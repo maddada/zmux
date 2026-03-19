@@ -1,10 +1,24 @@
-# VS-AGENT-MUX
+# VSMux: Manage all your AI coding sessions in 1 place.  
+
+Inspired by Codex app, T3Code, CMux, and Superset + many more.
+
+Based on zmx (tmux alternative) & ghostty 1.3. Persistent terminal sessions. Works with Claude Code/Codex CLI/OpenCode/PI/etc.
+
+Works great with my other tool that shows all running agent sessions: https://github.com/maddada/agent-manager-x
+
+Contributions welcome 🙏🏻
+
+![Uploading 2026-03-19_Google Chrome Canary_16-30-12@2x.png…]()
 
 Video showing the experience:
 https://x.com/i/status/2034602427442503890
 
 <img width="2746" height="1588" alt="Code 2026-03-19 07 45 13" src="https://github.com/user-attachments/assets/22e6eb06-0cc7-4396-a4d2-2537ca424f9b" />
 
+
+---
+
+## A Sloplanation by Codex:
 
 VS-AGENT-MUX turns VS Code into a fast multi-session terminal workspace. It keeps up to nine shell sessions organized in a logical `3x3` grid, lets you show `1`, `2`, `3`, `4`, `6`, or `9` sessions at a time, and gives you quick layout switching between horizontal, vertical, and grid views.
 
