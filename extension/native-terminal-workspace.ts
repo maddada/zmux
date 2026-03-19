@@ -14,7 +14,9 @@ import {
   resolveSidebarTheme,
   type ExtensionToSidebarMessage,
   type SessionGridDirection,
+  type SessionGroupRecord,
   type SessionRecord,
+  type SidebarSessionGroup,
   type SidebarThemeVariant,
   type SidebarToExtensionMessage,
   type SidebarSessionItem,
@@ -181,7 +183,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async focusDirection(direction: SessionGridDirection): Promise<void> {
-    const previousVisibleSessionIds = this.store.getSnapshot().visibleSessionIds;
+    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
     const changed = await this.store.focusDirection(direction);
     if (!changed) {
       return;
@@ -192,7 +194,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async focusSession(sessionId: string, preserveFocus = false): Promise<void> {
-    const previousVisibleSessionIds = this.store.getSnapshot().visibleSessionIds;
+    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
     const changed = await this.store.focusSession(sessionId);
     if (changed) {
       await this.updateFocusedTerminal(previousVisibleSessionIds, preserveFocus);
@@ -206,7 +208,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   public async focusSessionSlot(slotNumber: number): Promise<void> {
     const normalizedSlotNumber = Math.max(1, Math.min(MAX_SESSION_COUNT, Math.floor(slotNumber)));
-    const session = getOrderedSessions(this.store.getSnapshot()).find(
+    const session = getOrderedSessions(this.getActiveSnapshot()).find(
       (sessionRecord) => sessionRecord.slotIndex === normalizedSlotNumber - 1,
     );
     if (!session) {
@@ -219,7 +221,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   public async openWorkspace(): Promise<void> {
     await vscode.commands.executeCommand("workbench.view.extension.agentCanvasXSessions");
 
-    if (this.store.getSnapshot().sessions.length === 0) {
+    if (this.getAllSessionRecords().length === 0) {
       await this.createSession();
       return;
     }
@@ -252,7 +254,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    for (const sessionRecord of this.store.getSnapshot().sessions) {
+    for (const sessionRecord of this.getAllSessionRecords()) {
       try {
         await this.client.kill(sessionRecord.sessionId);
       } catch {
@@ -336,7 +338,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   public async promptRenameFocusedSession(): Promise<void> {
     const session =
-      this.store.getFocusedSession() ?? getOrderedSessions(this.store.getSnapshot())[0];
+      this.store.getFocusedSession() ?? getOrderedSessions(this.getActiveSnapshot())[0];
     if (!session) {
       void vscode.window.showInformationMessage("No sessions are available yet.");
       return;
@@ -389,13 +391,66 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     );
   }
 
-  public async syncSessionOrder(sessionIds: readonly string[]): Promise<void> {
-    const changed = await this.store.syncSessionOrder(sessionIds);
+  public async focusGroup(groupId: string): Promise<void> {
+    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
+    const changed = await this.store.focusGroup(groupId);
+    if (!changed) {
+      return;
+    }
+
+    await this.updateFocusedTerminal(previousVisibleSessionIds, true);
+    await this.refreshSidebar();
+  }
+
+  public async focusGroupByIndex(groupIndex: number): Promise<void> {
+    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
+    const changed = await this.store.focusGroupByIndex(groupIndex);
+    if (!changed) {
+      return;
+    }
+
+    await this.updateFocusedTerminal(previousVisibleSessionIds, true);
+    await this.refreshSidebar();
+  }
+
+  public async renameGroup(groupId: string, title: string): Promise<void> {
+    const changed = await this.store.renameGroup(groupId, title);
+    if (!changed) {
+      return;
+    }
+
+    await this.refreshSidebar();
+  }
+
+  public async syncSessionOrder(groupId: string, sessionIds: readonly string[]): Promise<void> {
+    const changed = await this.store.syncSessionOrder(groupId, sessionIds);
     if (!changed) {
       return;
     }
 
     await this.reconcileVisibleTerminals();
+    await this.refreshSidebar();
+  }
+
+  public async moveSessionToGroup(sessionId: string, groupId: string): Promise<void> {
+    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
+    const changed = await this.store.moveSessionToGroup(sessionId, groupId);
+    if (!changed) {
+      return;
+    }
+
+    await this.updateFocusedTerminal(previousVisibleSessionIds, true);
+    await this.refreshSidebar();
+  }
+
+  public async createGroupFromSession(sessionId: string): Promise<void> {
+    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
+    const groupId = await this.store.createGroupFromSession(sessionId);
+    if (!groupId) {
+      return;
+    }
+
+    await this.updateFocusedTerminal(previousVisibleSessionIds, true);
     await this.refreshSidebar();
   }
 
@@ -433,25 +488,41 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private createSidebarMessage(
     type: ExtensionToSidebarMessage["type"] = "sessionState",
   ): ExtensionToSidebarMessage {
-    const snapshot = this.store.getSnapshot();
+    const workspaceSnapshot = this.store.getSnapshot();
+    const activeSnapshot = this.getActiveSnapshot();
 
     return {
       hud: createSidebarHudState(
-        snapshot,
+        activeSnapshot,
         resolveSidebarTheme(getSidebarThemeSetting(), getSidebarThemeVariant()),
         getShowCloseButtonOnSessionCards(),
         getShowHotkeysOnSessionCards(),
       ),
-      sessions: getOrderedSessions(snapshot).map((session) => this.createSidebarItem(session)),
+      groups: workspaceSnapshot.groups.map((group) => this.createSidebarGroup(group)),
       type,
     };
   }
 
-  private createSidebarItem(sessionRecord: SessionRecord): SidebarSessionItem {
+  private createSidebarGroup(group: SessionGroupRecord): SidebarSessionGroup {
+    return {
+      groupId: group.groupId,
+      isActive: this.store.getSnapshot().activeGroupId === group.groupId,
+      sessions: getOrderedSessions(group.snapshot).map((session) =>
+        this.createSidebarItem(group, session),
+      ),
+      title: group.title,
+    };
+  }
+
+  private createSidebarItem(
+    group: SessionGroupRecord,
+    sessionRecord: SessionRecord,
+  ): SidebarSessionItem {
     const sessionSnapshot =
       this.sessions.get(sessionRecord.sessionId) ??
       createDisconnectedSessionSnapshot(sessionRecord.sessionId, this.workspaceId);
-    const snapshot = this.store.getSnapshot();
+    const activeSnapshot = this.getActiveSnapshot();
+    const isActiveGroup = this.store.getSnapshot().activeGroupId === group.groupId;
 
     return {
       activity: sessionSnapshot.agentStatus,
@@ -462,9 +533,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       alias: sessionRecord.alias,
       column: sessionRecord.column,
       detail: sessionSnapshot.errorMessage,
-      isFocused: snapshot.focusedSessionId === sessionRecord.sessionId,
+      isFocused: isActiveGroup && activeSnapshot.focusedSessionId === sessionRecord.sessionId,
       isRunning: sessionSnapshot.status === "running",
-      isVisible: snapshot.visibleSessionIds.includes(sessionRecord.sessionId),
+      isVisible:
+        isActiveGroup && activeSnapshot.visibleSessionIds.includes(sessionRecord.sessionId),
       primaryTitle: getVisiblePrimaryTitle(sessionRecord.title),
       row: sessionRecord.row,
       sessionId: sessionRecord.sessionId,
@@ -537,6 +609,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         await this.createSession();
         return;
 
+      case "focusGroup":
+        await this.focusGroup(message.groupId);
+        return;
+
       case "toggleFullscreenSession":
         await this.toggleFullscreenSession();
         return;
@@ -570,10 +646,22 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         }
         return;
 
+      case "renameGroup":
+        await this.renameGroup(message.groupId, message.title);
+        return;
+
       case "closeSession":
         if (message.sessionId) {
           await this.closeSession(message.sessionId);
         }
+        return;
+
+      case "moveSessionToGroup":
+        await this.moveSessionToGroup(message.sessionId, message.groupId);
+        return;
+
+      case "createGroupFromSession":
+        await this.createGroupFromSession(message.sessionId);
         return;
 
       case "setVisibleCount":
@@ -589,9 +677,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         return;
 
       case "syncSessionOrder":
-        if (message.sessionIds.length > 0) {
-          await this.syncSessionOrder(message.sessionIds);
-        }
+        await this.syncSessionOrder(message.groupId, message.sessionIds);
         return;
     }
   }
@@ -649,7 +735,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private shouldAcknowledgeSessionAttention(sessionId: string): boolean {
-    const snapshot = this.store.getSnapshot();
+    const snapshot = this.getActiveSnapshot();
     if (snapshot.focusedSessionId === sessionId && snapshot.visibleSessionIds.includes(sessionId)) {
       return true;
     }
@@ -703,7 +789,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     previousVisibleSessionIds: readonly string[],
     preserveFocus = false,
   ): Promise<void> {
-    const snapshot = this.store.getSnapshot();
+    const snapshot = this.getActiveSnapshot();
 
     if (
       haveSameSessionIds(previousVisibleSessionIds, snapshot.visibleSessionIds) &&
@@ -718,15 +804,20 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private async promptForSessionId(title: string): Promise<string | undefined> {
-    const sessions = getOrderedSessions(this.store.getSnapshot());
+    const sessions = this.store.getSnapshot().groups.flatMap((group) =>
+      getOrderedSessions(group.snapshot).map((session) => ({
+        groupTitle: group.title,
+        session,
+      })),
+    );
     if (sessions.length === 0) {
       void vscode.window.showInformationMessage("No sessions are available yet.");
       return undefined;
     }
 
     const selection = await vscode.window.showQuickPick(
-      sessions.map((session) => ({
-        description: `${session.alias} · R${session.row + 1}C${session.column + 1}`,
+      sessions.map(({ groupTitle, session }) => ({
+        description: `${groupTitle} · ${session.alias} · R${session.row + 1}C${session.column + 1}`,
         label: session.title,
         sessionId: session.sessionId,
       })),
@@ -740,7 +831,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private async reconcileVisibleTerminals(preserveFocus = false): Promise<void> {
-    const snapshot = this.store.getSnapshot();
+    const snapshot = this.getActiveSnapshot();
     this.disposeAllProjections();
 
     if (snapshot.visibleSessionIds.length === 0) {
@@ -822,7 +913,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private async flashSidebarFocusedTerminal(sessionId: string): Promise<void> {
-    const snapshot = this.store.getSnapshot();
+    const snapshot = this.getActiveSnapshot();
     if (
       !getShowTerminalTitleIndicatorOnSidebarActivate() ||
       snapshot.visibleSessionIds.length <= 1 ||
@@ -832,6 +923,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     this.projections.get(sessionId)?.bridge.flash(getTerminalTitleIndicatorMarkers());
+  }
+
+  private getActiveSnapshot() {
+    return this.store.getActiveGroup()?.snapshot ?? createEmptyWorkspaceSessionSnapshot();
+  }
+
+  private getAllSessionRecords(): SessionRecord[] {
+    return this.store.getSnapshot().groups.flatMap((group) => getOrderedSessions(group.snapshot));
   }
 }
 
@@ -1058,6 +1157,17 @@ function haveSameSessionIds(left: readonly string[], right: readonly string[]): 
   }
 
   return left.every((sessionId, index) => sessionId === right[index]);
+}
+
+function createEmptyWorkspaceSessionSnapshot() {
+  return {
+    focusedSessionId: undefined,
+    fullscreenRestoreVisibleCount: undefined,
+    sessions: [],
+    visibleCount: 1 as const,
+    visibleSessionIds: [],
+    viewMode: "grid" as const,
+  };
 }
 
 function createBlockedSessionSnapshot(

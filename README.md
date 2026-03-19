@@ -35,19 +35,22 @@ This exposes repository artifacts directly inside the Source Control UI, includi
 
 On macOS, the extension ships with these default shortcuts:
 
-- `cmd + option + 1` = show 1 session
-- `cmd + option + 2` = show 2 sessions
-- `cmd + option + 3` = show 3 sessions
-- `cmd + option + 4` = show 4 sessions
-- `cmd + option + 6` = show 6 sessions
-- `cmd + option + 9` = show 9 sessions
+- `ctrl + option + shift + 1` = focus group 1
+- `ctrl + option + shift + 2` = focus group 2
+- `ctrl + option + shift + 3` = focus group 3
+- `ctrl + option + shift + 4` = focus group 4
+- `cmd + option + 1` through `cmd + option + 9` = focus session slot 1 through 9 inside the active group
+- `cmd + option + shift + 6` = show 6 sessions
+- `cmd + option + shift + 9` = show 9 sessions
 - `cmd + option + h` = horizontal layout
 - `cmd + option + v` = vertical layout
 - `cmd + option + g` = grid layout
 - `cmd + option + r` = rename active session
 - `cmd + option + f` = full screen the focused Agent Canvas X terminal session, or fall back to VS Code panel/editor maximize when a terminal is not focused
+- `cmd + option + =` = increase terminal font size only
+- `cmd + option + -` = decrease terminal font size only
 
-On Windows and Linux, the extension uses the same defaults with `ctrl + alt` instead of `cmd + option`.
+On Windows and Linux, the extension uses the same defaults with `ctrl + alt` instead of `cmd + option`, and keeps `ctrl + alt + shift + 1..4` for group switching.
 
 ## Copy-Paste Keybindings JSON
 
@@ -56,23 +59,47 @@ Paste this into your VS Code `keybindings.json` on macOS (find replace cmd with 
 ```json
 [
   {
+    "key": "ctrl+alt+shift+1",
+    "command": "agentCanvasX.focusGroup1",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "ctrl+alt+shift+2",
+    "command": "agentCanvasX.focusGroup2",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "ctrl+alt+shift+3",
+    "command": "agentCanvasX.focusGroup3",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "ctrl+alt+shift+4",
+    "command": "agentCanvasX.focusGroup4",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
     "key": "cmd+alt+1",
-    "command": "agentCanvasX.showOne",
+    "command": "agentCanvasX.focusSessionSlot",
+    "args": 1,
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+2",
-    "command": "agentCanvasX.showTwo",
+    "command": "agentCanvasX.focusSessionSlot",
+    "args": 2,
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+3",
-    "command": "agentCanvasX.showThree",
+    "command": "agentCanvasX.focusSessionSlot",
+    "args": 3,
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+4",
-    "command": "agentCanvasX.showFour",
+    "command": "agentCanvasX.focusSessionSlot",
+    "args": 4,
     "when": "!inputFocus || terminalFocus"
   },
   {
@@ -119,6 +146,16 @@ Paste this into your VS Code `keybindings.json` on macOS (find replace cmd with 
     "key": "cmd+alt+f",
     "command": "workbench.action.toggleMaximizeEditorGroup",
     "when": "!panelFocus && !terminalFocus"
+  },
+  {
+    "key": "cmd+alt+=",
+    "command": "workbench.action.terminal.fontZoomIn",
+    "when": "terminalFocus"
+  },
+  {
+    "key": "cmd+alt+-",
+    "command": "workbench.action.terminal.fontZoomOut",
+    "when": "terminalFocus"
   }
 ]
 ```

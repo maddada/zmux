@@ -83,6 +83,26 @@
         "category": "Agent Canvas X"
       },
       {
+        "command": "agentCanvasX.focusGroup1",
+        "title": "Focus Group 1",
+        "category": "Agent Canvas X"
+      },
+      {
+        "command": "agentCanvasX.focusGroup2",
+        "title": "Focus Group 2",
+        "category": "Agent Canvas X"
+      },
+      {
+        "command": "agentCanvasX.focusGroup3",
+        "title": "Focus Group 3",
+        "category": "Agent Canvas X"
+      },
+      {
+        "command": "agentCanvasX.focusGroup4",
+        "title": "Focus Group 4",
+        "category": "Agent Canvas X"
+      },
+      {
         "command": "agentCanvasX.focusUp",
         "title": "Focus Up",
         "category": "Agent Canvas X"
@@ -265,27 +285,27 @@
     },
     "keybindings": [
       {
-        "command": "agentCanvasX.showOne",
+        "command": "agentCanvasX.focusGroup1",
         "key": "ctrl+alt+shift+1",
-        "mac": "cmd+alt+shift+1",
+        "mac": "ctrl+alt+shift+1",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.showTwo",
+        "command": "agentCanvasX.focusGroup2",
         "key": "ctrl+alt+shift+2",
-        "mac": "cmd+alt+shift+2",
+        "mac": "ctrl+alt+shift+2",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.showThree",
+        "command": "agentCanvasX.focusGroup3",
         "key": "ctrl+alt+shift+3",
-        "mac": "cmd+alt+shift+3",
+        "mac": "ctrl+alt+shift+3",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.showFour",
+        "command": "agentCanvasX.focusGroup4",
         "key": "ctrl+alt+shift+4",
-        "mac": "cmd+alt+shift+4",
+        "mac": "ctrl+alt+shift+4",
         "when": "!inputFocus || terminalFocus"
       },
       {

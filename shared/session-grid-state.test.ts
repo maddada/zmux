@@ -27,11 +27,11 @@ describe("createSessionInSnapshot", () => {
   test("should allocate the lowest free slot in row-major order", () => {
     let snapshot = createDefaultSessionGridSnapshot();
 
-    const first = createSessionInSnapshot(snapshot);
+    const first = createSessionInSnapshot(snapshot, 1);
     snapshot = first.snapshot;
-    const second = createSessionInSnapshot(snapshot);
+    const second = createSessionInSnapshot(snapshot, 2);
     snapshot = second.snapshot;
-    const third = createSessionInSnapshot(snapshot);
+    const third = createSessionInSnapshot(snapshot, 3);
 
     expect(first.session?.slotIndex).toBe(0);
     expect(second.session?.slotIndex).toBe(1);
@@ -49,14 +49,16 @@ describe("createSessionInSnapshot", () => {
   });
 
   test("should append a new session to the end of the current ordered list", () => {
-    const result = createSessionInSnapshot({
-      focusedSessionId: "session-2",
-      nextSessionNumber: 3,
-      sessions: [createSessionRecord(1, 0), createSessionRecord(2, 2)],
-      viewMode: "grid",
-      visibleCount: 3,
-      visibleSessionIds: ["session-1", "session-2"],
-    });
+    const result = createSessionInSnapshot(
+      {
+        focusedSessionId: "session-2",
+        sessions: [createSessionRecord(1, 0), createSessionRecord(2, 2)],
+        viewMode: "grid",
+        visibleCount: 3,
+        visibleSessionIds: ["session-1", "session-2"],
+      },
+      3,
+    );
 
     expect(result.session?.sessionId).toBe("session-3");
     expect(result.session?.slotIndex).toBe(2);
@@ -76,7 +78,6 @@ describe("normalizeSessionGridSnapshot", () => {
     const snapshot = normalizeSessionGridSnapshot({
       focusedSessionId: "session-3",
       fullscreenRestoreVisibleCount: 4,
-      nextSessionNumber: 5,
       sessions: [
         createSessionRecord(1, 0),
         createSessionRecord(2, 1),
@@ -102,7 +103,6 @@ describe("normalizeSessionGridSnapshot", () => {
   test("should fall back to grid mode for legacy snapshots missing or carrying invalid view modes", () => {
     const missingViewMode = normalizeSessionGridSnapshot({
       focusedSessionId: "session-1",
-      nextSessionNumber: 2,
       sessions: [createSessionRecord(1, 0)],
       visibleCount: 1,
       visibleSessionIds: ["session-1"],
@@ -110,7 +110,6 @@ describe("normalizeSessionGridSnapshot", () => {
 
     const invalidViewMode = normalizeSessionGridSnapshot({
       focusedSessionId: "session-1",
-      nextSessionNumber: 2,
       sessions: [createSessionRecord(1, 0)],
       viewMode: "diagonal",
       visibleCount: 6,
@@ -125,7 +124,6 @@ describe("normalizeSessionGridSnapshot", () => {
   test("should backfill aliases for legacy snapshots that only stored the primary title", () => {
     const snapshot = normalizeSessionGridSnapshot({
       focusedSessionId: "session-1",
-      nextSessionNumber: 3,
       sessions: [
         { ...createSessionRecord(1, 0), alias: undefined as unknown as string },
         { ...createSessionRecord(2, 1), alias: "" },
@@ -145,7 +143,6 @@ describe("normalizeSessionGridSnapshot", () => {
     const snapshot = normalizeSessionGridSnapshot({
       focusedSessionId: "session-1",
       fullscreenRestoreVisibleCount: 4,
-      nextSessionNumber: 3,
       sessions: [createSessionRecord(1, 0), createSessionRecord(2, 1)],
       viewMode: "grid",
       visibleCount: 1,
@@ -167,7 +164,6 @@ describe("session shortcut labels", () => {
     const items = createSidebarSessionItems(
       {
         focusedSessionId: "session-1",
-        nextSessionNumber: 3,
         sessions: [createSessionRecord(1, 0), createSessionRecord(2, 2)],
         viewMode: "grid",
         visibleCount: 2,
@@ -199,7 +195,6 @@ describe("sidebar HUD state", () => {
       {
         focusedSessionId: "session-2",
         fullscreenRestoreVisibleCount: 4,
-        nextSessionNumber: 3,
         sessions: [createSessionRecord(1, 0), createSessionRecord(2, 1)],
         viewMode: "grid",
         visibleCount: 1,
@@ -231,7 +226,6 @@ describe("visible primary titles", () => {
     const items = createSidebarSessionItems(
       {
         focusedSessionId: "session-1",
-        nextSessionNumber: 3,
         sessions: [first, second],
         viewMode: "grid",
         visibleCount: 2,
@@ -251,7 +245,6 @@ describe("focusSessionInSnapshot", () => {
   test("should reveal an offscreen session while keeping the visible set slot-ordered", () => {
     const snapshot = {
       focusedSessionId: "session-1",
-      nextSessionNumber: 5,
       sessions: [
         createSessionRecord(1, 0),
         createSessionRecord(2, 1),
@@ -275,7 +268,6 @@ describe("focusDirectionInSnapshot", () => {
   test("should move to the nearest directional neighbor on the logical grid", () => {
     const snapshot = {
       focusedSessionId: "session-1",
-      nextSessionNumber: 4,
       sessions: [createSessionRecord(1, 0), createSessionRecord(2, 1), createSessionRecord(3, 3)],
       viewMode: "grid",
       visibleCount: 2 as const,
@@ -297,7 +289,6 @@ describe("setVisibleCountInSnapshot", () => {
     const snapshot = setVisibleCountInSnapshot(
       {
         focusedSessionId: "session-2",
-        nextSessionNumber: 5,
         sessions: [
           createSessionRecord(1, 0),
           createSessionRecord(2, 1),
@@ -324,7 +315,6 @@ describe("setVisibleCountInSnapshot", () => {
     const snapshot = setVisibleCountInSnapshot(
       {
         focusedSessionId: "session-4",
-        nextSessionNumber: 5,
         sessions: [
           createSessionRecord(1, 0),
           createSessionRecord(2, 1),
@@ -348,7 +338,6 @@ describe("setVisibleCountInSnapshot", () => {
       {
         focusedSessionId: "session-1",
         fullscreenRestoreVisibleCount: 4,
-        nextSessionNumber: 5,
         sessions: [
           createSessionRecord(1, 0),
           createSessionRecord(2, 1),
@@ -371,7 +360,6 @@ describe("toggleFullscreenSessionInSnapshot", () => {
   test("should enter fullscreen and remember the previous visible count", () => {
     const snapshot = toggleFullscreenSessionInSnapshot({
       focusedSessionId: "session-3",
-      nextSessionNumber: 5,
       sessions: [
         createSessionRecord(1, 0),
         createSessionRecord(2, 1),
@@ -393,7 +381,6 @@ describe("toggleFullscreenSessionInSnapshot", () => {
     const snapshot = toggleFullscreenSessionInSnapshot({
       focusedSessionId: "session-3",
       fullscreenRestoreVisibleCount: 4,
-      nextSessionNumber: 5,
       sessions: [
         createSessionRecord(1, 0),
         createSessionRecord(2, 1),
@@ -421,7 +408,6 @@ describe("setViewModeInSnapshot", () => {
     const snapshot = setViewModeInSnapshot(
       {
         focusedSessionId: "session-2",
-        nextSessionNumber: 4,
         sessions: [createSessionRecord(1, 0), createSessionRecord(2, 1), createSessionRecord(3, 2)],
         viewMode: "grid",
         visibleCount: 6,
@@ -441,7 +427,6 @@ describe("syncSessionOrderInSnapshot", () => {
     const result = syncSessionOrderInSnapshot(
       {
         focusedSessionId: "session-4",
-        nextSessionNumber: 5,
         sessions: [
           createSessionRecord(1, 0),
           createSessionRecord(2, 1),
@@ -471,7 +456,6 @@ describe("syncSessionOrderInSnapshot", () => {
     const result = syncSessionOrderInSnapshot(
       {
         focusedSessionId: "session-2",
-        nextSessionNumber: 5,
         sessions: [
           createSessionRecord(1, 0),
           createSessionRecord(2, 1),
@@ -493,20 +477,20 @@ describe("syncSessionOrderInSnapshot", () => {
   test("should ignore invalid or incomplete order payloads", () => {
     const snapshot = {
       focusedSessionId: "session-1",
-      nextSessionNumber: 4,
       sessions: [createSessionRecord(1, 0), createSessionRecord(2, 1), createSessionRecord(3, 2)],
       viewMode: "grid" as const,
       visibleCount: 2 as const,
       visibleSessionIds: ["session-1", "session-2"],
     };
+    const normalizedSnapshot = normalizeSessionGridSnapshot(snapshot);
 
     const duplicate = syncSessionOrderInSnapshot(snapshot, ["session-2", "session-2", "session-1"]);
     const missing = syncSessionOrderInSnapshot(snapshot, ["session-2", "session-1"]);
 
     expect(duplicate.changed).toBe(false);
-    expect(duplicate.snapshot).toEqual(snapshot);
+    expect(duplicate.snapshot).toEqual(normalizedSnapshot);
     expect(missing.changed).toBe(false);
-    expect(missing.snapshot).toEqual(snapshot);
+    expect(missing.snapshot).toEqual(normalizedSnapshot);
   });
 });
 
@@ -515,7 +499,6 @@ describe("renameSessionAliasInSnapshot", () => {
     const result = renameSessionAliasInSnapshot(
       {
         focusedSessionId: "session-1",
-        nextSessionNumber: 3,
         sessions: [createSessionRecord(1, 0), createSessionRecord(2, 1)],
         viewMode: "grid",
         visibleCount: 2,
@@ -535,17 +518,17 @@ describe("renameSessionAliasInSnapshot", () => {
   test("should ignore empty aliases", () => {
     const snapshot = {
       focusedSessionId: "session-1",
-      nextSessionNumber: 2,
       sessions: [createSessionRecord(1, 0)],
       viewMode: "grid",
       visibleCount: 1 as const,
       visibleSessionIds: ["session-1"],
     };
+    const normalizedSnapshot = normalizeSessionGridSnapshot(snapshot);
 
     const result = renameSessionAliasInSnapshot(snapshot, "session-1", "   ");
 
     expect(result.changed).toBe(false);
-    expect(result.snapshot).toEqual(snapshot);
+    expect(result.snapshot).toEqual(normalizedSnapshot);
   });
 });
 
@@ -554,7 +537,6 @@ describe("setSessionTitleInSnapshot", () => {
     const result = setSessionTitleInSnapshot(
       {
         focusedSessionId: "session-1",
-        nextSessionNumber: 3,
         sessions: [createSessionRecord(1, 0), createSessionRecord(2, 1)],
         viewMode: "grid",
         visibleCount: 2,
@@ -581,7 +563,6 @@ describe("removeSessionInSnapshot", () => {
     const result = removeSessionInSnapshot(
       {
         focusedSessionId: "session-2",
-        nextSessionNumber: 5,
         sessions: [createSessionRecord(1, 0), createSessionRecord(2, 1), createSessionRecord(3, 2)],
         viewMode: "grid",
         visibleCount: 2,

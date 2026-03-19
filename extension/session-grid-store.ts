@@ -1,42 +1,65 @@
 import * as vscode from "vscode";
 import {
+  createDefaultSessionGridSnapshot,
+  type GroupedSessionWorkspaceSnapshot,
   type SessionGridDirection,
-  type SessionGridSnapshot,
+  type SessionGroupRecord,
   type SessionRecord,
   type TerminalViewMode,
   type VisibleSessionCount,
+  getOrderedSessions,
 } from "../shared/session-grid-contract";
 import {
-  createSessionInSnapshot,
-  focusDirectionInSnapshot,
-  focusSessionInSnapshot,
-  normalizeSessionGridSnapshot,
-  removeSessionInSnapshot,
-  renameSessionAliasInSnapshot,
-  setSessionTitleInSnapshot,
-  setVisibleCountInSnapshot,
-  setViewModeInSnapshot,
-  syncSessionOrderInSnapshot,
-  toggleFullscreenSessionInSnapshot,
-} from "../shared/session-grid-state";
+  createGroupFromSessionInWorkspace,
+  createSessionInWorkspace,
+  focusGroupByIndexInWorkspace,
+  focusGroupInWorkspace,
+  focusSessionInWorkspace,
+  getActiveGroup,
+  getGroupById,
+  getGroupForSession,
+  normalizeGroupedSessionWorkspaceSnapshot,
+  removeSessionInWorkspace,
+  renameGroupInWorkspace,
+  renameSessionAliasInWorkspace,
+  setSessionTitleInWorkspace,
+  setViewModeInWorkspace,
+  setVisibleCountInWorkspace,
+  syncSessionOrderInWorkspace,
+  toggleFullscreenSessionInWorkspace,
+  moveSessionToGroupInWorkspace,
+} from "../shared/grouped-session-workspace-state";
+import { focusDirectionInSnapshot } from "../shared/session-grid-state";
 
 const WORKSPACE_SNAPSHOT_KEY = "agentCanvasX.sessionGridSnapshot";
 
 export class SessionGridStore {
-  private snapshot: SessionGridSnapshot;
+  private snapshot: GroupedSessionWorkspaceSnapshot;
 
   public constructor(private readonly context: vscode.ExtensionContext) {
-    this.snapshot = normalizeSessionGridSnapshot(
-      context.workspaceState.get<SessionGridSnapshot>(WORKSPACE_SNAPSHOT_KEY),
+    this.snapshot = normalizeGroupedSessionWorkspaceSnapshot(
+      context.workspaceState.get<GroupedSessionWorkspaceSnapshot>(WORKSPACE_SNAPSHOT_KEY),
     );
   }
 
-  public getSnapshot(): SessionGridSnapshot {
+  public getSnapshot(): GroupedSessionWorkspaceSnapshot {
     return this.snapshot;
   }
 
+  public getActiveGroup(): SessionGroupRecord | undefined {
+    return getActiveGroup(this.snapshot);
+  }
+
+  public getGroup(groupId: string): SessionGroupRecord | undefined {
+    return getGroupById(this.snapshot, groupId);
+  }
+
+  public getSessionGroup(sessionId: string): SessionGroupRecord | undefined {
+    return getGroupForSession(this.snapshot, sessionId);
+  }
+
   public async createSession(): Promise<SessionRecord | undefined> {
-    const result = createSessionInSnapshot(this.snapshot);
+    const result = createSessionInWorkspace(this.snapshot);
     this.snapshot = result.snapshot;
     await this.persist();
 
@@ -44,7 +67,43 @@ export class SessionGridStore {
   }
 
   public async focusDirection(direction: SessionGridDirection): Promise<boolean> {
-    const result = focusDirectionInSnapshot(this.snapshot, direction);
+    const activeGroup = getActiveGroup(this.snapshot);
+    if (!activeGroup) {
+      return false;
+    }
+
+    const result = focusDirectionInSnapshot(activeGroup.snapshot, direction);
+    if (!result.changed) {
+      return false;
+    }
+
+    this.snapshot = {
+      ...this.snapshot,
+      groups: this.snapshot.groups.map((group) =>
+        group.groupId === activeGroup.groupId
+          ? {
+              ...group,
+              snapshot: result.snapshot,
+            }
+          : group,
+      ),
+    };
+    await this.persist();
+    return true;
+  }
+
+  public async focusGroup(groupId: string): Promise<boolean> {
+    const result = focusGroupInWorkspace(this.snapshot, groupId);
+    this.snapshot = result.snapshot;
+    if (result.changed) {
+      await this.persist();
+    }
+
+    return result.changed;
+  }
+
+  public async focusGroupByIndex(groupIndex: number): Promise<boolean> {
+    const result = focusGroupByIndexInWorkspace(this.snapshot, groupIndex);
     this.snapshot = result.snapshot;
     if (result.changed) {
       await this.persist();
@@ -54,7 +113,7 @@ export class SessionGridStore {
   }
 
   public async focusSession(sessionId: string): Promise<boolean> {
-    const result = focusSessionInSnapshot(this.snapshot, sessionId);
+    const result = focusSessionInWorkspace(this.snapshot, sessionId);
     this.snapshot = result.snapshot;
     if (result.changed) {
       await this.persist();
@@ -64,24 +123,39 @@ export class SessionGridStore {
   }
 
   public getFocusedSession(): SessionRecord | undefined {
-    return this.snapshot.focusedSessionId
-      ? this.snapshot.sessions.find(
-          (session) => session.sessionId === this.snapshot.focusedSessionId,
-        )
-      : undefined;
+    const activeGroup = getActiveGroup(this.snapshot);
+    if (!activeGroup?.snapshot.focusedSessionId) {
+      return undefined;
+    }
+
+    return activeGroup.snapshot.sessions.find(
+      (session) => session.sessionId === activeGroup.snapshot.focusedSessionId,
+    );
   }
 
   public getSession(sessionId: string): SessionRecord | undefined {
-    return this.snapshot.sessions.find((session) => session.sessionId === sessionId);
+    return this.snapshot.groups
+      .flatMap((group) => group.snapshot.sessions)
+      .find((session) => session.sessionId === sessionId);
+  }
+
+  public async renameGroup(groupId: string, title: string): Promise<boolean> {
+    const result = renameGroupInWorkspace(this.snapshot, groupId, title);
+    this.snapshot = result.snapshot;
+    if (result.changed) {
+      await this.persist();
+    }
+
+    return result.changed;
   }
 
   public async reset(): Promise<void> {
-    this.snapshot = normalizeSessionGridSnapshot(undefined);
+    this.snapshot = normalizeGroupedSessionWorkspaceSnapshot(undefined);
     await this.persist();
   }
 
   public async removeSession(sessionId: string): Promise<boolean> {
-    const result = removeSessionInSnapshot(this.snapshot, sessionId);
+    const result = removeSessionInWorkspace(this.snapshot, sessionId);
     this.snapshot = result.snapshot;
     if (result.changed) {
       await this.persist();
@@ -91,7 +165,7 @@ export class SessionGridStore {
   }
 
   public async renameSessionAlias(sessionId: string, alias: string): Promise<boolean> {
-    const result = renameSessionAliasInSnapshot(this.snapshot, sessionId, alias);
+    const result = renameSessionAliasInWorkspace(this.snapshot, sessionId, alias);
     this.snapshot = result.snapshot;
     if (result.changed) {
       await this.persist();
@@ -101,7 +175,7 @@ export class SessionGridStore {
   }
 
   public async setSessionTitle(sessionId: string, title: string): Promise<boolean> {
-    const result = setSessionTitleInSnapshot(this.snapshot, sessionId, title);
+    const result = setSessionTitleInWorkspace(this.snapshot, sessionId, title);
     this.snapshot = result.snapshot;
     if (result.changed) {
       await this.persist();
@@ -111,28 +185,54 @@ export class SessionGridStore {
   }
 
   public async setVisibleCount(visibleCount: VisibleSessionCount): Promise<void> {
-    this.snapshot = setVisibleCountInSnapshot(this.snapshot, visibleCount);
+    this.snapshot = setVisibleCountInWorkspace(this.snapshot, visibleCount);
     await this.persist();
   }
 
   public async toggleFullscreenSession(): Promise<void> {
-    this.snapshot = toggleFullscreenSessionInSnapshot(this.snapshot);
+    this.snapshot = toggleFullscreenSessionInWorkspace(this.snapshot);
     await this.persist();
   }
 
   public async setViewMode(viewMode: TerminalViewMode): Promise<void> {
-    this.snapshot = setViewModeInSnapshot(this.snapshot, viewMode);
+    this.snapshot = setViewModeInWorkspace(this.snapshot, viewMode);
     await this.persist();
   }
 
-  public async syncSessionOrder(sessionIds: readonly string[]): Promise<boolean> {
-    const result = syncSessionOrderInSnapshot(this.snapshot, sessionIds);
+  public async syncSessionOrder(groupId: string, sessionIds: readonly string[]): Promise<boolean> {
+    const result = syncSessionOrderInWorkspace(this.snapshot, groupId, sessionIds);
     this.snapshot = result.snapshot;
     if (result.changed) {
       await this.persist();
     }
 
     return result.changed;
+  }
+
+  public async moveSessionToGroup(sessionId: string, groupId: string): Promise<boolean> {
+    const result = moveSessionToGroupInWorkspace(this.snapshot, sessionId, groupId);
+    this.snapshot = result.snapshot;
+    if (result.changed) {
+      await this.persist();
+    }
+
+    return result.changed;
+  }
+
+  public async createGroupFromSession(sessionId: string): Promise<string | undefined> {
+    const result = createGroupFromSessionInWorkspace(this.snapshot, sessionId);
+    this.snapshot = result.snapshot;
+    if (result.changed) {
+      await this.persist();
+    }
+
+    return result.groupId;
+  }
+
+  public getActiveGroupSessions(): SessionRecord[] {
+    return getOrderedSessions(
+      getActiveGroup(this.snapshot)?.snapshot ?? createDefaultSessionGridSnapshot(),
+    );
   }
 
   private async persist(): Promise<void> {

@@ -15,7 +15,10 @@ import {
   getOrderedSessions,
 } from "./session-grid-contract";
 
-export function createSessionInSnapshot(snapshot: SessionGridSnapshot): {
+export function createSessionInSnapshot(
+  snapshot: SessionGridSnapshot,
+  sessionNumber: number,
+): {
   session?: SessionRecord;
   snapshot: SessionGridSnapshot;
 } {
@@ -26,7 +29,7 @@ export function createSessionInSnapshot(snapshot: SessionGridSnapshot): {
   }
 
   const slotIndex = orderedSessions.length;
-  const session = createSessionRecord(normalizedSnapshot.nextSessionNumber, slotIndex);
+  const session = createSessionRecord(sessionNumber, slotIndex);
   const sessions = reindexSessionsInOrder([...orderedSessions, session]);
   const visibleSessionIds =
     normalizedSnapshot.visibleSessionIds.length < normalizedSnapshot.visibleCount
@@ -38,7 +41,6 @@ export function createSessionInSnapshot(snapshot: SessionGridSnapshot): {
     snapshot: normalizeSessionGridSnapshot({
       ...normalizedSnapshot,
       focusedSessionId: session.sessionId,
-      nextSessionNumber: normalizedSnapshot.nextSessionNumber + 1,
       sessions,
       visibleSessionIds,
     }),
@@ -113,10 +115,6 @@ export function normalizeSessionGridSnapshot(
   const sessionIds = new Set(orderedSessions.map((session) => session.sessionId));
   const visibleCount = clampVisibleSessionCount(normalizedSnapshot.visibleCount);
   const viewMode = clampTerminalViewMode(normalizedSnapshot.viewMode);
-  const nextSessionNumber =
-    normalizedSnapshot.nextSessionNumber > 0
-      ? normalizedSnapshot.nextSessionNumber
-      : orderedSessions.length + 1;
 
   const focusFallback = orderedSessions[0]?.sessionId;
   const focusedSessionId =
@@ -139,7 +137,6 @@ export function normalizeSessionGridSnapshot(
   return {
     focusedSessionId,
     fullscreenRestoreVisibleCount,
-    nextSessionNumber,
     sessions: orderedSessions,
     visibleCount,
     visibleSessionIds: normalizedVisibleIds,

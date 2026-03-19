@@ -133,6 +133,9 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
     case "toggleFullscreenSession":
       return true;
 
+    case "focusGroup":
+      return typeof message.groupId === "string" && message.groupId.length > 0;
+
     case "focusSession":
       return (
         typeof message.sessionId === "string" &&
@@ -152,6 +155,13 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
         typeof message.title === "string"
       );
 
+    case "renameGroup":
+      return (
+        typeof message.groupId === "string" &&
+        message.groupId.length > 0 &&
+        typeof message.title === "string"
+      );
+
     case "setVisibleCount":
       return (
         typeof message.visibleCount === "number" &&
@@ -164,8 +174,21 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
         ["horizontal", "vertical", "grid"].includes(message.viewMode)
       );
 
+    case "moveSessionToGroup":
+      return (
+        typeof message.sessionId === "string" &&
+        message.sessionId.length > 0 &&
+        typeof message.groupId === "string" &&
+        message.groupId.length > 0
+      );
+
+    case "createGroupFromSession":
+      return typeof message.sessionId === "string" && message.sessionId.length > 0;
+
     case "syncSessionOrder":
       return (
+        typeof message.groupId === "string" &&
+        message.groupId.length > 0 &&
         Array.isArray(message.sessionIds) &&
         message.sessionIds.every(
           (sessionId) => typeof sessionId === "string" && sessionId.length > 0,

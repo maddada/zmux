@@ -1,5 +1,8 @@
 export const GRID_COLUMN_COUNT = 3;
 export const MAX_SESSION_COUNT = GRID_COLUMN_COUNT * GRID_COLUMN_COUNT;
+export const MAX_GROUP_COUNT = 4;
+export const DEFAULT_MAIN_GROUP_ID = "group-1";
+export const DEFAULT_MAIN_GROUP_TITLE = "Main";
 
 export type VisibleSessionCount = 1 | 2 | 3 | 4 | 6 | 9;
 
@@ -50,11 +53,23 @@ export type SessionRecord = {
 export type SessionGridSnapshot = {
   focusedSessionId?: string;
   fullscreenRestoreVisibleCount?: VisibleSessionCount;
-  nextSessionNumber: number;
   sessions: SessionRecord[];
   visibleCount: VisibleSessionCount;
   visibleSessionIds: string[];
   viewMode: TerminalViewMode;
+};
+
+export type SessionGroupRecord = {
+  groupId: string;
+  snapshot: SessionGridSnapshot;
+  title: string;
+};
+
+export type GroupedSessionWorkspaceSnapshot = {
+  activeGroupId: string;
+  groups: SessionGroupRecord[];
+  nextGroupNumber: number;
+  nextSessionNumber: number;
 };
 
 export type SidebarSessionItem = {
@@ -72,27 +87,35 @@ export type SidebarSessionItem = {
   detail?: string;
 };
 
+export type SidebarSessionGroup = {
+  groupId: string;
+  isActive: boolean;
+  sessions: SidebarSessionItem[];
+  title: string;
+};
+
 export type SidebarHudState = {
   focusedSessionTitle?: string;
   isFocusModeActive: boolean;
   showCloseButtonOnSessionCards: boolean;
   showHotkeysOnSessionCards: boolean;
   theme: SidebarTheme;
+  highlightedVisibleCount: VisibleSessionCount;
   visibleCount: VisibleSessionCount;
   visibleSlotLabels: string[];
   viewMode: TerminalViewMode;
 };
 
 export type SidebarHydrateMessage = {
+  groups: SidebarSessionGroup[];
   type: "hydrate";
   hud: SidebarHudState;
-  sessions: SidebarSessionItem[];
 };
 
 export type SidebarSessionStateMessage = {
+  groups: SidebarSessionGroup[];
   type: "sessionState";
   hud: SidebarHudState;
-  sessions: SidebarSessionItem[];
 };
 
 export type ExtensionToSidebarMessage = SidebarHydrateMessage | SidebarSessionStateMessage;
@@ -106,6 +129,10 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "createSession";
+    }
+  | {
+      type: "focusGroup";
+      groupId: string;
     }
   | {
       type: "toggleFullscreenSession";
@@ -129,7 +156,21 @@ export type SidebarToExtensionMessage =
       title: string;
     }
   | {
+      type: "renameGroup";
+      groupId: string;
+      title: string;
+    }
+  | {
       type: "closeSession";
+      sessionId: string;
+    }
+  | {
+      type: "moveSessionToGroup";
+      groupId: string;
+      sessionId: string;
+    }
+  | {
+      type: "createGroupFromSession";
       sessionId: string;
     }
   | {
@@ -142,6 +183,7 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "syncSessionOrder";
+      groupId: string;
       sessionIds: string[];
     };
 
@@ -232,11 +274,25 @@ export function createDefaultSessionGridSnapshot(): SessionGridSnapshot {
   return {
     focusedSessionId: undefined,
     fullscreenRestoreVisibleCount: undefined,
-    nextSessionNumber: 1,
     sessions: [],
     visibleCount: 1,
     visibleSessionIds: [],
     viewMode: "grid",
+  };
+}
+
+export function createDefaultGroupedSessionWorkspaceSnapshot(): GroupedSessionWorkspaceSnapshot {
+  return {
+    activeGroupId: DEFAULT_MAIN_GROUP_ID,
+    groups: [
+      {
+        groupId: DEFAULT_MAIN_GROUP_ID,
+        snapshot: createDefaultSessionGridSnapshot(),
+        title: DEFAULT_MAIN_GROUP_TITLE,
+      },
+    ],
+    nextGroupNumber: 2,
+    nextSessionNumber: 1,
   };
 }
 
@@ -336,6 +392,7 @@ export function createSidebarHudState(
     focusedSessionTitle: focusedSession?.title,
     isFocusModeActive:
       snapshot.visibleCount === 1 && snapshot.fullscreenRestoreVisibleCount !== undefined,
+    highlightedVisibleCount: snapshot.fullscreenRestoreVisibleCount ?? snapshot.visibleCount,
     showCloseButtonOnSessionCards,
     showHotkeysOnSessionCards,
     theme,

@@ -10,6 +10,8 @@ import {
   type RefObject,
 } from "react";
 import type { SidebarSessionItem } from "../shared/session-grid-contract";
+import { createSessionDragData } from "./sidebar-dnd";
+import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import type { WebviewApi } from "./webview-api";
 
 const CONTEXT_MENU_HEIGHT_PX = 90;
@@ -27,6 +29,7 @@ type HoverTooltipPosition = {
 };
 
 export type SortableSessionCardProps = {
+  groupId: string;
   index: number;
   session: SidebarSessionItem;
   showCloseButton: boolean;
@@ -48,6 +51,7 @@ function clampContextMenuPosition(clientX: number, clientY: number): ContextMenu
 }
 
 export function SortableSessionCard({
+  groupId,
   index,
   session,
   showCloseButton,
@@ -58,6 +62,7 @@ export function SortableSessionCard({
   const [aliasTooltipPosition, setAliasTooltipPosition] = useState<HoverTooltipPosition>();
   const menuRef = useRef<HTMLDivElement>(null);
   const aliasHeadingRef = useRef<HTMLDivElement>(null);
+  const aliasTooltipTimeoutRef = useRef<number | undefined>(undefined);
   const secondaryText = session.detail ?? session.primaryTitle ?? session.activityLabel;
   const secondaryTitle =
     session.primaryTitle && session.detail
@@ -65,14 +70,26 @@ export function SortableSessionCard({
       : secondaryText;
   const isAliasOverflowing = useIsTextOverflowing(aliasHeadingRef, session.alias);
   const sortable = useSortable({
+    accept: "session",
+    data: createSessionDragData(groupId, session.sessionId),
     disabled: contextMenuPosition !== undefined,
+    group: groupId,
     id: session.sessionId,
     index,
+    type: "session",
   });
 
   useEffect(() => {
     setContextMenuPosition(undefined);
   }, [session.alias, session.sessionId]);
+
+  useEffect(() => {
+    return () => {
+      if (aliasTooltipTimeoutRef.current !== undefined) {
+        window.clearTimeout(aliasTooltipTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!contextMenuPosition) {
@@ -131,19 +148,31 @@ export function SortableSessionCard({
       return;
     }
 
+    if (aliasTooltipTimeoutRef.current !== undefined) {
+      window.clearTimeout(aliasTooltipTimeoutRef.current);
+    }
+
     const aliasElement = aliasHeadingRef.current;
     if (!aliasElement) {
       return;
     }
 
     const bounds = aliasElement.getBoundingClientRect();
-    setAliasTooltipPosition({
-      left: bounds.left + bounds.width / 2,
-      top: Math.max(12, bounds.top - 8),
-    });
+    aliasTooltipTimeoutRef.current = window.setTimeout(() => {
+      setAliasTooltipPosition({
+        left: bounds.left + bounds.width / 2,
+        top: Math.max(12, bounds.top - 8),
+      });
+      aliasTooltipTimeoutRef.current = undefined;
+    }, TOOLTIP_DELAY_MS);
   };
 
   const closeAliasTooltip = () => {
+    if (aliasTooltipTimeoutRef.current !== undefined) {
+      window.clearTimeout(aliasTooltipTimeoutRef.current);
+      aliasTooltipTimeoutRef.current = undefined;
+    }
+
     setAliasTooltipPosition(undefined);
   };
 
@@ -177,6 +206,7 @@ export function SortableSessionCard({
     }
 
     event.preventDefault();
+    event.stopPropagation();
     vscode.postMessage({ sessionId: session.sessionId, type: "focusSession" });
   };
 
@@ -201,6 +231,8 @@ export function SortableSessionCard({
           requestClose();
         }}
         onClick={(event) => {
+          event.stopPropagation();
+
           if (event.metaKey) {
             event.preventDefault();
             requestClose();

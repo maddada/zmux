@@ -18,6 +18,10 @@ export function activate(context: vscode.ExtensionContext): void {
     registerCommand("agentCanvasX.renameActiveSession", () =>
       workspace.promptRenameFocusedSession(),
     ),
+    registerFocusGroupCommand("agentCanvasX.focusGroup1", workspace, 1),
+    registerFocusGroupCommand("agentCanvasX.focusGroup2", workspace, 2),
+    registerFocusGroupCommand("agentCanvasX.focusGroup3", workspace, 3),
+    registerFocusGroupCommand("agentCanvasX.focusGroup4", workspace, 4),
     registerCommand("agentCanvasX.focusUp", () => workspace.focusDirection("up")),
     registerCommand("agentCanvasX.focusRight", () => workspace.focusDirection("right")),
     registerCommand("agentCanvasX.focusDown", () => workspace.focusDirection("down")),
@@ -61,6 +65,17 @@ function registerVisibleCountCommand(
 ): vscode.Disposable {
   return registerCommand(command, async () => {
     await workspace.setVisibleCount(visibleCount);
+    await vscode.commands.executeCommand(`workbench.view.extension.${SESSION_CONTAINER_ID}`);
+  });
+}
+
+function registerFocusGroupCommand(
+  command: string,
+  workspace: NativeTerminalWorkspaceController,
+  groupIndex: number,
+): vscode.Disposable {
+  return registerCommand(command, async () => {
+    await workspace.focusGroupByIndex(groupIndex);
     await vscode.commands.executeCommand(`workbench.view.extension.${SESSION_CONTAINER_ID}`);
   });
 }
