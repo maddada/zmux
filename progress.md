@@ -74,7 +74,7 @@
 - Status: completed
 - Goal: let detached sessions expire after a configurable idle timeout once the last VS Code client disconnects.
 - Verification:
-  - added `agentCanvasX.backgroundSessionTimeoutMinutes` with a default of `0` for no expiry
+  - added `VS-AGENT-MUX.backgroundSessionTimeoutMinutes` with a default of `0` for no expiry
   - terminal host protocol now supports live daemon configuration updates
   - the daemon starts a shutdown timer when the last authenticated client disconnects and cancels it on reconnect
   - when the timer expires, the daemon kills all tracked sessions and exits
@@ -196,10 +196,10 @@
 ## Step 15 - Secondary sidebar default location
 
 - Status: completed
-- Goal: make the Agent Canvas X sessions surface appear in the right-side secondary sidebar by default instead of the left activity bar.
+- Goal: make the VS-AGENT-MUX sessions surface appear in the right-side secondary sidebar by default instead of the left activity bar.
 - Verification:
   - the extension now contributes its custom view container through `contributes.viewsContainers.secondarySidebar`
-  - the existing `agentCanvasXSessions` container id and `agentCanvasX.sessions` view id stay unchanged, so reveal commands continue to target the same view container
+  - the existing `VS-AGENT-MUXSessions` container id and `VS-AGENT-MUX.sessions` view id stay unchanged, so reveal commands continue to target the same view container
 
 ## Step 14 - HUD row stacking
 

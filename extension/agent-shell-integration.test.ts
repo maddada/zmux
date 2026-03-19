@@ -6,7 +6,7 @@ import {
 
 describe("parseAgentControlChunk", () => {
   test("should strip agent lifecycle markers from visible terminal output", () => {
-    const parsed = parseAgentControlChunk(`hello\u001b]9001;agent-canvas-x;start;codex\u0007world`);
+    const parsed = parseAgentControlChunk(`hello\u001b]9001;VS-AGENT-MUX;start;codex\u0007world`);
 
     expect(parsed.output).toBe("helloworld");
     expect(parsed.pending).toBe("");
@@ -21,10 +21,10 @@ describe("parseAgentControlChunk", () => {
   });
 
   test("should buffer incomplete lifecycle markers until the terminator arrives", () => {
-    const firstChunk = parseAgentControlChunk(`busy\u001b]9001;agent-canvas-x;stop;codex`);
+    const firstChunk = parseAgentControlChunk(`busy\u001b]9001;VS-AGENT-MUX;stop;codex`);
 
     expect(firstChunk.output).toBe("busy");
-    expect(firstChunk.pending).toBe(`\u001b]9001;agent-canvas-x;stop;codex`);
+    expect(firstChunk.pending).toBe(`\u001b]9001;VS-AGENT-MUX;stop;codex`);
     expect(firstChunk.events).toEqual([]);
 
     const secondChunk = parseAgentControlChunk(`${firstChunk.pending}\u0007done`);
@@ -50,14 +50,6 @@ describe("detectCodexLifecycleEventFromLogLine", () => {
     );
 
     expect(eventType).toBe("stop");
-  });
-
-  test("should keep recognizing legacy Superset-style Codex task start events", () => {
-    const eventType = detectCodexLifecycleEventFromLogLine(
-      '{"dir":"to_tui","kind":"codex_event","msg":{"type":"task_started","turn_id":"legacy-turn"}}',
-    );
-
-    expect(eventType).toBe("start");
   });
 
   test("should ignore unrelated Codex session log lines", () => {

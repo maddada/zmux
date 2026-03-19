@@ -4,7 +4,7 @@ import type {
   SidebarToExtensionMessage,
 } from "../shared/session-grid-contract";
 
-const EXTENSION_ID = "maddada.agent-canvas-x";
+const EXTENSION_ID = "maddada.VS-AGENT-MUX";
 
 type SessionSidebarViewOptions = {
   onMessage: (message: SidebarToExtensionMessage) => void | Promise<void>;
@@ -79,7 +79,7 @@ function getSidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri | unde
     return `<!DOCTYPE html>
 <html lang="en">
   <body>
-    <p>Unable to resolve the Agent Canvas X extension assets.</p>
+    <p>Unable to resolve the VS-AGENT-MUX extension assets.</p>
   </body>
 </html>`;
   }
@@ -116,7 +116,7 @@ function getExtensionUri(): vscode.Uri | undefined {
     return directMatch.extensionUri;
   }
 
-  return vscode.extensions.all.find((extension) => extension.packageJSON.name === "agent-canvas-x")
+  return vscode.extensions.all.find((extension) => extension.packageJSON.name === "VS-AGENT-MUX")
     ?.extensionUri;
 }
 

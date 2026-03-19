@@ -526,6 +526,23 @@ button:disabled {
   gap: 8px;
 }
 
+.group-sessions[data-drop-target="true"] {
+  background: color-mix(in srgb, var(--app-button-background) 8%, transparent);
+  border-radius: 16px;
+}
+
+.group-empty-drop-target {
+  display: grid;
+}
+
+.group-empty-drop-target[data-drop-target="true"] .group-empty-button {
+  background: color-mix(in srgb, var(--app-button-background) 12%, transparent);
+  border-color: color-mix(in srgb, var(--app-button-background) 76%, var(--app-border));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--app-button-background) 18%, transparent),
+    0 12px 24px color-mix(in srgb, var(--app-button-background) 8%, transparent);
+}
+
 .group-empty-button {
   align-items: center;
   align-self: center;
@@ -699,7 +716,16 @@ button:disabled {
 }
 
 .session[data-dragging="true"] {
-  opacity: 0.72;
+  opacity: 0.2;
+}
+
+.session-drag-overlay {
+  cursor: grabbing;
+  pointer-events: none;
+  box-shadow:
+    0 18px 36px color-mix(in srgb, #000000 18%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--app-button-background) 16%, transparent);
+  opacity: 0.98;
 }
 
 .session[data-running="false"] {
@@ -1011,7 +1037,7 @@ button:disabled {
 }
 
 .tooltip-positioner {
-  z-index: 10;
+  z-index: 200;
 }
 
 .session-hover-tooltip {

@@ -468,7 +468,8 @@ function createPtyEnvironment(cwd, sessionId, shellIntegration) {
     environment.SHELL ||= safeUserShell() ?? "/bin/sh";
     environment.TERM ||= "xterm-256color";
     environment.USER ||= os.userInfo().username;
-    environment.AGENT_CANVAS_SESSION_ID = sessionId;
+    environment.VS_AGENT_MUX_SESSION_ID = sessionId;
+    environment.ZDOTDIR = shellIntegration.zshDotDir;
     return environment;
 }
 function trySpawnTerminal(shellCandidates, snapshot, environment) {

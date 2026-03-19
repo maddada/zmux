@@ -84,7 +84,7 @@ The safest direction is to keep the current detached terminal-host model:
 - reconnect from the extension when VS Code starts again
 - recreate the visible editor-area terminals and bind them back to existing sessions
 
-This is consistent with the current Agent Canvas X architecture, where terminal sessions already live in a detached host process and can outlive a single UI instance.
+This is consistent with the current VS-AGENT-MUX architecture, where terminal sessions already live in a detached host process and can outlive a single UI instance.
 
 The native-terminal version should keep that durability property and change only the presentation layer.
 

@@ -33,7 +33,7 @@ import {
 } from "../shared/grouped-session-workspace-state";
 import { focusDirectionInSnapshot } from "../shared/session-grid-state";
 
-const WORKSPACE_SNAPSHOT_KEY = "agentCanvasX.sessionGridSnapshot";
+const WORKSPACE_SNAPSHOT_KEY = "VS-AGENT-MUX.sessionGridSnapshot";
 
 export class SessionGridStore {
   private snapshot: GroupedSessionWorkspaceSnapshot;

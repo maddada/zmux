@@ -10,8 +10,8 @@ import {
   type RefObject,
 } from "react";
 import type { SidebarSessionItem } from "../shared/session-grid-contract";
+import { SessionCardContent } from "./session-card-content";
 import { createSessionDragData } from "./sidebar-dnd";
-import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import type { WebviewApi } from "./webview-api";
 
 const CONTEXT_MENU_HEIGHT_PX = 90;
@@ -21,11 +21,6 @@ const CONTEXT_MENU_WIDTH_PX = 156;
 type ContextMenuPosition = {
   x: number;
   y: number;
-};
-
-type HoverTooltipPosition = {
-  left: number;
-  top: number;
 };
 
 export type SortableSessionCardProps = {
@@ -59,16 +54,13 @@ export function SortableSessionCard({
   vscode,
 }: SortableSessionCardProps) {
   const [contextMenuPosition, setContextMenuPosition] = useState<ContextMenuPosition>();
-  const [aliasTooltipPosition, setAliasTooltipPosition] = useState<HoverTooltipPosition>();
   const menuRef = useRef<HTMLDivElement>(null);
   const aliasHeadingRef = useRef<HTMLDivElement>(null);
-  const aliasTooltipTimeoutRef = useRef<number | undefined>(undefined);
-  const secondaryText = session.detail ?? session.primaryTitle ?? session.activityLabel;
-  const secondaryTitle =
-    session.primaryTitle && session.detail
-      ? `${session.primaryTitle}\n${session.detail}`
-      : secondaryText;
+  const secondaryRef = useRef<HTMLDivElement>(null);
   const isAliasOverflowing = useIsTextOverflowing(aliasHeadingRef, session.alias);
+  const secondaryText =
+    session.detail ?? session.terminalTitle ?? session.primaryTitle ?? session.activityLabel ?? "";
+  const isSecondaryOverflowing = useIsTextOverflowing(secondaryRef, secondaryText);
   const sortable = useSortable({
     accept: "session",
     data: createSessionDragData(groupId, session.sessionId),
@@ -82,14 +74,6 @@ export function SortableSessionCard({
   useEffect(() => {
     setContextMenuPosition(undefined);
   }, [session.alias, session.sessionId]);
-
-  useEffect(() => {
-    return () => {
-      if (aliasTooltipTimeoutRef.current !== undefined) {
-        window.clearTimeout(aliasTooltipTimeoutRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (!contextMenuPosition) {
@@ -141,39 +125,6 @@ export function SortableSessionCard({
 
   const openContextMenu = (clientX: number, clientY: number) => {
     setContextMenuPosition(clampContextMenuPosition(clientX, clientY));
-  };
-
-  const openAliasTooltip = () => {
-    if (!isAliasOverflowing) {
-      return;
-    }
-
-    if (aliasTooltipTimeoutRef.current !== undefined) {
-      window.clearTimeout(aliasTooltipTimeoutRef.current);
-    }
-
-    const aliasElement = aliasHeadingRef.current;
-    if (!aliasElement) {
-      return;
-    }
-
-    const bounds = aliasElement.getBoundingClientRect();
-    aliasTooltipTimeoutRef.current = window.setTimeout(() => {
-      setAliasTooltipPosition({
-        left: bounds.left + bounds.width / 2,
-        top: Math.max(12, bounds.top - 8),
-      });
-      aliasTooltipTimeoutRef.current = undefined;
-    }, TOOLTIP_DELAY_MS);
-  };
-
-  const closeAliasTooltip = () => {
-    if (aliasTooltipTimeoutRef.current !== undefined) {
-      window.clearTimeout(aliasTooltipTimeoutRef.current);
-      aliasTooltipTimeoutRef.current = undefined;
-    }
-
-    setAliasTooltipPosition(undefined);
   };
 
   const requestRename = () => {
@@ -254,59 +205,17 @@ export function SortableSessionCard({
         role="button"
         tabIndex={0}
       >
-        <div className="session-head">
-          <div
-            className="session-alias-heading"
-            onBlur={closeAliasTooltip}
-            onMouseEnter={openAliasTooltip}
-            onMouseLeave={closeAliasTooltip}
-            ref={aliasHeadingRef}
-          >
-            {session.alias}
-          </div>
-          {showCloseButton ? (
-            <button
-              aria-label="Close session"
-              className="close-button"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                vscode.postMessage({ sessionId: session.sessionId, type: "closeSession" });
-              }}
-              type="button"
-            >
-              ×
-            </button>
-          ) : null}
-        </div>
-        <div className="session-footer">
-          {secondaryText ? (
-            <div className="session-secondary" title={secondaryTitle}>
-              {secondaryText}
-            </div>
-          ) : (
-            <div />
-          )}
-          <div className="session-meta" data-visible={String(showHotkeys)}>
-            {session.shortcutLabel}
-          </div>
-        </div>
+        <SessionCardContent
+          aliasHeadingRef={aliasHeadingRef}
+          onClose={requestClose}
+          secondaryRef={secondaryRef}
+          session={session}
+          showAliasTooltip={isAliasOverflowing}
+          showCloseButton={showCloseButton}
+          showHotkeys={showHotkeys}
+          showSecondaryTooltip={isSecondaryOverflowing}
+        />
       </article>
-      {aliasTooltipPosition && isAliasOverflowing
-        ? createPortal(
-            <div
-              aria-hidden="true"
-              className="session-hover-tooltip"
-              style={{
-                left: `${aliasTooltipPosition.left}px`,
-                top: `${aliasTooltipPosition.top}px`,
-              }}
-            >
-              <div className="tooltip-popup">{session.alias}</div>
-            </div>,
-            document.body,
-          )
-        : null}
       {contextMenuPosition
         ? createPortal(
             <div

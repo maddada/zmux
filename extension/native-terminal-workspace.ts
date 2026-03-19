@@ -1,43 +1,47 @@
-import { createHash } from "node:crypto";
-import * as os from "node:os";
-import * as path from "node:path";
 import * as vscode from "vscode";
-import { createEditorLayoutPlan } from "../shared/editor-layout";
 import {
   MAX_SESSION_COUNT,
   clampSidebarThemeSetting,
-  createSessionAlias,
   createSidebarHudState,
-  getVisiblePrimaryTitle,
   getOrderedSessions,
   getSessionShortcutLabel,
+  getVisiblePrimaryTitle,
   resolveSidebarTheme,
   type ExtensionToSidebarMessage,
   type SessionGridDirection,
   type SessionGroupRecord,
   type SessionRecord,
   type SidebarSessionGroup,
+  type SidebarSessionItem,
+  type SidebarThemeSetting,
   type SidebarThemeVariant,
   type SidebarToExtensionMessage,
-  type SidebarSessionItem,
   type TerminalViewMode,
   type VisibleSessionCount,
 } from "../shared/session-grid-contract";
 import type {
-  TerminalSessionSnapshot,
   TerminalAgentStatus,
-  TerminalSessionStatus,
+  TerminalSessionSnapshot,
 } from "../shared/terminal-host-protocol";
+import { RusptyTerminalWorkspaceBackend } from "./ruspty-terminal-workspace-backend";
 import { SessionGridStore } from "./session-grid-store";
 import { SessionSidebarViewProvider } from "./session-sidebar-view";
-import { TerminalHostClient } from "./terminal-host-client";
+import {
+  getTitleDerivedSessionActivity,
+  getTitleDerivedSessionActivityFromTransition,
+  haveSameTitleDerivedSessionActivity,
+  type TitleDerivedSessionActivity,
+} from "./session-title-activity";
+import type { TerminalWorkspaceBackend } from "./terminal-workspace-backend";
+import {
+  createDisconnectedSessionSnapshot,
+  createEmptyWorkspaceSessionSnapshot,
+  getSessionActivityLabel,
+  getWorkspaceId,
+} from "./terminal-workspace-helpers";
+import { ZmxTerminalWorkspaceBackend } from "./zmx-terminal-workspace-backend";
 
-const DEFAULT_TERMINAL_COLS = 120;
-const DEFAULT_TERMINAL_ROWS = 34;
-const FOCUSED_TERMINAL_FLASH_FRAME_DURATION_MS = 120;
-const DEFAULT_FOCUSED_TERMINAL_FLASH_MARKERS = ["🟥", "🟩", "🟨", "🟦", "🟪", "⬜"] as const;
-const MINUTE_IN_MS = 60_000;
-const SETTINGS_SECTION = "agentCanvasX";
+const SETTINGS_SECTION = "VS-AGENT-MUX";
 const BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING = "backgroundSessionTimeoutMinutes";
 const SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING = "sendRenameCommandOnSidebarRename";
 const SIDEBAR_THEME_SETTING = "sidebarTheme";
@@ -46,78 +50,63 @@ const SHOW_TERMINAL_TITLE_INDICATOR_ON_SIDEBAR_ACTIVATE_SETTING =
 const TERMINAL_TITLE_INDICATOR_MARKERS_SETTING = "terminalTitleIndicatorMarkers";
 const SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING = "showCloseButtonOnSessionCards";
 const SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING = "showHotkeysOnSessionCards";
-const SESSIONS_VIEW_ID = "agentCanvasX.sessions";
+export const SESSIONS_VIEW_ID = "VS-AGENT-MUX.sessions";
 const SHORTCUT_LABEL_PLATFORM = process.platform === "darwin" ? "mac" : "default";
 
-type SessionProjection = {
-  bridge: SessionTerminalBridge;
-  terminal: vscode.Terminal;
+type NativeTerminalWorkspaceBackendKind = "ruspty" | "zmx";
+
+export type NativeTerminalWorkspaceDebugState = {
+  backend: NativeTerminalWorkspaceBackendKind;
+  platform: NodeJS.Platform;
+  terminalUiPath: string;
 };
 
 export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private hasApprovedUntrustedShells = vscode.workspace.isTrusted;
-  private readonly client: TerminalHostClient;
+  private readonly backend: TerminalWorkspaceBackend;
+  private readonly backendKind: NativeTerminalWorkspaceBackendKind;
   private readonly disposables: vscode.Disposable[] = [];
-  private readonly projections = new Map<string, SessionProjection>();
-  private readonly sessions = new Map<string, TerminalSessionSnapshot>();
   private readonly store: SessionGridStore;
-  private readonly terminalToSessionId = new Map<vscode.Terminal, string>();
+  private readonly terminalTitleBySessionId = new Map<string, string>();
+  private readonly titleDerivedActivityBySessionId = new Map<string, TitleDerivedSessionActivity>();
   public readonly sidebarProvider: SessionSidebarViewProvider;
   private readonly workspaceId: string;
 
   public constructor(context: vscode.ExtensionContext) {
     this.store = new SessionGridStore(context);
     this.workspaceId = getWorkspaceId();
-    this.client = new TerminalHostClient({
-      daemonScriptPath: path.join(
-        context.extensionUri.fsPath,
-        "out",
-        "extension",
-        "terminal-host-daemon.js",
-      ),
-      storagePath: context.globalStorageUri.fsPath,
-    });
+    this.backendKind = process.platform === "win32" ? "ruspty" : "zmx";
+    this.backend =
+      this.backendKind === "zmx"
+        ? new ZmxTerminalWorkspaceBackend({
+            context,
+            ensureShellSpawnAllowed: () => this.ensureShellSpawnAllowed(),
+            workspaceId: this.workspaceId,
+          })
+        : new RusptyTerminalWorkspaceBackend({
+            context,
+            ensureShellSpawnAllowed: () => this.ensureShellSpawnAllowed(),
+            workspaceId: this.workspaceId,
+          });
     this.sidebarProvider = new SessionSidebarViewProvider({
       onMessage: async (message) => this.handleSidebarMessage(message),
     });
 
-    this.client.on("sessionOutput", (event) => {
-      const previousSession = this.sessions.get(event.sessionId);
-      const nextSession = previousSession
-        ? {
-            ...previousSession,
-            history: `${previousSession.history ?? ""}${event.data}`.slice(-200_000),
-          }
-        : createDisconnectedSessionSnapshot(event.sessionId, this.workspaceId);
-
-      this.sessions.set(event.sessionId, nextSession);
-      this.projections.get(event.sessionId)?.bridge.write(event.data);
-      void this.refreshSidebar();
-    });
-
-    this.client.on("sessionState", (event) => {
-      if (event.session.workspaceId !== this.workspaceId) {
-        return;
-      }
-
-      this.sessions.set(event.session.sessionId, event.session);
-      if (
-        event.session.agentStatus === "attention" &&
-        this.shouldAcknowledgeSessionAttention(event.session.sessionId)
-      ) {
-        void this.acknowledgeSessionAttention(event.session.sessionId);
-        return;
-      }
-
-      void this.refreshSidebar();
-    });
-
     this.disposables.push(
-      { dispose: () => void this.client.dispose() },
+      this.backend,
       this.sidebarProvider,
+      this.backend.onDidActivateSession((sessionId) => {
+        void this.handleProjectedTerminalActivated(sessionId);
+      }),
+      this.backend.onDidChangeSessions(() => {
+        void this.handleBackendSessionsChanged();
+      }),
+      this.backend.onDidChangeSessionTitle(({ sessionId, title }) => {
+        void this.syncSessionTitle(sessionId, title);
+      }),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration(getBackgroundSessionTimeoutConfigurationKey())) {
-          void this.syncDaemonConfiguration();
+          void this.backend.syncConfiguration();
         }
 
         if (
@@ -131,43 +120,31 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       vscode.window.onDidChangeActiveColorTheme(() => {
         void this.refreshSidebar("hydrate");
       }),
-      vscode.window.onDidChangeActiveTerminal((terminal) => {
-        const sessionId = terminal ? this.terminalToSessionId.get(terminal) : undefined;
-        if (!sessionId) {
-          return;
-        }
-
-        void this.handleProjectedTerminalActivated(sessionId);
-      }),
-      vscode.window.onDidCloseTerminal((terminal) => {
-        const sessionId = this.terminalToSessionId.get(terminal);
-        if (!sessionId) {
-          return;
-        }
-
-        this.terminalToSessionId.delete(terminal);
-        const projection = this.projections.get(sessionId);
-        if (projection?.terminal === terminal) {
-          projection.bridge.dispose();
-          this.projections.delete(sessionId);
-        }
-      }),
     );
   }
 
   public async initialize(): Promise<void> {
-    await this.syncDaemonConfiguration();
-    await this.loadLiveSessions();
-    await this.reconcileVisibleTerminals();
+    await this.backend.syncConfiguration();
+    await this.backend.initialize(this.getAllSessionRecords());
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar("hydrate");
+  }
+
+  public getDebuggingState(): NativeTerminalWorkspaceDebugState {
+    return {
+      backend: this.backendKind,
+      platform: process.platform,
+      terminalUiPath:
+        this.backendKind === "zmx"
+          ? "VS Code native shell terminal"
+          : "VS Code Pseudoterminal bridge",
+    };
   }
 
   public dispose(): void {
     while (this.disposables.length > 0) {
       this.disposables.pop()?.dispose();
     }
-
-    this.disposeAllProjections();
   }
 
   public async createSession(): Promise<void> {
@@ -177,8 +154,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    await this.createOrAttachSession(sessionRecord.sessionId);
-    await this.reconcileVisibleTerminals();
+    await this.backend.createOrAttachSession(sessionRecord);
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar();
   }
 
@@ -219,14 +196,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async openWorkspace(): Promise<void> {
-    await vscode.commands.executeCommand("workbench.view.extension.agentCanvasXSessions");
+    await vscode.commands.executeCommand("workbench.view.extension.VS-AGENT-MUXSessions");
 
     if (this.getAllSessionRecords().length === 0) {
       await this.createSession();
       return;
     }
 
-    await this.reconcileVisibleTerminals();
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar();
   }
 
@@ -241,7 +218,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   public async resetWorkspace(): Promise<void> {
     const confirmation = await vscode.window.showWarningMessage(
-      "Reset Agent Canvas X sessions?",
+      "Reset VS-AGENT-MUX sessions?",
       {
         detail:
           "This clears the saved session grid for the current workspace and kills all detached shells owned by it.",
@@ -255,30 +232,26 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     for (const sessionRecord of this.getAllSessionRecords()) {
-      try {
-        await this.client.kill(sessionRecord.sessionId);
-      } catch {
-        // ignore stale daemon sessions during reset
-      }
+      await this.backend.killSession(sessionRecord.sessionId);
     }
 
-    this.sessions.clear();
-    this.disposeAllProjections();
+    this.terminalTitleBySessionId.clear();
+    this.titleDerivedActivityBySessionId.clear();
     await this.store.reset();
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar();
   }
 
   public async restartSession(sessionId: string): Promise<void> {
-    try {
-      await this.client.kill(sessionId);
-    } catch {
-      // ignore stale daemon sessions and recreate below
+    const sessionRecord = this.store.getSession(sessionId);
+    if (!sessionRecord) {
+      return;
     }
 
-    this.sessions.delete(sessionId);
-    this.disposeProjection(sessionId);
-    await this.createOrAttachSession(sessionId);
-    await this.reconcileVisibleTerminals();
+    this.terminalTitleBySessionId.delete(sessionId);
+    this.titleDerivedActivityBySessionId.delete(sessionId);
+    await this.backend.restartSession(sessionRecord);
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar();
   }
 
@@ -303,9 +276,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     const sessionRecord = this.store.getSession(sessionId);
-    if (sessionRecord) {
-      this.projections.get(sessionId)?.bridge.setName(getSessionTabTitle(sessionRecord));
+    if (!sessionRecord) {
+      return;
     }
+
+    await this.backend.renameSession(sessionRecord);
 
     if (getSendRenameCommandOnSidebarRename()) {
       await this.writePendingRenameCommand(sessionId, nextAlias);
@@ -353,41 +328,35 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    this.disposeProjection(sessionId);
-
-    try {
-      await this.client.kill(sessionId);
-    } catch {
-      // ignore stale daemon sessions and continue removing local state
-    }
-
-    this.sessions.delete(sessionId);
-    await this.reconcileVisibleTerminals();
+    await this.backend.killSession(sessionId);
+    this.terminalTitleBySessionId.delete(sessionId);
+    this.titleDerivedActivityBySessionId.delete(sessionId);
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar();
   }
 
   public async setVisibleCount(visibleCount: VisibleSessionCount): Promise<void> {
     await this.store.setVisibleCount(visibleCount);
-    await this.reconcileVisibleTerminals();
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar();
   }
 
   public async toggleFullscreenSession(): Promise<void> {
     await this.store.toggleFullscreenSession();
-    await this.reconcileVisibleTerminals();
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar();
   }
 
   public async setViewMode(viewMode: TerminalViewMode): Promise<void> {
     await this.store.setViewMode(viewMode);
-    await this.reconcileVisibleTerminals();
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar();
   }
 
   public async openSettings(): Promise<void> {
     await vscode.commands.executeCommand(
       "workbench.action.openSettings",
-      "@ext:maddada.agent-canvas-x",
+      "@ext:maddada.VS-AGENT-MUX",
     );
   }
 
@@ -432,7 +401,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    await this.reconcileVisibleTerminals();
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar();
   }
 
@@ -483,7 +452,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    await this.createOrAttachSession(sessionRecord.sessionId);
+    await this.backend.createOrAttachSession(sessionRecord);
     await this.updateFocusedTerminal(previousVisibleSessionIds, false);
     await this.refreshSidebar();
   }
@@ -495,15 +464,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     for (const sessionRecord of group.snapshot.sessions) {
-      this.disposeProjection(sessionRecord.sessionId);
-
-      try {
-        await this.client.kill(sessionRecord.sessionId);
-      } catch {
-        // ignore stale daemon sessions and continue removing local state
-      }
-
-      this.sessions.delete(sessionRecord.sessionId);
+      await this.backend.killSession(sessionRecord.sessionId);
+      this.terminalTitleBySessionId.delete(sessionRecord.sessionId);
+      this.titleDerivedActivityBySessionId.delete(sessionRecord.sessionId);
     }
 
     const removed = await this.store.removeGroup(groupId);
@@ -511,39 +474,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    await this.reconcileVisibleTerminals();
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
     await this.refreshSidebar();
-  }
-
-  private async createOrAttachSession(sessionId: string): Promise<TerminalSessionSnapshot> {
-    if (!(await this.ensureShellSpawnAllowed())) {
-      const blockedSession = createBlockedSessionSnapshot(sessionId, this.workspaceId);
-      this.sessions.set(sessionId, blockedSession);
-      return blockedSession;
-    }
-
-    try {
-      await this.client.ensureConnected();
-      const session = await this.client.createOrAttach({
-        cols: DEFAULT_TERMINAL_COLS,
-        cwd: getDefaultWorkspaceCwd(),
-        rows: DEFAULT_TERMINAL_ROWS,
-        sessionId,
-        shell: getDefaultShell(),
-        workspaceId: this.workspaceId,
-      });
-      this.sessions.set(sessionId, session);
-      return session;
-    } catch (error) {
-      const erroredSession = {
-        ...createDisconnectedSessionSnapshot(sessionId, this.workspaceId),
-        errorMessage: getErrorMessage(error),
-        startedAt: new Date().toISOString(),
-        status: "error" as const,
-      };
-      this.sessions.set(sessionId, erroredSession);
-      return erroredSession;
-    }
   }
 
   private createSidebarMessage(
@@ -555,7 +487,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     return {
       hud: createSidebarHudState(
         activeSnapshot,
-        resolveSidebarTheme(getSidebarThemeSetting(), getSidebarThemeVariant()),
+        resolveSidebarTheme(getClampedSidebarThemeSetting(), getSidebarThemeVariant()),
         getShowCloseButtonOnSessionCards(),
         getShowHotkeysOnSessionCards(),
       ),
@@ -580,16 +512,17 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     sessionRecord: SessionRecord,
   ): SidebarSessionItem {
     const sessionSnapshot =
-      this.sessions.get(sessionRecord.sessionId) ??
+      this.backend.getSessionSnapshot(sessionRecord.sessionId) ??
       createDisconnectedSessionSnapshot(sessionRecord.sessionId, this.workspaceId);
     const activeSnapshot = this.getActiveSnapshot();
     const isActiveGroup = this.store.getSnapshot().activeGroupId === group.groupId;
+    const effectiveActivity = this.getEffectiveSessionActivity(sessionRecord, sessionSnapshot);
 
     return {
-      activity: sessionSnapshot.agentStatus,
+      activity: effectiveActivity.activity,
       activityLabel: getSessionActivityLabel(
-        sessionSnapshot.agentStatus,
-        sessionSnapshot.agentName,
+        effectiveActivity.activity,
+        effectiveActivity.agentName,
       ),
       alias: sessionRecord.alias,
       column: sessionRecord.column,
@@ -598,42 +531,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       isRunning: sessionSnapshot.status === "running",
       isVisible:
         isActiveGroup && activeSnapshot.visibleSessionIds.includes(sessionRecord.sessionId),
-      primaryTitle: getVisiblePrimaryTitle(sessionRecord.title),
+      primaryTitle: getVisibleTerminalTitle(getVisiblePrimaryTitle(sessionRecord.title)),
       row: sessionRecord.row,
       sessionId: sessionRecord.sessionId,
       shortcutLabel: getSessionShortcutLabel(sessionRecord.slotIndex, SHORTCUT_LABEL_PLATFORM),
+      terminalTitle: getVisibleTerminalTitle(
+        this.terminalTitleBySessionId.get(sessionRecord.sessionId),
+      ),
     };
-  }
-
-  private disposeAllProjections(): void {
-    for (const sessionId of this.projections.keys()) {
-      this.disposeProjection(sessionId);
-    }
-  }
-
-  private disposeProjection(sessionId: string): void {
-    const projection = this.projections.get(sessionId);
-    if (!projection) {
-      return;
-    }
-
-    this.terminalToSessionId.delete(projection.terminal);
-    projection.bridge.dispose();
-    projection.terminal.dispose();
-    this.projections.delete(sessionId);
-  }
-
-  private async ensureSessionShell(sessionId: string): Promise<TerminalSessionSnapshot> {
-    const existingSession = this.sessions.get(sessionId);
-    if (
-      existingSession &&
-      existingSession.status !== "disconnected" &&
-      existingSession.status !== "error"
-    ) {
-      return existingSession;
-    }
-
-    return this.createOrAttachSession(sessionId);
   }
 
   private async ensureShellSpawnAllowed(): Promise<boolean> {
@@ -643,7 +548,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     const approval = await vscode.window.showWarningMessage(
-      "Agent Canvas X is about to start a shell in an untrusted workspace.",
+      "VS-AGENT-MUX is about to start a shell in an untrusted workspace.",
       {
         detail:
           "Shell sessions can run commands against files in this workspace. Trust the workspace or explicitly allow shell access to continue.",
@@ -755,20 +660,20 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
   }
 
-  private async loadLiveSessions(): Promise<void> {
-    try {
-      await this.client.ensureConnected();
-    } catch {
-      return;
-    }
-
-    for (const session of await this.client.listSessions()) {
-      if (session.workspaceId !== this.workspaceId) {
-        continue;
+  private async handleBackendSessionsChanged(): Promise<void> {
+    const focusedSessionId = this.getActiveSnapshot().focusedSessionId;
+    if (
+      focusedSessionId &&
+      this.backend.getSessionSnapshot(focusedSessionId)?.agentStatus === "attention" &&
+      this.shouldAcknowledgeSessionAttention(focusedSessionId)
+    ) {
+      const acknowledgedAttention = await this.acknowledgeSessionAttention(focusedSessionId);
+      if (acknowledgedAttention) {
+        return;
       }
-
-      this.sessions.set(session.sessionId, session);
     }
+
+    await this.refreshSidebar();
   }
 
   private async refreshSidebar(
@@ -778,20 +683,27 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private async acknowledgeSessionAttention(sessionId: string): Promise<boolean> {
-    const sessionSnapshot = this.sessions.get(sessionId);
-    if (!sessionSnapshot || sessionSnapshot.agentStatus !== "attention") {
-      return false;
+    let acknowledgedAttention = false;
+    const titleDerivedActivity = this.titleDerivedActivityBySessionId.get(sessionId);
+    if (titleDerivedActivity?.activity === "attention") {
+      this.titleDerivedActivityBySessionId.set(sessionId, {
+        ...titleDerivedActivity,
+        activity: "idle",
+      });
+      acknowledgedAttention = true;
     }
 
-    this.sessions.set(sessionId, {
-      ...sessionSnapshot,
-      agentStatus: "idle",
-    });
+    const sessionSnapshot = this.backend.getSessionSnapshot(sessionId);
+    if (!sessionSnapshot || sessionSnapshot.agentStatus !== "attention") {
+      if (acknowledgedAttention) {
+        await this.refreshSidebar();
+      }
+      return acknowledgedAttention;
+    }
 
-    try {
-      await this.client.acknowledgeAttention(sessionId);
-    } catch {
-      // ignore daemon disconnects; local optimistic state is sufficient here
+    const backendAcknowledged = await this.backend.acknowledgeAttention(sessionId);
+    if (!backendAcknowledged && !acknowledgedAttention) {
+      return false;
     }
 
     await this.refreshSidebar();
@@ -809,36 +721,13 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private shouldAcknowledgeSessionAttention(sessionId: string): boolean {
     const snapshot = this.getActiveSnapshot();
-    if (snapshot.focusedSessionId === sessionId && snapshot.visibleSessionIds.includes(sessionId)) {
-      return true;
-    }
-
-    const activeTerminal = vscode.window.activeTerminal;
-    return !!activeTerminal && this.terminalToSessionId.get(activeTerminal) === sessionId;
-  }
-
-  private async syncDaemonConfiguration(): Promise<void> {
-    try {
-      await this.client.ensureConnected();
-      await this.client.configure({
-        idleShutdownTimeoutMs: getBackgroundSessionTimeoutMs(),
-      });
-    } catch {
-      // leave the existing daemon state untouched if it cannot be reached
-    }
+    return (
+      snapshot.focusedSessionId === sessionId && snapshot.visibleSessionIds.includes(sessionId)
+    );
   }
 
   private async writePendingRenameCommand(sessionId: string, alias: string): Promise<void> {
-    const sessionSnapshot = this.sessions.get(sessionId);
-    if (!sessionSnapshot || sessionSnapshot.status !== "running") {
-      return;
-    }
-
-    try {
-      await this.client.write(sessionId, `/rename ${alias}`);
-    } catch {
-      // keep the local alias change even if the backing shell cannot be reached
-    }
+    await this.backend.writeText(sessionId, `/rename ${alias}`);
   }
 
   private async syncSessionTitle(sessionId: string, title: string): Promise<void> {
@@ -847,15 +736,59 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    const sessionRecord = this.store.getSession(sessionId);
-    if (!sessionRecord || sessionRecord.title === nextTitle) {
+    const previousTitle = this.terminalTitleBySessionId.get(sessionId);
+    if (previousTitle === nextTitle) {
       return;
     }
 
-    const changed = await this.store.setSessionTitle(sessionId, nextTitle);
-    if (changed) {
+    const previousDerivedActivity = this.titleDerivedActivityBySessionId.get(sessionId);
+    const nextDerivedActivity = getTitleDerivedSessionActivityFromTransition(
+      previousTitle,
+      nextTitle,
+      previousDerivedActivity,
+    );
+    this.terminalTitleBySessionId.set(sessionId, nextTitle);
+    if (nextDerivedActivity) {
+      this.titleDerivedActivityBySessionId.set(sessionId, nextDerivedActivity);
+    } else {
+      this.titleDerivedActivityBySessionId.delete(sessionId);
+    }
+
+    const titleActivityChanged = !haveSameTitleDerivedSessionActivity(
+      previousDerivedActivity,
+      nextDerivedActivity,
+    );
+    if (titleActivityChanged || previousTitle !== nextTitle) {
       await this.refreshSidebar();
     }
+  }
+
+  private getEffectiveSessionActivity(
+    sessionRecord: SessionRecord,
+    sessionSnapshot: TerminalSessionSnapshot,
+  ): { activity: TerminalAgentStatus; agentName: string | undefined } {
+    if (sessionSnapshot.agentStatus !== "idle") {
+      return {
+        activity: sessionSnapshot.agentStatus,
+        agentName: sessionSnapshot.agentName,
+      };
+    }
+
+    const titleDerivedActivity = getTitleDerivedSessionActivity(
+      this.terminalTitleBySessionId.get(sessionRecord.sessionId) ?? "",
+      this.titleDerivedActivityBySessionId.get(sessionRecord.sessionId),
+    );
+    if (!titleDerivedActivity) {
+      return {
+        activity: "idle",
+        agentName: sessionSnapshot.agentName,
+      };
+    }
+
+    return {
+      activity: titleDerivedActivity.activity,
+      agentName: titleDerivedActivity.agentName,
+    };
   }
 
   private async updateFocusedTerminal(
@@ -863,17 +796,19 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     preserveFocus = false,
   ): Promise<void> {
     const snapshot = this.getActiveSnapshot();
+    const focusedSessionId = snapshot.focusedSessionId ?? snapshot.visibleSessionIds[0];
+    const canReuseVisibleTerminalLayout = this.backendKind !== "zmx";
 
     if (
+      canReuseVisibleTerminalLayout &&
+      focusedSessionId &&
       haveSameSessionIds(previousVisibleSessionIds, snapshot.visibleSessionIds) &&
-      snapshot.visibleSessionIds.every((sessionId) => this.projections.has(sessionId))
+      (await this.backend.focusSession(focusedSessionId, preserveFocus))
     ) {
-      const focusedSessionId = snapshot.focusedSessionId ?? snapshot.visibleSessionIds[0];
-      this.projections.get(focusedSessionId ?? "")?.terminal.show(preserveFocus);
       return;
     }
 
-    await this.reconcileVisibleTerminals(preserveFocus);
+    await this.backend.reconcileVisibleTerminals(snapshot, preserveFocus);
   }
 
   private async promptForSessionId(title: string): Promise<string | undefined> {
@@ -896,93 +831,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       })),
       {
         placeHolder: title,
-        title: `Agent Canvas X: ${title}`,
+        title: `VS-AGENT-MUX: ${title}`,
       },
     );
 
     return selection?.sessionId;
-  }
-
-  private async reconcileVisibleTerminals(preserveFocus = false): Promise<void> {
-    const snapshot = this.getActiveSnapshot();
-    this.disposeAllProjections();
-
-    if (snapshot.visibleSessionIds.length === 0) {
-      return;
-    }
-
-    await applyEditorLayout(snapshot.visibleSessionIds.length, snapshot.viewMode);
-
-    for (let index = 0; index < snapshot.visibleSessionIds.length; index += 1) {
-      const sessionId = snapshot.visibleSessionIds[index];
-      const sessionRecord = snapshot.sessions.find((session) => session.sessionId === sessionId);
-      if (!sessionRecord) {
-        continue;
-      }
-
-      const sessionSnapshot = await this.ensureSessionShell(sessionId);
-      const terminalTabTitle = getSessionTabTitle(sessionRecord);
-      const bridge = new SessionTerminalBridge({
-        history: sessionSnapshot.history ?? "",
-        name: terminalTabTitle,
-        onClose: () => {
-          this.projections.delete(sessionId);
-        },
-        onInput: async (data) => {
-          const liveSession = this.sessions.get(sessionId);
-          if (!liveSession || liveSession.status !== "running" || data.length === 0) {
-            return;
-          }
-
-          await this.client.write(sessionId, data);
-        },
-        onResize: async (cols, rows) => {
-          const liveSession = this.sessions.get(sessionId);
-          if (!liveSession || liveSession.status !== "running") {
-            return;
-          }
-
-          if (liveSession.cols === cols && liveSession.rows === rows) {
-            return;
-          }
-
-          const resizedSession = {
-            ...liveSession,
-            cols,
-            rows,
-          };
-
-          this.sessions.set(sessionId, resizedSession);
-
-          try {
-            await this.client.resize(sessionId, cols, rows);
-          } catch (error) {
-            this.sessions.set(sessionId, liveSession);
-            throw error;
-          }
-        },
-        onTitleChange: async (title) => {
-          await this.syncSessionTitle(sessionId, title);
-        },
-      });
-      const terminal = vscode.window.createTerminal({
-        iconPath: new vscode.ThemeIcon("terminal"),
-        isTransient: true,
-        location: {
-          preserveFocus: true,
-          viewColumn: getViewColumn(index),
-        },
-        name: terminalTabTitle,
-        pty: bridge,
-      });
-
-      this.projections.set(sessionId, { bridge, terminal });
-      this.terminalToSessionId.set(terminal, sessionId);
-      terminal.show(true);
-    }
-
-    const focusedSessionId = snapshot.focusedSessionId ?? snapshot.visibleSessionIds[0];
-    this.projections.get(focusedSessionId)?.terminal.show(preserveFocus);
   }
 
   private async flashSidebarFocusedTerminal(sessionId: string): Promise<void> {
@@ -995,7 +848,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    this.projections.get(sessionId)?.bridge.flash(getTerminalTitleIndicatorMarkers());
+    this.backend.flashSession(sessionId, getTerminalTitleIndicatorMarkers());
   }
 
   private getActiveSnapshot() {
@@ -1007,314 +860,17 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 }
 
-type SessionTerminalBridgeOptions = {
-  history: string;
-  name: string;
-  onClose: () => void;
-  onInput: (data: string) => Promise<void>;
-  onResize: (cols: number, rows: number) => Promise<void>;
-  onTitleChange: (title: string) => Promise<void>;
-};
-
-class SessionTerminalBridge implements vscode.Disposable, vscode.Pseudoterminal {
-  private readonly closeEmitter = new vscode.EventEmitter<number | void>();
-  private readonly nameEmitter = new vscode.EventEmitter<string>();
-  private readonly writeEmitter = new vscode.EventEmitter<string>();
-  private hasReplayedHistory = false;
-  private flashTimeout: NodeJS.Timeout | undefined;
-  private isFlashingName = false;
-  private pendingOutput = "";
-  private stableName: string;
-  public readonly onDidChangeName = this.nameEmitter.event;
-  public readonly onDidClose = this.closeEmitter.event;
-  public readonly onDidWrite = this.writeEmitter.event;
-  private isOpen = false;
-
-  public constructor(private readonly options: SessionTerminalBridgeOptions) {
-    this.stableName = options.name;
+function getVisibleTerminalTitle(title: string | undefined): string | undefined {
+  const normalizedTitle = title?.trim();
+  if (!normalizedTitle) {
+    return undefined;
   }
 
-  public close(): void {
-    this.options.onClose();
-    this.closeEmitter.fire();
+  if (/^(~|\/)/.test(normalizedTitle)) {
+    return undefined;
   }
 
-  public dispose(): void {
-    if (this.flashTimeout) {
-      clearTimeout(this.flashTimeout);
-      this.flashTimeout = undefined;
-    }
-
-    this.closeEmitter.dispose();
-    this.nameEmitter.dispose();
-    this.writeEmitter.dispose();
-  }
-
-  public flash(markers: readonly string[]): void {
-    if (!this.isOpen) {
-      return;
-    }
-
-    if (this.flashTimeout) {
-      clearTimeout(this.flashTimeout);
-    }
-
-    this.isFlashingName = true;
-    let frameIndex = 0;
-    const effectiveMarkers = markers.length > 0 ? markers : DEFAULT_FOCUSED_TERMINAL_FLASH_MARKERS;
-
-    const emitFrame = () => {
-      if (!this.isOpen) {
-        this.isFlashingName = false;
-        this.flashTimeout = undefined;
-        return;
-      }
-
-      const marker = effectiveMarkers[frameIndex];
-      this.nameEmitter.fire(`${marker} ${this.stableName} ${marker}`);
-
-      frameIndex += 1;
-      if (frameIndex >= effectiveMarkers.length) {
-        this.isFlashingName = false;
-        this.flashTimeout = undefined;
-        this.nameEmitter.fire(this.stableName);
-        return;
-      }
-
-      this.flashTimeout = setTimeout(emitFrame, FOCUSED_TERMINAL_FLASH_FRAME_DURATION_MS);
-    };
-
-    emitFrame();
-  }
-
-  public setName(name: string): void {
-    if (this.stableName === name) {
-      return;
-    }
-
-    this.stableName = name;
-    if (!this.isFlashingName) {
-      this.nameEmitter.fire(name);
-    }
-  }
-
-  public handleInput(data: string): void {
-    void this.options.onInput(data);
-  }
-
-  public open(): void {
-    this.isOpen = true;
-    if (!this.hasReplayedHistory && this.options.history.length > 0) {
-      this.hasReplayedHistory = true;
-      const replayOutput = this.consumeOutput(this.options.history);
-      if (replayOutput.length > 0) {
-        this.writeEmitter.fire(replayOutput);
-      }
-    }
-  }
-
-  public setDimensions(dimensions: vscode.TerminalDimensions | undefined): void {
-    if (!dimensions) {
-      return;
-    }
-
-    void this.options.onResize(dimensions.columns, dimensions.rows);
-  }
-
-  public write(data: string): void {
-    if (!this.isOpen || data.length === 0) {
-      return;
-    }
-
-    const output = this.consumeOutput(data);
-    if (output.length > 0) {
-      this.writeEmitter.fire(output);
-    }
-  }
-
-  private consumeOutput(data: string): string {
-    const parsedChunk = parseTerminalOutputChunk(`${this.pendingOutput}${data}`);
-    this.pendingOutput = parsedChunk.pending;
-
-    for (const title of parsedChunk.titles) {
-      void this.options.onTitleChange(title);
-    }
-
-    return parsedChunk.output;
-  }
-}
-
-type ParsedTerminalOutputChunk = {
-  output: string;
-  pending: string;
-  titles: string[];
-};
-
-async function applyEditorLayout(visibleCount: number, viewMode: TerminalViewMode): Promise<void> {
-  const layoutPlan = createEditorLayoutPlan(visibleCount, viewMode);
-  await vscode.commands.executeCommand("workbench.action.joinAllGroups");
-  await vscode.commands.executeCommand("vscode.setEditorLayout", layoutPlan.layout);
-}
-
-function parseTerminalOutputChunk(data: string): ParsedTerminalOutputChunk {
-  let index = 0;
-  let output = "";
-  const titles: string[] = [];
-
-  while (index < data.length) {
-    if (data[index] !== "\u001b" || data[index + 1] !== "]") {
-      output += data[index];
-      index += 1;
-      continue;
-    }
-
-    const controlStart = index;
-    const terminator = findOscTerminator(data, controlStart + 2);
-    if (!terminator) {
-      return {
-        output,
-        pending: data.slice(controlStart),
-        titles,
-      };
-    }
-
-    const controlBody = data.slice(controlStart + 2, terminator.contentEnd);
-    const sequence = data.slice(controlStart, terminator.sequenceEnd);
-    const separatorIndex = controlBody.indexOf(";");
-    const command = separatorIndex >= 0 ? controlBody.slice(0, separatorIndex) : controlBody;
-    const title = separatorIndex >= 0 ? controlBody.slice(separatorIndex + 1).trim() : "";
-
-    if ((command === "0" || command === "2") && title.length > 0) {
-      titles.push(title);
-    } else {
-      output += sequence;
-    }
-
-    index = terminator.sequenceEnd;
-  }
-
-  return {
-    output,
-    pending: "",
-    titles,
-  };
-}
-
-function findOscTerminator(
-  data: string,
-  startIndex: number,
-): { contentEnd: number; sequenceEnd: number } | undefined {
-  for (let index = startIndex; index < data.length; index += 1) {
-    const currentCharacter = data[index];
-    if (currentCharacter === "\u0007") {
-      return {
-        contentEnd: index,
-        sequenceEnd: index + 1,
-      };
-    }
-
-    if (currentCharacter === "\u001b" && data[index + 1] === "\\") {
-      return {
-        contentEnd: index,
-        sequenceEnd: index + 2,
-      };
-    }
-  }
-
-  return undefined;
-}
-
-function haveSameSessionIds(left: readonly string[], right: readonly string[]): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return left.every((sessionId, index) => sessionId === right[index]);
-}
-
-function createEmptyWorkspaceSessionSnapshot() {
-  return {
-    focusedSessionId: undefined,
-    fullscreenRestoreVisibleCount: undefined,
-    sessions: [],
-    visibleCount: 1 as const,
-    visibleSessionIds: [],
-    viewMode: "grid" as const,
-  };
-}
-
-function createBlockedSessionSnapshot(
-  sessionId: string,
-  workspaceId: string,
-): TerminalSessionSnapshot {
-  return {
-    ...createDisconnectedSessionSnapshot(sessionId, workspaceId),
-    errorMessage: "Shell creation blocked in an untrusted workspace.",
-    status: "error",
-  };
-}
-
-function createDisconnectedSessionSnapshot(
-  sessionId: string,
-  workspaceId: string,
-  status: TerminalSessionStatus = "disconnected",
-): TerminalSessionSnapshot {
-  return {
-    agentName: undefined,
-    agentStatus: "idle",
-    cols: DEFAULT_TERMINAL_COLS,
-    cwd: getDefaultWorkspaceCwd(),
-    history: "",
-    restoreState: "replayed",
-    rows: DEFAULT_TERMINAL_ROWS,
-    sessionId,
-    shell: getDefaultShell(),
-    startedAt: new Date(0).toISOString(),
-    status,
-    workspaceId,
-  };
-}
-
-function getSessionActivityLabel(
-  activity: TerminalAgentStatus,
-  agentName: string | undefined,
-): string | undefined {
-  const resolvedAgentName = agentName?.trim();
-  const titleCaseAgentName = resolvedAgentName
-    ? `${resolvedAgentName.slice(0, 1).toUpperCase()}${resolvedAgentName.slice(1)}`
-    : "Agent";
-
-  switch (activity) {
-    case "working":
-      return `${titleCaseAgentName} active`;
-    case "attention":
-      return `${titleCaseAgentName} needs attention`;
-    default:
-      return undefined;
-  }
-}
-
-function getSessionTabTitle(session: SessionRecord): string {
-  const sessionNumber = getSessionNumber(session.sessionId);
-  if (sessionNumber === undefined) {
-    return session.alias;
-  }
-
-  const defaultAlias = createSessionAlias(sessionNumber, session.slotIndex);
-  if (session.alias !== defaultAlias) {
-    return session.alias;
-  }
-
-  return `Session ${sessionNumber}`;
-}
-
-function getDefaultShell(): string {
-  const configuredShell = process.env.SHELL?.trim();
-  if (configuredShell) {
-    return configuredShell;
-  }
-
-  return process.platform === "win32" ? "powershell.exe" : "/bin/zsh";
+  return normalizedTitle;
 }
 
 function getBackgroundSessionTimeoutConfigurationKey(): string {
@@ -1325,16 +881,6 @@ function getSidebarThemeConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${SIDEBAR_THEME_SETTING}`;
 }
 
-function getSidebarThemeVariant(): SidebarThemeVariant {
-  switch (vscode.window.activeColorTheme.kind) {
-    case vscode.ColorThemeKind.Light:
-    case vscode.ColorThemeKind.HighContrastLight:
-      return "light";
-    default:
-      return "dark";
-  }
-}
-
 function getShowCloseButtonOnSessionCardsConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING}`;
 }
@@ -1343,99 +889,70 @@ function getShowHotkeysOnSessionCardsConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING}`;
 }
 
-function getBackgroundSessionTimeoutMs(): number | null {
-  const configuredMinutes = vscode.workspace
-    .getConfiguration(SETTINGS_SECTION)
-    .get<number>(BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING, 0);
-
-  if (!Number.isFinite(configuredMinutes) || configuredMinutes <= 0) {
-    return null;
-  }
-
-  return Math.floor(configuredMinutes * MINUTE_IN_MS);
+function getSidebarThemeSetting(): string {
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<string>(SIDEBAR_THEME_SETTING, "auto") ?? "auto"
+  );
 }
 
-function getSidebarThemeSetting() {
-  const configuredTheme = vscode.workspace
-    .getConfiguration(SETTINGS_SECTION)
-    .get<string>(SIDEBAR_THEME_SETTING, "auto");
-
-  return clampSidebarThemeSetting(configuredTheme);
-}
-
-function getSendRenameCommandOnSidebarRename(): boolean {
-  return vscode.workspace
-    .getConfiguration(SETTINGS_SECTION)
-    .get<boolean>(SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING, true);
+function getSidebarThemeVariant(): SidebarThemeVariant {
+  const activeKind = vscode.window.activeColorTheme.kind;
+  return activeKind === vscode.ColorThemeKind.Light ? "light" : "dark";
 }
 
 function getShowTerminalTitleIndicatorOnSidebarActivate(): boolean {
-  return vscode.workspace
-    .getConfiguration(SETTINGS_SECTION)
-    .get<boolean>(SHOW_TERMINAL_TITLE_INDICATOR_ON_SIDEBAR_ACTIVATE_SETTING, true);
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<boolean>(SHOW_TERMINAL_TITLE_INDICATOR_ON_SIDEBAR_ACTIVATE_SETTING, true) ?? true
+  );
 }
 
 function getTerminalTitleIndicatorMarkers(): string[] {
-  const configuredMarkers = vscode.workspace
-    .getConfiguration(SETTINGS_SECTION)
-    .get<string>(
-      TERMINAL_TITLE_INDICATOR_MARKERS_SETTING,
-      DEFAULT_FOCUSED_TERMINAL_FLASH_MARKERS.join(" "),
-    );
-
-  return parseTerminalTitleIndicatorMarkers(configuredMarkers);
-}
-
-function getShowCloseButtonOnSessionCards(): boolean {
-  return vscode.workspace
-    .getConfiguration(SETTINGS_SECTION)
-    .get<boolean>(SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING, false);
-}
-
-function getShowHotkeysOnSessionCards(): boolean {
-  return vscode.workspace
-    .getConfiguration(SETTINGS_SECTION)
-    .get<boolean>(SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING, false);
-}
-
-function getDefaultWorkspaceCwd(): string {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
-}
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function parseTerminalTitleIndicatorMarkers(value: string): string[] {
-  const markers = value
-    .split(/[\s,]+/u)
+  const configuredMarkers =
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<string>(TERMINAL_TITLE_INDICATOR_MARKERS_SETTING, "") ?? "";
+  const markers = configuredMarkers
+    .split(/[,\s]+/)
     .map((marker) => marker.trim())
     .filter((marker) => marker.length > 0);
 
-  return markers.length > 0 ? markers : [...DEFAULT_FOCUSED_TERMINAL_FLASH_MARKERS];
+  return markers.length > 0 ? markers : [];
 }
 
-function getSessionNumber(sessionId: string): number | undefined {
-  const match = /^session-(\d+)$/.exec(sessionId);
-  if (!match) {
-    return undefined;
-  }
-
-  const sessionNumber = Number.parseInt(match[1], 10);
-  return Number.isInteger(sessionNumber) && sessionNumber > 0 ? sessionNumber : undefined;
+function getShowCloseButtonOnSessionCards(): boolean {
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<boolean>(SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING, false) ?? false
+  );
 }
 
-function getViewColumn(index: number): vscode.ViewColumn {
-  return Math.max(vscode.ViewColumn.One, Math.min(index + 1, vscode.ViewColumn.Nine));
+function getShowHotkeysOnSessionCards(): boolean {
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<boolean>(SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING, false) ?? false
+  );
 }
 
-function getWorkspaceId(): string {
-  const workspaceKey =
-    vscode.workspace.workspaceFile?.toString() ??
-    vscode.workspace.workspaceFolders?.map((folder) => folder.uri.toString()).join("|") ??
-    "no-workspace";
-
-  return createHash("sha1").update(workspaceKey).digest("hex").slice(0, 12);
+function getSendRenameCommandOnSidebarRename(): boolean {
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<boolean>(SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING, false) ?? false
+  );
 }
 
-export { SESSIONS_VIEW_ID };
+function haveSameSessionIds(left: readonly string[], right: readonly string[]): boolean {
+  return (
+    left.length === right.length && left.every((sessionId, index) => sessionId === right[index])
+  );
+}
+
+export function getClampedSidebarThemeSetting(): SidebarThemeSetting {
+  return clampSidebarThemeSetting(getSidebarThemeSetting());
+}

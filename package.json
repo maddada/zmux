@@ -1,9 +1,9 @@
 {
-  "name": "agent-canvas-x",
-  "displayName": "Agent Canvas X",
+  "name": "VS-AGENT-MUX",
+  "displayName": "VS-AGENT-MUX",
   "version": "0.0.1",
   "private": true,
-  "description": "Agent Canvas X - A VS Code extension",
+  "description": "VS-AGENT-MUX - A VS Code extension",
   "categories": [
     "Other"
   ],
@@ -11,7 +11,7 @@
   "author": "maddada",
   "repository": {
     "type": "git",
-    "url": "https://github.com/maddada/agent-canvas-x.git"
+    "url": "https://github.com/maddada/VS-AGENT-MUX.git"
   },
   "publisher": "maddada",
   "files": [
@@ -53,164 +53,164 @@
   "contributes": {
     "commands": [
       {
-        "command": "agentCanvasX.openWorkspace",
+        "command": "VS-AGENT-MUX.openWorkspace",
         "title": "Open Workspace",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.openSettings",
+        "command": "VS-AGENT-MUX.openSettings",
         "title": "Open Settings",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.createSession",
+        "command": "VS-AGENT-MUX.createSession",
         "title": "New Session",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.revealSession",
+        "command": "VS-AGENT-MUX.revealSession",
         "title": "Reveal Session",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.restartSession",
+        "command": "VS-AGENT-MUX.restartSession",
         "title": "Restart Session",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.renameActiveSession",
+        "command": "VS-AGENT-MUX.renameActiveSession",
         "title": "Rename Active Session",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.focusGroup1",
+        "command": "VS-AGENT-MUX.focusGroup1",
         "title": "Focus Group 1",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.focusGroup2",
+        "command": "VS-AGENT-MUX.focusGroup2",
         "title": "Focus Group 2",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.focusGroup3",
+        "command": "VS-AGENT-MUX.focusGroup3",
         "title": "Focus Group 3",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.focusGroup4",
+        "command": "VS-AGENT-MUX.focusGroup4",
         "title": "Focus Group 4",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.focusUp",
+        "command": "VS-AGENT-MUX.focusUp",
         "title": "Focus Up",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.focusRight",
+        "command": "VS-AGENT-MUX.focusRight",
         "title": "Focus Right",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.focusDown",
+        "command": "VS-AGENT-MUX.focusDown",
         "title": "Focus Down",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.focusLeft",
+        "command": "VS-AGENT-MUX.focusLeft",
         "title": "Focus Left",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.focusSessionSlot",
+        "command": "VS-AGENT-MUX.focusSessionSlot",
         "title": "Focus Session Slot",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.showOne",
+        "command": "VS-AGENT-MUX.showOne",
         "title": "Show 1 Terminal",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.showTwo",
+        "command": "VS-AGENT-MUX.showTwo",
         "title": "Show 2 Terminals",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.showThree",
+        "command": "VS-AGENT-MUX.showThree",
         "title": "Show 3 Terminals",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.showFour",
+        "command": "VS-AGENT-MUX.showFour",
         "title": "Show 4 Terminals",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.showSix",
+        "command": "VS-AGENT-MUX.showSix",
         "title": "Show 6 Terminals",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.showNine",
+        "command": "VS-AGENT-MUX.showNine",
         "title": "Show 9 Terminals",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.toggleFullscreenSession",
+        "command": "VS-AGENT-MUX.toggleFullscreenSession",
         "title": "Toggle Fullscreen Session",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.setHorizontalView",
+        "command": "VS-AGENT-MUX.setHorizontalView",
         "title": "Set Horizontal View",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.setVerticalView",
+        "command": "VS-AGENT-MUX.setVerticalView",
         "title": "Set Vertical View",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.setGridView",
+        "command": "VS-AGENT-MUX.setGridView",
         "title": "Set Grid View",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       },
       {
-        "command": "agentCanvasX.resetWorkspace",
+        "command": "VS-AGENT-MUX.resetWorkspace",
         "title": "Reset Workspace",
-        "category": "Agent Canvas X"
+        "category": "VS-AGENT-MUX"
       }
     ],
     "viewsContainers": {
       "secondarySidebar": [
         {
-          "id": "agentCanvasXSessions",
-          "title": "Agent Canvas X",
-          "icon": "media/agent-canvas-x.svg"
+          "id": "VS-AGENT-MUXSessions",
+          "title": "VS-AGENT-MUX",
+          "icon": "media/VS-AGENT-MUX.svg"
         }
       ]
     },
     "views": {
-      "agentCanvasXSessions": [
+      "VS-AGENT-MUXSessions": [
         {
           "type": "webview",
-          "id": "agentCanvasX.sessions",
+          "id": "VS-AGENT-MUX.sessions",
           "name": "Sessions"
         }
       ]
     },
     "configuration": {
-      "title": "Agent Canvas X",
+      "title": "VS-AGENT-MUX",
       "properties": {
-        "agentCanvasX.backgroundSessionTimeoutMinutes": {
+        "VS-AGENT-MUX.backgroundSessionTimeoutMinutes": {
           "type": "number",
           "minimum": 0,
           "default": 5,
-          "description": "How long detached background sessions stay alive after the last Agent Canvas X window disconnects. Set to 0 to keep sessions alive until they exit or are explicitly closed."
+          "description": "How long detached background sessions stay alive after the last VS-AGENT-MUX window disconnects. Set to 0 to keep sessions alive until they exit or are explicitly closed."
         },
-        "agentCanvasX.sidebarTheme": {
+        "VS-AGENT-MUX.sidebarTheme": {
           "type": "string",
           "default": "auto",
           "enum": [
@@ -252,31 +252,36 @@
             "A light pink-tinted palette with a rose accent.",
             "A light orange-tinted palette with an amber accent."
           ],
-          "description": "Theme preset used by the Agent Canvas X sidebar app. Auto follows the active VS Code light or dark theme."
+          "description": "Theme preset used by the VS-AGENT-MUX sidebar app. Auto follows the active VS Code light or dark theme."
         },
-        "agentCanvasX.showTerminalTitleIndicatorOnSidebarActivate": {
+        "VS-AGENT-MUX.debuggingMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show debugging UI such as the active terminal backend indicator in the status bar."
+        },
+        "VS-AGENT-MUX.showTerminalTitleIndicatorOnSidebarActivate": {
           "type": "boolean",
           "default": true,
           "order": 2,
           "description": "Show indicator on terminal title when activated from sidebar card."
         },
-        "agentCanvasX.terminalTitleIndicatorMarkers": {
+        "VS-AGENT-MUX.terminalTitleIndicatorMarkers": {
           "type": "string",
-          "default": "🟥 🟩 🟨 🟦 🟪 ⬜",
+          "default": "🔥,🔥,🔥,🔥,🔥",
           "order": 3,
           "description": "Emoji sequence used for the terminal title indicator. Enter markers separated by spaces or commas."
         },
-        "agentCanvasX.showCloseButtonOnSessionCards": {
+        "VS-AGENT-MUX.showCloseButtonOnSessionCards": {
           "type": "boolean",
           "default": false,
           "description": "Show close button on session cards. You can always cmd + click or middle click on a card to close it."
         },
-        "agentCanvasX.showHotkeysOnSessionCards": {
+        "VS-AGENT-MUX.showHotkeysOnSessionCards": {
           "type": "boolean",
           "default": false,
           "description": "Show hotkey labels on session cards all the time instead of only revealing them when you hover a card."
         },
-        "agentCanvasX.sendRenameCommandOnSidebarRename": {
+        "VS-AGENT-MUX.sendRenameCommandOnSidebarRename": {
           "type": "boolean",
           "default": true,
           "description": "When renaming a session from the sidebar, also stage `/rename <new name>` in that terminal and focus it without pressing Enter."
@@ -285,130 +290,130 @@
     },
     "keybindings": [
       {
-        "command": "agentCanvasX.focusGroup1",
+        "command": "VS-AGENT-MUX.focusGroup1",
         "key": "ctrl+alt+shift+1",
         "mac": "ctrl+alt+shift+1",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.focusGroup2",
+        "command": "VS-AGENT-MUX.focusGroup2",
         "key": "ctrl+alt+shift+2",
         "mac": "ctrl+alt+shift+2",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.focusGroup3",
+        "command": "VS-AGENT-MUX.focusGroup3",
         "key": "ctrl+alt+shift+3",
         "mac": "ctrl+alt+shift+3",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.focusGroup4",
+        "command": "VS-AGENT-MUX.focusGroup4",
         "key": "ctrl+alt+shift+4",
         "mac": "ctrl+alt+shift+4",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.showSix",
+        "command": "VS-AGENT-MUX.showSix",
         "key": "ctrl+alt+shift+6",
         "mac": "cmd+alt+shift+6",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.showNine",
+        "command": "VS-AGENT-MUX.showNine",
         "key": "ctrl+alt+shift+9",
         "mac": "cmd+alt+shift+9",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "args": 1,
-        "command": "agentCanvasX.focusSessionSlot",
+        "command": "VS-AGENT-MUX.focusSessionSlot",
         "key": "ctrl+alt+1",
         "mac": "cmd+alt+1",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "args": 2,
-        "command": "agentCanvasX.focusSessionSlot",
+        "command": "VS-AGENT-MUX.focusSessionSlot",
         "key": "ctrl+alt+2",
         "mac": "cmd+alt+2",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "args": 3,
-        "command": "agentCanvasX.focusSessionSlot",
+        "command": "VS-AGENT-MUX.focusSessionSlot",
         "key": "ctrl+alt+3",
         "mac": "cmd+alt+3",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "args": 4,
-        "command": "agentCanvasX.focusSessionSlot",
+        "command": "VS-AGENT-MUX.focusSessionSlot",
         "key": "ctrl+alt+4",
         "mac": "cmd+alt+4",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "args": 5,
-        "command": "agentCanvasX.focusSessionSlot",
+        "command": "VS-AGENT-MUX.focusSessionSlot",
         "key": "ctrl+alt+5",
         "mac": "cmd+alt+5",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "args": 6,
-        "command": "agentCanvasX.focusSessionSlot",
+        "command": "VS-AGENT-MUX.focusSessionSlot",
         "key": "ctrl+alt+6",
         "mac": "cmd+alt+6",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "args": 7,
-        "command": "agentCanvasX.focusSessionSlot",
+        "command": "VS-AGENT-MUX.focusSessionSlot",
         "key": "ctrl+alt+7",
         "mac": "cmd+alt+7",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "args": 8,
-        "command": "agentCanvasX.focusSessionSlot",
+        "command": "VS-AGENT-MUX.focusSessionSlot",
         "key": "ctrl+alt+8",
         "mac": "cmd+alt+8",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "args": 9,
-        "command": "agentCanvasX.focusSessionSlot",
+        "command": "VS-AGENT-MUX.focusSessionSlot",
         "key": "ctrl+alt+9",
         "mac": "cmd+alt+9",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.setHorizontalView",
+        "command": "VS-AGENT-MUX.setHorizontalView",
         "key": "ctrl+alt+h",
         "mac": "cmd+alt+h",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.setVerticalView",
+        "command": "VS-AGENT-MUX.setVerticalView",
         "key": "ctrl+alt+v",
         "mac": "cmd+alt+v",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.setGridView",
+        "command": "VS-AGENT-MUX.setGridView",
         "key": "ctrl+alt+g",
         "mac": "cmd+alt+g",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.renameActiveSession",
+        "command": "VS-AGENT-MUX.renameActiveSession",
         "key": "ctrl+alt+r",
         "mac": "cmd+alt+r",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.toggleFullscreenSession",
+        "command": "VS-AGENT-MUX.toggleFullscreenSession",
         "key": "ctrl+alt+f",
         "mac": "cmd+alt+f",
         "when": "terminalFocus"
@@ -429,7 +434,7 @@
   },
   "activationEvents": [
     "onStartupFinished",
-    "onView:agentCanvasX.sessions"
+    "onView:VS-AGENT-MUX.sessions"
   ],
   "engines": {
     "vscode": "^1.110.0"

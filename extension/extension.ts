@@ -1,46 +1,49 @@
 import * as vscode from "vscode";
 import { type TerminalViewMode, type VisibleSessionCount } from "../shared/session-grid-contract";
+import { DebuggingStatusIndicator } from "./debugging-status-indicator";
 import { NativeTerminalWorkspaceController, SESSIONS_VIEW_ID } from "./native-terminal-workspace";
 
-const SESSION_CONTAINER_ID = "agentCanvasXSessions";
+const SESSION_CONTAINER_ID = "VS-AGENT-MUXSessions";
 
 export function activate(context: vscode.ExtensionContext): void {
   const workspace = new NativeTerminalWorkspaceController(context);
+  const debuggingStatusIndicator = new DebuggingStatusIndicator(workspace);
 
   context.subscriptions.push(
     workspace,
+    debuggingStatusIndicator,
     vscode.window.registerWebviewViewProvider(SESSIONS_VIEW_ID, workspace.sidebarProvider),
-    registerCommand("agentCanvasX.openWorkspace", () => workspace.openWorkspace()),
-    registerCommand("agentCanvasX.openSettings", () => workspace.openSettings()),
-    registerCommand("agentCanvasX.createSession", () => workspace.createSession()),
-    registerCommand("agentCanvasX.revealSession", () => workspace.revealSession()),
-    registerCommand("agentCanvasX.restartSession", () => workspace.restartSessionFromCommand()),
-    registerCommand("agentCanvasX.renameActiveSession", () =>
+    registerCommand("VS-AGENT-MUX.openWorkspace", () => workspace.openWorkspace()),
+    registerCommand("VS-AGENT-MUX.openSettings", () => workspace.openSettings()),
+    registerCommand("VS-AGENT-MUX.createSession", () => workspace.createSession()),
+    registerCommand("VS-AGENT-MUX.revealSession", () => workspace.revealSession()),
+    registerCommand("VS-AGENT-MUX.restartSession", () => workspace.restartSessionFromCommand()),
+    registerCommand("VS-AGENT-MUX.renameActiveSession", () =>
       workspace.promptRenameFocusedSession(),
     ),
-    registerFocusGroupCommand("agentCanvasX.focusGroup1", workspace, 1),
-    registerFocusGroupCommand("agentCanvasX.focusGroup2", workspace, 2),
-    registerFocusGroupCommand("agentCanvasX.focusGroup3", workspace, 3),
-    registerFocusGroupCommand("agentCanvasX.focusGroup4", workspace, 4),
-    registerCommand("agentCanvasX.focusUp", () => workspace.focusDirection("up")),
-    registerCommand("agentCanvasX.focusRight", () => workspace.focusDirection("right")),
-    registerCommand("agentCanvasX.focusDown", () => workspace.focusDirection("down")),
-    registerCommand("agentCanvasX.focusLeft", () => workspace.focusDirection("left")),
-    registerSlotFocusCommand("agentCanvasX.focusSessionSlot", workspace),
-    registerVisibleCountCommand("agentCanvasX.showOne", workspace, 1),
-    registerVisibleCountCommand("agentCanvasX.showTwo", workspace, 2),
-    registerVisibleCountCommand("agentCanvasX.showThree", workspace, 3),
-    registerVisibleCountCommand("agentCanvasX.showFour", workspace, 4),
-    registerVisibleCountCommand("agentCanvasX.showSix", workspace, 6),
-    registerVisibleCountCommand("agentCanvasX.showNine", workspace, 9),
-    registerCommand("agentCanvasX.toggleFullscreenSession", async () => {
+    registerFocusGroupCommand("VS-AGENT-MUX.focusGroup1", workspace, 1),
+    registerFocusGroupCommand("VS-AGENT-MUX.focusGroup2", workspace, 2),
+    registerFocusGroupCommand("VS-AGENT-MUX.focusGroup3", workspace, 3),
+    registerFocusGroupCommand("VS-AGENT-MUX.focusGroup4", workspace, 4),
+    registerCommand("VS-AGENT-MUX.focusUp", () => workspace.focusDirection("up")),
+    registerCommand("VS-AGENT-MUX.focusRight", () => workspace.focusDirection("right")),
+    registerCommand("VS-AGENT-MUX.focusDown", () => workspace.focusDirection("down")),
+    registerCommand("VS-AGENT-MUX.focusLeft", () => workspace.focusDirection("left")),
+    registerSlotFocusCommand("VS-AGENT-MUX.focusSessionSlot", workspace),
+    registerVisibleCountCommand("VS-AGENT-MUX.showOne", workspace, 1),
+    registerVisibleCountCommand("VS-AGENT-MUX.showTwo", workspace, 2),
+    registerVisibleCountCommand("VS-AGENT-MUX.showThree", workspace, 3),
+    registerVisibleCountCommand("VS-AGENT-MUX.showFour", workspace, 4),
+    registerVisibleCountCommand("VS-AGENT-MUX.showSix", workspace, 6),
+    registerVisibleCountCommand("VS-AGENT-MUX.showNine", workspace, 9),
+    registerCommand("VS-AGENT-MUX.toggleFullscreenSession", async () => {
       await workspace.toggleFullscreenSession();
       await vscode.commands.executeCommand(`workbench.view.extension.${SESSION_CONTAINER_ID}`);
     }),
-    registerViewModeCommand("agentCanvasX.setHorizontalView", workspace, "horizontal"),
-    registerViewModeCommand("agentCanvasX.setVerticalView", workspace, "vertical"),
-    registerViewModeCommand("agentCanvasX.setGridView", workspace, "grid"),
-    registerCommand("agentCanvasX.resetWorkspace", () => workspace.resetWorkspace()),
+    registerViewModeCommand("VS-AGENT-MUX.setHorizontalView", workspace, "horizontal"),
+    registerViewModeCommand("VS-AGENT-MUX.setVerticalView", workspace, "vertical"),
+    registerViewModeCommand("VS-AGENT-MUX.setGridView", workspace, "grid"),
+    registerCommand("VS-AGENT-MUX.resetWorkspace", () => workspace.resetWorkspace()),
   );
 
   void workspace.initialize().catch((error) => {

@@ -1,5 +1,5 @@
 import { Tooltip } from "@base-ui/react/tooltip";
-import { DragDropProvider } from "@dnd-kit/react";
+import { DragDropProvider, DragOverlay } from "@dnd-kit/react";
 import { isSortable } from "@dnd-kit/react/sortable";
 import { IconFocusCentered } from "@tabler/icons-react";
 import {
@@ -21,6 +21,7 @@ import {
   type VisibleSessionCount,
 } from "../shared/session-grid-contract";
 import { CreateGroupDropTarget } from "./create-group-drop-target";
+import { SessionCardContent } from "./session-card-content";
 import { getSidebarDropData } from "./sidebar-dnd";
 import { SessionGroupSection } from "./session-group-section";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
@@ -80,6 +81,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
   const [autoEditingGroupId, setAutoEditingGroupId] = useState<string>();
   const [draftGroupIds, setDraftGroupIds] = useState<string[] | undefined>();
   const [draggedSessionId, setDraggedSessionId] = useState<string>();
+  const [draggedSessionWidth, setDraggedSessionWidth] = useState<number>();
   const [draftSessionIdsByGroup, setDraftSessionIdsByGroup] = useState<
     Record<string, string[] | undefined>
   >({});
@@ -165,11 +167,28 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
       }));
   }, [draftGroupIds, draftSessionIdsByGroup, serverState.groups]);
 
+  const draggedSession = useMemo(() => {
+    if (!draggedSessionId) {
+      return undefined;
+    }
+
+    return orderedGroups
+      .flatMap((group) => group.orderedSessions)
+      .find((session) => session.sessionId === draggedSessionId);
+  }, [draggedSessionId, orderedGroups]);
+
   const handleDragStart = (event: {
     operation: {
       source: unknown;
     };
   }) => {
+    if (isSortable(event.operation.source)) {
+      const sourceElement = event.operation.source.element;
+      if (sourceElement instanceof HTMLElement) {
+        setDraggedSessionWidth(sourceElement.getBoundingClientRect().width);
+      }
+    }
+
     const sourceData = getSidebarDropData(event.operation.source as { data?: unknown });
     if (sourceData?.kind === "group") {
       return;
@@ -190,6 +209,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
     };
   }) => {
     setDraggedSessionId(undefined);
+    setDraggedSessionWidth(undefined);
 
     if (event.canceled) {
       return;
@@ -352,16 +372,17 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
               </div>
               <div className="button-group">
                 {COUNT_OPTIONS.map((visibleCount) => (
-                  <button
+                  <ToolbarIconButton
+                    ariaLabel={`Show ${visibleCount} session${visibleCount === 1 ? "" : "s"}`}
                     key={visibleCount}
-                    className="toolbar-button"
                     data-dimmed={String(serverState.hud.isFocusModeActive)}
-                    data-selected={String(serverState.hud.highlightedVisibleCount === visibleCount)}
                     onClick={() => vscode.postMessage({ type: "setVisibleCount", visibleCount })}
-                    type="button"
+                    tooltip={`Show ${visibleCount} session${visibleCount === 1 ? "" : "s"}`}
+                    isDimmed={serverState.hud.isFocusModeActive}
+                    isSelected={serverState.hud.highlightedVisibleCount === visibleCount}
                   >
                     {visibleCount}
-                  </button>
+                  </ToolbarIconButton>
                 ))}
               </div>
             </div>
@@ -396,6 +417,33 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
                 isVisible={Boolean(draggedSessionId) && orderedGroups.length < MAX_GROUP_COUNT}
               />
             </div>
+            <DragOverlay
+              dropAnimation={{
+                duration: 220,
+                easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+              }}
+            >
+              {draggedSession ? (
+                <div
+                  className="session session-drag-overlay"
+                  data-activity={draggedSession.activity}
+                  data-focused={String(draggedSession.isFocused)}
+                  data-running={String(draggedSession.isRunning)}
+                  data-visible={String(draggedSession.isVisible)}
+                  style={
+                    draggedSessionWidth
+                      ? { width: `${Math.round(draggedSessionWidth)}px` }
+                      : undefined
+                  }
+                >
+                  <SessionCardContent
+                    session={draggedSession}
+                    showCloseButton={false}
+                    showHotkeys={serverState.hud.showHotkeysOnSessionCards}
+                  />
+                </div>
+              ) : null}
+            </DragOverlay>
           </DragDropProvider>
           {orderedGroups.every((group) => group.sessions.length === 0) ? (
             <div className="empty" data-empty-space-blocking="true">
@@ -430,6 +478,7 @@ type ToolbarIconButtonProps = {
   ariaLabel: string;
   children: React.ReactNode;
   className?: string;
+  dataDimmed?: string;
   isDisabled?: boolean;
   isDimmed?: boolean;
   isSelected?: boolean;
@@ -442,6 +491,7 @@ function ToolbarIconButton({
   ariaLabel,
   children,
   className,
+  dataDimmed,
   isDisabled = false,
   isDimmed = false,
   isSelected = false,
@@ -458,7 +508,7 @@ function ToolbarIconButton({
             aria-label={ariaLabel}
             className={className ? `toolbar-button ${className}` : "toolbar-button"}
             data-disabled={String(isDisabled)}
-            data-dimmed={String(isDimmed)}
+            data-dimmed={dataDimmed ?? String(isDimmed)}
             data-selected={String(isSelected)}
             onClick={() => {
               if (isDisabled) {

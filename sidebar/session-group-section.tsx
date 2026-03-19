@@ -1,4 +1,5 @@
 import { IconGripVertical, IconPencil, IconX } from "@tabler/icons-react";
+import { useDroppable } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { createPortal } from "react-dom";
 import {
@@ -65,8 +66,13 @@ export function SessionGroupSection({
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const sessionDropTarget = useDroppable({
+    accept: "session",
+    data: createGroupDropData(group.groupId),
+    id: `${group.groupId}-session-drop`,
+  });
   const sortable = useSortable({
-    accept: ["group", "session"],
+    accept: "group",
     data: createGroupDropData(group.groupId),
     group: "groups",
     id: group.groupId,
@@ -220,7 +226,7 @@ export function SessionGroupSection({
         className="group"
         data-active={String(group.isActive)}
         data-dragging={String(Boolean(sortable.isDragging))}
-        data-drop-target={String(sortable.isDropTarget)}
+        data-drop-target={String(sortable.isDropTarget || sessionDropTarget.isDropTarget)}
         onClick={() => {
           requestFocusGroup();
         }}
@@ -262,7 +268,11 @@ export function SessionGroupSection({
             {group.isActive ? "Active" : "Switch"}
           </div>
         </div>
-        <div className="group-sessions">
+        <div
+          className="group-sessions"
+          data-drop-target={String(sessionDropTarget.isDropTarget)}
+          ref={orderedSessions.length > 0 ? sessionDropTarget.ref : undefined}
+        >
           {orderedSessions.length > 0 ? (
             orderedSessions.map((session, sessionIndex) => (
               <SortableSessionCard
@@ -276,18 +286,24 @@ export function SessionGroupSection({
               />
             ))
           ) : (
-            <button
-              aria-label={`Create a session in ${group.title}`}
-              className="group-empty-button"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                requestCreateSession();
-              }}
-              type="button"
+            <div
+              className="group-empty-drop-target"
+              data-drop-target={String(sessionDropTarget.isDropTarget)}
+              ref={sessionDropTarget.ref}
             >
-              +
-            </button>
+              <button
+                aria-label={`Create a session in ${group.title}`}
+                className="group-empty-button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  requestCreateSession();
+                }}
+                type="button"
+              >
+                +
+              </button>
+            </div>
           )}
         </div>
       </section>

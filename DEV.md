@@ -7,7 +7,7 @@ This repo is now extension-only. There is no separate canvas app or terminal web
 - `extension/`: VS Code extension host code
 - `shared/`: shared contracts and pure grid-state logic
 - `out/`: compiled extension output
-- `media/agent-canvas-x.svg`: activity-bar icon
+- `media/VS-AGENT-MUX.svg`: activity-bar icon
 
 ## Setup
 
@@ -21,7 +21,7 @@ vp install
 
 1. Run `vp run watch` in a terminal if you want automatic extension recompiles.
 2. Press `F5` in VS Code to launch an Extension Development Host.
-3. In the Extension Development Host, run `Agent Canvas X: Open Workspace`.
+3. In the Extension Development Host, run `VS-AGENT-MUX: Open Workspace`.
 
 If the Extension Development Host does not pick up a rebuild automatically, run
 `Developer: Reload Window` there.
@@ -37,7 +37,7 @@ vp test
 Current note:
 
 - `vp test` runs the unit tests for the pure grid-state logic in `shared/session-grid-state.ts`.
-- `agentCanvasX.backgroundSessionTimeoutMinutes` controls how long the detached daemon keeps sessions alive after the last VS Code client disconnects. `0` disables expiry.
+- `VS-AGENT-MUX.backgroundSessionTimeoutMinutes` controls how long the detached daemon keeps sessions alive after the last VS Code client disconnects. `0` disables expiry.
 
 Testing scope:
 

@@ -77,6 +77,7 @@ export type SidebarSessionItem = {
   activityLabel?: string;
   sessionId: string;
   primaryTitle?: string;
+  terminalTitle?: string;
   alias: string;
   shortcutLabel: string;
   row: number;
