@@ -11,6 +11,7 @@ export type TerminalWorkspaceBackend = vscode.Disposable & {
   readonly onDidActivateSession: vscode.Event<string>;
   readonly onDidChangeSessions: vscode.Event<void>;
   readonly onDidChangeSessionTitle: vscode.Event<TerminalWorkspaceBackendTitleChange>;
+  getLastTerminalActivityAt: (sessionId: string) => number | undefined;
   initialize: (sessionRecords: readonly SessionRecord[]) => Promise<void>;
   acknowledgeAttention: (sessionId: string) => Promise<boolean>;
   createOrAttachSession: (sessionRecord: SessionRecord) => Promise<TerminalSessionSnapshot>;

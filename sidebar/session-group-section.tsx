@@ -1,4 +1,4 @@
-import { IconGripVertical, IconPencil, IconX } from "@tabler/icons-react";
+import { IconFocusCentered, IconPencil, IconX } from "@tabler/icons-react";
 import { useDroppable } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { createPortal } from "react-dom";
@@ -10,7 +10,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import type { SidebarSessionGroup, SidebarSessionItem } from "../shared/session-grid-contract";
+import type {
+  SidebarSessionGroup,
+  SidebarSessionItem,
+  TerminalViewMode,
+  VisibleSessionCount,
+} from "../shared/session-grid-contract";
 import { ConfirmationModal } from "./confirmation-modal";
 import { createGroupDropData } from "./sidebar-dnd";
 import { SortableSessionCard } from "./sortable-session-card";
@@ -23,6 +28,14 @@ const CONTEXT_MENU_WIDTH_PX = 164;
 type ContextMenuPosition = {
   x: number;
   y: number;
+};
+
+type GroupLayoutIconProps = {
+  viewMode: TerminalViewMode;
+};
+
+type GroupVisibleCountIconProps = {
+  visibleCount: VisibleSessionCount;
 };
 
 export type SessionGroupSectionProps = {
@@ -48,6 +61,42 @@ function clampContextMenuPosition(clientX: number, clientY: number): ContextMenu
       Math.min(clientY, window.innerHeight - CONTEXT_MENU_HEIGHT_PX - CONTEXT_MENU_MARGIN_PX),
     ),
   };
+}
+
+function GroupLayoutIcon({ viewMode }: GroupLayoutIconProps) {
+  switch (viewMode) {
+    case "horizontal":
+      return (
+        <svg aria-hidden="true" className="group-meta-icon" viewBox="0 0 16 16">
+          <rect className="group-meta-frame" height="12" rx="2" width="12" x="2" y="2" />
+          <path className="group-meta-line" d="M6 4v8M10 4v8" />
+        </svg>
+      );
+    case "vertical":
+      return (
+        <svg aria-hidden="true" className="group-meta-icon" viewBox="0 0 16 16">
+          <rect className="group-meta-frame" height="12" rx="2" width="12" x="2" y="2" />
+          <path className="group-meta-line" d="M4 6h8M4 10h8" />
+        </svg>
+      );
+    case "grid":
+      return (
+        <svg aria-hidden="true" className="group-meta-icon" viewBox="0 0 16 16">
+          <rect className="group-meta-frame" height="12" rx="2" width="12" x="2" y="2" />
+          <path className="group-meta-line" d="M8 4v8M4 8h8" />
+        </svg>
+      );
+  }
+}
+
+function GroupVisibleCountIcon({ visibleCount }: GroupVisibleCountIconProps) {
+  return (
+    <svg aria-hidden="true" className="group-meta-icon" viewBox="0 0 16 16">
+      <text className="group-meta-count-text" textAnchor="middle" x="8" y="8">
+        {visibleCount}
+      </text>
+    </svg>
+  );
 }
 
 export function SessionGroupSection({
@@ -227,6 +276,7 @@ export function SessionGroupSection({
         data-active={String(group.isActive)}
         data-dragging={String(Boolean(sortable.isDragging))}
         data-drop-target={String(sortable.isDropTarget || sessionDropTarget.isDropTarget)}
+        data-sidebar-group-id={group.groupId}
         onClick={() => {
           requestFocusGroup();
         }}
@@ -238,18 +288,7 @@ export function SessionGroupSection({
         ref={sortable.ref}
       >
         <div className="group-head">
-          <button
-            aria-label="Reorder group"
-            className="group-drag-handle"
-            onClick={(event) => {
-              event.stopPropagation();
-            }}
-            ref={sortable.handleRef}
-            type="button"
-          >
-            <IconGripVertical aria-hidden="true" className="group-drag-icon" stroke={1.7} />
-          </button>
-          <div className="group-title-wrap">
+          <div className="group-title-wrap" ref={isEditing ? undefined : sortable.handleRef}>
             {isEditing ? (
               <input
                 autoFocus
@@ -261,17 +300,48 @@ export function SessionGroupSection({
                 value={draftTitle}
               />
             ) : (
-              <div className="group-title">{group.title}</div>
+              <div className="group-title-row">
+                <div className="group-title">{group.title}</div>
+                <div className="group-meta">
+                  <span
+                    aria-label={`Layout ${group.viewMode}`}
+                    className="group-meta-item"
+                    role="img"
+                    title={`Layout: ${group.viewMode}`}
+                  >
+                    <GroupLayoutIcon viewMode={group.viewMode} />
+                  </span>
+                  <span
+                    aria-label={`${group.visibleCount} sessions shown`}
+                    className="group-meta-item"
+                    role="img"
+                    title={`Sessions shown: ${group.visibleCount}`}
+                  >
+                    <GroupVisibleCountIcon visibleCount={group.visibleCount} />
+                  </span>
+                  {group.isFocusModeActive ? (
+                    <span
+                      aria-label="Focus mode active"
+                      className="group-meta-item"
+                      role="img"
+                      title="Focus mode active"
+                    >
+                      <IconFocusCentered
+                        aria-hidden="true"
+                        className="group-meta-focus-icon"
+                        stroke={1.8}
+                      />
+                    </span>
+                  ) : null}
+                </div>
+              </div>
             )}
-          </div>
-          <div className="group-status" data-active={String(group.isActive)}>
-            {group.isActive ? "Active" : "Switch"}
           </div>
         </div>
         <div
           className="group-sessions"
           data-drop-target={String(sessionDropTarget.isDropTarget)}
-          ref={orderedSessions.length > 0 ? sessionDropTarget.ref : undefined}
+          ref={sessionDropTarget.ref}
         >
           {orderedSessions.length > 0 ? (
             orderedSessions.map((session, sessionIndex) => (
@@ -289,7 +359,6 @@ export function SessionGroupSection({
             <div
               className="group-empty-drop-target"
               data-drop-target={String(sessionDropTarget.isDropTarget)}
-              ref={sessionDropTarget.ref}
             >
               <button
                 aria-label={`Create a session in ${group.title}`}

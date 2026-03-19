@@ -1,5 +1,9 @@
 import * as vscode from "vscode";
 import {
+  clampCompletionSoundSetting,
+  type CompletionSoundSetting,
+} from "../shared/completion-sound";
+import {
   MAX_SESSION_COUNT,
   clampSidebarThemeSetting,
   createSidebarHudState,
@@ -11,8 +15,10 @@ import {
   type SessionGridDirection,
   type SessionGroupRecord,
   type SessionRecord,
+  type SidebarHydrateMessage,
   type SidebarSessionGroup,
   type SidebarSessionItem,
+  type SidebarSessionStateMessage,
   type SidebarThemeSetting,
   type SidebarThemeVariant,
   type SidebarToExtensionMessage,
@@ -47,8 +53,11 @@ const SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING = "sendRenameCommandOnSideba
 const SIDEBAR_THEME_SETTING = "sidebarTheme";
 const SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING = "showCloseButtonOnSessionCards";
 const SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING = "showHotkeysOnSessionCards";
+const COMPLETION_SOUND_SETTING = "completionSound";
+const COMPLETION_BELL_ENABLED_KEY = "VS-AGENT-MUX.completionBellEnabled";
 export const SESSIONS_VIEW_ID = "VS-AGENT-MUX.sessions";
 const SHORTCUT_LABEL_PLATFORM = process.platform === "darwin" ? "mac" : "default";
+const WORKING_ACTIVITY_STALE_TIMEOUT_MS = 10_000;
 
 type NativeTerminalWorkspaceBackendKind = "ruspty" | "zmx";
 
@@ -63,13 +72,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private readonly backend: TerminalWorkspaceBackend;
   private readonly backendKind: NativeTerminalWorkspaceBackendKind;
   private readonly disposables: vscode.Disposable[] = [];
+  private readonly lastKnownActivityBySessionId = new Map<string, TerminalAgentStatus>();
   private readonly store: SessionGridStore;
   private readonly terminalTitleBySessionId = new Map<string, string>();
   private readonly titleDerivedActivityBySessionId = new Map<string, TitleDerivedSessionActivity>();
   public readonly sidebarProvider: SessionSidebarViewProvider;
   private readonly workspaceId: string;
 
-  public constructor(context: vscode.ExtensionContext) {
+  public constructor(private readonly context: vscode.ExtensionContext) {
     this.store = new SessionGridStore(context);
     this.workspaceId = getWorkspaceId();
     this.backendKind = process.platform === "win32" ? "ruspty" : "zmx";
@@ -108,6 +118,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
         if (
           event.affectsConfiguration(getSidebarThemeConfigurationKey()) ||
+          event.affectsConfiguration(getCompletionSoundConfigurationKey()) ||
           event.affectsConfiguration(getShowCloseButtonOnSessionCardsConfigurationKey()) ||
           event.affectsConfiguration(getShowHotkeysOnSessionCardsConfigurationKey())
         ) {
@@ -365,6 +376,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     );
   }
 
+  public async toggleCompletionBell(): Promise<void> {
+    await this.context.workspaceState.update(
+      COMPLETION_BELL_ENABLED_KEY,
+      !this.getCompletionBellEnabled(),
+    );
+    await this.refreshSidebar();
+  }
+
   public async focusGroup(groupId: string): Promise<void> {
     if (!this.store.getGroup(groupId)) {
       return;
@@ -484,7 +503,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private createSidebarMessage(
-    type: ExtensionToSidebarMessage["type"] = "sessionState",
+    type: SidebarHydrateMessage["type"] | SidebarSessionStateMessage["type"] = "sessionState",
   ): ExtensionToSidebarMessage {
     const workspaceSnapshot = this.store.getSnapshot();
     const activeSnapshot = this.getActiveSnapshot();
@@ -495,6 +514,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         resolveSidebarTheme(getClampedSidebarThemeSetting(), getSidebarThemeVariant()),
         getShowCloseButtonOnSessionCards(),
         getShowHotkeysOnSessionCards(),
+        this.getCompletionBellEnabled(),
+        getClampedCompletionSoundSetting(),
       ),
       groups: workspaceSnapshot.groups.map((group) => this.createSidebarGroup(group)),
       type,
@@ -505,10 +526,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     return {
       groupId: group.groupId,
       isActive: this.store.getSnapshot().activeGroupId === group.groupId,
+      isFocusModeActive:
+        group.snapshot.visibleCount === 1 &&
+        group.snapshot.fullscreenRestoreVisibleCount !== undefined,
       sessions: getOrderedSessions(group.snapshot).map((session) =>
         this.createSidebarItem(group, session),
       ),
       title: group.title,
+      viewMode: group.snapshot.viewMode,
+      visibleCount: group.snapshot.visibleCount,
     };
   }
 
@@ -596,6 +622,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         await this.openSettings();
         return;
 
+      case "toggleCompletionBell":
+        await this.toggleCompletionBell();
+        return;
+
       case "focusSession":
         if (message.sessionId) {
           await this.focusSession(message.sessionId, message.preserveFocus === true);
@@ -665,6 +695,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private async handleBackendSessionsChanged(): Promise<void> {
+    await this.syncKnownSessionActivities(true);
+
     const focusedSessionId = this.getActiveSnapshot().focusedSessionId;
     if (
       focusedSessionId &&
@@ -681,8 +713,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private async refreshSidebar(
-    type: ExtensionToSidebarMessage["type"] = "sessionState",
+    type: SidebarHydrateMessage["type"] | SidebarSessionStateMessage["type"] = "sessionState",
   ): Promise<void> {
+    await this.syncKnownSessionActivities(false);
     await this.sidebarProvider.postMessage(this.createSidebarMessage(type));
   }
 
@@ -762,9 +795,50 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       previousDerivedActivity,
       nextDerivedActivity,
     );
+    await this.syncKnownSessionActivities(true);
+
     if (titleActivityChanged || previousTitle !== nextTitle) {
       await this.refreshSidebar();
     }
+  }
+
+  private getCompletionBellEnabled(): boolean {
+    return this.context.workspaceState.get<boolean>(COMPLETION_BELL_ENABLED_KEY, false) ?? false;
+  }
+
+  private async syncKnownSessionActivities(playSound: boolean): Promise<void> {
+    const nextActivityBySessionId = new Map<string, TerminalAgentStatus>();
+    let shouldPlayCompletionSound = false;
+
+    for (const sessionRecord of this.getAllSessionRecords()) {
+      const sessionSnapshot =
+        this.backend.getSessionSnapshot(sessionRecord.sessionId) ??
+        createDisconnectedSessionSnapshot(sessionRecord.sessionId, this.workspaceId);
+      const effectiveActivity = this.getEffectiveSessionActivity(sessionRecord, sessionSnapshot);
+      nextActivityBySessionId.set(sessionRecord.sessionId, effectiveActivity.activity);
+
+      if (
+        playSound &&
+        effectiveActivity.activity === "attention" &&
+        this.lastKnownActivityBySessionId.get(sessionRecord.sessionId) !== "attention"
+      ) {
+        shouldPlayCompletionSound = true;
+      }
+    }
+
+    this.lastKnownActivityBySessionId.clear();
+    for (const [sessionId, activity] of nextActivityBySessionId) {
+      this.lastKnownActivityBySessionId.set(sessionId, activity);
+    }
+
+    if (!shouldPlayCompletionSound || !this.getCompletionBellEnabled()) {
+      return;
+    }
+
+    await this.sidebarProvider.postMessage({
+      sound: getClampedCompletionSoundSetting(),
+      type: "playCompletionSound",
+    });
   }
 
   private getEffectiveSessionActivity(
@@ -772,6 +846,16 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     sessionSnapshot: TerminalSessionSnapshot,
   ): { activity: TerminalAgentStatus; agentName: string | undefined } {
     if (sessionSnapshot.agentStatus !== "idle") {
+      if (
+        sessionSnapshot.agentStatus === "working" &&
+        this.shouldExpireWorkingActivity(sessionRecord.sessionId, sessionSnapshot.agentName)
+      ) {
+        return {
+          activity: "idle",
+          agentName: sessionSnapshot.agentName,
+        };
+      }
+
       return {
         activity: sessionSnapshot.agentStatus,
         agentName: sessionSnapshot.agentName,
@@ -789,10 +873,34 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       };
     }
 
+    if (
+      titleDerivedActivity.activity === "working" &&
+      this.shouldExpireWorkingActivity(sessionRecord.sessionId, titleDerivedActivity.agentName)
+    ) {
+      return {
+        activity: "idle",
+        agentName: titleDerivedActivity.agentName,
+      };
+    }
+
     return {
       activity: titleDerivedActivity.activity,
       agentName: titleDerivedActivity.agentName,
     };
+  }
+
+  private shouldExpireWorkingActivity(sessionId: string, agentName: string | undefined): boolean {
+    const normalizedAgentName = agentName?.trim().toLowerCase();
+    if (normalizedAgentName !== "claude" && normalizedAgentName !== "codex") {
+      return false;
+    }
+
+    const lastTerminalActivityAt = this.backend.getLastTerminalActivityAt(sessionId);
+    if (!lastTerminalActivityAt) {
+      return false;
+    }
+
+    return Date.now() - lastTerminalActivityAt >= WORKING_ACTIVITY_STALE_TIMEOUT_MS;
   }
 
   private async updateFocusedTerminal(
@@ -874,6 +982,10 @@ function getShowCloseButtonOnSessionCardsConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING}`;
 }
 
+function getCompletionSoundConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${COMPLETION_SOUND_SETTING}`;
+}
+
 function getShowHotkeysOnSessionCardsConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING}`;
 }
@@ -907,6 +1019,14 @@ function getShowHotkeysOnSessionCards(): boolean {
   );
 }
 
+function getCompletionSoundSetting(): string {
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<string>(COMPLETION_SOUND_SETTING, "ping") ?? "ping"
+  );
+}
+
 function getSendRenameCommandOnSidebarRename(): boolean {
   return (
     vscode.workspace
@@ -923,4 +1043,8 @@ function haveSameSessionIds(left: readonly string[], right: readonly string[]): 
 
 export function getClampedSidebarThemeSetting(): SidebarThemeSetting {
   return clampSidebarThemeSetting(getSidebarThemeSetting());
+}
+
+function getClampedCompletionSoundSetting(): CompletionSoundSetting {
+  return clampCompletionSoundSetting(getCompletionSoundSetting());
 }

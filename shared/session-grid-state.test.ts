@@ -183,8 +183,13 @@ describe("sidebar HUD state", () => {
       "dark-green",
       false,
       false,
+      true,
+      "glass",
     );
 
+    expect(hud.completionBellEnabled).toBe(true);
+    expect(hud.completionSound).toBe("glass");
+    expect(hud.completionSoundLabel).toBe("Glass");
     expect(hud.showCloseButtonOnSessionCards).toBe(false);
     expect(hud.showHotkeysOnSessionCards).toBe(false);
     expect(hud.isFocusModeActive).toBe(false);
@@ -203,6 +208,8 @@ describe("sidebar HUD state", () => {
       "dark-green",
       false,
       false,
+      false,
+      "ping",
     );
 
     expect(hud.isFocusModeActive).toBe(true);

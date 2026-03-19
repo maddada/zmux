@@ -24,6 +24,7 @@
     "sidebar:build": "vp build --config vite.sidebar.config.ts",
     "storybook": "vp exec storybook dev -p 6006 --no-open",
     "storybook:build": "vp exec storybook build",
+    "storybook:test": "node ./scripts/storybook-test.mjs",
     "compile": "vp run sidebar:build && tsc -p ./tsconfig.extension.json",
     "watch": "tsc -w -p ./tsconfig.extension.json",
     "lint": "vp lint",
@@ -43,6 +44,7 @@
   },
   "devDependencies": {
     "@storybook/react-vite": "^10.3.0",
+    "@storybook/test-runner": "^0.24.3",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -277,6 +279,35 @@
           "type": "boolean",
           "default": false,
           "description": "Show hotkey labels on session cards all the time instead of only revealing them when you hover a card."
+        },
+        "VS-AGENT-MUX.completionSound": {
+          "type": "string",
+          "default": "ping",
+          "enum": [
+            "arcade",
+            "codecompleteafrican",
+            "codecompleteafrobeat",
+            "codecompleteedm",
+            "comebacktothecode",
+            "glass",
+            "ping",
+            "shamisen",
+            "supersetdoowap",
+            "supersetquick"
+          ],
+          "enumItemLabels": [
+            "Arcade",
+            "African Code Complete",
+            "Afrobeat Code Complete",
+            "EDM Code Complete",
+            "Come Back To The Code",
+            "Glass",
+            "Ping",
+            "Shamisen",
+            "Superset Doo-Wap",
+            "Superset Quick"
+          ],
+          "description": "Sound played when an agent finishes and the per-project bell is enabled in the VS-AGENT-MUX sidebar."
         },
         "VS-AGENT-MUX.sendRenameCommandOnSidebarRename": {
           "type": "boolean",

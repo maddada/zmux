@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { COMPLETION_SOUND_OPTIONS, getCompletionSoundFileName } from "../shared/completion-sound";
 import type {
   ExtensionToSidebarMessage,
   SidebarToExtensionMessage,
@@ -26,7 +27,10 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
   }
 
   public async postMessage(message: ExtensionToSidebarMessage): Promise<void> {
-    this.latestMessage = message;
+    if (message.type === "hydrate" || message.type === "sessionState") {
+      this.latestMessage = message;
+    }
+
     if (!this.view) {
       return;
     }
@@ -48,7 +52,10 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: extensionUri
-        ? [vscode.Uri.joinPath(extensionUri, "out", "sidebar")]
+        ? [
+            vscode.Uri.joinPath(extensionUri, "media", "sounds"),
+            vscode.Uri.joinPath(extensionUri, "out", "sidebar"),
+          ]
         : undefined,
     };
     webviewView.webview.html = getSidebarHtml(webviewView.webview, extensionUri);
@@ -90,6 +97,23 @@ function getSidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri | unde
   const styleUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, "out", "sidebar", "sidebar.css"),
   );
+  const nonce = getNonce();
+  const soundUrls = Object.fromEntries(
+    COMPLETION_SOUND_OPTIONS.map((option) => [
+      option.value,
+      webview
+        .asWebviewUri(
+          vscode.Uri.joinPath(
+            extensionUri,
+            "media",
+            "sounds",
+            getCompletionSoundFileName(option.value),
+          ),
+        )
+        .toString(),
+    ]),
+  );
+  const soundUrlsJson = JSON.stringify(soundUrls).replace(/</g, "\\u003c");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -97,7 +121,7 @@ function getSidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri | unde
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource}; img-src ${webview.cspSource} data:;"
+      content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'nonce-${nonce}'; img-src ${webview.cspSource} data:; media-src ${webview.cspSource};"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent Sessions</title>
@@ -105,7 +129,10 @@ function getSidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri | unde
   </head>
   <body>
     <div id="root"></div>
-    <script src="${scriptUri}" type="module"></script>
+    <script nonce="${nonce}">
+      window.__VS_AGENT_MUX_SOUND_URLS__ = ${soundUrlsJson};
+    </script>
+    <script nonce="${nonce}" src="${scriptUri}" type="module"></script>
   </body>
 </html>`;
 }
@@ -120,6 +147,10 @@ function getExtensionUri(): vscode.Uri | undefined {
     ?.extensionUri;
 }
 
+function getNonce(): string {
+  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
 function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMessage {
   if (!candidate || typeof candidate !== "object") {
     return false;
@@ -129,6 +160,7 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
   switch (message.type) {
     case "ready":
     case "openSettings":
+    case "toggleCompletionBell":
     case "createSession":
     case "toggleFullscreenSession":
       return true;

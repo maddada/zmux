@@ -22,6 +22,10 @@ export type PersistedSessionState = {
 export const DEFAULT_TERMINAL_COLS = 120;
 export const DEFAULT_TERMINAL_ROWS = 34;
 
+const VT_TEXT_ACTIVITY_TAIL_LENGTH = 4000;
+const CODEX_WORKING_TEXT_MARKER = "esc to interrupt)";
+const CODEX_WORKING_SNIPPET_LENGTH = 220;
+
 export async function applyEditorLayout(
   visibleCount: number,
   viewMode: TerminalViewMode,
@@ -179,6 +183,41 @@ export function extractLatestTerminalTitleFromVtHistory(history: string): string
   return latestTitle;
 }
 
+export function extractTerminalTextTailFromVtHistory(history: string): string | undefined {
+  const strippedHistory = stripTerminalControlSequences(history);
+  return normalizePersistedSessionValue(strippedHistory.slice(-VT_TEXT_ACTIVITY_TAIL_LENGTH));
+}
+
+export function hasCodexWorkingStatusInVtHistory(
+  history: string,
+  title?: string,
+  agentName?: string,
+): boolean {
+  const normalizedTitle = title?.trim().toLowerCase();
+  const normalizedAgentName = agentName?.trim().toLowerCase();
+  if (!normalizedTitle?.includes("codex") && normalizedAgentName !== "codex") {
+    return false;
+  }
+
+  const tailText = extractTerminalTextTailFromVtHistory(history);
+  if (!tailText) {
+    return false;
+  }
+
+  const lowerTailText = tailText.toLowerCase();
+  const markerIndex = lowerTailText.lastIndexOf(CODEX_WORKING_TEXT_MARKER);
+  if (markerIndex < 0) {
+    return false;
+  }
+
+  const snippet = tailText.slice(
+    Math.max(0, markerIndex - CODEX_WORKING_SNIPPET_LENGTH),
+    markerIndex + CODEX_WORKING_TEXT_MARKER.length,
+  );
+
+  return /\([^)]*esc to interrupt\)/iu.test(snippet) && /[a-z]/iu.test(snippet);
+}
+
 export function getSessionNumber(sessionId: string): number | undefined {
   const match = /^session-(\d+)$/.exec(sessionId);
   if (!match) {
@@ -192,6 +231,16 @@ export function getSessionNumber(sessionId: string): number | undefined {
 function normalizePersistedSessionValue(value: string | undefined): string | undefined {
   const normalizedValue = value?.replace(/\s+/g, " ").trim();
   return normalizedValue && normalizedValue.length > 0 ? normalizedValue : undefined;
+}
+
+function stripTerminalControlSequences(history: string): string {
+  return history
+    .replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\)/gu, " ")
+    .replace(/\u001bP[\s\S]*?\u001b\\/gu, " ")
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, "")
+    .replace(/\u001b[@-_]/gu, "")
+    .replace(/[\u0000-\u0008\u000b-\u001a\u001c-\u001f\u007f]/gu, " ")
+    .replace(/\r/gu, "\n");
 }
 
 function findOscTerminator(

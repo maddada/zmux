@@ -1,7 +1,7 @@
 import { Tooltip } from "@base-ui/react/tooltip";
 import { DragDropProvider, DragOverlay } from "@dnd-kit/react";
 import { isSortable } from "@dnd-kit/react/sortable";
-import { IconFocusCentered } from "@tabler/icons-react";
+import { IconBell, IconBellOff, IconFocusCentered } from "@tabler/icons-react";
 import {
   startTransition,
   useEffect,
@@ -20,6 +20,7 @@ import {
   type TerminalViewMode,
   type VisibleSessionCount,
 } from "../shared/session-grid-contract";
+import { playCompletionSound } from "./completion-sound-player";
 import { CreateGroupDropTarget } from "./create-group-drop-target";
 import { SessionCardContent } from "./session-card-content";
 import { getSidebarDropData } from "./sidebar-dnd";
@@ -46,6 +47,9 @@ const MODE_OPTIONS: { tooltip: string; viewMode: TerminalViewMode }[] = [
 const INITIAL_STATE: SidebarState = {
   groups: [],
   hud: {
+    completionBellEnabled: false,
+    completionSound: "ping",
+    completionSoundLabel: "Ping",
     focusedSessionTitle: undefined,
     isFocusModeActive: false,
     showCloseButtonOnSessionCards: false,
@@ -102,7 +106,16 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent<ExtensionToSidebarMessage>) => {
-      if (!event.data || (event.data.type !== "hydrate" && event.data.type !== "sessionState")) {
+      if (!event.data) {
+        return;
+      }
+
+      if (event.data.type === "playCompletionSound") {
+        void playCompletionSound(event.data.sound);
+        return;
+      }
+
+      if (event.data.type !== "hydrate" && event.data.type !== "sessionState") {
         return;
       }
 
@@ -176,6 +189,40 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
       .flatMap((group) => group.orderedSessions)
       .find((session) => session.sessionId === draggedSessionId);
   }, [draggedSessionId, orderedGroups]);
+
+  const applyCrossGroupSessionMoveDraft = (
+    sessionId: string,
+    sourceGroupId: string,
+    targetGroupId: string,
+  ) => {
+    if (sourceGroupId === targetGroupId) {
+      return;
+    }
+
+    const sourceGroup = orderedGroups.find((group) => group.groupId === sourceGroupId);
+    const targetGroup = orderedGroups.find((group) => group.groupId === targetGroupId);
+    if (!sourceGroup || !targetGroup) {
+      return;
+    }
+
+    const nextSourceSessionIds = sourceGroup.orderedSessions
+      .map((session) => session.sessionId)
+      .filter((candidateSessionId) => candidateSessionId !== sessionId);
+    const nextTargetSessionIds = [
+      ...targetGroup.orderedSessions
+        .map((session) => session.sessionId)
+        .filter((candidateSessionId) => candidateSessionId !== sessionId),
+      sessionId,
+    ];
+
+    startTransition(() => {
+      setDraftSessionIdsByGroup((previousDraft) => ({
+        ...previousDraft,
+        [sourceGroupId]: nextSourceSessionIds,
+        [targetGroupId]: nextTargetSessionIds,
+      }));
+    });
+  };
 
   const handleDragStart = (event: {
     operation: {
@@ -266,6 +313,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
         return;
       }
 
+      applyCrossGroupSessionMoveDraft(sourceData.sessionId, sourceData.groupId, targetData.groupId);
       vscode.postMessage({
         groupId: targetData.groupId,
         sessionId: sourceData.sessionId,
@@ -275,6 +323,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
     }
 
     if (!isSortable(target) || sourceData.groupId !== targetData.groupId) {
+      applyCrossGroupSessionMoveDraft(sourceData.sessionId, sourceData.groupId, targetData.groupId);
       vscode.postMessage({
         groupId: targetData.groupId,
         sessionId: sourceData.sessionId,
@@ -356,6 +405,26 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
                   ))}
                 </div>
                 <div className="button-group button-group-end">
+                  <ToolbarIconButton
+                    ariaLabel={
+                      serverState.hud.completionBellEnabled
+                        ? "Disable completion sound for this project"
+                        : "Enable completion sound for this project"
+                    }
+                    isSelected={serverState.hud.completionBellEnabled}
+                    onClick={() => vscode.postMessage({ type: "toggleCompletionBell" })}
+                    tooltip={getCompletionBellTooltip(serverState.hud)}
+                  >
+                    {serverState.hud.completionBellEnabled ? (
+                      <IconBell aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
+                    ) : (
+                      <IconBellOff
+                        aria-hidden="true"
+                        className="toolbar-tabler-icon"
+                        stroke={1.8}
+                      />
+                    )}
+                  </ToolbarIconButton>
                   <ToolbarIconButton
                     ariaLabel="Open sidebar theme settings"
                     onClick={() => vscode.postMessage({ type: "openSettings" })}
@@ -720,4 +789,10 @@ function SettingsIcon() {
       <circle className="toolbar-icon-frame" cx="8" cy="8" r="4.6" />
     </svg>
   );
+}
+
+function getCompletionBellTooltip(hud: SidebarHudState): string {
+  return hud.completionBellEnabled
+    ? `Disable done sound for this project (${hud.completionSoundLabel})`
+    : `Enable done sound for this project (${hud.completionSoundLabel})`;
 }

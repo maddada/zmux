@@ -15,6 +15,7 @@
   --working-secondary: color-mix(in srgb, #ffd27a 62%, #2f6feb 38%);
   --attention-primary: color-mix(in srgb, #5ea0ff 68%, #2f6feb 32%);
   --attention-secondary: color-mix(in srgb, #9dcbff 62%, #184896 38%);
+  --attention-dot: #63e58f;
 }
 
 body[data-sidebar-theme="plain-dark"] {
@@ -429,11 +430,7 @@ button:disabled {
 }
 
 .group[data-active="true"] {
-  border-color: color-mix(in srgb, var(--app-button-background) 48%, var(--app-border));
-  background: color-mix(in srgb, var(--app-card-active) 92%, transparent);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--app-button-background) 18%, transparent),
-    0 16px 30px color-mix(in srgb, var(--app-button-background) 10%, transparent);
+  background: color-mix(in srgb, var(--app-card) 94%, transparent);
 }
 
 .group[data-drop-target="true"] {
@@ -444,41 +441,24 @@ button:disabled {
 }
 
 .group-head {
-  align-items: center;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-width: 0;
 }
 
 .group-title-wrap {
   min-width: 0;
 }
 
-.group-drag-handle {
+.group-title-row {
   align-items: center;
-  align-self: stretch;
-  background: transparent;
-  border: 0;
-  border-radius: 12px;
-  color: var(--app-muted);
   cursor: grab;
-  display: inline-flex;
-  justify-content: center;
-  padding: 0 4px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
 }
 
-.group-drag-handle:active {
+.group-title-row:active {
   cursor: grabbing;
-}
-
-.group-drag-handle:hover,
-.group-drag-handle:focus-visible {
-  background: color-mix(in srgb, var(--app-button-background) 10%, transparent);
-  color: color-mix(in srgb, var(--app-button-background) 72%, var(--app-foreground) 28%);
-}
-
-.group-drag-icon {
-  display: block;
 }
 
 .group-title,
@@ -491,11 +471,68 @@ button:disabled {
 }
 
 .group-title {
-  color: var(--app-muted);
+  color: color-mix(in srgb, var(--app-foreground) 58%, var(--app-muted) 42%);
   display: block;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.group-meta {
+  align-items: center;
+  align-self: center;
+  color: color-mix(in srgb, var(--app-muted) 82%, var(--app-foreground) 18%);
+  cursor: default;
+  display: inline-flex;
+  flex: none;
+  gap: 7px;
+  justify-content: flex-end;
+  margin-left: auto;
+  min-height: 14px;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.group-meta-item {
+  align-items: center;
+  align-self: center;
+  cursor: default;
+  display: inline-flex;
+  justify-content: center;
+  opacity: 0.84;
+}
+
+.group-meta-icon,
+.group-meta-focus-icon {
+  display: block;
+  height: 14px;
+  width: 14px;
+}
+
+.group-meta-frame,
+.group-meta-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.group-meta-frame {
+  stroke-width: 1.2;
+}
+
+.group-meta-line {
+  stroke-width: 1.15;
+}
+
+.group-meta-count-text {
+  dominant-baseline: middle;
+  fill: currentColor;
+  font-size: 14px;
+  font-weight: 700;
+  opacity: 0.92;
 }
 
 .group-title-input {
@@ -513,22 +550,14 @@ button:disabled {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--app-button-background) 24%, transparent);
 }
 
-.group-status {
-  border: 1px solid color-mix(in srgb, var(--app-border) 72%, transparent);
-  border-radius: 999px;
-  color: var(--app-muted);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  line-height: 1;
-  padding: 6px 8px;
-  text-transform: uppercase;
+.group[data-active="true"] .group-title {
+  color: var(--app-foreground);
 }
 
-.group-status[data-active="true"] {
-  border-color: color-mix(in srgb, var(--app-button-background) 36%, transparent);
-  background: color-mix(in srgb, var(--app-button-background) 16%, transparent);
-  color: color-mix(in srgb, var(--app-button-background) 72%, var(--app-foreground) 28%);
+.group[data-active="true"] .group-meta,
+.group:hover .group-meta {
+  opacity: 1;
+  visibility: visible;
 }
 
 .group-sessions {
@@ -815,6 +844,7 @@ button:disabled {
 }
 
 .session[data-activity="attention"] {
+  padding-left: 28px;
   border-color: color-mix(in srgb, var(--attention-primary) 74%, var(--app-border));
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--attention-primary) 52%, transparent),
@@ -846,6 +876,21 @@ button:disabled {
 
 .session:focus-visible {
   outline-color: color-mix(in srgb, var(--app-button-background) 72%, #ffffff 28%);
+}
+
+.session-attention-dot {
+  position: absolute;
+  left: 12px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--attention-dot);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--attention-dot) 12%, transparent),
+    0 6px 16px color-mix(in srgb, var(--attention-dot) 18%, transparent);
+  z-index: 1;
 }
 
 .session-head {

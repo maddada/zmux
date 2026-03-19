@@ -1,3 +1,4 @@
+import { DEFAULT_COMPLETION_SOUND, getCompletionSoundLabel } from "../shared/completion-sound";
 import type {
   SidebarHydrateMessage,
   SidebarHudState,
@@ -7,12 +8,14 @@ import type {
   TerminalViewMode,
   VisibleSessionCount,
 } from "../shared/session-grid-contract";
+import { clampVisibleSessionCount } from "../shared/session-grid-contract";
 
 export type SidebarStoryFixture =
   | "default"
   | "selector-states"
   | "overflow-stress"
-  | "empty-groups";
+  | "empty-groups"
+  | "three-groups-stress";
 
 export type SidebarStoryArgs = {
   fixture: SidebarStoryFixture;
@@ -25,7 +28,12 @@ export type SidebarStoryArgs = {
   visibleCount: VisibleSessionCount;
 };
 
-const DEFAULT_GROUPS: SidebarSessionGroup[] = [
+type SidebarStoryGroup = Omit<
+  SidebarSessionGroup,
+  "isFocusModeActive" | "viewMode" | "visibleCount"
+>;
+
+const DEFAULT_GROUPS: SidebarStoryGroup[] = [
   {
     groupId: "group-1",
     isActive: false,
@@ -88,7 +96,7 @@ const DEFAULT_GROUPS: SidebarSessionGroup[] = [
   },
 ];
 
-const SELECTOR_STATE_GROUPS: SidebarSessionGroup[] = [
+const SELECTOR_STATE_GROUPS: SidebarStoryGroup[] = [
   {
     groupId: "group-1",
     isActive: true,
@@ -143,7 +151,7 @@ const SELECTOR_STATE_GROUPS: SidebarSessionGroup[] = [
   },
 ];
 
-const OVERFLOW_STRESS_GROUPS: SidebarSessionGroup[] = [
+const OVERFLOW_STRESS_GROUPS: SidebarStoryGroup[] = [
   {
     groupId: "group-1",
     isActive: true,
@@ -214,7 +222,7 @@ const OVERFLOW_STRESS_GROUPS: SidebarSessionGroup[] = [
   },
 ];
 
-const EMPTY_GROUPS: SidebarSessionGroup[] = [
+const EMPTY_GROUPS: SidebarStoryGroup[] = [
   {
     groupId: "group-1",
     isActive: true,
@@ -244,16 +252,90 @@ const EMPTY_GROUPS: SidebarSessionGroup[] = [
   },
 ];
 
-const GROUPS_BY_FIXTURE: Record<SidebarStoryFixture, SidebarSessionGroup[]> = {
+const THREE_GROUPS_STRESS: SidebarStoryGroup[] = [
+  {
+    groupId: "group-1",
+    isActive: true,
+    sessions: [
+      createSession({
+        alias: "Atlas Forge",
+        detail: "OpenAI Codex",
+        isFocused: true,
+        isVisible: true,
+        sessionId: "session-1",
+        shortcutLabel: "⌘⌥1",
+      }),
+      createSession({
+        alias: "Beryl Note",
+        detail: "OpenAI Codex",
+        isVisible: true,
+        sessionId: "session-2",
+        shortcutLabel: "⌘⌥2",
+      }),
+    ],
+    title: "Main",
+  },
+  {
+    groupId: "group-2",
+    isActive: false,
+    sessions: [
+      createSession({
+        alias: "Cinder Path",
+        detail: "OpenAI Codex",
+        sessionId: "session-3",
+        shortcutLabel: "⌘⌥3",
+      }),
+      createSession({
+        alias: "Dune Echo",
+        detail: "OpenAI Codex",
+        sessionId: "session-4",
+        shortcutLabel: "⌘⌥4",
+      }),
+    ],
+    title: "Group 2",
+  },
+  {
+    groupId: "group-3",
+    isActive: false,
+    sessions: [
+      createSession({
+        alias: "Elm Signal",
+        detail: "OpenAI Codex",
+        sessionId: "session-5",
+        shortcutLabel: "⌘⌥5",
+      }),
+      createSession({
+        alias: "Fjord Thread",
+        detail: "OpenAI Codex",
+        sessionId: "session-6",
+        shortcutLabel: "⌘⌥6",
+      }),
+    ],
+    title: "Group 3",
+  },
+];
+
+const GROUPS_BY_FIXTURE: Record<SidebarStoryFixture, SidebarStoryGroup[]> = {
   default: DEFAULT_GROUPS,
   "empty-groups": EMPTY_GROUPS,
   "overflow-stress": OVERFLOW_STRESS_GROUPS,
   "selector-states": SELECTOR_STATE_GROUPS,
+  "three-groups-stress": THREE_GROUPS_STRESS,
 };
 
 export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrateMessage {
-  const groups = cloneGroups(GROUPS_BY_FIXTURE[args.fixture]);
+  const groups = cloneGroups(GROUPS_BY_FIXTURE[args.fixture]).map((group) => ({
+    ...group,
+    isFocusModeActive: group.isActive ? args.isFocusModeActive : false,
+    viewMode: group.isActive ? args.viewMode : "grid",
+    visibleCount: group.isActive
+      ? args.visibleCount
+      : clampVisibleSessionCount(Math.max(1, group.sessions.length)),
+  }));
   const hud: SidebarHudState = {
+    completionBellEnabled: false,
+    completionSound: DEFAULT_COMPLETION_SOUND,
+    completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),
     focusedSessionTitle: getFocusedSessionTitle(groups),
     highlightedVisibleCount: args.highlightedVisibleCount,
     isFocusModeActive: args.isFocusModeActive,
@@ -314,7 +396,7 @@ function createSession({
   };
 }
 
-function cloneGroups(groups: SidebarSessionGroup[]): SidebarSessionGroup[] {
+function cloneGroups(groups: SidebarStoryGroup[]): SidebarStoryGroup[] {
   return groups.map((group) => ({
     ...group,
     sessions: group.sessions.map((session) => ({ ...session })),

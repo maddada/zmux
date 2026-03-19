@@ -3,6 +3,7 @@ import { createSessionRecord } from "../shared/session-grid-contract";
 import {
   extractLatestTerminalTitleFromVtHistory,
   getSessionTabTitle,
+  hasCodexWorkingStatusInVtHistory,
   parsePersistedSessionState,
   serializePersistedSessionState,
 } from "./terminal-workspace-helpers";
@@ -148,5 +149,35 @@ describe("extractLatestTerminalTitleFromVtHistory", () => {
         `\u001b]8;;https://example.com\u0007link\u001b]8;;\u0007`,
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("hasCodexWorkingStatusInVtHistory", () => {
+  test("should detect Codex working status lines in VT history", () => {
+    expect(
+      hasCodexWorkingStatusInVtHistory(
+        `\u001b[38;2;211;218;224m•\u001b[0m Crafting a 50-line poem \u001b[2m(6s • esc to interrupt)\u001b[0m`,
+        "OpenAI Codex",
+      ),
+    ).toBe(true);
+  });
+
+  test("should detect generic Codex interrupt status lines for codex agents", () => {
+    expect(
+      hasCodexWorkingStatusInVtHistory(
+        `\u001b[38;2;211;218;224m•\u001b[0m Working \u001b[2m(3s • esc to interrupt)\u001b[0m`,
+        undefined,
+        "codex",
+      ),
+    ).toBe(true);
+  });
+
+  test("should ignore interrupt status lines for non-codex sessions", () => {
+    expect(
+      hasCodexWorkingStatusInVtHistory(
+        `\u001b[38;2;211;218;224m•\u001b[0m Working \u001b[2m(3s • esc to interrupt)\u001b[0m`,
+        "Claude Code",
+      ),
+    ).toBe(false);
   });
 });

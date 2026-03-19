@@ -125,6 +125,10 @@ export class RusptyTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     }
   }
 
+  public getLastTerminalActivityAt(): number | undefined {
+    return undefined;
+  }
+
   public dispose(): void {
     while (this.disposables.length > 0) {
       this.disposables.pop()?.dispose();

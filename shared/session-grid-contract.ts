@@ -1,3 +1,9 @@
+import {
+  DEFAULT_COMPLETION_SOUND,
+  getCompletionSoundLabel,
+  type CompletionSoundSetting,
+} from "./completion-sound";
+
 export const GRID_COLUMN_COUNT = 3;
 export const MAX_SESSION_COUNT = GRID_COLUMN_COUNT * GRID_COLUMN_COUNT;
 export const MAX_GROUP_COUNT = 4;
@@ -91,11 +97,17 @@ export type SidebarSessionItem = {
 export type SidebarSessionGroup = {
   groupId: string;
   isActive: boolean;
+  isFocusModeActive: boolean;
   sessions: SidebarSessionItem[];
   title: string;
+  viewMode: TerminalViewMode;
+  visibleCount: VisibleSessionCount;
 };
 
 export type SidebarHudState = {
+  completionBellEnabled: boolean;
+  completionSound: CompletionSoundSetting;
+  completionSoundLabel: string;
   focusedSessionTitle?: string;
   isFocusModeActive: boolean;
   showCloseButtonOnSessionCards: boolean;
@@ -119,7 +131,15 @@ export type SidebarSessionStateMessage = {
   hud: SidebarHudState;
 };
 
-export type ExtensionToSidebarMessage = SidebarHydrateMessage | SidebarSessionStateMessage;
+export type SidebarPlayCompletionSoundMessage = {
+  sound: CompletionSoundSetting;
+  type: "playCompletionSound";
+};
+
+export type ExtensionToSidebarMessage =
+  | SidebarHydrateMessage
+  | SidebarSessionStateMessage
+  | SidebarPlayCompletionSoundMessage;
 
 export type SidebarToExtensionMessage =
   | {
@@ -127,6 +147,9 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "openSettings";
+    }
+  | {
+      type: "toggleCompletionBell";
     }
   | {
       type: "createSession";
@@ -395,6 +418,8 @@ export function createSidebarHudState(
   theme: SidebarTheme = "dark-blue",
   showCloseButtonOnSessionCards = false,
   showHotkeysOnSessionCards = false,
+  completionBellEnabled = false,
+  completionSound: CompletionSoundSetting = DEFAULT_COMPLETION_SOUND,
 ): SidebarHudState {
   const sessionById = new Map(snapshot.sessions.map((session) => [session.sessionId, session]));
   const focusedSession = snapshot.focusedSessionId
@@ -402,6 +427,9 @@ export function createSidebarHudState(
     : undefined;
 
   return {
+    completionBellEnabled,
+    completionSound,
+    completionSoundLabel: getCompletionSoundLabel(completionSound),
     focusedSessionTitle: focusedSession?.title,
     isFocusModeActive:
       snapshot.visibleCount === 1 && snapshot.fullscreenRestoreVisibleCount !== undefined,

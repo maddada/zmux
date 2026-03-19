@@ -167,6 +167,7 @@ export function SortableSessionCard({
         data-dragging={String(Boolean(sortable.isDragging))}
         data-focused={String(session.isFocused)}
         data-running={String(session.isRunning)}
+        data-sidebar-session-id={session.sessionId}
         data-visible={String(session.isVisible)}
         onAuxClick={(event) => {
           if (event.button !== 1) {

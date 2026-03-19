@@ -18,10 +18,12 @@ import {
   applyEditorLayout,
   createBlockedSessionSnapshot,
   createDisconnectedSessionSnapshot,
+  extractTerminalTextTailFromVtHistory,
   extractLatestTerminalTitleFromVtHistory,
   focusEditorGroupByIndex,
   getDefaultShell,
   getDefaultWorkspaceCwd,
+  hasCodexWorkingStatusInVtHistory,
   getSessionTabTitle,
   getViewColumn,
   matchesVisibleTerminalLayout,
@@ -46,6 +48,12 @@ type SessionProjection = {
   terminal: vscode.Terminal;
 };
 
+type SessionHistoryState = {
+  hasCodexWorkingStatus: boolean;
+  textTail?: string;
+  title?: string;
+};
+
 export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
   private agentShellIntegration: AgentShellIntegration | undefined;
   private readonly activateSessionEmitter = new vscode.EventEmitter<string>();
@@ -54,6 +62,8 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
     new vscode.EventEmitter<TerminalWorkspaceBackendTitleChange>();
   private readonly disposables: vscode.Disposable[] = [];
   private readonly projections = new Map<string, SessionProjection>();
+  private readonly lastTerminalActivityAtBySessionId = new Map<string, number>();
+  private readonly lastTerminalTextTailBySessionId = new Map<string, string>();
   private readonly sessions = new Map<string, TerminalSessionSnapshot>();
   private readonly sessionTitles = new Map<string, string>();
   private readonly terminalToSessionId = new Map<vscode.Terminal, string>();
@@ -112,6 +122,10 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
     );
   }
 
+  public getLastTerminalActivityAt(sessionId: string): number | undefined {
+    return this.lastTerminalActivityAtBySessionId.get(sessionId);
+  }
+
   public dispose(): void {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
@@ -128,6 +142,8 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
     }
 
     this.projections.clear();
+    this.lastTerminalActivityAtBySessionId.clear();
+    this.lastTerminalTextTailBySessionId.clear();
     this.activateSessionEmitter.dispose();
     this.changeSessionsEmitter.dispose();
     this.changeSessionTitleEmitter.dispose();
@@ -221,6 +237,8 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
     }
 
     await this.deleteSessionAgentState(sessionId);
+    this.lastTerminalActivityAtBySessionId.delete(sessionId);
+    this.lastTerminalTextTailBySessionId.delete(sessionId);
     this.sessionTitles.delete(sessionId);
     this.sessions.delete(sessionId);
     this.changeSessionsEmitter.fire();
@@ -427,6 +445,7 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
     const runningSessionNames = new Set(
       parseZmxListSessionNames(await this.runZmxCommand(["list", "--short"])),
     );
+    const refreshStartedAt = Date.now();
 
     let changed = false;
     for (const sessionId of this.trackedSessionIds) {
@@ -434,20 +453,28 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
       const previousSession = this.sessions.get(sessionId);
       const agentState = await this.readSessionAgentState(sessionId);
       const previousTitle = this.sessionTitles.get(sessionId);
-      const historyTitle = runningSessionNames.has(sessionName)
-        ? await this.readSessionTitleFromHistory(sessionName)
+      const historyState = runningSessionNames.has(sessionName)
+        ? await this.readSessionHistoryState(sessionName, agentState)
         : undefined;
-      const nextTitle = historyTitle ?? agentState.title?.trim();
+      const nextTitle = historyState?.title ?? agentState.title?.trim();
+      this.updateLastTerminalActivity(sessionId, historyState, nextTitle, previousTitle, refreshStartedAt);
       const nextStatus: TerminalSessionStatus = runningSessionNames.has(sessionName)
         ? "running"
         : previousSession?.status === "running"
           ? "exited"
           : (previousSession?.status ?? "disconnected");
+      const nextAgentStatus =
+        runningSessionNames.has(sessionName) && historyState?.hasCodexWorkingStatus
+          ? "working"
+          : agentState.agentStatus;
       const nextSession: TerminalSessionSnapshot = runningSessionNames.has(sessionName)
         ? {
             ...this.createRunningSessionSnapshot(sessionId),
-            agentName: agentState.agentName ?? previousSession?.agentName,
-            agentStatus: agentState.agentStatus,
+            agentName:
+              agentState.agentName ??
+              (historyState?.hasCodexWorkingStatus ? "codex" : undefined) ??
+              previousSession?.agentName,
+            agentStatus: nextAgentStatus,
           }
         : {
             ...(previousSession ??
@@ -478,6 +505,10 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
         });
       } else if (!nextTitle && previousTitle) {
         this.sessionTitles.delete(sessionId);
+      }
+
+      if (!runningSessionNames.has(sessionName)) {
+        this.lastTerminalTextTailBySessionId.delete(sessionId);
       }
     }
 
@@ -514,12 +545,51 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
     await rm(this.getSessionAgentStateFilePath(sessionId), { force: true });
   }
 
-  private async readSessionTitleFromHistory(sessionName: string): Promise<string | undefined> {
+  private async readSessionHistoryState(
+    sessionName: string,
+    agentState: PersistedSessionState,
+  ): Promise<SessionHistoryState | undefined> {
     try {
       const history = await this.runZmxCommand(["history", sessionName, "--vt"]);
-      return extractLatestTerminalTitleFromVtHistory(history);
+      const title = extractLatestTerminalTitleFromVtHistory(history);
+      return {
+        hasCodexWorkingStatus: hasCodexWorkingStatusInVtHistory(
+          history,
+          title ?? agentState.title,
+          agentState.agentName,
+        ),
+        textTail: extractTerminalTextTailFromVtHistory(history),
+        title,
+      };
     } catch {
       return undefined;
+    }
+  }
+
+  private updateLastTerminalActivity(
+    sessionId: string,
+    historyState: SessionHistoryState | undefined,
+    nextTitle: string | undefined,
+    previousTitle: string | undefined,
+    observedAt: number,
+  ): void {
+    const previousTextTail = this.lastTerminalTextTailBySessionId.get(sessionId);
+    const nextTextTail = historyState?.textTail;
+    if (nextTextTail) {
+      this.lastTerminalTextTailBySessionId.set(sessionId, nextTextTail);
+      if (nextTextTail !== previousTextTail) {
+        this.lastTerminalActivityAtBySessionId.set(sessionId, observedAt);
+        return;
+      }
+    }
+
+    if (nextTitle && nextTitle !== previousTitle) {
+      this.lastTerminalActivityAtBySessionId.set(sessionId, observedAt);
+      return;
+    }
+
+    if (!this.lastTerminalActivityAtBySessionId.has(sessionId) && (nextTextTail || nextTitle)) {
+      this.lastTerminalActivityAtBySessionId.set(sessionId, observedAt);
     }
   }
 
