@@ -1,115 +1,229 @@
 :root {
   color-scheme: light dark;
-  --app-background: #181818;
-  --app-foreground: #d7dae0;
-  --app-muted: #9399a3;
+  --app-background: #0c1117;
+  --app-foreground: #dce6f8;
+  --app-muted: #90a0b8;
   --app-border: color-mix(in srgb, #ffffff 10%, transparent);
-  --app-card: #23252b;
-  --app-card-active: #293038;
-  --app-button-background: #4c9448;
-  --app-button-foreground: #f5fbf4;
-  --app-input-background: #1d2025;
-  --app-tooltip-background: #2a2d34;
-  --app-tooltip-foreground: #f1f5f9;
-  --working-primary: color-mix(in srgb, #4c9448 64%, #ffb857 36%);
-  --working-secondary: color-mix(in srgb, #ffd780 60%, #4c9448 40%);
-  --attention-primary: color-mix(in srgb, #33c97d 76%, #4c9448 24%);
-  --attention-secondary: color-mix(in srgb, #86efac 58%, #164e2f 42%);
+  --app-card: #121924;
+  --app-card-active: #182233;
+  --app-button-background: #2f6feb;
+  --app-button-foreground: #f7fbff;
+  --app-input-background: #0f151d;
+  --app-tooltip-background: #151d29;
+  --app-tooltip-foreground: #edf4ff;
+  --working-primary: color-mix(in srgb, #2f6feb 60%, #ffb454 40%);
+  --working-secondary: color-mix(in srgb, #ffd27a 62%, #2f6feb 38%);
+  --attention-primary: color-mix(in srgb, #5ea0ff 68%, #2f6feb 32%);
+  --attention-secondary: color-mix(in srgb, #9dcbff 62%, #184896 38%);
 }
 
-body[data-sidebar-theme="dark-modern"] {
+body[data-sidebar-theme="plain-dark"] {
   color-scheme: dark;
-  --app-background: #181818;
-  --app-foreground: #d7dae0;
-  --app-muted: #9399a3;
-  --app-border: color-mix(in srgb, #ffffff 10%, transparent);
-  --app-card: #23252b;
-  --app-card-active: #293038;
-  --app-button-background: #4c9448;
-  --app-button-foreground: #f5fbf4;
-  --app-input-background: #1d2025;
-  --app-tooltip-background: #2a2d34;
-  --app-tooltip-foreground: #f1f5f9;
-  --working-primary: color-mix(in srgb, #4c9448 64%, #ffb857 36%);
-  --working-secondary: color-mix(in srgb, #ffd780 60%, #4c9448 40%);
-  --attention-primary: color-mix(in srgb, #33c97d 76%, #4c9448 24%);
-  --attention-secondary: color-mix(in srgb, #86efac 58%, #164e2f 42%);
-}
-
-body[data-sidebar-theme="dark-plus"] {
-  color-scheme: dark;
-  --app-background: #1e1e1e;
-  --app-foreground: #d4d4d4;
-  --app-muted: #8c8c8c;
+  --app-background: #111111;
+  --app-foreground: #e3e3e3;
+  --app-muted: #9b9b9b;
   --app-border: color-mix(in srgb, #ffffff 11%, transparent);
-  --app-card: #252526;
-  --app-card-active: #2d2d30;
-  --app-button-background: #0e639c;
+  --app-card: #1a1a1a;
+  --app-card-active: #232323;
+  --app-button-background: #4a4a4a;
   --app-button-foreground: #ffffff;
-  --app-input-background: #1f1f1f;
-  --app-tooltip-background: #252526;
-  --app-tooltip-foreground: #f3f3f3;
-  --working-primary: color-mix(in srgb, #0e639c 60%, #ffb454 40%);
-  --working-secondary: color-mix(in srgb, #ffd27a 62%, #0e639c 38%);
-  --attention-primary: color-mix(in srgb, #2aa3ff 68%, #0e639c 32%);
-  --attention-secondary: color-mix(in srgb, #82cfff 62%, #0b4d79 38%);
+  --app-input-background: #181818;
+  --app-tooltip-background: #202020;
+  --app-tooltip-foreground: #f0f0f0;
+  --working-primary: color-mix(in srgb, #5d5d5d 60%, #ffb454 40%);
+  --working-secondary: color-mix(in srgb, #d3d3d3 64%, #5d5d5d 36%);
+  --attention-primary: color-mix(in srgb, #8b8b8b 68%, #5d5d5d 32%);
+  --attention-secondary: color-mix(in srgb, #c9c9c9 62%, #5d5d5d 38%);
 }
 
-body[data-sidebar-theme="light-plus"] {
+body[data-sidebar-theme="plain-light"] {
   color-scheme: light;
-  --app-background: #ffffff;
-  --app-foreground: #343434;
-  --app-muted: #616161;
+  --app-background: #f3f3f3;
+  --app-foreground: #262626;
+  --app-muted: #717171;
   --app-border: color-mix(in srgb, #000000 12%, transparent);
-  --app-card: #f6f8fb;
-  --app-card-active: #edf3fb;
-  --app-button-background: #0e639c;
+  --app-card: #ffffff;
+  --app-card-active: #efefef;
+  --app-button-background: #6f6f6f;
   --app-button-foreground: #ffffff;
   --app-input-background: #ffffff;
   --app-tooltip-background: #ffffff;
-  --app-tooltip-foreground: #1f2328;
-  --working-primary: color-mix(in srgb, #0e639c 54%, #ffad42 46%);
-  --working-secondary: color-mix(in srgb, #ffcf7a 70%, #0e639c 30%);
-  --attention-primary: color-mix(in srgb, #2b7de9 66%, #0e639c 34%);
-  --attention-secondary: color-mix(in srgb, #7bb4ff 68%, #0e639c 32%);
+  --app-tooltip-foreground: #1f1f1f;
+  --working-primary: color-mix(in srgb, #6f6f6f 54%, #ffad42 46%);
+  --working-secondary: color-mix(in srgb, #dfdfdf 70%, #6f6f6f 30%);
+  --attention-primary: color-mix(in srgb, #8f8f8f 66%, #6f6f6f 34%);
+  --attention-secondary: color-mix(in srgb, #cbcbcb 68%, #6f6f6f 32%);
 }
 
-body[data-sidebar-theme="monokai"] {
+body[data-sidebar-theme="dark-green"] {
   color-scheme: dark;
-  --app-background: #272822;
-  --app-foreground: #f8f8f2;
-  --app-muted: #a6a88f;
+  --app-background: #0b120d;
+  --app-foreground: #d8e3db;
+  --app-muted: #8ea196;
+  --app-border: color-mix(in srgb, #ffffff 10%, transparent);
+  --app-card: #111913;
+  --app-card-active: #17231a;
+  --app-button-background: #3f8f57;
+  --app-button-foreground: #f4fbf5;
+  --app-input-background: #0f1511;
+  --app-tooltip-background: #151d17;
+  --app-tooltip-foreground: #edf5ef;
+  --working-primary: color-mix(in srgb, #3f8f57 64%, #ffb857 36%);
+  --working-secondary: color-mix(in srgb, #ffd780 60%, #3f8f57 40%);
+  --attention-primary: color-mix(in srgb, #39c27d 76%, #3f8f57 24%);
+  --attention-secondary: color-mix(in srgb, #86efac 58%, #123922 42%);
+}
+
+body[data-sidebar-theme="dark-blue"] {
+  color-scheme: dark;
+  --app-background: #0c1117;
+  --app-foreground: #dce6f8;
+  --app-muted: #90a0b8;
   --app-border: color-mix(in srgb, #ffffff 11%, transparent);
-  --app-card: #31332d;
-  --app-card-active: #383a32;
-  --app-button-background: #a6e22e;
-  --app-button-foreground: #1f211c;
-  --app-input-background: #22231e;
-  --app-tooltip-background: #3b3d34;
-  --app-tooltip-foreground: #f8f8f2;
-  --working-primary: color-mix(in srgb, #a6e22e 64%, #fd971f 36%);
-  --working-secondary: color-mix(in srgb, #ffd77a 52%, #a6e22e 48%);
-  --attention-primary: color-mix(in srgb, #66d9ef 70%, #a6e22e 30%);
-  --attention-secondary: color-mix(in srgb, #aeefff 62%, #19707c 38%);
+  --app-card: #121924;
+  --app-card-active: #182233;
+  --app-button-background: #2f6feb;
+  --app-button-foreground: #f7fbff;
+  --app-input-background: #0f151d;
+  --app-tooltip-background: #151d29;
+  --app-tooltip-foreground: #edf4ff;
+  --working-primary: color-mix(in srgb, #2f6feb 60%, #ffb454 40%);
+  --working-secondary: color-mix(in srgb, #ffd27a 62%, #2f6feb 38%);
+  --attention-primary: color-mix(in srgb, #5ea0ff 68%, #2f6feb 32%);
+  --attention-secondary: color-mix(in srgb, #9dcbff 62%, #184896 38%);
 }
 
-body[data-sidebar-theme="solarized-dark"] {
+body[data-sidebar-theme="dark-red"] {
   color-scheme: dark;
-  --app-background: #002b36;
-  --app-foreground: #93a1a1;
-  --app-muted: #7d8c8c;
-  --app-border: color-mix(in srgb, #fdf6e3 10%, transparent);
-  --app-card: #073642;
-  --app-card-active: #0c4352;
-  --app-button-background: #268bd2;
-  --app-button-foreground: #fdf6e3;
-  --app-input-background: #012b34;
-  --app-tooltip-background: #073642;
-  --app-tooltip-foreground: #fdf6e3;
-  --working-primary: color-mix(in srgb, #268bd2 62%, #cb4b16 38%);
-  --working-secondary: color-mix(in srgb, #f5b67a 56%, #268bd2 44%);
-  --attention-primary: color-mix(in srgb, #2aa198 74%, #268bd2 26%);
-  --attention-secondary: color-mix(in srgb, #7fd7d1 64%, #0b5f6c 36%);
+  --app-background: #140c0e;
+  --app-foreground: #f1dde1;
+  --app-muted: #b6939b;
+  --app-border: color-mix(in srgb, #ffffff 11%, transparent);
+  --app-card: #1b1114;
+  --app-card-active: #27171c;
+  --app-button-background: #c74b5a;
+  --app-button-foreground: #fff8f9;
+  --app-input-background: #160d10;
+  --app-tooltip-background: #201317;
+  --app-tooltip-foreground: #fff0f3;
+  --working-primary: color-mix(in srgb, #c74b5a 60%, #ffb454 40%);
+  --working-secondary: color-mix(in srgb, #ffd27a 54%, #c74b5a 46%);
+  --attention-primary: color-mix(in srgb, #f06f7e 70%, #c74b5a 30%);
+  --attention-secondary: color-mix(in srgb, #ffb2be 62%, #852f3d 38%);
+}
+
+body[data-sidebar-theme="dark-pink"] {
+  color-scheme: dark;
+  --app-background: #160d13;
+  --app-foreground: #f4deeb;
+  --app-muted: #b99bad;
+  --app-border: color-mix(in srgb, #ffffff 11%, transparent);
+  --app-card: #1e1219;
+  --app-card-active: #2a1822;
+  --app-button-background: #c65c8a;
+  --app-button-foreground: #fff7fb;
+  --app-input-background: #190f15;
+  --app-tooltip-background: #22141d;
+  --app-tooltip-foreground: #fff1f8;
+  --working-primary: color-mix(in srgb, #c65c8a 60%, #ffb454 40%);
+  --working-secondary: color-mix(in srgb, #ffd27a 54%, #c65c8a 46%);
+  --attention-primary: color-mix(in srgb, #ef7eb1 70%, #c65c8a 30%);
+  --attention-secondary: color-mix(in srgb, #ffc0db 62%, #8c3d60 38%);
+}
+
+body[data-sidebar-theme="dark-orange"] {
+  color-scheme: dark;
+  --app-background: #171008;
+  --app-foreground: #f0dfcf;
+  --app-muted: #baa08c;
+  --app-border: color-mix(in srgb, #ffffff 10%, transparent);
+  --app-card: #20160d;
+  --app-card-active: #2c1d11;
+  --app-button-background: #d17b31;
+  --app-button-foreground: #fff8f2;
+  --app-input-background: #1a1209;
+  --app-tooltip-background: #26190f;
+  --app-tooltip-foreground: #fff1e4;
+  --working-primary: color-mix(in srgb, #d17b31 62%, #ffd56f 38%);
+  --working-secondary: color-mix(in srgb, #ffe0a0 58%, #d17b31 42%);
+  --attention-primary: color-mix(in srgb, #f3a255 70%, #d17b31 30%);
+  --attention-secondary: color-mix(in srgb, #ffd1a3 62%, #964f14 38%);
+}
+
+body[data-sidebar-theme="light-blue"] {
+  color-scheme: light;
+  --app-background: #eef4fb;
+  --app-foreground: #203042;
+  --app-muted: #60748b;
+  --app-border: color-mix(in srgb, #0f172a 13%, transparent);
+  --app-card: #f8fbff;
+  --app-card-active: #edf4ff;
+  --app-button-background: #2f6feb;
+  --app-button-foreground: #ffffff;
+  --app-input-background: #ffffff;
+  --app-tooltip-background: #ffffff;
+  --app-tooltip-foreground: #172334;
+  --working-primary: color-mix(in srgb, #2f6feb 54%, #ffad42 46%);
+  --working-secondary: color-mix(in srgb, #ffcf7a 70%, #2f6feb 30%);
+  --attention-primary: color-mix(in srgb, #5b96ff 66%, #2f6feb 34%);
+  --attention-secondary: color-mix(in srgb, #99beff 68%, #2f6feb 32%);
+}
+
+body[data-sidebar-theme="light-green"] {
+  color-scheme: light;
+  --app-background: #eef7f0;
+  --app-foreground: #203127;
+  --app-muted: #627765;
+  --app-border: color-mix(in srgb, #102415 13%, transparent);
+  --app-card: #f8fdf8;
+  --app-card-active: #eef8ef;
+  --app-button-background: #3f8f57;
+  --app-button-foreground: #ffffff;
+  --app-input-background: #ffffff;
+  --app-tooltip-background: #ffffff;
+  --app-tooltip-foreground: #17251b;
+  --working-primary: color-mix(in srgb, #3f8f57 54%, #ffad42 46%);
+  --working-secondary: color-mix(in srgb, #ffcf7a 70%, #3f8f57 30%);
+  --attention-primary: color-mix(in srgb, #59b876 66%, #3f8f57 34%);
+  --attention-secondary: color-mix(in srgb, #99d7ac 68%, #3f8f57 32%);
+}
+
+body[data-sidebar-theme="light-pink"] {
+  color-scheme: light;
+  --app-background: #fbf0f6;
+  --app-foreground: #3a2431;
+  --app-muted: #856879;
+  --app-border: color-mix(in srgb, #3a1628 13%, transparent);
+  --app-card: #fff8fb;
+  --app-card-active: #fff0f7;
+  --app-button-background: #c65c8a;
+  --app-button-foreground: #ffffff;
+  --app-input-background: #ffffff;
+  --app-tooltip-background: #ffffff;
+  --app-tooltip-foreground: #351a28;
+  --working-primary: color-mix(in srgb, #c65c8a 54%, #ffad42 46%);
+  --working-secondary: color-mix(in srgb, #ffcf7a 68%, #c65c8a 32%);
+  --attention-primary: color-mix(in srgb, #e789af 66%, #c65c8a 34%);
+  --attention-secondary: color-mix(in srgb, #f8bfd6 68%, #c65c8a 32%);
+}
+
+body[data-sidebar-theme="light-orange"] {
+  color-scheme: light;
+  --app-background: #fbf3ea;
+  --app-foreground: #402c1a;
+  --app-muted: #8a6d52;
+  --app-border: color-mix(in srgb, #3d2208 13%, transparent);
+  --app-card: #fffaf4;
+  --app-card-active: #fff1de;
+  --app-button-background: #d17b31;
+  --app-button-foreground: #ffffff;
+  --app-input-background: #ffffff;
+  --app-tooltip-background: #ffffff;
+  --app-tooltip-foreground: #392312;
+  --working-primary: color-mix(in srgb, #d17b31 54%, #ffd36f 46%);
+  --working-secondary: color-mix(in srgb, #ffe09f 68%, #d17b31 32%);
+  --attention-primary: color-mix(in srgb, #eca15b 66%, #d17b31 34%);
+  --attention-secondary: color-mix(in srgb, #ffd1a3 68%, #d17b31 32%);
 }
 
 * {
@@ -119,6 +233,7 @@ body[data-sidebar-theme="solarized-dark"] {
 html,
 body,
 #root {
+  height: 100%;
   margin: 0;
   min-height: 100%;
 }
@@ -128,6 +243,8 @@ body {
   font: 13px/1.4 var(--vscode-font-family);
   color: var(--app-foreground);
   background: var(--app-background);
+  -webkit-user-select: none;
+  user-select: none;
   transition:
     background-color 180ms ease,
     color 180ms ease;
@@ -154,6 +271,7 @@ button:disabled {
 .stack {
   display: grid;
   gap: 10px;
+  height: 100%;
   min-height: 100%;
   align-content: start;
 }
@@ -227,6 +345,12 @@ button:disabled {
   overflow: visible;
 }
 
+.toolbar-tabler-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
 .toolbar-icon-frame,
 .toolbar-icon-line {
   fill: none;
@@ -250,9 +374,10 @@ button:disabled {
   color: var(--app-button-foreground);
 }
 
-.toolbar-button[data-disabled="true"] {
+.toolbar-button[data-disabled="true"],
+.toolbar-button[data-dimmed="true"] {
   cursor: default;
-  opacity: 0.58;
+  opacity: 0.7;
 }
 
 .toolbar-button[data-disabled="true"][data-selected="true"] {
@@ -276,6 +401,7 @@ button:disabled {
 
 .session {
   --session-surface: transparent;
+  --session-glow: transparent;
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--app-border);
@@ -330,7 +456,31 @@ button:disabled {
 }
 
 .session[data-visible="true"] {
-  --session-surface: var(--app-card-active);
+  --session-surface: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--app-button-background) 18%, var(--app-card-active) 82%),
+    color-mix(in srgb, var(--app-button-background) 10%, var(--app-card) 90%)
+  );
+  --session-glow: color-mix(in srgb, var(--app-button-background) 16%, transparent);
+  border-color: color-mix(in srgb, var(--app-button-background) 34%, var(--app-border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--app-button-background) 10%, transparent),
+    0 12px 28px color-mix(in srgb, var(--app-button-background) 8%, transparent);
+}
+
+.session[data-visible="true"]::before {
+  opacity: 0.96;
+  background:
+    radial-gradient(circle at 16% 18%, var(--session-glow), transparent 54%),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--app-button-background) 14%, transparent),
+      transparent 62%
+    );
+}
+
+.session[data-visible="true"]::after {
+  opacity: 1;
 }
 
 .session[data-focused="true"] {
@@ -396,24 +546,17 @@ button:disabled {
   min-width: 0;
 }
 
-.session-alias-trigger {
-  display: flex;
-  align-items: center;
+.session-heading {
+  display: grid;
+  gap: 5px;
   min-width: 0;
-  width: 100%;
-  cursor: text;
-  user-select: none;
-}
-
-.session-alias-trigger:focus {
-  outline: none;
 }
 
 .session-alias-heading {
   flex: 1 1 auto;
   width: 100%;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.3;
   min-width: 0;
@@ -422,23 +565,27 @@ button:disabled {
   white-space: nowrap;
 }
 
-.session-alias-input {
-  flex: 1;
-  width: 100%;
-  min-width: 0;
-  padding: 4px 8px;
-  border: 1px solid color-mix(in srgb, var(--app-button-background) 72%, var(--app-border));
+.session-visibility-badge {
+  align-items: center;
+  align-self: flex-start;
+  border: 1px solid color-mix(in srgb, var(--app-border) 76%, transparent);
   border-radius: 999px;
-  background: var(--app-input-background);
-  color: var(--app-foreground);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
+  color: var(--app-muted);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0 8px;
+  text-transform: uppercase;
 }
 
-.session-alias-input:focus {
-  outline: 1px solid color-mix(in srgb, var(--app-button-background) 88%, transparent);
-  outline-offset: 0;
+.session-visibility-badge[data-visible="true"] {
+  border-color: color-mix(in srgb, var(--app-button-background) 34%, transparent);
+  background: color-mix(in srgb, var(--app-button-background) 18%, transparent);
+  color: color-mix(in srgb, var(--app-button-background) 72%, var(--app-foreground) 28%);
 }
 
 .session-primary-title {
@@ -523,6 +670,63 @@ button:disabled {
   letter-spacing: 0.04em;
   line-height: 1;
   text-align: right;
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+
+.session-meta[data-visible="false"] {
+  opacity: 0;
+}
+
+.session:hover .session-meta[data-visible="false"],
+.session:focus-visible .session-meta[data-visible="false"] {
+  opacity: 1;
+}
+
+.session-context-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 156px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--app-border) 88%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-card) 92%, #000000 8%);
+  box-shadow:
+    0 14px 28px color-mix(in srgb, #000000 32%, transparent),
+    0 0 0 1px color-mix(in srgb, #ffffff 4%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.session-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.session-context-menu-icon {
+  flex: none;
+}
+
+.session-context-menu-item:hover,
+.session-context-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 20%, transparent);
+  outline: none;
+}
+
+.session-context-menu-item-danger {
+  color: #ff7b72;
+}
+
+.session-context-menu-item-danger:hover,
+.session-context-menu-item-danger:focus-visible {
+  background: color-mix(in srgb, #ff7b72 18%, transparent);
 }
 
 .session-summary {
@@ -554,16 +758,24 @@ button:disabled {
   z-index: 10;
 }
 
+.session-hover-tooltip {
+  position: fixed;
+  z-index: 30;
+  transform: translate(-50%, calc(-100% - 8px));
+  pointer-events: none;
+}
+
 .tooltip-popup {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 5px 8px;
+  max-width: 90vw;
   border: 1px solid var(--app-border);
   border-radius: 10px;
   background: var(--app-tooltip-background);
   color: var(--app-tooltip-foreground);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1;
   box-shadow: 0 10px 24px color-mix(in srgb, black 22%, transparent);
 }

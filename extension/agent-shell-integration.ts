@@ -25,6 +25,15 @@ const AGENT_CONTROL_NAMESPACE = "agent-canvas-x";
 const AGENT_SHELL_DIR_NAME = "agent-shell-integration";
 const NOTIFY_SCRIPT_NAME = "notify.sh";
 const OPENCODE_PLUGIN_FILE_NAME = "agent-canvas-x-notify.js";
+const CODEX_START_LOG_PATTERNS = [
+  [`"type":"event_msg"`, `"payload":{"type":"task_started"`],
+  [`"dir":"to_tui"`, `"kind":"codex_event"`, `"msg":{"type":"task_started"`],
+  [`"dir":"to_tui"`, `"kind":"codex_event"`, `"msg":{"type":"exec_command_begin"`],
+] as const;
+const CODEX_STOP_LOG_PATTERNS = [
+  [`"type":"event_msg"`, `"payload":{"type":"task_complete"`],
+  [`"type":"agent-turn-complete"`],
+] as const;
 
 const integrationPromises = new Map<string, Promise<AgentShellIntegration>>();
 
@@ -87,6 +96,20 @@ export function parseAgentControlChunk(data: string): ParsedAgentControlChunk {
     output,
     pending: "",
   };
+}
+
+export function detectCodexLifecycleEventFromLogLine(
+  line: string,
+): AgentLifecycleEventType | undefined {
+  if (matchesLogPattern(line, CODEX_START_LOG_PATTERNS)) {
+    return "start";
+  }
+
+  if (matchesLogPattern(line, CODEX_STOP_LOG_PATTERNS)) {
+    return "stop";
+  }
+
+  return undefined;
 }
 
 async function createAgentShellIntegration(daemonStateDir: string): Promise<AgentShellIntegration> {
@@ -202,6 +225,18 @@ function quoteShellLiteral(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+function matchesLogPattern(line: string, patterns: readonly (readonly string[])[]): boolean {
+  return patterns.some((pattern) => pattern.every((fragment) => line.includes(fragment)));
+}
+
+function createShellCasePattern(pattern: readonly string[]): string {
+  return pattern.map((fragment) => `*${quoteShellCaseFragment(fragment)}`).join("");
+}
+
+function quoteShellCaseFragment(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("*", "\\*");
+}
+
 function getNotifyScriptContent(): string {
   return `#!/bin/sh
 INPUT=""
@@ -214,7 +249,7 @@ fi
 EVENT_TYPE=$(printf '%s' "$INPUT" | grep -oE '"hook_event_name"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -oE '"[^"]*"$' | tr -d '"')
 if [ -z "$EVENT_TYPE" ]; then
   RAW_TYPE=$(printf '%s' "$INPUT" | grep -oE '"type"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -oE '"[^"]*"$' | tr -d '"')
-  if [ "$RAW_TYPE" = "agent-turn-complete" ]; then
+  if [ "$RAW_TYPE" = "agent-turn-complete" ] || [ "$RAW_TYPE" = "task_complete" ]; then
     EVENT_TYPE="Stop"
   fi
 fi
@@ -244,6 +279,11 @@ function getCodexWrapperContent(binDir: string, notifyPath: string): string {
   const quotedBinDir = quoteShellLiteral(binDir);
   const quotedNotifyPath = quoteShellLiteral(notifyPath);
   const notifyConfigValue = JSON.stringify(["sh", notifyPath]);
+  const codexTaskStartedPattern = createShellCasePattern(CODEX_START_LOG_PATTERNS[0]);
+  const codexLegacyTaskStartedPattern = createShellCasePattern(CODEX_START_LOG_PATTERNS[1]);
+  const codexLegacyExecCommandPattern = createShellCasePattern(CODEX_START_LOG_PATTERNS[2]);
+  const codexTaskCompletePattern = createShellCasePattern(CODEX_STOP_LOG_PATTERNS[0]);
+  const codexNotifyStopPattern = createShellCasePattern(CODEX_STOP_LOG_PATTERNS[1]);
 
   return `#!/bin/bash
 # Agent Canvas X codex wrapper
@@ -284,12 +324,13 @@ if [ -f ${quotedNotifyPath} ]; then
     _agent_canvas_log="$CODEX_TUI_SESSION_LOG_PATH"
     _agent_canvas_notify=${quotedNotifyPath}
     _agent_canvas_last_turn_id=""
+    _agent_canvas_last_completed_turn_id=""
     _agent_canvas_last_exec_call_id=""
 
     _agent_canvas_emit_event() {
       _agent_canvas_event="$1"
       _agent_canvas_payload=$(printf '{"hook_event_name":"%s","agent":"codex"}' "$_agent_canvas_event")
-      sh "$_agent_canvas_notify" "$_agent_canvas_payload" >/dev/null 2>&1 || true
+      sh "$_agent_canvas_notify" "$_agent_canvas_payload" || true
     }
 
     _agent_canvas_i=0
@@ -304,7 +345,7 @@ if [ -f ${quotedNotifyPath} ]; then
 
     tail -n 0 -F "$_agent_canvas_log" 2>/dev/null | while IFS= read -r _agent_canvas_line; do
       case "$_agent_canvas_line" in
-        *'"dir":"to_tui"'*'"kind":"codex_event"'*'"msg":{"type":"task_started"'*)
+        ${codexTaskStartedPattern}|${codexLegacyTaskStartedPattern})
           _agent_canvas_turn_id=$(printf '%s\\n' "$_agent_canvas_line" | awk -F'"turn_id":"' 'NF > 1 { sub(/".*/, "", $2); print $2; exit }')
           [ -n "$_agent_canvas_turn_id" ] || _agent_canvas_turn_id="task_started"
           if [ "$_agent_canvas_turn_id" != "$_agent_canvas_last_turn_id" ]; then
@@ -312,7 +353,7 @@ if [ -f ${quotedNotifyPath} ]; then
             _agent_canvas_emit_event "Start"
           fi
           ;;
-        *'"dir":"to_tui"'*'"kind":"codex_event"'*'"msg":{"type":"exec_command_begin"'*)
+        ${codexLegacyExecCommandPattern})
           _agent_canvas_exec_call_id=$(printf '%s\\n' "$_agent_canvas_line" | awk -F'"call_id":"' 'NF > 1 { sub(/".*/, "", $2); print $2; exit }')
           if [ -n "$_agent_canvas_exec_call_id" ]; then
             if [ "$_agent_canvas_exec_call_id" != "$_agent_canvas_last_exec_call_id" ]; then
@@ -321,6 +362,14 @@ if [ -f ${quotedNotifyPath} ]; then
             fi
           else
             _agent_canvas_emit_event "Start"
+          fi
+          ;;
+        ${codexTaskCompletePattern}|${codexNotifyStopPattern})
+          _agent_canvas_completed_turn_id=$(printf '%s\\n' "$_agent_canvas_line" | awk -F'"turn_id":"' 'NF > 1 { sub(/".*/, "", $2); print $2; exit }')
+          [ -n "$_agent_canvas_completed_turn_id" ] || _agent_canvas_completed_turn_id="task_complete"
+          if [ "$_agent_canvas_completed_turn_id" != "$_agent_canvas_last_completed_turn_id" ]; then
+            _agent_canvas_last_completed_turn_id="$_agent_canvas_completed_turn_id"
+            _agent_canvas_emit_event "Stop"
           fi
           ;;
       esac

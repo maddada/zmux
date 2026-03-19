@@ -4,14 +4,18 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { createEditorLayoutPlan } from "../shared/editor-layout";
 import {
-  clampSidebarTheme,
+  MAX_SESSION_COUNT,
+  clampSidebarThemeSetting,
+  createSessionAlias,
   createSidebarHudState,
   getVisiblePrimaryTitle,
   getOrderedSessions,
   getSessionShortcutLabel,
+  resolveSidebarTheme,
   type ExtensionToSidebarMessage,
   type SessionGridDirection,
   type SessionRecord,
+  type SidebarThemeVariant,
   type SidebarToExtensionMessage,
   type SidebarSessionItem,
   type TerminalViewMode,
@@ -28,13 +32,18 @@ import { TerminalHostClient } from "./terminal-host-client";
 
 const DEFAULT_TERMINAL_COLS = 120;
 const DEFAULT_TERMINAL_ROWS = 34;
-const FOCUSED_TERMINAL_FLASH_OFF_SEQUENCE = "\u001b[?5l";
-const FOCUSED_TERMINAL_FLASH_ON_SEQUENCE = "\u001b[?5h";
-const FOCUSED_TERMINAL_FLASH_DURATION_MS = 140;
+const FOCUSED_TERMINAL_FLASH_FRAME_DURATION_MS = 120;
+const DEFAULT_FOCUSED_TERMINAL_FLASH_MARKERS = ["🟥", "🟩", "🟨", "🟦", "🟪", "⬜"] as const;
 const MINUTE_IN_MS = 60_000;
 const SETTINGS_SECTION = "agentCanvasX";
 const BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING = "backgroundSessionTimeoutMinutes";
+const SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING = "sendRenameCommandOnSidebarRename";
 const SIDEBAR_THEME_SETTING = "sidebarTheme";
+const SHOW_TERMINAL_TITLE_INDICATOR_ON_SIDEBAR_ACTIVATE_SETTING =
+  "showTerminalTitleIndicatorOnSidebarActivate";
+const TERMINAL_TITLE_INDICATOR_MARKERS_SETTING = "terminalTitleIndicatorMarkers";
+const SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING = "showCloseButtonOnSessionCards";
+const SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING = "showHotkeysOnSessionCards";
 const SESSIONS_VIEW_ID = "agentCanvasX.sessions";
 const SHORTCUT_LABEL_PLATFORM = process.platform === "darwin" ? "mac" : "default";
 
@@ -109,12 +118,16 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           void this.syncDaemonConfiguration();
         }
 
-        if (event.affectsConfiguration(getSidebarThemeConfigurationKey())) {
+        if (
+          event.affectsConfiguration(getSidebarThemeConfigurationKey()) ||
+          event.affectsConfiguration(getShowCloseButtonOnSessionCardsConfigurationKey()) ||
+          event.affectsConfiguration(getShowHotkeysOnSessionCardsConfigurationKey())
+        ) {
           void this.refreshSidebar("hydrate");
         }
       }),
-      vscode.window.onDidChangeTerminalState((terminal) => {
-        void this.syncSessionTitleFromOwnedTerminal(terminal);
+      vscode.window.onDidChangeActiveColorTheme(() => {
+        void this.refreshSidebar("hydrate");
       }),
       vscode.window.onDidChangeActiveTerminal((terminal) => {
         const sessionId = terminal ? this.terminalToSessionId.get(terminal) : undefined;
@@ -191,6 +204,18 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
   }
 
+  public async focusSessionSlot(slotNumber: number): Promise<void> {
+    const normalizedSlotNumber = Math.max(1, Math.min(MAX_SESSION_COUNT, Math.floor(slotNumber)));
+    const session = getOrderedSessions(this.store.getSnapshot()).find(
+      (sessionRecord) => sessionRecord.slotIndex === normalizedSlotNumber - 1,
+    );
+    if (!session) {
+      return;
+    }
+
+    await this.focusSession(session.sessionId);
+  }
+
   public async openWorkspace(): Promise<void> {
     await vscode.commands.executeCommand("workbench.view.extension.agentCanvasXSessions");
 
@@ -265,9 +290,24 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async renameSession(sessionId: string, title: string): Promise<void> {
-    const changed = await this.store.renameSessionAlias(sessionId, title);
+    const nextAlias = title.trim();
+    if (!nextAlias) {
+      return;
+    }
+
+    const changed = await this.store.renameSessionAlias(sessionId, nextAlias);
     if (!changed) {
       return;
+    }
+
+    const sessionRecord = this.store.getSession(sessionId);
+    if (sessionRecord) {
+      this.projections.get(sessionId)?.bridge.setName(getSessionTabTitle(sessionRecord));
+    }
+
+    if (getSendRenameCommandOnSidebarRename()) {
+      await this.writePendingRenameCommand(sessionId, nextAlias);
+      await this.focusSession(sessionId);
     }
 
     await this.refreshSidebar();
@@ -281,7 +321,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     const title = await vscode.window.showInputBox({
       prompt: "Enter a session nickname",
-      title: "Rename Session Nickname",
+      title: "Rename VSC-Mux Session",
       validateInput: (value) =>
         value.trim().length === 0 ? "Session nickname cannot be empty." : undefined,
       value: session.alias,
@@ -292,6 +332,17 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     await this.renameSession(sessionId, title);
+  }
+
+  public async promptRenameFocusedSession(): Promise<void> {
+    const session =
+      this.store.getFocusedSession() ?? getOrderedSessions(this.store.getSnapshot())[0];
+    if (!session) {
+      void vscode.window.showInformationMessage("No sessions are available yet.");
+      return;
+    }
+
+    await this.promptRenameSession(session.sessionId);
   }
 
   public async closeSession(sessionId: string): Promise<void> {
@@ -319,6 +370,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.refreshSidebar();
   }
 
+  public async toggleFullscreenSession(): Promise<void> {
+    await this.store.toggleFullscreenSession();
+    await this.reconcileVisibleTerminals();
+    await this.refreshSidebar();
+  }
+
   public async setViewMode(viewMode: TerminalViewMode): Promise<void> {
     await this.store.setViewMode(viewMode);
     await this.reconcileVisibleTerminals();
@@ -326,13 +383,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async openSettings(): Promise<void> {
-    const opened = await vscode.env.openExternal(
-      vscode.Uri.parse(`vscode://settings/${getSidebarThemeConfigurationKey()}`),
+    await vscode.commands.executeCommand(
+      "workbench.action.openSettings",
+      "@ext:maddada.agent-canvas-x",
     );
-
-    if (!opened) {
-      await vscode.commands.executeCommand("workbench.action.openSettings");
-    }
   }
 
   public async syncSessionOrder(sessionIds: readonly string[]): Promise<void> {
@@ -382,7 +436,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     const snapshot = this.store.getSnapshot();
 
     return {
-      hud: createSidebarHudState(snapshot, getSidebarTheme()),
+      hud: createSidebarHudState(
+        snapshot,
+        resolveSidebarTheme(getSidebarThemeSetting(), getSidebarThemeVariant()),
+        getShowCloseButtonOnSessionCards(),
+        getShowHotkeysOnSessionCards(),
+      ),
       sessions: getOrderedSessions(snapshot).map((session) => this.createSidebarItem(session)),
       type,
     };
@@ -476,6 +535,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
       case "createSession":
         await this.createSession();
+        return;
+
+      case "toggleFullscreenSession":
+        await this.toggleFullscreenSession();
         return;
 
       case "openSettings":
@@ -606,6 +669,19 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
   }
 
+  private async writePendingRenameCommand(sessionId: string, alias: string): Promise<void> {
+    const sessionSnapshot = this.sessions.get(sessionId);
+    if (!sessionSnapshot || sessionSnapshot.status !== "running") {
+      return;
+    }
+
+    try {
+      await this.client.write(sessionId, `/rename ${alias}`);
+    } catch {
+      // keep the local alias change even if the backing shell cannot be reached
+    }
+  }
+
   private async syncSessionTitle(sessionId: string, title: string): Promise<void> {
     const nextTitle = title.trim();
     if (!nextTitle) {
@@ -621,15 +697,6 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     if (changed) {
       await this.refreshSidebar();
     }
-  }
-
-  private async syncSessionTitleFromOwnedTerminal(terminal: vscode.Terminal): Promise<void> {
-    const sessionId = this.terminalToSessionId.get(terminal);
-    if (!sessionId) {
-      return;
-    }
-
-    await this.syncSessionTitle(sessionId, terminal.name);
   }
 
   private async updateFocusedTerminal(
@@ -690,8 +757,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       }
 
       const sessionSnapshot = await this.ensureSessionShell(sessionId);
+      const terminalTabTitle = getSessionTabTitle(sessionRecord);
       const bridge = new SessionTerminalBridge({
         history: sessionSnapshot.history ?? "",
+        name: terminalTabTitle,
         onClose: () => {
           this.projections.delete(sessionId);
         },
@@ -739,7 +808,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           preserveFocus: true,
           viewColumn: getViewColumn(index),
         },
-        name: sessionRecord.title,
+        name: terminalTabTitle,
         pty: bridge,
       });
 
@@ -754,16 +823,21 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private async flashSidebarFocusedTerminal(sessionId: string): Promise<void> {
     const snapshot = this.store.getSnapshot();
-    if (snapshot.visibleSessionIds.length <= 1 || !snapshot.visibleSessionIds.includes(sessionId)) {
+    if (
+      !getShowTerminalTitleIndicatorOnSidebarActivate() ||
+      snapshot.visibleSessionIds.length <= 1 ||
+      !snapshot.visibleSessionIds.includes(sessionId)
+    ) {
       return;
     }
 
-    this.projections.get(sessionId)?.bridge.flash();
+    this.projections.get(sessionId)?.bridge.flash(getTerminalTitleIndicatorMarkers());
   }
 }
 
 type SessionTerminalBridgeOptions = {
   history: string;
+  name: string;
   onClose: () => void;
   onInput: (data: string) => Promise<void>;
   onResize: (cols: number, rows: number) => Promise<void>;
@@ -776,13 +850,17 @@ class SessionTerminalBridge implements vscode.Disposable, vscode.Pseudoterminal 
   private readonly writeEmitter = new vscode.EventEmitter<string>();
   private hasReplayedHistory = false;
   private flashTimeout: NodeJS.Timeout | undefined;
+  private isFlashingName = false;
   private pendingOutput = "";
+  private stableName: string;
   public readonly onDidChangeName = this.nameEmitter.event;
   public readonly onDidClose = this.closeEmitter.event;
   public readonly onDidWrite = this.writeEmitter.event;
   private isOpen = false;
 
-  public constructor(private readonly options: SessionTerminalBridgeOptions) {}
+  public constructor(private readonly options: SessionTerminalBridgeOptions) {
+    this.stableName = options.name;
+  }
 
   public close(): void {
     this.options.onClose();
@@ -800,7 +878,7 @@ class SessionTerminalBridge implements vscode.Disposable, vscode.Pseudoterminal 
     this.writeEmitter.dispose();
   }
 
-  public flash(): void {
+  public flash(markers: readonly string[]): void {
     if (!this.isOpen) {
       return;
     }
@@ -809,17 +887,43 @@ class SessionTerminalBridge implements vscode.Disposable, vscode.Pseudoterminal 
       clearTimeout(this.flashTimeout);
     }
 
-    this.writeEmitter.fire(
-      `${FOCUSED_TERMINAL_FLASH_OFF_SEQUENCE}${FOCUSED_TERMINAL_FLASH_ON_SEQUENCE}`,
-    );
-    this.flashTimeout = setTimeout(() => {
-      this.flashTimeout = undefined;
+    this.isFlashingName = true;
+    let frameIndex = 0;
+    const effectiveMarkers = markers.length > 0 ? markers : DEFAULT_FOCUSED_TERMINAL_FLASH_MARKERS;
+
+    const emitFrame = () => {
       if (!this.isOpen) {
+        this.isFlashingName = false;
+        this.flashTimeout = undefined;
         return;
       }
 
-      this.writeEmitter.fire(FOCUSED_TERMINAL_FLASH_OFF_SEQUENCE);
-    }, FOCUSED_TERMINAL_FLASH_DURATION_MS);
+      const marker = effectiveMarkers[frameIndex];
+      this.nameEmitter.fire(`${marker} ${this.stableName} ${marker}`);
+
+      frameIndex += 1;
+      if (frameIndex >= effectiveMarkers.length) {
+        this.isFlashingName = false;
+        this.flashTimeout = undefined;
+        this.nameEmitter.fire(this.stableName);
+        return;
+      }
+
+      this.flashTimeout = setTimeout(emitFrame, FOCUSED_TERMINAL_FLASH_FRAME_DURATION_MS);
+    };
+
+    emitFrame();
+  }
+
+  public setName(name: string): void {
+    if (this.stableName === name) {
+      return;
+    }
+
+    this.stableName = name;
+    if (!this.isFlashingName) {
+      this.nameEmitter.fire(name);
+    }
   }
 
   public handleInput(data: string): void {
@@ -861,7 +965,6 @@ class SessionTerminalBridge implements vscode.Disposable, vscode.Pseudoterminal 
     this.pendingOutput = parsedChunk.pending;
 
     for (const title of parsedChunk.titles) {
-      this.nameEmitter.fire(title);
       void this.options.onTitleChange(title);
     }
 
@@ -1008,6 +1111,20 @@ function getSessionActivityLabel(
   }
 }
 
+function getSessionTabTitle(session: SessionRecord): string {
+  const sessionNumber = getSessionNumber(session.sessionId);
+  if (sessionNumber === undefined) {
+    return session.alias;
+  }
+
+  const defaultAlias = createSessionAlias(sessionNumber, session.slotIndex);
+  if (session.alias !== defaultAlias) {
+    return session.alias;
+  }
+
+  return `Session ${sessionNumber}`;
+}
+
 function getDefaultShell(): string {
   const configuredShell = process.env.SHELL?.trim();
   if (configuredShell) {
@@ -1025,6 +1142,24 @@ function getSidebarThemeConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${SIDEBAR_THEME_SETTING}`;
 }
 
+function getSidebarThemeVariant(): SidebarThemeVariant {
+  switch (vscode.window.activeColorTheme.kind) {
+    case vscode.ColorThemeKind.Light:
+    case vscode.ColorThemeKind.HighContrastLight:
+      return "light";
+    default:
+      return "dark";
+  }
+}
+
+function getShowCloseButtonOnSessionCardsConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING}`;
+}
+
+function getShowHotkeysOnSessionCardsConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING}`;
+}
+
 function getBackgroundSessionTimeoutMs(): number | null {
   const configuredMinutes = vscode.workspace
     .getConfiguration(SETTINGS_SECTION)
@@ -1037,12 +1172,47 @@ function getBackgroundSessionTimeoutMs(): number | null {
   return Math.floor(configuredMinutes * MINUTE_IN_MS);
 }
 
-function getSidebarTheme() {
+function getSidebarThemeSetting() {
   const configuredTheme = vscode.workspace
     .getConfiguration(SETTINGS_SECTION)
-    .get<string>(SIDEBAR_THEME_SETTING, "dark-modern");
+    .get<string>(SIDEBAR_THEME_SETTING, "auto");
 
-  return clampSidebarTheme(configuredTheme);
+  return clampSidebarThemeSetting(configuredTheme);
+}
+
+function getSendRenameCommandOnSidebarRename(): boolean {
+  return vscode.workspace
+    .getConfiguration(SETTINGS_SECTION)
+    .get<boolean>(SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING, true);
+}
+
+function getShowTerminalTitleIndicatorOnSidebarActivate(): boolean {
+  return vscode.workspace
+    .getConfiguration(SETTINGS_SECTION)
+    .get<boolean>(SHOW_TERMINAL_TITLE_INDICATOR_ON_SIDEBAR_ACTIVATE_SETTING, true);
+}
+
+function getTerminalTitleIndicatorMarkers(): string[] {
+  const configuredMarkers = vscode.workspace
+    .getConfiguration(SETTINGS_SECTION)
+    .get<string>(
+      TERMINAL_TITLE_INDICATOR_MARKERS_SETTING,
+      DEFAULT_FOCUSED_TERMINAL_FLASH_MARKERS.join(" "),
+    );
+
+  return parseTerminalTitleIndicatorMarkers(configuredMarkers);
+}
+
+function getShowCloseButtonOnSessionCards(): boolean {
+  return vscode.workspace
+    .getConfiguration(SETTINGS_SECTION)
+    .get<boolean>(SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING, false);
+}
+
+function getShowHotkeysOnSessionCards(): boolean {
+  return vscode.workspace
+    .getConfiguration(SETTINGS_SECTION)
+    .get<boolean>(SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING, false);
 }
 
 function getDefaultWorkspaceCwd(): string {
@@ -1051,6 +1221,25 @@ function getDefaultWorkspaceCwd(): string {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseTerminalTitleIndicatorMarkers(value: string): string[] {
+  const markers = value
+    .split(/[\s,]+/u)
+    .map((marker) => marker.trim())
+    .filter((marker) => marker.length > 0);
+
+  return markers.length > 0 ? markers : [...DEFAULT_FOCUSED_TERMINAL_FLASH_MARKERS];
+}
+
+function getSessionNumber(sessionId: string): number | undefined {
+  const match = /^session-(\d+)$/.exec(sessionId);
+  if (!match) {
+    return undefined;
+  }
+
+  const sessionNumber = Number.parseInt(match[1], 10);
+  return Number.isInteger(sessionNumber) && sessionNumber > 0 ? sessionNumber : undefined;
 }
 
 function getViewColumn(index: number): vscode.ViewColumn {

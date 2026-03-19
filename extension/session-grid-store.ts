@@ -17,6 +17,7 @@ import {
   setVisibleCountInSnapshot,
   setViewModeInSnapshot,
   syncSessionOrderInSnapshot,
+  toggleFullscreenSessionInSnapshot,
 } from "../shared/session-grid-state";
 
 const WORKSPACE_SNAPSHOT_KEY = "agentCanvasX.sessionGridSnapshot";
@@ -111,6 +112,11 @@ export class SessionGridStore {
 
   public async setVisibleCount(visibleCount: VisibleSessionCount): Promise<void> {
     this.snapshot = setVisibleCountInSnapshot(this.snapshot, visibleCount);
+    await this.persist();
+  }
+
+  public async toggleFullscreenSession(): Promise<void> {
+    this.snapshot = toggleFullscreenSessionInSnapshot(this.snapshot);
     await this.persist();
   }
 

@@ -1,11 +1,11 @@
 import { Tooltip } from "@base-ui/react/tooltip";
 import { DragDropProvider } from "@dnd-kit/react";
-import { isSortable, useSortable } from "@dnd-kit/react/sortable";
+import { isSortable } from "@dnd-kit/react/sortable";
+import { IconFocusCentered } from "@tabler/icons-react";
 import {
   startTransition,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -13,14 +13,12 @@ import type {
   ExtensionToSidebarMessage,
   SidebarHudState,
   SidebarSessionItem,
-  SidebarToExtensionMessage,
+  SidebarTheme,
   TerminalViewMode,
   VisibleSessionCount,
 } from "../shared/session-grid-contract";
-
-type WebviewApi = {
-  postMessage: (message: SidebarToExtensionMessage) => void;
-};
+import { SortableSessionCard } from "./sortable-session-card";
+import type { WebviewApi } from "./webview-api";
 
 export type SidebarAppProps = {
   vscode: WebviewApi;
@@ -41,7 +39,10 @@ const MODE_OPTIONS: { tooltip: string; viewMode: TerminalViewMode }[] = [
 const INITIAL_STATE: SidebarState = {
   hud: {
     focusedSessionTitle: undefined,
-    theme: "dark-modern",
+    isFocusModeActive: false,
+    showCloseButtonOnSessionCards: false,
+    showHotkeysOnSessionCards: false,
+    theme: getInitialSidebarTheme(),
     viewMode: "grid",
     visibleCount: 1,
     visibleSlotLabels: [],
@@ -49,14 +50,35 @@ const INITIAL_STATE: SidebarState = {
   sessions: [],
 };
 
+const SIDEBAR_EMPTY_SPACE_BLOCKER_SELECTOR = [
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "a",
+  "[role='button']",
+  "[role='menu']",
+  "[role='menuitem']",
+  "[data-empty-space-blocking='true']",
+].join(", ");
+
+function getInitialSidebarTheme(): SidebarTheme {
+  return document.body.classList.contains("vscode-light") ||
+    document.body.classList.contains("vscode-high-contrast-light")
+    ? "light-blue"
+    : "dark-blue";
+}
+
 export function SidebarApp({ vscode }: SidebarAppProps) {
   const [serverState, setServerState] = useState<SidebarState>(INITIAL_STATE);
   const [draftSessionIds, setDraftSessionIds] = useState<string[] | undefined>();
+
   const requestNewSession = () => {
     vscode.postMessage({ type: "createSession" });
   };
-  const handleEmptySpaceDoubleClick = (event: ReactMouseEvent<HTMLElement>) => {
-    if (event.target !== event.currentTarget) {
+
+  const handleSidebarDoubleClick = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!isEmptySidebarDoubleClick(event.target, event.currentTarget)) {
       return;
     }
 
@@ -155,36 +177,39 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
   };
 
   return (
-    <div
-      className="stack"
-      data-sidebar-theme={serverState.hud.theme}
-      onDoubleClick={handleEmptySpaceDoubleClick}
-    >
-      <section className="card hud" onDoubleClick={handleEmptySpaceDoubleClick}>
-        <div className="toolbar-row">
-          <div className="toolbar-section">
-            <div className="control-label">Sessions Shown</div>
-            <div className="button-group">
-              {COUNT_OPTIONS.map((visibleCount) => (
-                <button
-                  key={visibleCount}
-                  className="toolbar-button"
-                  data-selected={String(serverState.hud.visibleCount === visibleCount)}
-                  onClick={() => vscode.postMessage({ type: "setVisibleCount", visibleCount })}
-                  type="button"
-                >
-                  {visibleCount}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="toolbar-section">
-            <div className="control-label">Layout</div>
-            <Tooltip.Provider delay={200}>
+    <Tooltip.Provider delay={200}>
+      <div
+        className="stack"
+        data-sidebar-theme={serverState.hud.theme}
+        onDoubleClick={handleSidebarDoubleClick}
+      >
+        <section className="card hud">
+          <div className="toolbar-row">
+            <div className="toolbar-section">
+              <div className="control-label" data-empty-space-blocking="true">
+                Layout
+              </div>
               <div className="toolbar-inline-row">
                 <div className="button-group">
+                  <ToolbarIconButton
+                    ariaLabel="Toggle focus mode"
+                    isSelected={serverState.hud.isFocusModeActive}
+                    onClick={() => vscode.postMessage({ type: "toggleFullscreenSession" })}
+                    tooltip={
+                      serverState.hud.isFocusModeActive
+                        ? "Restore previous session layout"
+                        : "Focus on the active session"
+                    }
+                  >
+                    <IconFocusCentered
+                      aria-hidden="true"
+                      className="toolbar-tabler-icon"
+                      stroke={1.8}
+                    />
+                  </ToolbarIconButton>
                   {MODE_OPTIONS.map((mode) => (
                     <ModeButton
+                      isDimmed={serverState.hud.isFocusModeActive}
                       key={mode.viewMode}
                       mode={mode}
                       viewMode={serverState.hud.viewMode}
@@ -194,59 +219,133 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
                   ))}
                 </div>
                 <div className="button-group button-group-end">
-                  <ToolbarActionButton
+                  <ToolbarIconButton
                     ariaLabel="Open sidebar theme settings"
-                    tooltip="Sidebar Settings"
                     onClick={() => vscode.postMessage({ type: "openSettings" })}
+                    tooltip="Sidebar Settings"
                   >
                     <SettingsIcon />
-                  </ToolbarActionButton>
+                  </ToolbarIconButton>
                 </div>
               </div>
-            </Tooltip.Provider>
+            </div>
+            <div className="toolbar-section">
+              <div className="control-label" data-empty-space-blocking="true">
+                Sessions Shown
+              </div>
+              <div className="button-group">
+                {COUNT_OPTIONS.map((visibleCount) => (
+                  <button
+                    key={visibleCount}
+                    className="toolbar-button"
+                    data-dimmed={String(serverState.hud.isFocusModeActive)}
+                    data-selected={String(serverState.hud.visibleCount === visibleCount)}
+                    onClick={() => vscode.postMessage({ type: "setVisibleCount", visibleCount })}
+                    type="button"
+                  >
+                    {visibleCount}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="action-row">
-          <button className="primary" onClick={requestNewSession} type="button">
-            New Session
-          </button>
-        </div>
-      </section>
-      <section className="card" onDoubleClick={handleEmptySpaceDoubleClick}>
-        <div className="eyebrow">Sessions</div>
-        <div className="sessions" onDoubleClick={handleEmptySpaceDoubleClick}>
-          <DragDropProvider onDragEnd={handleDragEnd}>
-            {orderedSessions.map((session, index) => (
-              <SortableSessionCard
-                key={session.sessionId}
-                index={index}
-                session={session}
-                vscode={vscode}
-              />
-            ))}
-          </DragDropProvider>
-        </div>
-        {orderedSessions.length === 0 ? (
-          <div className="empty">Create the first session to start the workspace.</div>
-        ) : null}
-      </section>
-    </div>
+          <div className="action-row">
+            <button className="primary" onClick={requestNewSession} type="button">
+              New Session
+            </button>
+          </div>
+        </section>
+        <section className="card">
+          <div className="eyebrow" data-empty-space-blocking="true">
+            Sessions
+          </div>
+          <div className="sessions">
+            <DragDropProvider onDragEnd={handleDragEnd}>
+              {orderedSessions.map((session, index) => (
+                <SortableSessionCard
+                  key={session.sessionId}
+                  index={index}
+                  session={session}
+                  showCloseButton={serverState.hud.showCloseButtonOnSessionCards}
+                  showHotkeys={serverState.hud.showHotkeysOnSessionCards}
+                  vscode={vscode}
+                />
+              ))}
+            </DragDropProvider>
+          </div>
+          {orderedSessions.length === 0 ? (
+            <div className="empty" data-empty-space-blocking="true">
+              Create the first session to start the workspace.
+            </div>
+          ) : null}
+        </section>
+      </div>
+    </Tooltip.Provider>
   );
 }
 
-type ToolbarActionButtonProps = {
+function isEmptySidebarDoubleClick(
+  target: EventTarget | null,
+  currentTarget: HTMLElement,
+): boolean {
+  if (target === currentTarget) {
+    return true;
+  }
+
+  const targetNode = target instanceof Node ? target : undefined;
+  const targetElement =
+    targetNode instanceof Element ? targetNode : (targetNode?.parentElement ?? undefined);
+  if (!targetElement || !currentTarget.contains(targetElement)) {
+    return false;
+  }
+
+  return targetElement.closest(SIDEBAR_EMPTY_SPACE_BLOCKER_SELECTOR) === null;
+}
+
+type ToolbarIconButtonProps = {
   ariaLabel: string;
   children: React.ReactNode;
+  className?: string;
+  isDisabled?: boolean;
+  isDimmed?: boolean;
+  isSelected?: boolean;
   onClick: () => void;
+  tabIndex?: number;
   tooltip: string;
 };
 
-function ToolbarActionButton({ ariaLabel, children, onClick, tooltip }: ToolbarActionButtonProps) {
+function ToolbarIconButton({
+  ariaLabel,
+  children,
+  className,
+  isDisabled = false,
+  isDimmed = false,
+  isSelected = false,
+  onClick,
+  tabIndex,
+  tooltip,
+}: ToolbarIconButtonProps) {
   return (
     <Tooltip.Root>
       <Tooltip.Trigger
         render={
-          <button aria-label={ariaLabel} className="toolbar-button" onClick={onClick} type="button">
+          <button
+            aria-disabled={isDisabled}
+            aria-label={ariaLabel}
+            className={className ? `toolbar-button ${className}` : "toolbar-button"}
+            data-disabled={String(isDisabled)}
+            data-dimmed={String(isDimmed)}
+            data-selected={String(isSelected)}
+            onClick={() => {
+              if (isDisabled) {
+                return;
+              }
+
+              onClick();
+            }}
+            tabIndex={tabIndex}
+            type="button"
+          >
             {children}
           </button>
         }
@@ -261,232 +360,30 @@ function ToolbarActionButton({ ariaLabel, children, onClick, tooltip }: ToolbarA
 }
 
 type ModeButtonProps = {
+  isDimmed: boolean;
   mode: (typeof MODE_OPTIONS)[number];
   viewMode: TerminalViewMode;
   visibleCount: VisibleSessionCount;
   vscode: WebviewApi;
 };
 
-function ModeButton({ mode, viewMode, visibleCount, vscode }: ModeButtonProps) {
+function ModeButton({ isDimmed, mode, viewMode, visibleCount, vscode }: ModeButtonProps) {
   const isDisabled = isViewModeDisabled(mode.viewMode, visibleCount);
 
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger
-        render={
-          <button
-            aria-label={mode.tooltip}
-            aria-disabled={isDisabled}
-            className="toolbar-button"
-            data-disabled={String(isDisabled)}
-            data-selected={String(viewMode === mode.viewMode)}
-            onClick={() => {
-              if (isDisabled) {
-                return;
-              }
-
-              vscode.postMessage({ type: "setViewMode", viewMode: mode.viewMode });
-            }}
-            tabIndex={isDisabled ? -1 : 0}
-            type="button"
-          >
-            <LayoutModeIcon viewMode={mode.viewMode} />
-          </button>
-        }
-      />
-      <Tooltip.Portal>
-        <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
-          <Tooltip.Popup className="tooltip-popup">{mode.tooltip}</Tooltip.Popup>
-        </Tooltip.Positioner>
-      </Tooltip.Portal>
-    </Tooltip.Root>
-  );
-}
-
-type SortableSessionCardProps = {
-  index: number;
-  session: SidebarSessionItem;
-  vscode: WebviewApi;
-};
-
-function SortableSessionCard({ index, session, vscode }: SortableSessionCardProps) {
-  const [draftAlias, setDraftAlias] = useState(session.alias);
-  const [isEditing, setIsEditing] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const secondaryText = session.detail ?? session.primaryTitle ?? session.activityLabel;
-  const secondaryTitle =
-    session.primaryTitle && session.detail
-      ? `${session.primaryTitle}\n${session.detail}`
-      : secondaryText;
-  const sortable = useSortable({
-    disabled: isEditing,
-    id: session.sessionId,
-    index,
-  });
-
-  useEffect(() => {
-    if (!isEditing) {
-      setDraftAlias(session.alias);
-    }
-  }, [isEditing, session.alias]);
-
-  useEffect(() => {
-    if (!isEditing) {
-      return;
-    }
-
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, [isEditing]);
-
-  const commitRename = () => {
-    const nextAlias = draftAlias.trim();
-    setIsEditing(false);
-    if (!nextAlias || nextAlias === session.alias) {
-      setDraftAlias(session.alias);
-      return;
-    }
-
-    vscode.postMessage({
-      sessionId: session.sessionId,
-      title: nextAlias,
-      type: "renameSession",
-    });
-  };
-
-  const cancelRename = () => {
-    setDraftAlias(session.alias);
-    setIsEditing(false);
-  };
-
-  return (
-    <article
-      className="session"
-      data-activity={session.activity}
-      data-dragging={String(Boolean(sortable.isDragging))}
-      data-focused={String(session.isFocused)}
-      data-running={String(session.isRunning)}
-      data-visible={String(session.isVisible)}
-      aria-pressed={session.isFocused}
-      onAuxClick={(event) => {
-        if (event.button !== 1) {
-          return;
-        }
-
-        event.preventDefault();
-        vscode.postMessage({ sessionId: session.sessionId, type: "closeSession" });
-      }}
+    <ToolbarIconButton
+      ariaLabel={mode.tooltip}
+      isDisabled={isDisabled}
+      isDimmed={isDimmed}
+      isSelected={viewMode === mode.viewMode}
       onClick={() => {
-        if (isEditing) {
-          return;
-        }
-
-        vscode.postMessage({
-          sessionId: session.sessionId,
-          type: "focusSession",
-        });
+        vscode.postMessage({ type: "setViewMode", viewMode: mode.viewMode });
       }}
-      onKeyDown={(event) => {
-        if (isEditing) {
-          return;
-        }
-
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-
-        event.preventDefault();
-        vscode.postMessage({ sessionId: session.sessionId, type: "focusSession" });
-      }}
-      ref={sortable.ref}
-      role="button"
-      tabIndex={0}
-      title="Click to activate the terminal. Click the alias to rename. Middle-click to close."
+      tabIndex={isDisabled ? -1 : 0}
+      tooltip={mode.tooltip}
     >
-      <div className="session-head">
-        {isEditing ? (
-          <input
-            aria-label={`Rename alias for ${session.alias}`}
-            className="session-alias-input"
-            onBlur={commitRename}
-            onChange={(event) => setDraftAlias(event.target.value)}
-            onClick={(event) => {
-              event.stopPropagation();
-            }}
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                commitRename();
-                return;
-              }
-
-              if (event.key === "Escape") {
-                event.preventDefault();
-                cancelRename();
-              }
-            }}
-            onPointerDown={(event) => {
-              event.stopPropagation();
-            }}
-            ref={inputRef}
-            type="text"
-            value={draftAlias}
-          />
-        ) : (
-          <div
-            className="session-alias-trigger"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              setDraftAlias(session.alias);
-              setIsEditing(true);
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" && event.key !== " ") {
-                return;
-              }
-
-              event.preventDefault();
-              event.stopPropagation();
-              setDraftAlias(session.alias);
-              setIsEditing(true);
-            }}
-            onPointerDown={(event) => {
-              event.stopPropagation();
-            }}
-            role="button"
-            tabIndex={0}
-          >
-            <div className="session-alias-heading">{session.alias}</div>
-          </div>
-        )}
-        <button
-          aria-label="Close session"
-          className="close-button"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            vscode.postMessage({ sessionId: session.sessionId, type: "closeSession" });
-          }}
-          type="button"
-        >
-          ×
-        </button>
-      </div>
-      <div className="session-footer">
-        {secondaryText ? (
-          <div className="session-secondary" title={secondaryTitle}>
-            {secondaryText}
-          </div>
-        ) : (
-          <div />
-        )}
-        <div className="session-meta">{session.shortcutLabel}</div>
-      </div>
-    </article>
+      <LayoutModeIcon viewMode={mode.viewMode} />
+    </ToolbarIconButton>
   );
 }
 

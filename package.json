@@ -35,6 +35,7 @@
     "@base-ui/react": "^1.3.0",
     "@dnd-kit/react": "^0.3.2",
     "@replit/ruspty": "^3.6.0",
+    "@tabler/icons-react": "^3.40.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
@@ -77,6 +78,11 @@
         "category": "Agent Canvas X"
       },
       {
+        "command": "agentCanvasX.renameActiveSession",
+        "title": "Rename Active Session",
+        "category": "Agent Canvas X"
+      },
+      {
         "command": "agentCanvasX.focusUp",
         "title": "Focus Up",
         "category": "Agent Canvas X"
@@ -94,6 +100,11 @@
       {
         "command": "agentCanvasX.focusLeft",
         "title": "Focus Left",
+        "category": "Agent Canvas X"
+      },
+      {
+        "command": "agentCanvasX.focusSessionSlot",
+        "title": "Focus Session Slot",
         "category": "Agent Canvas X"
       },
       {
@@ -124,6 +135,11 @@
       {
         "command": "agentCanvasX.showNine",
         "title": "Show 9 Terminals",
+        "category": "Agent Canvas X"
+      },
+      {
+        "command": "agentCanvasX.toggleFullscreenSession",
+        "title": "Toggle Fullscreen Session",
         "category": "Agent Canvas X"
       },
       {
@@ -171,63 +187,178 @@
         "agentCanvasX.backgroundSessionTimeoutMinutes": {
           "type": "number",
           "minimum": 0,
-          "default": 0,
+          "default": 5,
           "description": "How long detached background sessions stay alive after the last Agent Canvas X window disconnects. Set to 0 to keep sessions alive until they exit or are explicitly closed."
         },
         "agentCanvasX.sidebarTheme": {
           "type": "string",
-          "default": "dark-modern",
+          "default": "auto",
           "enum": [
-            "dark-modern",
-            "dark-plus",
-            "light-plus",
-            "monokai",
-            "solarized-dark"
+            "auto",
+            "plain",
+            "dark-green",
+            "dark-blue",
+            "dark-red",
+            "dark-pink",
+            "dark-orange",
+            "light-blue",
+            "light-green",
+            "light-pink",
+            "light-orange"
+          ],
+          "enumItemLabels": [
+            "Auto",
+            "Plain",
+            "Dark Green",
+            "Dark Blue",
+            "Dark Red",
+            "Dark Pink",
+            "Dark Orange",
+            "Light Blue",
+            "Light Green",
+            "Light Pink",
+            "Light Orange"
           ],
           "enumDescriptions": [
-            "A darker, softer palette inspired by VS Code Dark Modern.",
-            "The classic VS Code Dark+ look.",
-            "The classic VS Code Light+ look.",
-            "A high-contrast Monokai-inspired palette.",
-            "A Solarized Dark-inspired palette."
+            "Follows the active VS Code theme: Dark Blue in dark themes and Light Blue in light themes.",
+            "A neutral grayscale theme that follows the active VS Code light or dark mode.",
+            "A very dark green-tinted palette with a muted emerald accent.",
+            "A very dark blue-tinted palette with a muted cobalt accent.",
+            "A very dark red-tinted palette with a muted crimson accent.",
+            "A very dark pink-tinted palette with a muted rose accent.",
+            "A very dark orange-tinted palette with a muted amber accent.",
+            "A light blue-tinted palette with a crisp cobalt accent.",
+            "A light green-tinted palette with a soft emerald accent.",
+            "A light pink-tinted palette with a rose accent.",
+            "A light orange-tinted palette with an amber accent."
           ],
-          "description": "Theme preset used by the Agent Canvas X sidebar app."
+          "description": "Theme preset used by the Agent Canvas X sidebar app. Auto follows the active VS Code light or dark theme."
+        },
+        "agentCanvasX.showTerminalTitleIndicatorOnSidebarActivate": {
+          "type": "boolean",
+          "default": true,
+          "order": 2,
+          "description": "Show indicator on terminal title when activated from sidebar card."
+        },
+        "agentCanvasX.terminalTitleIndicatorMarkers": {
+          "type": "string",
+          "default": "🟥 🟩 🟨 🟦 🟪 ⬜",
+          "order": 3,
+          "description": "Emoji sequence used for the terminal title indicator. Enter markers separated by spaces or commas."
+        },
+        "agentCanvasX.showCloseButtonOnSessionCards": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show close button on session cards. You can always cmd + click or middle click on a card to close it."
+        },
+        "agentCanvasX.showHotkeysOnSessionCards": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show hotkey labels on session cards all the time instead of only revealing them when you hover a card."
+        },
+        "agentCanvasX.sendRenameCommandOnSidebarRename": {
+          "type": "boolean",
+          "default": true,
+          "description": "When renaming a session from the sidebar, also stage `/rename <new name>` in that terminal and focus it without pressing Enter."
         }
       }
     },
     "keybindings": [
       {
         "command": "agentCanvasX.showOne",
+        "key": "ctrl+alt+shift+1",
+        "mac": "cmd+alt+shift+1",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "agentCanvasX.showTwo",
+        "key": "ctrl+alt+shift+2",
+        "mac": "cmd+alt+shift+2",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "agentCanvasX.showThree",
+        "key": "ctrl+alt+shift+3",
+        "mac": "cmd+alt+shift+3",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "agentCanvasX.showFour",
+        "key": "ctrl+alt+shift+4",
+        "mac": "cmd+alt+shift+4",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "agentCanvasX.showSix",
+        "key": "ctrl+alt+shift+6",
+        "mac": "cmd+alt+shift+6",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "agentCanvasX.showNine",
+        "key": "ctrl+alt+shift+9",
+        "mac": "cmd+alt+shift+9",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "args": 1,
+        "command": "agentCanvasX.focusSessionSlot",
         "key": "ctrl+alt+1",
         "mac": "cmd+alt+1",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.showTwo",
+        "args": 2,
+        "command": "agentCanvasX.focusSessionSlot",
         "key": "ctrl+alt+2",
         "mac": "cmd+alt+2",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.showThree",
+        "args": 3,
+        "command": "agentCanvasX.focusSessionSlot",
         "key": "ctrl+alt+3",
         "mac": "cmd+alt+3",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.showFour",
+        "args": 4,
+        "command": "agentCanvasX.focusSessionSlot",
         "key": "ctrl+alt+4",
         "mac": "cmd+alt+4",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.showSix",
+        "args": 5,
+        "command": "agentCanvasX.focusSessionSlot",
+        "key": "ctrl+alt+5",
+        "mac": "cmd+alt+5",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "args": 6,
+        "command": "agentCanvasX.focusSessionSlot",
         "key": "ctrl+alt+6",
         "mac": "cmd+alt+6",
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "agentCanvasX.showNine",
+        "args": 7,
+        "command": "agentCanvasX.focusSessionSlot",
+        "key": "ctrl+alt+7",
+        "mac": "cmd+alt+7",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "args": 8,
+        "command": "agentCanvasX.focusSessionSlot",
+        "key": "ctrl+alt+8",
+        "mac": "cmd+alt+8",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "args": 9,
+        "command": "agentCanvasX.focusSessionSlot",
         "key": "ctrl+alt+9",
         "mac": "cmd+alt+9",
         "when": "!inputFocus || terminalFocus"
@@ -249,6 +380,30 @@
         "key": "ctrl+alt+g",
         "mac": "cmd+alt+g",
         "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "agentCanvasX.renameActiveSession",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "agentCanvasX.toggleFullscreenSession",
+        "key": "ctrl+alt+f",
+        "mac": "cmd+alt+f",
+        "when": "terminalFocus"
+      },
+      {
+        "command": "workbench.action.toggleMaximizedPanel",
+        "key": "ctrl+alt+f",
+        "mac": "cmd+alt+f",
+        "when": "panelFocus && !terminalFocus"
+      },
+      {
+        "command": "workbench.action.toggleMaximizeEditorGroup",
+        "key": "ctrl+alt+f",
+        "mac": "cmd+alt+f",
+        "when": "!panelFocus && !terminalFocus"
       }
     ]
   },

@@ -10,11 +10,32 @@ export type SessionGridDirection = "up" | "right" | "down" | "left";
 export type SidebarSessionActivityState = "idle" | "working" | "attention";
 
 export type SidebarTheme =
-  | "dark-modern"
-  | "dark-plus"
-  | "light-plus"
-  | "monokai"
-  | "solarized-dark";
+  | "plain-dark"
+  | "plain-light"
+  | "dark-green"
+  | "dark-blue"
+  | "dark-red"
+  | "dark-pink"
+  | "dark-orange"
+  | "light-blue"
+  | "light-green"
+  | "light-pink"
+  | "light-orange";
+
+export type SidebarThemeSetting =
+  | "auto"
+  | "plain"
+  | "dark-green"
+  | "dark-blue"
+  | "dark-red"
+  | "dark-pink"
+  | "dark-orange"
+  | "light-blue"
+  | "light-green"
+  | "light-pink"
+  | "light-orange";
+
+export type SidebarThemeVariant = "light" | "dark";
 
 export type SessionRecord = {
   sessionId: string;
@@ -28,6 +49,7 @@ export type SessionRecord = {
 
 export type SessionGridSnapshot = {
   focusedSessionId?: string;
+  fullscreenRestoreVisibleCount?: VisibleSessionCount;
   nextSessionNumber: number;
   sessions: SessionRecord[];
   visibleCount: VisibleSessionCount;
@@ -52,6 +74,9 @@ export type SidebarSessionItem = {
 
 export type SidebarHudState = {
   focusedSessionTitle?: string;
+  isFocusModeActive: boolean;
+  showCloseButtonOnSessionCards: boolean;
+  showHotkeysOnSessionCards: boolean;
   theme: SidebarTheme;
   visibleCount: VisibleSessionCount;
   visibleSlotLabels: string[];
@@ -81,6 +106,9 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "createSession";
+    }
+  | {
+      type: "toggleFullscreenSession";
     }
   | {
       type: "focusSession";
@@ -152,22 +180,58 @@ export function clampTerminalViewMode(value: string | undefined): TerminalViewMo
   }
 }
 
-export function clampSidebarTheme(value: string | undefined): SidebarTheme {
+export function clampSidebarThemeSetting(value: string | undefined): SidebarThemeSetting {
   switch (value) {
+    case "auto":
+    case "plain":
     case "dark-modern":
+    case "dark-green":
+      return value === "dark-modern" ? "dark-green" : value;
+
     case "dark-plus":
+    case "dark-blue":
+      return value === "dark-plus" ? "dark-blue" : value;
+
+    case "dark-red":
+    case "dark-pink":
+    case "dark-orange":
     case "light-plus":
+    case "light-blue":
+    case "light-green":
+    case "light-pink":
+    case "light-orange":
+      return value === "light-plus" ? "light-blue" : value;
+
     case "monokai":
+      return "dark-green";
+
     case "solarized-dark":
-      return value;
+      return "dark-blue";
+
     default:
-      return "dark-modern";
+      return "auto";
   }
+}
+
+export function resolveSidebarTheme(
+  themeSetting: SidebarThemeSetting,
+  variant: SidebarThemeVariant,
+): SidebarTheme {
+  if (themeSetting === "auto") {
+    return variant === "light" ? "light-blue" : "dark-blue";
+  }
+
+  if (themeSetting === "plain") {
+    return variant === "light" ? "plain-light" : "plain-dark";
+  }
+
+  return themeSetting;
 }
 
 export function createDefaultSessionGridSnapshot(): SessionGridSnapshot {
   return {
     focusedSessionId: undefined,
+    fullscreenRestoreVisibleCount: undefined,
     nextSessionNumber: 1,
     sessions: [],
     visibleCount: 1,
@@ -259,7 +323,9 @@ export function getOrderedSessions(snapshot: SessionGridSnapshot): SessionRecord
 
 export function createSidebarHudState(
   snapshot: SessionGridSnapshot,
-  theme: SidebarTheme = "dark-modern",
+  theme: SidebarTheme = "dark-blue",
+  showCloseButtonOnSessionCards = false,
+  showHotkeysOnSessionCards = false,
 ): SidebarHudState {
   const sessionById = new Map(snapshot.sessions.map((session) => [session.sessionId, session]));
   const focusedSession = snapshot.focusedSessionId
@@ -268,6 +334,10 @@ export function createSidebarHudState(
 
   return {
     focusedSessionTitle: focusedSession?.title,
+    isFocusModeActive:
+      snapshot.visibleCount === 1 && snapshot.fullscreenRestoreVisibleCount !== undefined,
+    showCloseButtonOnSessionCards,
+    showHotkeysOnSessionCards,
     theme,
     visibleCount: snapshot.visibleCount,
     visibleSlotLabels: snapshot.visibleSessionIds

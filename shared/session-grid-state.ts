@@ -20,17 +20,14 @@ export function createSessionInSnapshot(snapshot: SessionGridSnapshot): {
   snapshot: SessionGridSnapshot;
 } {
   const normalizedSnapshot = normalizeSessionGridSnapshot(snapshot);
-  if (normalizedSnapshot.sessions.length >= MAX_SESSION_COUNT) {
+  const orderedSessions = getOrderedSessions(normalizedSnapshot);
+  if (orderedSessions.length >= MAX_SESSION_COUNT) {
     return { snapshot: normalizedSnapshot };
   }
 
-  const slotIndex = findNextFreeSlotIndex(normalizedSnapshot.sessions);
-  if (slotIndex === undefined) {
-    return { snapshot: normalizedSnapshot };
-  }
-
+  const slotIndex = orderedSessions.length;
   const session = createSessionRecord(normalizedSnapshot.nextSessionNumber, slotIndex);
-  const sessions = [...normalizedSnapshot.sessions, session];
+  const sessions = reindexSessionsInOrder([...orderedSessions, session]);
   const visibleSessionIds =
     normalizedSnapshot.visibleSessionIds.length < normalizedSnapshot.visibleCount
       ? [...normalizedSnapshot.visibleSessionIds, session.sessionId]
@@ -127,30 +124,21 @@ export function normalizeSessionGridSnapshot(
       ? normalizedSnapshot.focusedSessionId
       : focusFallback;
 
-  const visibleSessionIds = normalizedSnapshot.visibleSessionIds.filter((sessionId) =>
-    sessionIds.has(sessionId),
-  );
-  const withFocusVisible =
-    focusedSessionId && !visibleSessionIds.includes(focusedSessionId)
-      ? [focusedSessionId, ...visibleSessionIds]
-      : visibleSessionIds;
-
   const desiredVisibleSize = Math.min(visibleCount, orderedSessions.length);
-  const normalizedVisibleIds = withFocusVisible.slice(0, desiredVisibleSize);
-
-  while (normalizedVisibleIds.length < desiredVisibleSize) {
-    const nextSession = orderedSessions.find(
-      (session) => !normalizedVisibleIds.includes(session.sessionId),
-    );
-    if (!nextSession) {
-      break;
-    }
-
-    normalizedVisibleIds.push(nextSession.sessionId);
-  }
+  const normalizedVisibleIds = normalizeVisibleSessionIds(
+    orderedSessions,
+    normalizedSnapshot.visibleSessionIds,
+    desiredVisibleSize,
+    focusedSessionId,
+  );
+  const fullscreenRestoreVisibleCount = normalizeFullscreenRestoreVisibleCount(
+    normalizedSnapshot.fullscreenRestoreVisibleCount,
+    visibleCount,
+  );
 
   return {
     focusedSessionId,
+    fullscreenRestoreVisibleCount,
     nextSessionNumber,
     sessions: orderedSessions,
     visibleCount,
@@ -165,7 +153,30 @@ export function setVisibleCountInSnapshot(
 ): SessionGridSnapshot {
   return normalizeSessionGridSnapshot({
     ...snapshot,
+    fullscreenRestoreVisibleCount: undefined,
     visibleCount,
+  });
+}
+
+export function toggleFullscreenSessionInSnapshot(
+  snapshot: SessionGridSnapshot,
+): SessionGridSnapshot {
+  const normalizedSnapshot = normalizeSessionGridSnapshot(snapshot);
+  const restoreVisibleCount = normalizedSnapshot.fullscreenRestoreVisibleCount;
+
+  if (normalizedSnapshot.visibleCount === 1 && restoreVisibleCount) {
+    return normalizeSessionGridSnapshot({
+      ...normalizedSnapshot,
+      fullscreenRestoreVisibleCount: undefined,
+      visibleCount: restoreVisibleCount,
+    });
+  }
+
+  return normalizeSessionGridSnapshot({
+    ...normalizedSnapshot,
+    fullscreenRestoreVisibleCount:
+      normalizedSnapshot.visibleCount > 1 ? normalizedSnapshot.visibleCount : undefined,
+    visibleCount: 1,
   });
 }
 
@@ -218,21 +229,16 @@ export function syncSessionOrderInSnapshot(
   }
 
   const sessionById = new Map(orderedSessions.map((session) => [session.sessionId, session]));
-  const sessions = sessionIds.map((sessionId, index) => {
-    const session = sessionById.get(sessionId);
-    if (!session) {
-      throw new Error(`Missing session for reorder: ${sessionId}`);
-    }
+  const sessions = reindexSessionsInOrder(
+    sessionIds.map((sessionId) => {
+      const session = sessionById.get(sessionId);
+      if (!session) {
+        throw new Error(`Missing session for reorder: ${sessionId}`);
+      }
 
-    const position = getSlotPosition(index);
-
-    return {
-      ...session,
-      column: position.column,
-      row: position.row,
-      slotIndex: index,
-    };
-  });
+      return session;
+    }),
+  );
 
   const visibleSessionIds = sessionIds.slice(
     0,
@@ -418,18 +424,6 @@ function findDirectionalNeighbor(
   })[0];
 }
 
-function findNextFreeSlotIndex(sessions: SessionRecord[]): number | undefined {
-  const usedSlotIndexes = new Set(sessions.map((session) => session.slotIndex));
-
-  for (let slotIndex = 0; slotIndex < MAX_SESSION_COUNT; slotIndex += 1) {
-    if (!usedSlotIndexes.has(slotIndex)) {
-      return slotIndex;
-    }
-  }
-
-  return undefined;
-}
-
 function getDirectionalDistance(
   candidate: SessionRecord,
   currentSession: SessionRecord,
@@ -460,6 +454,85 @@ function replaceFocusedVisibleSession(snapshot: SessionGridSnapshot, sessionId: 
   const nextVisibleIds = [...snapshot.visibleSessionIds];
   nextVisibleIds[focusedIndex] = sessionId;
   return nextVisibleIds;
+}
+
+function normalizeVisibleSessionIds(
+  orderedSessions: readonly SessionRecord[],
+  visibleSessionIds: readonly string[],
+  desiredVisibleSize: number,
+  focusedSessionId?: string,
+): string[] {
+  if (desiredVisibleSize <= 0 || orderedSessions.length === 0) {
+    return [];
+  }
+
+  const orderedSessionIds = orderedSessions.map((session) => session.sessionId);
+  const visibleIdSet = new Set(
+    visibleSessionIds.filter((sessionId) => orderedSessionIds.includes(sessionId)),
+  );
+  if (focusedSessionId && orderedSessionIds.includes(focusedSessionId)) {
+    visibleIdSet.add(focusedSessionId);
+  }
+
+  while (visibleIdSet.size < desiredVisibleSize) {
+    const nextSessionId = orderedSessionIds.find((sessionId) => !visibleIdSet.has(sessionId));
+    if (!nextSessionId) {
+      break;
+    }
+
+    visibleIdSet.add(nextSessionId);
+  }
+
+  const orderedVisibleIds = orderedSessionIds.filter((sessionId) => visibleIdSet.has(sessionId));
+  if (orderedVisibleIds.length <= desiredVisibleSize) {
+    return orderedVisibleIds;
+  }
+
+  if (!focusedSessionId) {
+    return orderedVisibleIds.slice(0, desiredVisibleSize);
+  }
+
+  const focusedIndex = orderedVisibleIds.indexOf(focusedSessionId);
+  if (focusedIndex < 0) {
+    return orderedVisibleIds.slice(0, desiredVisibleSize);
+  }
+
+  const windowStart = Math.max(
+    0,
+    Math.min(focusedIndex - desiredVisibleSize + 1, orderedVisibleIds.length - desiredVisibleSize),
+  );
+  return orderedVisibleIds.slice(windowStart, windowStart + desiredVisibleSize);
+}
+
+function normalizeFullscreenRestoreVisibleCount(
+  fullscreenRestoreVisibleCount: VisibleSessionCount | undefined,
+  visibleCount: VisibleSessionCount,
+): VisibleSessionCount | undefined {
+  if (visibleCount !== 1 || fullscreenRestoreVisibleCount === undefined) {
+    return undefined;
+  }
+
+  return fullscreenRestoreVisibleCount > 1 ? fullscreenRestoreVisibleCount : undefined;
+}
+
+function reindexSessionsInOrder(sessions: readonly SessionRecord[]): SessionRecord[] {
+  return sessions.map((session, index) => {
+    const position = getSlotPosition(index);
+    if (
+      session.slotIndex === index &&
+      session.row === position.row &&
+      session.column === position.column
+    ) {
+      return session;
+    }
+
+    return {
+      ...session,
+      column: position.column,
+      row: position.row,
+      slotIndex: index,
+    };
+  });
 }
 
 function normalizeSessionRecord(session: SessionRecord): SessionRecord {

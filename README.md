@@ -1,56 +1,138 @@
 # Agent Canvas X
 
-This repo is a VS Code extension that manages detached native editor-area terminals in a logical `3x3` workspace. Up to `4` sessions can be visible at once, while the detached PTY daemon keeps session processes alive across VS Code restarts unless the configured background idle timeout shuts them down.
+![Agent Canvas X demo](demo.gif)
 
-## Tooling baseline
+Agent Canvas X turns VS Code into a fast multi-session terminal workspace. It keeps up to nine shell sessions organized in a logical `3x3` grid, lets you show `1`, `2`, `3`, `4`, `6`, or `9` sessions at a time, and gives you quick layout switching between horizontal, vertical, and grid views.
 
-- VS Code `1.110+`
-- pnpm `10.14`
-- Vite+ (`vp`) for format, lint, staged-file checks, and dependency management
-- TypeScript `5.9`
+Unlike a normal terminal tab workflow, Agent Canvas X is built for keeping several long-running agent, coding, or shell sessions alive and easy to jump between. Sessions can stay attached to the workspace across reloads and restarts, and the sidebar gives you a compact control surface for focusing, renaming, reordering, and managing them.
 
-The extension host still compiles through TypeScript so VS Code can load `out/extension/extension.js`, but the day-to-day project workflow follows Vite+ for checks, hooks, and editor defaults.
+## What It Does
 
-## Architecture
+- Creates a dedicated multi-session terminal workspace inside VS Code
+- Shows sessions in native editor-area terminals instead of a custom terminal UI
+- Supports `1 / 2 / 3 / 4 / 6 / 9` visible-session layouts
+- Lets you switch layouts instantly between horizontal, vertical, and grid modes
+- Keeps session order and focus state organized from the sidebar
+- Supports session nicknames, drag reordering, restart, reveal, and reset actions
+- Can keep detached sessions alive after reloads and restart them into place on reopen
+- Places the sessions view in the right-side secondary sidebar for quick access
 
-- `extension/native-terminal-workspace.ts` reconciles daemon-backed sessions into native editor terminals in the main panel.
-- `extension/session-sidebar-view.ts` renders the left sidebar HUD and session list.
-- `extension/session-grid-store.ts` persists workspace state through VS Code storage.
-- `extension/terminal-host-daemon.ts` owns detached PTY lifetimes and background idle shutdown.
-- `shared/session-grid-state.ts` contains pure session-grid logic used by both the store and unit tests.
-- `shared/session-grid-state.test.ts` covers slot allocation, visible-count normalization, reveal/focus swapping, and directional navigation.
+## Recommended VS Code Setup
 
-## Background session timeout
+### 1. Enable Native Tabs
 
-Set `agentCanvasX.backgroundSessionTimeoutMinutes` in VS Code settings to control how long detached sessions stay alive after the last Agent Canvas X window disconnects.
+If you are on macOS, turn on VS Code's `window.nativeTabs` setting.
 
-- `0` keeps sessions alive until they exit naturally or you explicitly close/reset them.
-- Any positive value starts a daemon-owned shutdown timer when the last authenticated client disconnects.
-- Reopening VS Code and reconnecting before the timer expires cancels the pending shutdown.
+This makes it much easier to switch between projects, repos, and worktrees because each VS Code window can live in the same native tab strip. Instead of juggling separate windows, you can keep multiple Agent Canvas X workspaces open and move between them quickly with the normal macOS tab workflow.
 
-## Running the project
+### 2. Turn On Repositories Explorer for Worktrees
 
-1. Run `vp install`.
-2. Run `vp check`.
-3. Run `vp run watch` to compile the extension in watch mode.
-4. Press `F5` in VS Code to launch an Extension Development Host.
-5. Run `Agent Canvas X: Open Workspace` from the Command Palette.
+Enable `SCM > Repositories: Explorer`, and make sure `SCM > Repositories: Selection Mode` is set to `single`.
 
-There is no separate canvas app or bundled terminal frontend in this repo anymore. The only webview surface is the lightweight sidebar view used for the HUD and session list.
+This exposes repository artifacts directly inside the Source Control UI, including branches, stashes, tags, and worktrees. It makes creating and managing Git worktrees much easier from the VS Code UI, without needing to drop into the terminal for every worktree action.
 
-## Hooks and editor setup
+## Recommended Hotkeys
 
-- `.vite-hooks/pre-commit` runs `vp staged`
-- `prepare` runs `vp config`
-- `.vscode/settings.json` enables OXC format-on-save
-- `.vscode/extensions.json` recommends the Vite+ extension pack
+On macOS, the extension ships with these default shortcuts:
 
-## Commands
+- `cmd + option + 1` = show 1 session
+- `cmd + option + 2` = show 2 sessions
+- `cmd + option + 3` = show 3 sessions
+- `cmd + option + 4` = show 4 sessions
+- `cmd + option + 6` = show 6 sessions
+- `cmd + option + 9` = show 9 sessions
+- `cmd + option + h` = horizontal layout
+- `cmd + option + v` = vertical layout
+- `cmd + option + g` = grid layout
+- `cmd + option + r` = rename active session
+- `cmd + option + f` = full screen the focused Agent Canvas X terminal session, or fall back to VS Code panel/editor maximize when a terminal is not focused
 
-- `vp install`
-- `vp check`
-- `vp lint`
-- `vp fmt`
-- `vp test`
-- `vp run compile`
-- `vp run watch`
+On Windows and Linux, the extension uses the same defaults with `ctrl + alt` instead of `cmd + option`.
+
+## Copy-Paste Keybindings JSON
+
+Paste this into your VS Code `keybindings.json` on macOS (find replace cmd with ctrl on windows/linux):
+
+```json
+[
+  {
+    "key": "cmd+alt+1",
+    "command": "agentCanvasX.showOne",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "cmd+alt+2",
+    "command": "agentCanvasX.showTwo",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "cmd+alt+3",
+    "command": "agentCanvasX.showThree",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "cmd+alt+4",
+    "command": "agentCanvasX.showFour",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "cmd+alt+6",
+    "command": "agentCanvasX.showSix",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "cmd+alt+9",
+    "command": "agentCanvasX.showNine",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "cmd+alt+h",
+    "command": "agentCanvasX.setHorizontalView",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "cmd+alt+v",
+    "command": "agentCanvasX.setVerticalView",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "cmd+alt+g",
+    "command": "agentCanvasX.setGridView",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "cmd+alt+r",
+    "command": "agentCanvasX.renameActiveSession",
+    "when": "!inputFocus || terminalFocus"
+  },
+  {
+    "key": "cmd+alt+f",
+    "command": "agentCanvasX.toggleFullscreenSession",
+    "when": "terminalFocus"
+  },
+  {
+    "key": "cmd+alt+f",
+    "command": "workbench.action.toggleMaximizedPanel",
+    "when": "panelFocus && !terminalFocus"
+  },
+  {
+    "key": "cmd+alt+f",
+    "command": "workbench.action.toggleMaximizeEditorGroup",
+    "when": "!panelFocus && !terminalFocus"
+  }
+]
+```
+
+## Getting Started
+
+1. Open the Command Palette.
+2. Run `Agent Canvas X: Open Workspace`.
+3. Create your first session.
+4. Use the sidebar and hotkeys to change the number of visible sessions and switch layouts.
+
+## Settings
+
+- `agentCanvasX.backgroundSessionTimeoutMinutes`: controls how long detached background sessions stay alive after the last Agent Canvas X window disconnects
+- `agentCanvasX.sidebarTheme`: changes the sidebar theme preset
+- `agentCanvasX.showCloseButtonOnSessionCards`: shows or hides the close button on session cards
+- `agentCanvasX.sendRenameCommandOnSidebarRename`: stages `/rename <new name>` in the terminal when you rename from the sidebar

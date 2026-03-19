@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vite-plus/test";
-import { parseAgentControlChunk } from "./agent-shell-integration";
+import {
+  detectCodexLifecycleEventFromLogLine,
+  parseAgentControlChunk,
+} from "./agent-shell-integration";
 
 describe("parseAgentControlChunk", () => {
   test("should strip agent lifecycle markers from visible terminal output", () => {
@@ -29,5 +32,39 @@ describe("parseAgentControlChunk", () => {
     expect(secondChunk.output).toBe("done");
     expect(secondChunk.pending).toBe("");
     expect(secondChunk.events).toEqual([{ agentName: "codex", eventType: "stop" }]);
+  });
+});
+
+describe("detectCodexLifecycleEventFromLogLine", () => {
+  test("should detect current Codex task start events", () => {
+    const eventType = detectCodexLifecycleEventFromLogLine(
+      '{"timestamp":"2026-03-02T22:59:29.154Z","type":"event_msg","payload":{"type":"task_started","turn_id":"019cb0c7-25ec-7582-908d-61b59ecdd86d"}}',
+    );
+
+    expect(eventType).toBe("start");
+  });
+
+  test("should detect current Codex task completion events", () => {
+    const eventType = detectCodexLifecycleEventFromLogLine(
+      '{"timestamp":"2026-03-02T22:59:37.361Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"019cb0c7-25ec-7582-908d-61b59ecdd86d"}}',
+    );
+
+    expect(eventType).toBe("stop");
+  });
+
+  test("should keep recognizing legacy Superset-style Codex task start events", () => {
+    const eventType = detectCodexLifecycleEventFromLogLine(
+      '{"dir":"to_tui","kind":"codex_event","msg":{"type":"task_started","turn_id":"legacy-turn"}}',
+    );
+
+    expect(eventType).toBe("start");
+  });
+
+  test("should ignore unrelated Codex session log lines", () => {
+    const eventType = detectCodexLifecycleEventFromLogLine(
+      '{"timestamp":"2026-03-02T22:59:37.052Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"thinking"}}',
+    );
+
+    expect(eventType).toBeUndefined();
   });
 });

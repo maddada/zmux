@@ -2,6 +2,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   clampTerminalViewMode,
   createDefaultSessionGridSnapshot,
+  createSidebarHudState,
   createSidebarSessionItems,
   createSessionAlias,
   createSessionRecord,
@@ -19,6 +20,7 @@ import {
   setVisibleCountInSnapshot,
   setViewModeInSnapshot,
   syncSessionOrderInSnapshot,
+  toggleFullscreenSessionInSnapshot,
 } from "./session-grid-state";
 
 describe("createSessionInSnapshot", () => {
@@ -45,12 +47,35 @@ describe("createSessionInSnapshot", () => {
       createSessionAlias(3, 2),
     ]);
   });
+
+  test("should append a new session to the end of the current ordered list", () => {
+    const result = createSessionInSnapshot({
+      focusedSessionId: "session-2",
+      nextSessionNumber: 3,
+      sessions: [createSessionRecord(1, 0), createSessionRecord(2, 2)],
+      viewMode: "grid",
+      visibleCount: 3,
+      visibleSessionIds: ["session-1", "session-2"],
+    });
+
+    expect(result.session?.sessionId).toBe("session-3");
+    expect(result.session?.slotIndex).toBe(2);
+    expect(result.snapshot.sessions.map((session) => session.sessionId)).toEqual([
+      "session-1",
+      "session-2",
+      "session-3",
+    ]);
+    expect(result.snapshot.sessions.map((session) => session.slotIndex)).toEqual([0, 1, 2]);
+    expect(result.snapshot.focusedSessionId).toBe("session-3");
+    expect(result.snapshot.visibleSessionIds).toEqual(["session-1", "session-2", "session-3"]);
+  });
 });
 
 describe("normalizeSessionGridSnapshot", () => {
   test("should clamp visible count and keep the focused session visible", () => {
     const snapshot = normalizeSessionGridSnapshot({
       focusedSessionId: "session-3",
+      fullscreenRestoreVisibleCount: 4,
       nextSessionNumber: 5,
       sessions: [
         createSessionRecord(1, 0),
@@ -66,11 +91,12 @@ describe("normalizeSessionGridSnapshot", () => {
     expect(snapshot.viewMode).toBe("vertical");
     expect(snapshot.visibleCount).toBe(9);
     expect(snapshot.visibleSessionIds).toEqual([
-      "session-3",
       "session-1",
       "session-2",
+      "session-3",
       "session-4",
     ]);
+    expect(snapshot.fullscreenRestoreVisibleCount).toBeUndefined();
   });
 
   test("should fall back to grid mode for legacy snapshots missing or carrying invalid view modes", () => {
@@ -114,6 +140,20 @@ describe("normalizeSessionGridSnapshot", () => {
       createSessionAlias(2, 1),
     ]);
   });
+
+  test("should preserve fullscreen restore count only while the snapshot is in fullscreen mode", () => {
+    const snapshot = normalizeSessionGridSnapshot({
+      focusedSessionId: "session-1",
+      fullscreenRestoreVisibleCount: 4,
+      nextSessionNumber: 3,
+      sessions: [createSessionRecord(1, 0), createSessionRecord(2, 1)],
+      viewMode: "grid",
+      visibleCount: 1,
+      visibleSessionIds: ["session-1"],
+    });
+
+    expect(snapshot.fullscreenRestoreVisibleCount).toBe(4);
+  });
 });
 
 describe("session shortcut labels", () => {
@@ -137,6 +177,40 @@ describe("session shortcut labels", () => {
     );
 
     expect(items.map((item) => item.shortcutLabel)).toEqual(["⌘⌥1", "⌘⌥3"]);
+  });
+});
+
+describe("sidebar HUD state", () => {
+  test("should expose the session card chrome settings", () => {
+    const hud = createSidebarHudState(
+      createDefaultSessionGridSnapshot(),
+      "dark-green",
+      false,
+      false,
+    );
+
+    expect(hud.showCloseButtonOnSessionCards).toBe(false);
+    expect(hud.showHotkeysOnSessionCards).toBe(false);
+    expect(hud.isFocusModeActive).toBe(false);
+  });
+
+  test("should expose when reversible focus mode is active", () => {
+    const hud = createSidebarHudState(
+      {
+        focusedSessionId: "session-2",
+        fullscreenRestoreVisibleCount: 4,
+        nextSessionNumber: 3,
+        sessions: [createSessionRecord(1, 0), createSessionRecord(2, 1)],
+        viewMode: "grid",
+        visibleCount: 1,
+        visibleSessionIds: ["session-2"],
+      },
+      "dark-green",
+      false,
+      false,
+    );
+
+    expect(hud.isFocusModeActive).toBe(true);
   });
 });
 
@@ -174,7 +248,7 @@ describe("visible primary titles", () => {
 });
 
 describe("focusSessionInSnapshot", () => {
-  test("should swap an offscreen session into the focused visible pane", () => {
+  test("should reveal an offscreen session while keeping the visible set slot-ordered", () => {
     const snapshot = {
       focusedSessionId: "session-1",
       nextSessionNumber: 5,
@@ -193,7 +267,7 @@ describe("focusSessionInSnapshot", () => {
 
     expect(result.changed).toBe(true);
     expect(result.snapshot.focusedSessionId).toBe("session-3");
-    expect(result.snapshot.visibleSessionIds).toEqual(["session-3", "session-2"]);
+    expect(result.snapshot.visibleSessionIds).toEqual(["session-2", "session-3"]);
   });
 });
 
@@ -219,7 +293,7 @@ describe("focusDirectionInSnapshot", () => {
 });
 
 describe("setVisibleCountInSnapshot", () => {
-  test("should trim the visible list to the requested count", () => {
+  test("should normalize the visible list into slot order", () => {
     const snapshot = setVisibleCountInSnapshot(
       {
         focusedSessionId: "session-2",
@@ -239,8 +313,103 @@ describe("setVisibleCountInSnapshot", () => {
 
     expect(snapshot.visibleCount).toBe(6);
     expect(snapshot.visibleSessionIds).toEqual([
-      "session-2",
       "session-1",
+      "session-2",
+      "session-3",
+      "session-4",
+    ]);
+  });
+
+  test("should keep focus visible without scrambling slot order when reducing the count", () => {
+    const snapshot = setVisibleCountInSnapshot(
+      {
+        focusedSessionId: "session-4",
+        nextSessionNumber: 5,
+        sessions: [
+          createSessionRecord(1, 0),
+          createSessionRecord(2, 1),
+          createSessionRecord(3, 2),
+          createSessionRecord(4, 3),
+        ],
+        viewMode: "grid",
+        visibleCount: 4,
+        visibleSessionIds: ["session-1", "session-2", "session-3", "session-4"],
+      },
+      3,
+    );
+
+    expect(snapshot.visibleCount).toBe(3);
+    expect(snapshot.focusedSessionId).toBe("session-4");
+    expect(snapshot.visibleSessionIds).toEqual(["session-2", "session-3", "session-4"]);
+  });
+
+  test("should clear fullscreen restore state on an explicit visible-count change", () => {
+    const snapshot = setVisibleCountInSnapshot(
+      {
+        focusedSessionId: "session-1",
+        fullscreenRestoreVisibleCount: 4,
+        nextSessionNumber: 5,
+        sessions: [
+          createSessionRecord(1, 0),
+          createSessionRecord(2, 1),
+          createSessionRecord(3, 2),
+          createSessionRecord(4, 3),
+        ],
+        viewMode: "grid",
+        visibleCount: 1,
+        visibleSessionIds: ["session-1"],
+      },
+      3,
+    );
+
+    expect(snapshot.fullscreenRestoreVisibleCount).toBeUndefined();
+    expect(snapshot.visibleCount).toBe(3);
+  });
+});
+
+describe("toggleFullscreenSessionInSnapshot", () => {
+  test("should enter fullscreen and remember the previous visible count", () => {
+    const snapshot = toggleFullscreenSessionInSnapshot({
+      focusedSessionId: "session-3",
+      nextSessionNumber: 5,
+      sessions: [
+        createSessionRecord(1, 0),
+        createSessionRecord(2, 1),
+        createSessionRecord(3, 2),
+        createSessionRecord(4, 3),
+      ],
+      viewMode: "grid",
+      visibleCount: 4,
+      visibleSessionIds: ["session-1", "session-2", "session-3", "session-4"],
+    });
+
+    expect(snapshot.visibleCount).toBe(1);
+    expect(snapshot.fullscreenRestoreVisibleCount).toBe(4);
+    expect(snapshot.focusedSessionId).toBe("session-3");
+    expect(snapshot.visibleSessionIds).toEqual(["session-3"]);
+  });
+
+  test("should restore the previous visible count on the next toggle", () => {
+    const snapshot = toggleFullscreenSessionInSnapshot({
+      focusedSessionId: "session-3",
+      fullscreenRestoreVisibleCount: 4,
+      nextSessionNumber: 5,
+      sessions: [
+        createSessionRecord(1, 0),
+        createSessionRecord(2, 1),
+        createSessionRecord(3, 2),
+        createSessionRecord(4, 3),
+      ],
+      viewMode: "grid",
+      visibleCount: 1,
+      visibleSessionIds: ["session-3"],
+    });
+
+    expect(snapshot.visibleCount).toBe(4);
+    expect(snapshot.fullscreenRestoreVisibleCount).toBeUndefined();
+    expect(snapshot.visibleSessionIds).toEqual([
+      "session-1",
+      "session-2",
       "session-3",
       "session-4",
     ]);
@@ -248,7 +417,7 @@ describe("setVisibleCountInSnapshot", () => {
 });
 
 describe("setViewModeInSnapshot", () => {
-  test("should update the persisted view mode without changing visible selection", () => {
+  test("should update the persisted view mode while keeping the visible set stable", () => {
     const snapshot = setViewModeInSnapshot(
       {
         focusedSessionId: "session-2",
@@ -263,7 +432,7 @@ describe("setViewModeInSnapshot", () => {
 
     expect(snapshot.viewMode).toBe("horizontal");
     expect(snapshot.visibleCount).toBe(6);
-    expect(snapshot.visibleSessionIds).toEqual(["session-2", "session-1", "session-3"]);
+    expect(snapshot.visibleSessionIds).toEqual(["session-1", "session-2", "session-3"]);
   });
 });
 
@@ -427,7 +596,7 @@ describe("removeSessionInSnapshot", () => {
       "session-3",
     ]);
     expect(result.snapshot.focusedSessionId).toBe("session-3");
-    expect(result.snapshot.visibleSessionIds).toEqual(["session-3", "session-1"]);
+    expect(result.snapshot.visibleSessionIds).toEqual(["session-1", "session-3"]);
   });
 });
 

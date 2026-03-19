@@ -130,6 +130,7 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
     case "ready":
     case "openSettings":
     case "createSession":
+    case "toggleFullscreenSession":
       return true;
 
     case "focusSession":
