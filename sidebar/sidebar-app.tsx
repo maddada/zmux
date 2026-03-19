@@ -2,7 +2,14 @@ import { Tooltip } from "@base-ui/react/tooltip";
 import { DragDropProvider } from "@dnd-kit/react";
 import { isSortable } from "@dnd-kit/react/sortable";
 import { IconFocusCentered } from "@tabler/icons-react";
-import { startTransition, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import {
+  startTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   MAX_GROUP_COUNT,
   type ExtensionToSidebarMessage,
@@ -12,11 +19,11 @@ import {
   type SidebarTheme,
   type TerminalViewMode,
   type VisibleSessionCount,
-} from '../shared/session-grid-contract';
-import { CreateGroupDropTarget } from './create-group-drop-target';
-import { getSidebarDropData } from './sidebar-dnd';
-import { SessionGroupSection } from './session-group-section';
-import { TOOLTIP_DELAY_MS } from './tooltip-delay';
+} from "../shared/session-grid-contract";
+import { CreateGroupDropTarget } from "./create-group-drop-target";
+import { getSidebarDropData } from "./sidebar-dnd";
+import { SessionGroupSection } from "./session-group-section";
+import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import type { WebviewApi } from "./webview-api";
 
 export type SidebarAppProps = {
@@ -43,7 +50,7 @@ const INITIAL_STATE: SidebarState = {
     showCloseButtonOnSessionCards: false,
     showHotkeysOnSessionCards: false,
     theme: getInitialSidebarTheme(),
-    viewMode: 'grid',
+    viewMode: "grid",
     visibleCount: 1,
     visibleSlotLabels: [],
   },
@@ -71,8 +78,11 @@ function getInitialSidebarTheme(): SidebarTheme {
 export function SidebarApp({ vscode }: SidebarAppProps) {
   const [serverState, setServerState] = useState<SidebarState>(INITIAL_STATE);
   const [autoEditingGroupId, setAutoEditingGroupId] = useState<string>();
+  const [draftGroupIds, setDraftGroupIds] = useState<string[] | undefined>();
   const [draggedSessionId, setDraggedSessionId] = useState<string>();
-  const [draftSessionIdsByGroup, setDraftSessionIdsByGroup] = useState<Record<string, string[] | undefined>>({});
+  const [draftSessionIdsByGroup, setDraftSessionIdsByGroup] = useState<
+    Record<string, string[] | undefined>
+  >({});
   const pendingCreateGroupRef = useRef(false);
 
   const requestNewSession = () => {
@@ -109,7 +119,12 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
             hud: event.data.hud,
           };
         });
-        setDraftSessionIdsByGroup((previousDraft) => reconcileDraftSessionIdsByGroup(previousDraft, event.data.groups));
+        setDraftGroupIds((previousDraft) =>
+          reconcileDraftGroupIds(previousDraft, event.data.groups),
+        );
+        setDraftSessionIdsByGroup((previousDraft) =>
+          reconcileDraftSessionIdsByGroup(previousDraft, event.data.groups),
+        );
       });
     };
 
@@ -132,14 +147,23 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
     };
   }, [serverState.hud.theme]);
 
-  const orderedGroups = useMemo(
-    () =>
-      serverState.groups.map((group) => ({
+  const orderedGroups = useMemo(() => {
+    const groupById = new Map(serverState.groups.map((group) => [group.groupId, group] as const));
+    const orderedGroupIds = draftGroupIds
+      ? mergeDraftSessionIds(
+          draftGroupIds,
+          serverState.groups.map((group) => group.groupId),
+        )
+      : serverState.groups.map((group) => group.groupId);
+
+    return orderedGroupIds
+      .map((groupId) => groupById.get(groupId))
+      .filter((group): group is SidebarSessionGroup => group !== undefined)
+      .map((group) => ({
         ...group,
         orderedSessions: applyDraftSessionOrder(group, draftSessionIdsByGroup[group.groupId]),
-      })),
-    [draftSessionIdsByGroup, serverState.groups]
-  );
+      }));
+  }, [draftGroupIds, draftSessionIdsByGroup, serverState.groups]);
 
   const handleDragStart = (event: {
     operation: {
@@ -147,7 +171,11 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
     };
   }) => {
     const sourceData = getSidebarDropData(event.operation.source as { data?: unknown });
-    if (sourceData?.kind !== 'session') {
+    if (sourceData?.kind === "group") {
+      return;
+    }
+
+    if (sourceData?.kind !== "session") {
       return;
     }
 
@@ -174,20 +202,46 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
 
     const sourceData = getSidebarDropData(source);
     const targetData = getSidebarDropData(target as { data?: unknown });
-    if (sourceData?.kind !== 'session' || !targetData) {
+    if (!sourceData || !targetData) {
       return;
     }
 
-    if (targetData.kind === 'create-group') {
-      pendingCreateGroupRef.current = true;
+    if (sourceData.kind === "group") {
+      if (targetData.kind !== "group" || !isSortable(target)) {
+        return;
+      }
+
+      const { initialIndex } = source;
+      const targetIndex = target.index;
+      if (targetIndex == null || initialIndex === targetIndex) {
+        return;
+      }
+
+      const nextGroupIds = moveSessionId(
+        orderedGroups.map((group) => group.groupId),
+        initialIndex,
+        targetIndex,
+      );
+      startTransition(() => {
+        setDraftGroupIds(nextGroupIds);
+      });
       vscode.postMessage({
-        sessionId: sourceData.sessionId,
-        type: 'createGroupFromSession',
+        groupIds: nextGroupIds,
+        type: "syncGroupOrder",
       });
       return;
     }
 
-    if (targetData.kind === 'group') {
+    if (targetData.kind === "create-group") {
+      pendingCreateGroupRef.current = true;
+      vscode.postMessage({
+        sessionId: sourceData.sessionId,
+        type: "createGroupFromSession",
+      });
+      return;
+    }
+
+    if (targetData.kind === "group") {
       if (sourceData.groupId === targetData.groupId) {
         return;
       }
@@ -195,7 +249,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
       vscode.postMessage({
         groupId: targetData.groupId,
         sessionId: sourceData.sessionId,
-        type: 'moveSessionToGroup',
+        type: "moveSessionToGroup",
       });
       return;
     }
@@ -204,7 +258,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
       vscode.postMessage({
         groupId: targetData.groupId,
         sessionId: sourceData.sessionId,
-        type: 'moveSessionToGroup',
+        type: "moveSessionToGroup",
       });
       return;
     }
@@ -223,7 +277,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
     const nextSessionIds = moveSessionId(
       group.orderedSessions.map((session) => session.sessionId),
       initialIndex,
-      targetIndex
+      targetIndex,
     );
     startTransition(() => {
       setDraftSessionIdsByGroup((previousDraft) => ({
@@ -235,32 +289,40 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
     vscode.postMessage({
       groupId: group.groupId,
       sessionIds: nextSessionIds,
-      type: 'syncSessionOrder',
+      type: "syncSessionOrder",
     });
   };
 
   return (
     <Tooltip.Provider delay={TOOLTIP_DELAY_MS}>
-      <div className='stack' data-sidebar-theme={serverState.hud.theme} onDoubleClick={handleSidebarDoubleClick}>
-        <section className='card hud'>
-          <div className='toolbar-row'>
-            <div className='toolbar-section'>
-              <div className='control-label' data-empty-space-blocking='true'>
+      <div
+        className="stack"
+        data-sidebar-theme={serverState.hud.theme}
+        onDoubleClick={handleSidebarDoubleClick}
+      >
+        <section className="card hud">
+          <div className="toolbar-row">
+            <div className="toolbar-section">
+              <div className="control-label" data-empty-space-blocking="true">
                 Layout
               </div>
-              <div className='toolbar-inline-row'>
-                <div className='button-group'>
+              <div className="toolbar-inline-row">
+                <div className="button-group">
                   <ToolbarIconButton
-                    ariaLabel='Toggle focus mode'
+                    ariaLabel="Toggle focus mode"
                     isSelected={serverState.hud.isFocusModeActive}
-                    onClick={() => vscode.postMessage({ type: 'toggleFullscreenSession' })}
+                    onClick={() => vscode.postMessage({ type: "toggleFullscreenSession" })}
                     tooltip={
                       serverState.hud.isFocusModeActive
-                        ? 'Restore previous session layout'
-                        : 'Focus on the active session'
+                        ? "Restore previous session layout"
+                        : "Focus on the active session"
                     }
                   >
-                    <IconFocusCentered aria-hidden='true' className='toolbar-tabler-icon' stroke={1.8} />
+                    <IconFocusCentered
+                      aria-hidden="true"
+                      className="toolbar-tabler-icon"
+                      stroke={1.8}
+                    />
                   </ToolbarIconButton>
                   {MODE_OPTIONS.map((mode) => (
                     <ModeButton
@@ -273,30 +335,30 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
                     />
                   ))}
                 </div>
-                <div className='button-group button-group-end'>
+                <div className="button-group button-group-end">
                   <ToolbarIconButton
-                    ariaLabel='Open sidebar theme settings'
-                    onClick={() => vscode.postMessage({ type: 'openSettings' })}
-                    tooltip='Sidebar Settings'
+                    ariaLabel="Open sidebar theme settings"
+                    onClick={() => vscode.postMessage({ type: "openSettings" })}
+                    tooltip="Sidebar Settings"
                   >
                     <SettingsIcon />
                   </ToolbarIconButton>
                 </div>
               </div>
             </div>
-            <div className='toolbar-section'>
-              <div className='control-label' data-empty-space-blocking='true'>
+            <div className="toolbar-section">
+              <div className="control-label" data-empty-space-blocking="true">
                 Sessions Shown
               </div>
-              <div className='button-group'>
+              <div className="button-group">
                 {COUNT_OPTIONS.map((visibleCount) => (
                   <button
                     key={visibleCount}
-                    className='toolbar-button'
+                    className="toolbar-button"
                     data-dimmed={String(serverState.hud.isFocusModeActive)}
                     data-selected={String(serverState.hud.highlightedVisibleCount === visibleCount)}
-                    onClick={() => vscode.postMessage({ type: 'setVisibleCount', visibleCount })}
-                    type='button'
+                    onClick={() => vscode.postMessage({ type: "setVisibleCount", visibleCount })}
+                    type="button"
                   >
                     {visibleCount}
                   </button>
@@ -304,22 +366,24 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
               </div>
             </div>
           </div>
-          <div className='action-row'>
-            <button className='primary' onClick={requestNewSession} type='button'>
+          <div className="action-row">
+            <button className="primary" onClick={requestNewSession} type="button">
               New Session
             </button>
           </div>
         </section>
-        <section className='card'>
-          <div className='eyebrow' data-empty-space-blocking='true'>
-            Sessions
+        <section className="card">
+          <div className="eyebrow" data-empty-space-blocking="true">
+            Groups
           </div>
           <DragDropProvider onDragEnd={handleDragEnd} onDragStart={handleDragStart}>
-            <div className='group-list'>
-              {orderedGroups.map((group) => (
+            <div className="group-list">
+              {orderedGroups.map((group, groupIndex) => (
                 <SessionGroupSection
                   autoEdit={autoEditingGroupId === group.groupId}
+                  canClose={orderedGroups.length > 1}
                   group={group}
+                  index={groupIndex}
                   key={group.groupId}
                   onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
                   orderedSessions={group.orderedSessions}
@@ -328,11 +392,13 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
                   vscode={vscode}
                 />
               ))}
-              <CreateGroupDropTarget isVisible={Boolean(draggedSessionId) && orderedGroups.length < MAX_GROUP_COUNT} />
+              <CreateGroupDropTarget
+                isVisible={Boolean(draggedSessionId) && orderedGroups.length < MAX_GROUP_COUNT}
+              />
             </div>
           </DragDropProvider>
           {orderedGroups.every((group) => group.sessions.length === 0) ? (
-            <div className='empty' data-empty-space-blocking='true'>
+            <div className="empty" data-empty-space-blocking="true">
               Create the first session to start the workspace.
             </div>
           ) : null}
@@ -479,16 +545,18 @@ function mergeDraftSessionIds(
 
 function applyDraftSessionOrder(
   group: SidebarSessionGroup,
-  draftSessionIds: readonly string[] | undefined
+  draftSessionIds: readonly string[] | undefined,
 ): SidebarSessionItem[] {
   if (!draftSessionIds) {
     return group.sessions;
   }
 
-  const sessionById = new Map(group.sessions.map((session) => [session.sessionId, session] as const));
+  const sessionById = new Map(
+    group.sessions.map((session) => [session.sessionId, session] as const),
+  );
   return mergeDraftSessionIds(
     draftSessionIds,
-    group.sessions.map((session) => session.sessionId)
+    group.sessions.map((session) => session.sessionId),
   )
     .map((sessionId) => sessionById.get(sessionId))
     .filter((session): session is SidebarSessionItem => session !== undefined);
@@ -496,7 +564,7 @@ function applyDraftSessionOrder(
 
 function reconcileDraftSessionIdsByGroup(
   draftSessionIdsByGroup: Readonly<Record<string, string[] | undefined>>,
-  groups: readonly SidebarSessionGroup[]
+  groups: readonly SidebarSessionGroup[],
 ): Record<string, string[] | undefined> {
   const nextDraftSessionIdsByGroup: Record<string, string[] | undefined> = {};
 
@@ -514,6 +582,20 @@ function reconcileDraftSessionIdsByGroup(
   }
 
   return nextDraftSessionIdsByGroup;
+}
+
+function reconcileDraftGroupIds(
+  draftGroupIds: readonly string[] | undefined,
+  groups: readonly SidebarSessionGroup[],
+): string[] | undefined {
+  if (!draftGroupIds) {
+    return undefined;
+  }
+
+  const syncedGroupIds = groups.map((group) => group.groupId);
+  const nextDraftGroupIds = mergeDraftSessionIds(draftGroupIds, syncedGroupIds);
+
+  return haveSameSessionOrder(nextDraftGroupIds, syncedGroupIds) ? undefined : nextDraftGroupIds;
 }
 
 function haveSameSessionOrder(left: readonly string[], right: readonly string[]): boolean {
@@ -541,7 +623,7 @@ function isViewModeDisabled(
 
 function findCreatedGroupId(
   previousGroups: readonly SidebarSessionGroup[],
-  nextGroups: readonly SidebarSessionGroup[]
+  nextGroups: readonly SidebarSessionGroup[],
 ): string | undefined {
   const previousGroupIds = new Set(previousGroups.map((group) => group.groupId));
   return nextGroups.find((group) => !previousGroupIds.has(group.groupId))?.groupId;

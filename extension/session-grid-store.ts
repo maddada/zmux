@@ -18,16 +18,18 @@ import {
   getActiveGroup,
   getGroupById,
   getGroupForSession,
+  moveSessionToGroupInWorkspace,
   normalizeGroupedSessionWorkspaceSnapshot,
+  removeGroupInWorkspace,
   removeSessionInWorkspace,
   renameGroupInWorkspace,
   renameSessionAliasInWorkspace,
   setSessionTitleInWorkspace,
   setViewModeInWorkspace,
   setVisibleCountInWorkspace,
+  syncGroupOrderInWorkspace,
   syncSessionOrderInWorkspace,
   toggleFullscreenSessionInWorkspace,
-  moveSessionToGroupInWorkspace,
 } from "../shared/grouped-session-workspace-state";
 import { focusDirectionInSnapshot } from "../shared/session-grid-state";
 
@@ -149,6 +151,16 @@ export class SessionGridStore {
     return result.changed;
   }
 
+  public async removeGroup(groupId: string): Promise<boolean> {
+    const result = removeGroupInWorkspace(this.snapshot, groupId);
+    this.snapshot = result.snapshot;
+    if (result.changed) {
+      await this.persist();
+    }
+
+    return result.changed;
+  }
+
   public async reset(): Promise<void> {
     this.snapshot = normalizeGroupedSessionWorkspaceSnapshot(undefined);
     await this.persist();
@@ -201,6 +213,16 @@ export class SessionGridStore {
 
   public async syncSessionOrder(groupId: string, sessionIds: readonly string[]): Promise<boolean> {
     const result = syncSessionOrderInWorkspace(this.snapshot, groupId, sessionIds);
+    this.snapshot = result.snapshot;
+    if (result.changed) {
+      await this.persist();
+    }
+
+    return result.changed;
+  }
+
+  public async syncGroupOrder(groupIds: readonly string[]): Promise<boolean> {
+    const result = syncGroupOrderInWorkspace(this.snapshot, groupIds);
     this.snapshot = result.snapshot;
     if (result.changed) {
       await this.persist();

@@ -131,6 +131,10 @@ export type SidebarToExtensionMessage =
       type: "createSession";
     }
   | {
+      type: "createSessionInGroup";
+      groupId: string;
+    }
+  | {
       type: "focusGroup";
       groupId: string;
     }
@@ -161,6 +165,10 @@ export type SidebarToExtensionMessage =
       title: string;
     }
   | {
+      type: "closeGroup";
+      groupId: string;
+    }
+  | {
       type: "closeSession";
       sessionId: string;
     }
@@ -185,6 +193,10 @@ export type SidebarToExtensionMessage =
       type: "syncSessionOrder";
       groupId: string;
       sessionIds: string[];
+    }
+  | {
+      type: "syncGroupOrder";
+      groupIds: string[];
     };
 
 export function clampVisibleSessionCount(value: number): VisibleSessionCount {

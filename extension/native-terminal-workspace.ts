@@ -392,25 +392,29 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async focusGroup(groupId: string): Promise<void> {
-    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
-    const changed = await this.store.focusGroup(groupId);
-    if (!changed) {
+    if (!this.store.getGroup(groupId)) {
       return;
     }
 
-    await this.updateFocusedTerminal(previousVisibleSessionIds, true);
-    await this.refreshSidebar();
+    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
+    const changed = await this.store.focusGroup(groupId);
+    await this.updateFocusedTerminal(previousVisibleSessionIds, false);
+    if (changed) {
+      await this.refreshSidebar();
+    }
   }
 
   public async focusGroupByIndex(groupIndex: number): Promise<void> {
-    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
-    const changed = await this.store.focusGroupByIndex(groupIndex);
-    if (!changed) {
+    if (!this.store.getSnapshot().groups[groupIndex - 1]) {
       return;
     }
 
-    await this.updateFocusedTerminal(previousVisibleSessionIds, true);
-    await this.refreshSidebar();
+    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
+    const changed = await this.store.focusGroupByIndex(groupIndex);
+    await this.updateFocusedTerminal(previousVisibleSessionIds, false);
+    if (changed) {
+      await this.refreshSidebar();
+    }
   }
 
   public async renameGroup(groupId: string, title: string): Promise<void> {
@@ -432,6 +436,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.refreshSidebar();
   }
 
+  public async syncGroupOrder(groupIds: readonly string[]): Promise<void> {
+    const changed = await this.store.syncGroupOrder(groupIds);
+    if (!changed) {
+      return;
+    }
+
+    await this.refreshSidebar();
+  }
+
   public async moveSessionToGroup(sessionId: string, groupId: string): Promise<void> {
     const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
     const changed = await this.store.moveSessionToGroup(sessionId, groupId);
@@ -439,7 +452,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    await this.updateFocusedTerminal(previousVisibleSessionIds, true);
+    await this.updateFocusedTerminal(previousVisibleSessionIds, false);
     await this.refreshSidebar();
   }
 
@@ -450,7 +463,55 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    await this.updateFocusedTerminal(previousVisibleSessionIds, true);
+    await this.updateFocusedTerminal(previousVisibleSessionIds, false);
+    await this.refreshSidebar();
+  }
+
+  public async createSessionInGroup(groupId: string): Promise<void> {
+    if (!this.store.getGroup(groupId)) {
+      return;
+    }
+
+    const previousVisibleSessionIds = this.getActiveSnapshot().visibleSessionIds;
+    await this.store.focusGroup(groupId);
+
+    const sessionRecord = await this.store.createSession();
+    if (!sessionRecord) {
+      void vscode.window.showWarningMessage("The workspace already has 9 sessions.");
+      await this.updateFocusedTerminal(previousVisibleSessionIds, false);
+      await this.refreshSidebar();
+      return;
+    }
+
+    await this.createOrAttachSession(sessionRecord.sessionId);
+    await this.updateFocusedTerminal(previousVisibleSessionIds, false);
+    await this.refreshSidebar();
+  }
+
+  public async closeGroup(groupId: string): Promise<void> {
+    const group = this.store.getGroup(groupId);
+    if (!group || this.store.getSnapshot().groups.length <= 1) {
+      return;
+    }
+
+    for (const sessionRecord of group.snapshot.sessions) {
+      this.disposeProjection(sessionRecord.sessionId);
+
+      try {
+        await this.client.kill(sessionRecord.sessionId);
+      } catch {
+        // ignore stale daemon sessions and continue removing local state
+      }
+
+      this.sessions.delete(sessionRecord.sessionId);
+    }
+
+    const removed = await this.store.removeGroup(groupId);
+    if (!removed) {
+      return;
+    }
+
+    await this.reconcileVisibleTerminals();
     await this.refreshSidebar();
   }
 
@@ -609,6 +670,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         await this.createSession();
         return;
 
+      case "createSessionInGroup":
+        await this.createSessionInGroup(message.groupId);
+        return;
+
       case "focusGroup":
         await this.focusGroup(message.groupId);
         return;
@@ -650,6 +715,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         await this.renameGroup(message.groupId, message.title);
         return;
 
+      case "closeGroup":
+        await this.closeGroup(message.groupId);
+        return;
+
       case "closeSession":
         if (message.sessionId) {
           await this.closeSession(message.sessionId);
@@ -678,6 +747,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
       case "syncSessionOrder":
         await this.syncSessionOrder(message.groupId, message.sessionIds);
+        return;
+
+      case "syncGroupOrder":
+        await this.syncGroupOrder(message.groupIds);
         return;
     }
   }

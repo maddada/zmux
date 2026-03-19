@@ -12,8 +12,10 @@ import {
   moveSessionToGroupInWorkspace,
   normalizeGroupedSessionWorkspaceSnapshot,
   renameGroupInWorkspace,
+  removeGroupInWorkspace,
   setViewModeInWorkspace,
   setVisibleCountInWorkspace,
+  syncGroupOrderInWorkspace,
   toggleFullscreenSessionInWorkspace,
 } from "./grouped-session-workspace-state";
 
@@ -200,5 +202,98 @@ describe("active-group preferences", () => {
 
     expect(result.changed).toBe(true);
     expect(result.snapshot.groups[0]?.title).toBe("Client A");
+  });
+
+  test("should allow removing the active main group when another group remains", () => {
+    const result = removeGroupInWorkspace(
+      {
+        activeGroupId: DEFAULT_MAIN_GROUP_ID,
+        groups: [
+          {
+            groupId: DEFAULT_MAIN_GROUP_ID,
+            snapshot: {
+              focusedSessionId: "session-1",
+              sessions: [createSessionRecord(1, 0)],
+              viewMode: "grid",
+              visibleCount: 1,
+              visibleSessionIds: ["session-1"],
+            },
+            title: "Main",
+          },
+          {
+            groupId: "group-2",
+            snapshot: {
+              focusedSessionId: "session-2",
+              sessions: [createSessionRecord(2, 0)],
+              viewMode: "grid",
+              visibleCount: 1,
+              visibleSessionIds: ["session-2"],
+            },
+            title: "Client B",
+          },
+        ],
+        nextGroupNumber: 3,
+        nextSessionNumber: 3,
+      },
+      DEFAULT_MAIN_GROUP_ID,
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.snapshot.activeGroupId).toBe("group-2");
+    expect(result.snapshot.groups.map((group) => group.groupId)).toEqual(["group-2"]);
+  });
+
+  test("should reorder groups when the incoming order matches the current set", () => {
+    const result = syncGroupOrderInWorkspace(
+      {
+        activeGroupId: DEFAULT_MAIN_GROUP_ID,
+        groups: [
+          {
+            groupId: DEFAULT_MAIN_GROUP_ID,
+            snapshot: {
+              focusedSessionId: undefined,
+              sessions: [],
+              viewMode: "grid",
+              visibleCount: 1,
+              visibleSessionIds: [],
+            },
+            title: "Main",
+          },
+          {
+            groupId: "group-2",
+            snapshot: {
+              focusedSessionId: undefined,
+              sessions: [],
+              viewMode: "grid",
+              visibleCount: 1,
+              visibleSessionIds: [],
+            },
+            title: "Client B",
+          },
+          {
+            groupId: "group-3",
+            snapshot: {
+              focusedSessionId: undefined,
+              sessions: [],
+              viewMode: "grid",
+              visibleCount: 1,
+              visibleSessionIds: [],
+            },
+            title: "Client C",
+          },
+        ],
+        nextGroupNumber: 4,
+        nextSessionNumber: 1,
+      },
+      ["group-3", DEFAULT_MAIN_GROUP_ID, "group-2"],
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.snapshot.groups.map((group) => group.groupId)).toEqual([
+      "group-3",
+      DEFAULT_MAIN_GROUP_ID,
+      "group-2",
+    ]);
+    expect(result.snapshot.activeGroupId).toBe(DEFAULT_MAIN_GROUP_ID);
   });
 });

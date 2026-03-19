@@ -211,6 +211,37 @@ export function renameGroupInWorkspace(
   };
 }
 
+export function removeGroupInWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  groupId: string,
+): { changed: boolean; snapshot: GroupedSessionWorkspaceSnapshot } {
+  const normalizedSnapshot = normalizeGroupedSessionWorkspaceSnapshot(snapshot);
+  if (
+    normalizedSnapshot.groups.length <= 1 ||
+    !normalizedSnapshot.groups.some((group) => group.groupId === groupId)
+  ) {
+    return { changed: false, snapshot: normalizedSnapshot };
+  }
+
+  const removedGroupIndex = normalizedSnapshot.groups.findIndex(
+    (group) => group.groupId === groupId,
+  );
+  const groups = normalizedSnapshot.groups.filter((group) => group.groupId !== groupId);
+  const nextActiveGroupId =
+    normalizedSnapshot.activeGroupId !== groupId
+      ? normalizedSnapshot.activeGroupId
+      : (groups[Math.max(0, removedGroupIndex - 1)] ?? groups[0]).groupId;
+
+  return {
+    changed: true,
+    snapshot: {
+      ...normalizedSnapshot,
+      activeGroupId: nextActiveGroupId,
+      groups,
+    },
+  };
+}
+
 export function renameSessionAliasInWorkspace(
   snapshot: GroupedSessionWorkspaceSnapshot,
   sessionId: string,
@@ -286,6 +317,48 @@ export function syncSessionOrderInWorkspace(
           groups: updateGroup(normalizedSnapshot.groups, groupId, result.snapshot),
         }
       : normalizedSnapshot,
+  };
+}
+
+export function syncGroupOrderInWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  groupIds: readonly string[],
+): { changed: boolean; snapshot: GroupedSessionWorkspaceSnapshot } {
+  const normalizedSnapshot = normalizeGroupedSessionWorkspaceSnapshot(snapshot);
+  const currentGroupIds = normalizedSnapshot.groups.map((group) => group.groupId);
+  if (groupIds.length !== currentGroupIds.length) {
+    return { changed: false, snapshot: normalizedSnapshot };
+  }
+
+  const hasSameOrder = currentGroupIds.every((groupId, index) => groupId === groupIds[index]);
+  if (hasSameOrder) {
+    return { changed: false, snapshot: normalizedSnapshot };
+  }
+
+  const currentGroupIdSet = new Set(currentGroupIds);
+  const incomingGroupIdSet = new Set(groupIds);
+  if (
+    incomingGroupIdSet.size !== groupIds.length ||
+    currentGroupIds.some((groupId) => !incomingGroupIdSet.has(groupId)) ||
+    groupIds.some((groupId) => !currentGroupIdSet.has(groupId))
+  ) {
+    return { changed: false, snapshot: normalizedSnapshot };
+  }
+
+  const groupsById = new Map(normalizedSnapshot.groups.map((group) => [group.groupId, group]));
+  return {
+    changed: true,
+    snapshot: {
+      ...normalizedSnapshot,
+      groups: groupIds.map((groupId) => {
+        const group = groupsById.get(groupId);
+        if (!group) {
+          throw new Error(`Missing group for reorder: ${groupId}`);
+        }
+
+        return group;
+      }),
+    },
   };
 }
 

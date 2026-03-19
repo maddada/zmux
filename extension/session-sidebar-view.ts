@@ -133,6 +133,9 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
     case "toggleFullscreenSession":
       return true;
 
+    case "createSessionInGroup":
+      return typeof message.groupId === "string" && message.groupId.length > 0;
+
     case "focusGroup":
       return typeof message.groupId === "string" && message.groupId.length > 0;
 
@@ -193,6 +196,15 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
         message.sessionIds.every(
           (sessionId) => typeof sessionId === "string" && sessionId.length > 0,
         )
+      );
+
+    case "closeGroup":
+      return typeof message.groupId === "string" && message.groupId.length > 0;
+
+    case "syncGroupOrder":
+      return (
+        Array.isArray(message.groupIds) &&
+        message.groupIds.every((groupId) => typeof groupId === "string" && groupId.length > 0)
       );
 
     default:
