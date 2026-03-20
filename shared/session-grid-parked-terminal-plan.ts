@@ -20,7 +20,7 @@ export type ParkedTerminalReconcilePlan =
   | {
       currentVisibleSessionIds: string[];
       nextVisibleSessionIds: string[];
-      reason: "layout-shape-changed" | "missing-current-layout";
+      reason: "layout-shape-changed" | "missing-current-layout" | "unsupported-transfer";
       strategy: "rebuild";
     }
   | {
@@ -41,6 +41,20 @@ export function createParkedTerminalReconcilePlan(
   const basePlan = createVisibleSessionReconcilePlan(currentSnapshot, nextSnapshot);
   if (basePlan.strategy === "rebuild") {
     return basePlan;
+  }
+
+  // The current parked-terminal backend can only avoid a layout reset when the
+  // visible slot topology stays identical. Any visible-slot replacement or
+  // reorder would require promoting a terminal into an occupied editor group,
+  // and VS Code may materialize that as a brand new editor group instead of a
+  // tab replacement. That is what leaves behind blank groups in focus mode.
+  if (basePlan.hasChanges) {
+    return {
+      currentVisibleSessionIds: basePlan.currentVisibleSessionIds,
+      nextVisibleSessionIds: basePlan.nextVisibleSessionIds,
+      reason: "unsupported-transfer",
+      strategy: "rebuild",
+    };
   }
 
   const steps = createTransferSteps(

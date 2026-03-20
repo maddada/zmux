@@ -324,11 +324,19 @@ button:disabled {
   letter-spacing: 0.04em;
 }
 
-.toolbar-inline-row {
-  display: flex;
-  align-items: center;
+.toolbar-layout-shell {
+  display: grid;
+  align-items: start;
   gap: 12px;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "layout utility";
+}
+
+.toolbar-layout-block {
+  display: grid;
+  gap: 6px;
+  grid-area: layout;
+  min-width: 0;
 }
 
 .button-group {
@@ -344,12 +352,32 @@ button:disabled {
   margin: 2px 2px;
 }
 
-.toolbar-divider[data-active="true"] {
-  background: color-mix(in srgb, var(--app-button-background) 45%, var(--app-border) 55%);
+.toolbar-mode-group,
+.toolbar-utility-group {
+  flex-wrap: nowrap;
 }
 
-.button-group-end {
-  margin-left: auto;
+.toolbar-mode-group {
+  min-width: 0;
+}
+
+.toolbar-utility-group {
+  flex: none;
+  grid-area: utility;
+  justify-self: end;
+}
+
+@media (max-width: 340px) {
+  .toolbar-layout-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "utility"
+      "layout";
+  }
+
+  .toolbar-utility-group {
+    justify-self: start;
+  }
 }
 
 .toolbar-button {

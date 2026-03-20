@@ -53,6 +53,7 @@ import type { TerminalWorkspaceBackend } from "./terminal-workspace-backend";
 import {
   createDisconnectedSessionSnapshot,
   createEmptyWorkspaceSessionSnapshot,
+  getDefaultWorkspaceCwd,
   getSessionActivityLabel,
   getWorkspaceId,
   getWorkspaceStorageKey,
@@ -404,17 +405,22 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    const activeSnapshot = this.getActiveSnapshot();
-    const sessionId = activeSnapshot.focusedSessionId ?? activeSnapshot.visibleSessionIds[0];
-    if (!sessionId) {
-      void vscode.window.showInformationMessage("No active VSmux terminal is available.");
+    if (!(await this.ensureShellSpawnAllowed())) {
       return;
     }
 
-    await this.backend.writeText(sessionId, command, true);
+    const terminal = vscode.window.createTerminal({
+      cwd: getDefaultWorkspaceCwd(),
+      iconPath: new vscode.ThemeIcon("terminal"),
+      isTransient: true,
+      location: vscode.TerminalLocation.Panel,
+      name: `VSmux: ${commandButton?.name ?? "Command"}`,
+    });
+    terminal.show(true);
+    terminal.sendText(command, true);
 
     if (commandButton?.closeTerminalOnExit) {
-      await this.backend.writeText(sessionId, "exit", true);
+      terminal.sendText("exit", true);
     }
   }
 

@@ -379,44 +379,42 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
         <section className="card hud">
           <div className="toolbar-row">
             <div className="toolbar-section">
-              <div className="control-label" data-empty-space-blocking="true">
-                Layout
-              </div>
-              <div className="toolbar-inline-row">
-                <div className="button-group">
-                  <ToolbarIconButton
-                    ariaLabel="Toggle focus mode"
-                    isSelected={serverState.hud.isFocusModeActive}
-                    onClick={() => vscode.postMessage({ type: "toggleFullscreenSession" })}
-                    tooltip={
-                      serverState.hud.isFocusModeActive
-                        ? "Restore previous session layout"
-                        : "Focus on the active session"
-                    }
-                  >
-                    <IconFocusCentered
-                      aria-hidden="true"
-                      className="toolbar-tabler-icon"
-                      stroke={1.8}
-                    />
-                  </ToolbarIconButton>
-                  <div
-                    aria-hidden="true"
-                    className="toolbar-divider"
-                    data-active={String(serverState.hud.isFocusModeActive)}
-                  />
-                  {MODE_OPTIONS.map((mode) => (
-                    <ModeButton
-                      isDimmed={serverState.hud.isFocusModeActive}
-                      key={mode.viewMode}
-                      mode={mode}
-                      viewMode={serverState.hud.viewMode}
-                      visibleCount={serverState.hud.visibleCount}
-                      vscode={vscode}
-                    />
-                  ))}
+              <div className="toolbar-layout-shell">
+                <div className="toolbar-layout-block">
+                  <div className="control-label" data-empty-space-blocking="true">
+                    Layout
+                  </div>
+                  <div className="button-group toolbar-mode-group">
+                    <ToolbarIconButton
+                      ariaLabel="Toggle focus mode"
+                      isSelected={serverState.hud.isFocusModeActive}
+                      onClick={() => vscode.postMessage({ type: "toggleFullscreenSession" })}
+                      tooltip={
+                        serverState.hud.isFocusModeActive
+                          ? "Restore previous session layout"
+                          : "Focus on the active session"
+                      }
+                    >
+                      <IconFocusCentered
+                        aria-hidden="true"
+                        className="toolbar-tabler-icon"
+                        stroke={1.8}
+                      />
+                    </ToolbarIconButton>
+                    <div aria-hidden="true" className="toolbar-divider" />
+                    {MODE_OPTIONS.map((mode) => (
+                      <ModeButton
+                        isDimmed={serverState.hud.isFocusModeActive}
+                        key={mode.viewMode}
+                        mode={mode}
+                        viewMode={serverState.hud.viewMode}
+                        visibleCount={serverState.hud.visibleCount}
+                        vscode={vscode}
+                      />
+                    ))}
+                  </div>
                 </div>
-                <div className="button-group button-group-end">
+                <div className="button-group toolbar-utility-group">
                   <ToolbarIconButton
                     ariaLabel={
                       serverState.hud.completionBellEnabled

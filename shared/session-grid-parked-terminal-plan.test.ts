@@ -7,26 +7,17 @@ import {
 import { createParkedTerminalReconcilePlan } from "./session-grid-parked-terminal-plan";
 
 describe("createParkedTerminalReconcilePlan", () => {
-  test("should promote the incoming hidden session before demoting the outgoing visible session", () => {
-    const currentSnapshot = createSnapshot([1, 2, 3], ["session-1", "session-2"], "vertical");
-    const nextSnapshot = createSnapshot([1, 2, 3], ["session-1", "session-3"], "vertical");
+  test("should rebuild hidden-session replacement plans that would promote into an occupied slot", () => {
+    const currentSnapshot = createSnapshot([1, 2], ["session-1"], "grid");
+    const nextSnapshot = createSnapshot([1, 2], ["session-2"], "grid");
     const plan = createParkedTerminalReconcilePlan(currentSnapshot, nextSnapshot);
 
-    expect(plan.strategy).toBe("transfer");
-    if (plan.strategy !== "transfer") {
-      throw new Error("Expected transfer plan");
-    }
-
-    expect(plan.promoteSteps).toEqual([{ sessionId: "session-3", slotIndex: 1, type: "promote" }]);
-    expect(plan.demoteSteps).toEqual([{ sessionId: "session-2", slotIndex: 1, type: "demote" }]);
-    expect(plan.steps).toEqual([
-      { sessionId: "session-3", slotIndex: 1, type: "promote" },
-      { sessionId: "session-2", slotIndex: 1, type: "demote" },
-    ]);
-    expect(plan.unchangedSlots).toEqual([{ sessionId: "session-1", slotIndex: 0 }]);
-    expect(applyTransferSteps(currentSnapshot.visibleSessionIds, plan.steps)).toEqual(
-      nextSnapshot.visibleSessionIds,
-    );
+    expect(plan).toEqual({
+      currentVisibleSessionIds: ["session-1"],
+      nextVisibleSessionIds: ["session-2"],
+      reason: "unsupported-transfer",
+      strategy: "rebuild",
+    });
   });
 
   test("should return a transfer no-op when the visible sessions already match", () => {
@@ -73,7 +64,7 @@ describe("createParkedTerminalReconcilePlan", () => {
     });
   });
 
-  test("should resolve backfill by using panel transit steps instead of rebuilding", () => {
+  test("should rebuild backfill plans that require replacing occupied visible slots", () => {
     const currentSnapshot = createSnapshot(
       [1, 2, 3, 4],
       ["session-1", "session-2", "session-3"],
@@ -86,23 +77,15 @@ describe("createParkedTerminalReconcilePlan", () => {
     );
     const plan = createParkedTerminalReconcilePlan(currentSnapshot, nextSnapshot);
 
-    expect(plan.strategy).toBe("transfer");
-    if (plan.strategy !== "transfer") {
-      throw new Error("Expected transfer plan");
-    }
-
-    expect(plan.steps).toEqual([
-      { sessionId: "session-4", slotIndex: 2, type: "promote" },
-      { sessionId: "session-3", slotIndex: 2, type: "demote" },
-      { sessionId: "session-3", slotIndex: 1, type: "promote" },
-      { sessionId: "session-2", slotIndex: 1, type: "demote" },
-    ]);
-    expect(applyTransferSteps(currentSnapshot.visibleSessionIds, plan.steps)).toEqual(
-      nextSnapshot.visibleSessionIds,
-    );
+    expect(plan).toEqual({
+      currentVisibleSessionIds: ["session-1", "session-2", "session-3"],
+      nextVisibleSessionIds: ["session-1", "session-3", "session-4"],
+      reason: "unsupported-transfer",
+      strategy: "rebuild",
+    });
   });
 
-  test("should resolve visible-session reorder cycles with the minimum panel break sequence", () => {
+  test("should rebuild visible-session reorder plans that would need in-place slot replacement", () => {
     const currentSnapshot = createSnapshot(
       [1, 2, 3, 4],
       ["session-1", "session-2", "session-3", "session-4"],
@@ -115,20 +98,12 @@ describe("createParkedTerminalReconcilePlan", () => {
     );
     const plan = createParkedTerminalReconcilePlan(currentSnapshot, nextSnapshot);
 
-    expect(plan.strategy).toBe("transfer");
-    if (plan.strategy !== "transfer") {
-      throw new Error("Expected transfer plan");
-    }
-
-    expect(plan.steps).toEqual([
-      { sessionId: "session-3", slotIndex: 2, type: "demote" },
-      { sessionId: "session-3", slotIndex: 1, type: "promote" },
-      { sessionId: "session-2", slotIndex: 1, type: "demote" },
-      { sessionId: "session-2", slotIndex: 2, type: "promote" },
-    ]);
-    expect(applyTransferSteps(currentSnapshot.visibleSessionIds, plan.steps)).toEqual(
-      nextSnapshot.visibleSessionIds,
-    );
+    expect(plan).toEqual({
+      currentVisibleSessionIds: ["session-1", "session-2", "session-3", "session-4"],
+      nextVisibleSessionIds: ["session-1", "session-3", "session-2", "session-4"],
+      reason: "unsupported-transfer",
+      strategy: "rebuild",
+    });
   });
 });
 
@@ -147,31 +122,4 @@ function createSnapshot(
     visibleCount: visibleSessionIds.length === 0 ? 1 : visibleSessionIds.length,
     visibleSessionIds: [...visibleSessionIds],
   };
-}
-
-function applyTransferSteps(
-  currentVisibleSessionIds: readonly string[],
-  steps: ReadonlyArray<{ sessionId: string; slotIndex: number; type: "promote" | "demote" }>,
-): Array<string | undefined> {
-  const currentSlots = currentVisibleSessionIds.map((sessionId) => [sessionId]);
-  const panelSessionIds = new Set<string>();
-
-  for (const step of steps) {
-    if (step.type === "demote") {
-      expect(currentSlots[step.slotIndex]?.includes(step.sessionId)).toBe(true);
-      currentSlots[step.slotIndex] = currentSlots[step.slotIndex]?.filter(
-        (sessionId) => sessionId !== step.sessionId,
-      );
-      panelSessionIds.add(step.sessionId);
-      continue;
-    }
-
-    expect(
-      panelSessionIds.has(step.sessionId) || !currentVisibleSessionIds.includes(step.sessionId),
-    ).toBe(true);
-    currentSlots[step.slotIndex] = [...(currentSlots[step.slotIndex] ?? []), step.sessionId];
-    panelSessionIds.delete(step.sessionId);
-  }
-
-  return currentSlots.map((slotSessions) => slotSessions?.at(-1));
 }

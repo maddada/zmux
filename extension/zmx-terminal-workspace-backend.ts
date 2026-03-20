@@ -344,11 +344,7 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
     // zmx does not need dynamic backend configuration today.
   }
 
-  public async writeText(
-    sessionId: string,
-    data: string,
-    shouldExecute = false,
-  ): Promise<void> {
+  public async writeText(sessionId: string, data: string, shouldExecute = false): Promise<void> {
     const projection = this.projections.get(sessionId);
     if (!projection || data.length === 0) {
       return;
@@ -538,10 +534,13 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
       return;
     }
 
-    await this.showTerminal(projection.terminal, false);
     await this.runUiAction(async () => {
       await focusEditorGroupByIndex(visibleIndex);
     });
+    // Keep editor focus on the destination group while activating the terminal.
+    // Focusing the panel first can cause moveToEditor to materialize a brand new
+    // editor group instead of populating the intended one.
+    await this.showTerminal(projection.terminal, true);
     await this.runUiAction(() => moveActiveTerminalToEditor());
     projection.location = {
       type: "editor",
