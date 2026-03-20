@@ -415,6 +415,111 @@ button:disabled {
   gap: 8px;
 }
 
+.commands-section {
+  display: grid;
+  gap: 10px;
+}
+
+.commands-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.agents-grid,
+.commands-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-button,
+.command-button {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-card-active) 90%, transparent);
+  border-color: color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 12px;
+  color: color-mix(in srgb, var(--app-foreground) 90%, var(--app-muted) 10%);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: center;
+  letter-spacing: 0.02em;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.agent-button:hover,
+.agent-button:focus-visible,
+.command-button:hover,
+.command-button:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 14%, var(--app-card-active) 86%);
+  border-color: color-mix(in srgb, var(--app-button-background) 48%, var(--app-border));
+  outline: none;
+}
+
+.agent-button {
+  min-width: 0;
+}
+
+.agent-button[data-icon-only="true"] {
+  min-width: 40px;
+  padding: 0;
+}
+
+.agent-button-icon-shell {
+  align-items: center;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.agent-button-icon {
+  display: block;
+  height: 18px;
+  object-fit: contain;
+  width: 18px;
+}
+
+.agent-button-monogram {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-button-background) 20%, var(--app-card-active) 80%);
+  border: 1px solid color-mix(in srgb, var(--app-button-background) 34%, var(--app-border));
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--app-foreground) 94%, var(--app-muted) 6%);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  height: 18px;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  width: 18px;
+}
+
+.command-button[data-configured="true"] {
+  background: color-mix(in srgb, var(--app-button-background) 16%, var(--app-card-active) 84%);
+  border-color: color-mix(in srgb, var(--app-button-background) 40%, var(--app-border));
+}
+
+.command-button[data-configured="false"] {
+  border-style: dashed;
+  color: color-mix(in srgb, var(--app-muted) 90%, var(--app-foreground) 10%);
+}
+
+.command-button-add {
+  min-width: 36px;
+  padding: 0;
+}
+
+.command-button-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .session-groups-panel {
   display: grid;
   gap: 10px;
@@ -721,6 +826,59 @@ button:disabled {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.command-config-modal {
+  max-width: min(480px, calc(100vw - 24px));
+}
+
+.command-config-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.command-config-field {
+  display: grid;
+  gap: 6px;
+}
+
+.command-config-label {
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.command-config-input {
+  width: 100%;
+}
+
+.command-config-textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.command-config-toggle {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--app-card-active) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 14px;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.command-config-checkbox {
+  accent-color: var(--app-button-background);
+  flex: none;
+  margin: 2px 0 0;
+}
+
+.command-config-toggle-copy {
+  color: color-mix(in srgb, var(--app-foreground) 88%, var(--app-muted) 12%);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .confirm-modal-button {

@@ -9,6 +9,8 @@ import {
   type SidebarSessionStateMessage,
   type SidebarToExtensionMessage,
 } from "../shared/session-grid-contract";
+import type { SidebarAgentButton } from "../shared/sidebar-agents";
+import type { SidebarCommandButton } from "../shared/sidebar-commands";
 import {
   createGroupFromSessionInWorkspace,
   focusGroupInWorkspace,
@@ -23,6 +25,8 @@ import {
 } from "../shared/grouped-session-workspace-state";
 
 type SidebarStoryWorkspaceOptions = {
+  agents: SidebarAgentButton[];
+  commands: SidebarCommandButton[];
   completionBellEnabled: boolean;
   completionSound: SidebarHydrateMessage["hud"]["completionSound"];
   showCloseButtonOnSessionCards: boolean;
@@ -44,6 +48,8 @@ export type SidebarStoryWorkspace = {
 export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): SidebarStoryWorkspace {
   return {
     options: {
+      agents: message.hud.agents,
+      commands: message.hud.commands,
       completionBellEnabled: message.hud.completionBellEnabled,
       completionSound: message.hud.completionSound,
       showCloseButtonOnSessionCards: message.hud.showCloseButtonOnSessionCards,
@@ -115,6 +121,8 @@ export function createSidebarStoryMessage(
       workspace.options.showHotkeysOnSessionCards,
       workspace.options.completionBellEnabled,
       workspace.options.completionSound,
+      workspace.options.agents,
+      workspace.options.commands,
     ),
     type,
   };
@@ -174,6 +182,81 @@ export function reduceSidebarStoryWorkspace(
       return {
         ...workspace,
         snapshot: toggleFullscreenSessionInWorkspace(workspace.snapshot),
+      };
+
+    case "saveSidebarCommand": {
+      const nextCommandId = message.commandId ?? `custom-story-${workspace.options.commands.length}`;
+      const nextCommands = [...workspace.options.commands];
+      const existingIndex = nextCommands.findIndex((command) => command.commandId === nextCommandId);
+      const nextCommand = {
+        closeTerminalOnExit: message.closeTerminalOnExit,
+        command: message.command,
+        commandId: nextCommandId,
+        isDefault:
+          existingIndex >= 0 ? nextCommands[existingIndex]?.isDefault === true : false,
+        name: message.name,
+      };
+
+      if (existingIndex >= 0) {
+        nextCommands[existingIndex] = nextCommand;
+      } else {
+        nextCommands.push(nextCommand);
+      }
+
+      return {
+        ...workspace,
+        options: {
+          ...workspace.options,
+          commands: nextCommands,
+        },
+      };
+    }
+
+    case "saveSidebarAgent": {
+      const nextAgentId = message.agentId ?? `custom-agent-story-${workspace.options.agents.length}`;
+      const nextAgents = [...workspace.options.agents];
+      const existingIndex = nextAgents.findIndex((agent) => agent.agentId === nextAgentId);
+      const nextAgent = {
+        agentId: nextAgentId,
+        command: message.command,
+        icon: existingIndex >= 0 ? nextAgents[existingIndex]?.icon : undefined,
+        isDefault: existingIndex >= 0 ? nextAgents[existingIndex]?.isDefault === true : false,
+        name: message.name,
+      };
+
+      if (existingIndex >= 0) {
+        nextAgents[existingIndex] = nextAgent;
+      } else {
+        nextAgents.push(nextAgent);
+      }
+
+      return {
+        ...workspace,
+        options: {
+          ...workspace.options,
+          agents: nextAgents,
+        },
+      };
+    }
+
+    case "deleteSidebarCommand":
+      return {
+        ...workspace,
+        options: {
+          ...workspace.options,
+          commands: workspace.options.commands.filter(
+            (command) => command.commandId !== message.commandId,
+          ),
+        },
+      };
+
+    case "deleteSidebarAgent":
+      return {
+        ...workspace,
+        options: {
+          ...workspace.options,
+          agents: workspace.options.agents.filter((agent) => agent.agentId !== message.agentId),
+        },
       };
 
     case "createGroupFromSession": {

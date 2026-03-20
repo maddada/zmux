@@ -3,6 +3,14 @@ import {
   getCompletionSoundLabel,
   type CompletionSoundSetting,
 } from "./completion-sound";
+import {
+  createDefaultSidebarAgentButtons,
+  type SidebarAgentButton,
+} from "./sidebar-agents";
+import {
+  createDefaultSidebarCommandButtons,
+  type SidebarCommandButton,
+} from "./sidebar-commands";
 
 export const GRID_COLUMN_COUNT = 3;
 export const MAX_SESSION_COUNT = GRID_COLUMN_COUNT * GRID_COLUMN_COUNT;
@@ -105,6 +113,8 @@ export type SidebarSessionGroup = {
 };
 
 export type SidebarHudState = {
+  agents: SidebarAgentButton[];
+  commands: SidebarCommandButton[];
   completionBellEnabled: boolean;
   completionSound: CompletionSoundSetting;
   completionSoundLabel: string;
@@ -221,6 +231,35 @@ export type SidebarToExtensionMessage =
   | {
       type: "syncGroupOrder";
       groupIds: string[];
+    }
+  | {
+      type: "runSidebarCommand";
+      commandId: string;
+    }
+  | {
+      type: "saveSidebarCommand";
+      closeTerminalOnExit: boolean;
+      command: string;
+      commandId?: string;
+      name: string;
+    }
+  | {
+      type: "deleteSidebarCommand";
+      commandId: string;
+    }
+  | {
+      type: "runSidebarAgent";
+      agentId: string;
+    }
+  | {
+      type: "saveSidebarAgent";
+      agentId?: string;
+      command: string;
+      name: string;
+    }
+  | {
+      type: "deleteSidebarAgent";
+      agentId: string;
     };
 
 export function clampVisibleSessionCount(value: number): VisibleSessionCount {
@@ -404,6 +443,8 @@ export function createSidebarHudState(
   showHotkeysOnSessionCards = false,
   completionBellEnabled = false,
   completionSound: CompletionSoundSetting = DEFAULT_COMPLETION_SOUND,
+  agents: SidebarAgentButton[] = createDefaultSidebarAgentButtons(),
+  commands: SidebarCommandButton[] = createDefaultSidebarCommandButtons(),
 ): SidebarHudState {
   const sessionById = new Map(snapshot.sessions.map((session) => [session.sessionId, session]));
   const focusedSession = snapshot.focusedSessionId
@@ -411,6 +452,8 @@ export function createSidebarHudState(
     : undefined;
 
   return {
+    agents,
+    commands,
     completionBellEnabled,
     completionSound,
     completionSoundLabel: getCompletionSoundLabel(completionSound),

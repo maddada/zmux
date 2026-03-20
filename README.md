@@ -172,5 +172,6 @@ Paste this into your VS Code `keybindings.json` on macOS (find replace cmd with 
 - `VSmux.backgroundSessionTimeoutMinutes`: controls how long detached background sessions stay alive after the last VSmux window disconnects
 - `VSmux.sidebarTheme`: changes the sidebar theme preset
 - `VSmux.experimentalZmxActionDelayMs`: experimental zmx-only debug delay added before each VSmux terminal UI action; set it to `1000` to slow the sequence by 1 second per step
+- `VSmux.experimentalParkHiddenZmxTerminalsInPanel`: experimental zmx-only toggle that keeps hidden sessions alive in the bottom terminal panel and moves them into editor groups when they become visible
 - `VSmux.showCloseButtonOnSessionCards`: shows or hides the close button on session cards
 - `VSmux.sendRenameCommandOnSidebarRename`: stages `/rename <new name>` in the terminal when you rename from the sidebar

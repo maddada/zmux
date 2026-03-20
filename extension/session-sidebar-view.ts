@@ -165,6 +165,14 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
     case "toggleFullscreenSession":
       return true;
 
+    case "runSidebarCommand":
+    case "deleteSidebarCommand":
+      return typeof message.commandId === "string" && message.commandId.length > 0;
+
+    case "runSidebarAgent":
+    case "deleteSidebarAgent":
+      return typeof message.agentId === "string" && message.agentId.length > 0;
+
     case "createSessionInGroup":
       return typeof message.groupId === "string" && message.groupId.length > 0;
 
@@ -237,6 +245,23 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
       return (
         Array.isArray(message.groupIds) &&
         message.groupIds.every((groupId) => typeof groupId === "string" && groupId.length > 0)
+      );
+
+    case "saveSidebarCommand":
+      return (
+        (message.commandId === undefined ||
+          (typeof message.commandId === "string" && message.commandId.length > 0)) &&
+        typeof message.name === "string" &&
+        typeof message.command === "string" &&
+        typeof message.closeTerminalOnExit === "boolean"
+      );
+
+    case "saveSidebarAgent":
+      return (
+        (message.agentId === undefined ||
+          (typeof message.agentId === "string" && message.agentId.length > 0)) &&
+        typeof message.name === "string" &&
+        typeof message.command === "string"
       );
 
     default:

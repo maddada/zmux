@@ -32,6 +32,18 @@ import type {
 import { SessionGridStore } from "./session-grid-store";
 import { SessionSidebarViewProvider } from "./session-sidebar-view";
 import {
+  deleteSidebarAgentPreference,
+  getSidebarAgentButtonById,
+  getSidebarAgentButtons,
+  saveSidebarAgentPreference,
+} from "./sidebar-agent-preferences";
+import {
+  deleteSidebarCommandPreference,
+  getSidebarCommandButtonById,
+  getSidebarCommandButtons,
+  saveSidebarCommandPreference,
+} from "./sidebar-command-preferences";
+import {
   getTitleDerivedSessionActivity,
   getTitleDerivedSessionActivityFromTransition,
   haveSameTitleDerivedSessionActivity,
@@ -49,11 +61,14 @@ import { ZmxTerminalWorkspaceBackend } from "./zmx-terminal-workspace-backend";
 
 const SETTINGS_SECTION = "VSmux";
 const BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING = "backgroundSessionTimeoutMinutes";
+const EXPERIMENTAL_PARK_HIDDEN_ZMX_TERMINALS_IN_PANEL_SETTING =
+  "experimentalParkHiddenZmxTerminalsInPanel";
 const SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING = "sendRenameCommandOnSidebarRename";
 const SIDEBAR_THEME_SETTING = "sidebarTheme";
 const SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING = "showCloseButtonOnSessionCards";
 const SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING = "showHotkeysOnSessionCards";
 const COMPLETION_SOUND_SETTING = "completionSound";
+const AGENTS_SETTING = "agents";
 const COMPLETION_BELL_ENABLED_KEY = "VSmux.completionBellEnabled";
 export const SESSIONS_VIEW_ID = "VSmux.sessions";
 const SHORTCUT_LABEL_PLATFORM = process.platform === "darwin" ? "mac" : "default";
@@ -109,8 +124,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         }
 
         if (
+          event.affectsConfiguration(getExperimentalParkHiddenZmxTerminalsInPanelConfigurationKey())
+        ) {
+          void this.handleExperimentalLayoutModeChanged();
+        }
+
+        if (
           event.affectsConfiguration(getSidebarThemeConfigurationKey()) ||
           event.affectsConfiguration(getCompletionSoundConfigurationKey()) ||
+          event.affectsConfiguration(getAgentsConfigurationKey()) ||
           event.affectsConfiguration(getShowCloseButtonOnSessionCardsConfigurationKey()) ||
           event.affectsConfiguration(getShowHotkeysOnSessionCardsConfigurationKey())
         ) {
@@ -269,7 +291,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     const changed = await this.store.renameSessionAlias(sessionId, nextAlias);
-    if (!changed) {
+    const shouldSendRenameCommand = getSendRenameCommandOnSidebarRename();
+    if (!changed && !shouldSendRenameCommand) {
       return;
     }
 
@@ -278,14 +301,18 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    await this.backend.renameSession(sessionRecord);
+    if (changed) {
+      await this.backend.renameSession(sessionRecord);
+    }
 
-    if (getSendRenameCommandOnSidebarRename()) {
+    if (shouldSendRenameCommand) {
       await this.writePendingRenameCommand(sessionId, nextAlias);
       await this.focusSession(sessionId);
     }
 
-    await this.refreshSidebar();
+    if (changed) {
+      await this.refreshSidebar();
+    }
   }
 
   public async promptRenameSession(sessionId: string): Promise<void> {
@@ -368,6 +395,94 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.context.globalState.update(this.getCompletionBellEnabledStorageKey(), nextValue);
     await this.context.workspaceState.update(COMPLETION_BELL_ENABLED_KEY, nextValue);
     await this.refreshSidebar();
+  }
+
+  public async runSidebarCommand(commandId: string): Promise<void> {
+    const commandButton = getSidebarCommandButtonById(this.context, commandId);
+    const command = commandButton?.command?.trim();
+    if (!command) {
+      return;
+    }
+
+    const activeSnapshot = this.getActiveSnapshot();
+    const sessionId = activeSnapshot.focusedSessionId ?? activeSnapshot.visibleSessionIds[0];
+    if (!sessionId) {
+      void vscode.window.showInformationMessage("No active VSmux terminal is available.");
+      return;
+    }
+
+    await this.backend.writeText(sessionId, command, true);
+
+    if (commandButton?.closeTerminalOnExit) {
+      await this.backend.writeText(sessionId, "exit", true);
+    }
+  }
+
+  public async runSidebarAgent(agentId: string): Promise<void> {
+    const agentButton = getSidebarAgentButtonById(agentId);
+    if (!agentButton) {
+      return;
+    }
+
+    const command = agentButton.command?.trim();
+    if (!command) {
+      return;
+    }
+
+    const sessionRecord = await this.store.createSession();
+    if (!sessionRecord) {
+      void vscode.window.showWarningMessage("The workspace already has 9 sessions.");
+      return;
+    }
+
+    const nextAlias = agentButton.name.trim();
+    if (nextAlias) {
+      await this.store.renameSessionAlias(sessionRecord.sessionId, nextAlias);
+    }
+
+    const nextSessionRecord = this.store.getSession(sessionRecord.sessionId) ?? sessionRecord;
+    await this.backend.createOrAttachSession(nextSessionRecord);
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot());
+    await this.refreshSidebar();
+    await this.backend.writeText(nextSessionRecord.sessionId, command, true);
+  }
+
+  public async saveSidebarCommand(
+    commandId: string | undefined,
+    name: string,
+    command: string,
+    closeTerminalOnExit: boolean,
+  ): Promise<void> {
+    await saveSidebarCommandPreference(this.context, {
+      closeTerminalOnExit,
+      command,
+      commandId,
+      name,
+    });
+    await this.refreshSidebar();
+  }
+
+  public async deleteSidebarCommand(commandId: string): Promise<void> {
+    await deleteSidebarCommandPreference(this.context, commandId);
+    await this.refreshSidebar();
+  }
+
+  public async saveSidebarAgent(
+    agentId: string | undefined,
+    name: string,
+    command: string,
+  ): Promise<void> {
+    await saveSidebarAgentPreference({
+      agentId,
+      command,
+      name,
+    });
+    await this.refreshSidebar("hydrate");
+  }
+
+  public async deleteSidebarAgent(agentId: string): Promise<void> {
+    await deleteSidebarAgentPreference(agentId);
+    await this.refreshSidebar("hydrate");
   }
 
   public async focusGroup(groupId: string): Promise<void> {
@@ -502,6 +617,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         getShowHotkeysOnSessionCards(),
         this.getCompletionBellEnabled(),
         getClampedCompletionSoundSetting(),
+        getSidebarAgentButtons(),
+        getSidebarCommandButtons(this.context),
       ),
       groups: workspaceSnapshot.groups.map((group) => this.createSidebarGroup(group)),
       type,
@@ -610,6 +727,35 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
       case "toggleCompletionBell":
         await this.toggleCompletionBell();
+        return;
+
+      case "runSidebarAgent":
+        await this.runSidebarAgent(message.agentId);
+        return;
+
+      case "runSidebarCommand":
+        await this.runSidebarCommand(message.commandId);
+        return;
+
+      case "saveSidebarAgent":
+        await this.saveSidebarAgent(message.agentId, message.name, message.command);
+        return;
+
+      case "saveSidebarCommand":
+        await this.saveSidebarCommand(
+          message.commandId,
+          message.name,
+          message.command,
+          message.closeTerminalOnExit,
+        );
+        return;
+
+      case "deleteSidebarAgent":
+        await this.deleteSidebarAgent(message.agentId);
+        return;
+
+      case "deleteSidebarCommand":
+        await this.deleteSidebarCommand(message.commandId);
         return;
 
       case "focusSession":
@@ -750,7 +896,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private async writePendingRenameCommand(sessionId: string, alias: string): Promise<void> {
-    await this.backend.writeText(sessionId, `/rename ${alias}`);
+    await this.backend.writeText(sessionId, `/rename ${alias}`, false);
   }
 
   private async syncSessionTitle(sessionId: string, title: string): Promise<void> {
@@ -930,6 +1076,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.backend.reconcileVisibleTerminals(snapshot, preserveFocus);
   }
 
+  private async handleExperimentalLayoutModeChanged(): Promise<void> {
+    await this.backend.syncConfiguration();
+    await this.backend.reconcileVisibleTerminals(this.getActiveSnapshot(), true);
+    await this.refreshSidebar();
+  }
+
   private async promptForSessionId(title: string): Promise<string | undefined> {
     const sessions = this.store.getSnapshot().groups.flatMap((group) =>
       getOrderedSessions(group.snapshot).map((session) => ({
@@ -983,6 +1135,10 @@ function getBackgroundSessionTimeoutConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING}`;
 }
 
+function getExperimentalParkHiddenZmxTerminalsInPanelConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${EXPERIMENTAL_PARK_HIDDEN_ZMX_TERMINALS_IN_PANEL_SETTING}`;
+}
+
 function getSidebarThemeConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${SIDEBAR_THEME_SETTING}`;
 }
@@ -993,6 +1149,10 @@ function getShowCloseButtonOnSessionCardsConfigurationKey(): string {
 
 function getCompletionSoundConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${COMPLETION_SOUND_SETTING}`;
+}
+
+function getAgentsConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${AGENTS_SETTING}`;
 }
 
 function getShowHotkeysOnSessionCardsConfigurationKey(): string {

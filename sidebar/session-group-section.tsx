@@ -303,22 +303,6 @@ export function SessionGroupSection({
               <div className="group-title-row">
                 <div className="group-title">{group.title}</div>
                 <div className="group-meta">
-                  <span
-                    aria-label={`Layout ${group.viewMode}`}
-                    className="group-meta-item"
-                    role="img"
-                    title={`Layout: ${group.viewMode}`}
-                  >
-                    <GroupLayoutIcon viewMode={group.viewMode} />
-                  </span>
-                  <span
-                    aria-label={`${group.visibleCount} sessions shown`}
-                    className="group-meta-item"
-                    role="img"
-                    title={`Sessions shown: ${group.visibleCount}`}
-                  >
-                    <GroupVisibleCountIcon visibleCount={group.visibleCount} />
-                  </span>
                   {group.isFocusModeActive ? (
                     <span
                       aria-label="Focus mode active"
@@ -332,7 +316,26 @@ export function SessionGroupSection({
                         stroke={1.8}
                       />
                     </span>
-                  ) : null}
+                  ) : (
+                    <>
+                      <span
+                        aria-label={`Layout ${group.viewMode}`}
+                        className="group-meta-item"
+                        role="img"
+                        title={`Layout: ${group.viewMode}`}
+                      >
+                        <GroupLayoutIcon viewMode={group.viewMode} />
+                      </span>
+                      <span
+                        aria-label={`${group.visibleCount} sessions shown`}
+                        className="group-meta-item"
+                        role="img"
+                        title={`Sessions shown: ${group.visibleCount}`}
+                      >
+                        <GroupVisibleCountIcon visibleCount={group.visibleCount} />
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             )}

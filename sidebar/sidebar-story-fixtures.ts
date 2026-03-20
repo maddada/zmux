@@ -1,4 +1,6 @@
 import { DEFAULT_COMPLETION_SOUND, getCompletionSoundLabel } from "../shared/completion-sound";
+import { createDefaultSidebarAgentButtons } from "../shared/sidebar-agents";
+import { createDefaultSidebarCommandButtons } from "../shared/sidebar-commands";
 import type {
   SidebarHydrateMessage,
   SidebarHudState,
@@ -333,6 +335,8 @@ export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrat
       : clampVisibleSessionCount(Math.max(1, group.sessions.length)),
   }));
   const hud: SidebarHudState = {
+    agents: createDefaultSidebarAgentButtons(),
+    commands: createDefaultSidebarCommandButtons(),
     completionBellEnabled: false,
     completionSound: DEFAULT_COMPLETION_SOUND,
     completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),

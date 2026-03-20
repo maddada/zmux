@@ -10,6 +10,8 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { createDefaultSidebarAgentButtons } from "../shared/sidebar-agents";
+import { createDefaultSidebarCommandButtons } from "../shared/sidebar-commands";
 import {
   MAX_GROUP_COUNT,
   type ExtensionToSidebarMessage,
@@ -21,6 +23,8 @@ import {
   type VisibleSessionCount,
 } from "../shared/session-grid-contract";
 import { playCompletionSound } from "./completion-sound-player";
+import { AgentsPanel } from "./agents-panel";
+import { CommandsPanel } from "./commands-panel";
 import { CreateGroupDropTarget } from "./create-group-drop-target";
 import { SessionCardContent } from "./session-card-content";
 import { getSidebarDropData } from "./sidebar-dnd";
@@ -47,10 +51,13 @@ const MODE_OPTIONS: { tooltip: string; viewMode: TerminalViewMode }[] = [
 const INITIAL_STATE: SidebarState = {
   groups: [],
   hud: {
+    agents: createDefaultSidebarAgentButtons(),
+    commands: createDefaultSidebarCommandButtons(),
     completionBellEnabled: false,
     completionSound: "ping",
     completionSoundLabel: "Ping",
     focusedSessionTitle: undefined,
+    highlightedVisibleCount: 1,
     isFocusModeActive: false,
     showCloseButtonOnSessionCards: false,
     showHotkeysOnSessionCards: false,
@@ -467,6 +474,8 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
             </button>
           </div>
         </section>
+        <AgentsPanel agents={serverState.hud.agents} vscode={vscode} />
+        <CommandsPanel commands={serverState.hud.commands} vscode={vscode} />
         <section className="session-groups-panel">
           <div className="section-titlebar" data-empty-space-blocking="true">
             <div aria-hidden="true" className="section-titlebar-line" />
