@@ -29,7 +29,7 @@ Btw can work with worktrees in VS Code very easily by enabling these setting:
 
 If you are on macOS, turn on VS Code's `window.nativeTabs` setting.
 
-This makes it much easier to switch between projects, repos, and worktrees because each VS Code window can live in the same native tab strip. Instead of juggling separate windows, you can keep multiple VS-AGENT-MUX workspaces open and move between them quickly with the normal macOS tab workflow.
+This makes it much easier to switch between projects, repos, and worktrees because each VS Code window can live in the same native tab strip. Instead of juggling separate windows, you can keep multiple VSmux workspaces open and move between them quickly with the normal macOS tab workflow.
 
 ### 2. Turn On Repositories Explorer for Worktrees
 
@@ -56,9 +56,9 @@ VSmux works great with my other tool that shows all running agent sessions in a 
 
 ## A Sloplanation by GPT 5.4:
 
-VS-AGENT-MUX turns VS Code into a fast multi-session terminal workspace. It keeps up to nine shell sessions organized in a logical `3x3` grid, lets you show `1`, `2`, `3`, `4`, `6`, or `9` sessions at a time, and gives you quick layout switching between horizontal, vertical, and grid views.
+VSmux turns VS Code into a fast multi-session terminal workspace. It keeps up to nine shell sessions organized in a logical `3x3` grid, lets you show `1`, `2`, `3`, `4`, `6`, or `9` sessions at a time, and gives you quick layout switching between horizontal, vertical, and grid views.
 
-Unlike a normal terminal tab workflow, VS-AGENT-MUX is built for keeping several long-running agent, coding, or shell sessions alive and easy to jump between. Sessions can stay attached to the workspace across reloads and restarts, and the sidebar gives you a compact control surface for focusing, renaming, reordering, and managing them.
+Unlike a normal terminal tab workflow, VSmux is built for keeping several long-running agent, coding, or shell sessions alive and easy to jump between. Sessions can stay attached to the workspace across reloads and restarts, and the sidebar gives you a compact control surface for focusing, renaming, reordering, and managing them.
 
 ## What It Does
 
@@ -86,7 +86,7 @@ On macOS, the extension ships with these default shortcuts:
 - `cmd + option + v` = vertical layout
 - `cmd + option + g` = grid layout
 - `cmd + option + r` = rename active session
-- `cmd + option + f` = full screen the focused VS-AGENT-MUX terminal session, or fall back to VS Code panel/editor maximize when a terminal is not focused
+- `cmd + option + f` = full screen the focused VSmux terminal session, or fall back to VS Code panel/editor maximize when a terminal is not focused
 - `cmd + option + =` = increase terminal font size only
 - `cmd + option + -` = decrease terminal font size only
 
@@ -100,81 +100,81 @@ Paste this into your VS Code `keybindings.json` on macOS (find replace cmd with 
 [
   {
     "key": "ctrl+alt+shift+1",
-    "command": "VS-AGENT-MUX.focusGroup1",
+    "command": "VSmux.focusGroup1",
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "ctrl+alt+shift+2",
-    "command": "VS-AGENT-MUX.focusGroup2",
+    "command": "VSmux.focusGroup2",
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "ctrl+alt+shift+3",
-    "command": "VS-AGENT-MUX.focusGroup3",
+    "command": "VSmux.focusGroup3",
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "ctrl+alt+shift+4",
-    "command": "VS-AGENT-MUX.focusGroup4",
+    "command": "VSmux.focusGroup4",
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+1",
-    "command": "VS-AGENT-MUX.focusSessionSlot",
+    "command": "VSmux.focusSessionSlot",
     "args": 1,
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+2",
-    "command": "VS-AGENT-MUX.focusSessionSlot",
+    "command": "VSmux.focusSessionSlot",
     "args": 2,
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+3",
-    "command": "VS-AGENT-MUX.focusSessionSlot",
+    "command": "VSmux.focusSessionSlot",
     "args": 3,
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+4",
-    "command": "VS-AGENT-MUX.focusSessionSlot",
+    "command": "VSmux.focusSessionSlot",
     "args": 4,
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+6",
-    "command": "VS-AGENT-MUX.showSix",
+    "command": "VSmux.showSix",
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+9",
-    "command": "VS-AGENT-MUX.showNine",
+    "command": "VSmux.showNine",
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+h",
-    "command": "VS-AGENT-MUX.setHorizontalView",
+    "command": "VSmux.setHorizontalView",
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+v",
-    "command": "VS-AGENT-MUX.setVerticalView",
+    "command": "VSmux.setVerticalView",
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+g",
-    "command": "VS-AGENT-MUX.setGridView",
+    "command": "VSmux.setGridView",
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+r",
-    "command": "VS-AGENT-MUX.renameActiveSession",
+    "command": "VSmux.renameActiveSession",
     "when": "!inputFocus || terminalFocus"
   },
   {
     "key": "cmd+alt+f",
-    "command": "VS-AGENT-MUX.toggleFullscreenSession",
+    "command": "VSmux.toggleFullscreenSession",
     "when": "terminalFocus"
   },
   {
@@ -203,13 +203,13 @@ Paste this into your VS Code `keybindings.json` on macOS (find replace cmd with 
 ## Getting Started
 
 1. Open the Command Palette.
-2. Run `VS-AGENT-MUX: Open Workspace`.
+2. Run `VSmux: Open Workspace`.
 3. Create your first session.
 4. Use the sidebar and hotkeys to change the number of visible sessions and switch layouts.
 
 ## Settings
 
-- `VS-AGENT-MUX.backgroundSessionTimeoutMinutes`: controls how long detached background sessions stay alive after the last VS-AGENT-MUX window disconnects
-- `VS-AGENT-MUX.sidebarTheme`: changes the sidebar theme preset
-- `VS-AGENT-MUX.showCloseButtonOnSessionCards`: shows or hides the close button on session cards
-- `VS-AGENT-MUX.sendRenameCommandOnSidebarRename`: stages `/rename <new name>` in the terminal when you rename from the sidebar
+- `VSmux.backgroundSessionTimeoutMinutes`: controls how long detached background sessions stay alive after the last VSmux window disconnects
+- `VSmux.sidebarTheme`: changes the sidebar theme preset
+- `VSmux.showCloseButtonOnSessionCards`: shows or hides the close button on session cards
+- `VSmux.sendRenameCommandOnSidebarRename`: stages `/rename <new name>` in the terminal when you rename from the sidebar
