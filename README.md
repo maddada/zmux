@@ -1,6 +1,6 @@
-# VSMux: Manage all your AI coding sessions in 1 place.  
+# VSMux: Manage all your CLI coding agents sessions without leaving your IDE.  
 
-Current UI in v1.3 (still under development. Will be much nicer with time.)<br/>
+Current UI in v1.3 (still under development. Will be much nicer with time.)<br/><br/>
 <img width="3322" height="2054" alt="Code 2026-03-21 05 05 53" src="https://github.com/user-attachments/assets/24248a2e-a3e8-4178-abad-9d09f13c86d8" />
 
 Early version video showing the core experience of VSmux (will create a new video soon showing all of the new stuff):
