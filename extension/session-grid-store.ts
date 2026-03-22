@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import {
+  type CreateSessionRecordOptions,
   createDefaultSessionGridSnapshot,
   type GroupedSessionWorkspaceSnapshot,
   type SessionGridDirection,
@@ -60,8 +61,10 @@ export class SessionGridStore {
     return getGroupForSession(this.snapshot, sessionId);
   }
 
-  public async createSession(): Promise<SessionRecord | undefined> {
-    const result = createSessionInWorkspace(this.snapshot);
+  public async createSession(
+    options?: CreateSessionRecordOptions,
+  ): Promise<SessionRecord | undefined> {
+    const result = createSessionInWorkspace(this.snapshot, options);
     this.snapshot = result.snapshot;
     await this.persist();
 

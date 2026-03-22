@@ -2,6 +2,7 @@ import {
   DEFAULT_MAIN_GROUP_ID,
   DEFAULT_MAIN_GROUP_TITLE,
   MAX_GROUP_COUNT,
+  type CreateSessionRecordOptions,
   createDefaultGroupedSessionWorkspaceSnapshot,
   createDefaultSessionGridSnapshot,
   getOrderedSessions,
@@ -91,7 +92,10 @@ export function getGroupForSession(
   return findGroupContainingSession(snapshot, sessionId)?.group;
 }
 
-export function createSessionInWorkspace(snapshot: GroupedSessionWorkspaceSnapshot): {
+export function createSessionInWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  options?: CreateSessionRecordOptions,
+): {
   session?: SessionRecord;
   snapshot: GroupedSessionWorkspaceSnapshot;
 } {
@@ -104,6 +108,7 @@ export function createSessionInWorkspace(snapshot: GroupedSessionWorkspaceSnapsh
   const result = createSessionInSnapshot(
     activeGroup.snapshot,
     normalizedSnapshot.nextSessionNumber,
+    options,
   );
   if (!result.session) {
     return { snapshot: normalizedSnapshot };

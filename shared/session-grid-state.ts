@@ -1,4 +1,5 @@
 import {
+  type CreateSessionRecordOptions,
   GRID_COLUMN_COUNT,
   MAX_SESSION_COUNT,
   createSessionAlias,
@@ -18,6 +19,7 @@ import {
 export function createSessionInSnapshot(
   snapshot: SessionGridSnapshot,
   sessionNumber: number,
+  options?: CreateSessionRecordOptions,
 ): {
   session?: SessionRecord;
   snapshot: SessionGridSnapshot;
@@ -29,7 +31,7 @@ export function createSessionInSnapshot(
   }
 
   const slotIndex = orderedSessions.length;
-  const session = createSessionRecord(sessionNumber, slotIndex);
+  const session = createSessionRecord(sessionNumber, slotIndex, options);
   const sessions = reindexSessionsInOrder([...orderedSessions, session]);
   const visibleSessionIds =
     normalizedSnapshot.visibleSessionIds.length < normalizedSnapshot.visibleCount
@@ -536,17 +538,41 @@ function normalizeSessionRecord(session: SessionRecord): SessionRecord {
   const sessionNumber = getSessionNumber(session);
   const defaultAlias = createSessionAlias(sessionNumber, session.slotIndex);
   const defaultTitle = `Session ${sessionNumber}`;
+  const alias =
+    typeof session.alias === "string" && session.alias.trim().length > 0
+      ? session.alias.trim()
+      : defaultAlias;
+  const title =
+    typeof session.title === "string" && session.title.trim().length > 0
+      ? session.title.trim()
+      : defaultTitle;
+
+  if (
+    session.kind === "t3" &&
+    typeof session.t3.projectId === "string" &&
+    typeof session.t3.serverOrigin === "string" &&
+    typeof session.t3.threadId === "string" &&
+    typeof session.t3.workspaceRoot === "string"
+  ) {
+    return {
+      ...session,
+      alias,
+      kind: "t3",
+      t3: {
+        projectId: session.t3.projectId,
+        serverOrigin: session.t3.serverOrigin,
+        threadId: session.t3.threadId,
+        workspaceRoot: session.t3.workspaceRoot,
+      },
+      title,
+    };
+  }
 
   return {
     ...session,
-    alias:
-      typeof session.alias === "string" && session.alias.trim().length > 0
-        ? session.alias.trim()
-        : defaultAlias,
-    title:
-      typeof session.title === "string" && session.title.trim().length > 0
-        ? session.title.trim()
-        : defaultTitle,
+    alias,
+    kind: "terminal",
+    title,
   };
 }
 

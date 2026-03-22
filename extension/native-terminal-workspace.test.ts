@@ -71,6 +71,36 @@ const testState = vi.hoisted(() => ({
   debugPanelReveal: vi.fn(async () => {}),
   debugPanelHasPanel: vi.fn(() => false),
   sidebarPostMessage: vi.fn(async () => {}),
+  t3RuntimeInstances: [] as Array<{
+    createThreadSession: ReturnType<typeof vi.fn>;
+    dispose: ReturnType<typeof vi.fn>;
+    ensureRunning: ReturnType<typeof vi.fn>;
+    getServerOrigin: ReturnType<typeof vi.fn>;
+    getWebSocketUrl: ReturnType<typeof vi.fn>;
+  }>,
+  t3Runtime: undefined as
+    | {
+        createThreadSession: ReturnType<typeof vi.fn>;
+        dispose: ReturnType<typeof vi.fn>;
+        ensureRunning: ReturnType<typeof vi.fn>;
+        getServerOrigin: ReturnType<typeof vi.fn>;
+        getWebSocketUrl: ReturnType<typeof vi.fn>;
+      }
+    | undefined,
+  t3WebviewManagers: [] as Array<{
+    dispose: ReturnType<typeof vi.fn>;
+    disposeSession: ReturnType<typeof vi.fn>;
+    reconcileVisibleSessions: ReturnType<typeof vi.fn>;
+    revealStoredSession: ReturnType<typeof vi.fn>;
+  }>,
+  t3WebviewManager: undefined as
+    | {
+        dispose: ReturnType<typeof vi.fn>;
+        disposeSession: ReturnType<typeof vi.fn>;
+        reconcileVisibleSessions: ReturnType<typeof vi.fn>;
+        revealStoredSession: ReturnType<typeof vi.fn>;
+      }
+    | undefined,
 }));
 
 vi.mock("vscode", () => ({
@@ -200,6 +230,42 @@ vi.mock("./native-terminal-workspace-backend", () => ({
   },
 }));
 
+vi.mock("./t3-runtime-manager", () => ({
+  T3RuntimeManager: class T3RuntimeManager {
+    public constructor() {
+      testState.t3Runtime = {
+        createThreadSession: vi.fn(async () => ({
+          projectId: "project-1",
+          serverOrigin: "http://127.0.0.1:3773",
+          threadId: "thread-1",
+          workspaceRoot: "/workspace",
+        })),
+        dispose: vi.fn(),
+        ensureRunning: vi.fn(async () => "http://127.0.0.1:3773"),
+        getServerOrigin: vi.fn(() => "http://127.0.0.1:3773"),
+        getWebSocketUrl: vi.fn(() => "ws://127.0.0.1:3773"),
+      };
+      testState.t3RuntimeInstances.push(testState.t3Runtime);
+      return testState.t3Runtime;
+    }
+  },
+}));
+
+vi.mock("./t3-webview-manager", () => ({
+  T3WebviewManager: class T3WebviewManager {
+    public constructor() {
+      testState.t3WebviewManager = {
+        dispose: vi.fn(),
+        disposeSession: vi.fn(),
+        reconcileVisibleSessions: vi.fn(async () => {}),
+        revealStoredSession: vi.fn(async () => {}),
+      };
+      testState.t3WebviewManagers.push(testState.t3WebviewManager);
+      return testState.t3WebviewManager;
+    }
+  },
+}));
+
 import type { GroupedSessionWorkspaceSnapshot } from "../shared/session-grid-contract";
 import {
   createSessionAlias,
@@ -245,6 +311,10 @@ describe("NativeTerminalWorkspaceController rename session", () => {
     testState.debugPanelHasPanel.mockReturnValue(false);
     testState.sidebarPostMessage.mockReset();
     testState.sidebarPostMessage.mockResolvedValue(undefined);
+    testState.t3RuntimeInstances.length = 0;
+    testState.t3Runtime = undefined;
+    testState.t3WebviewManagers.length = 0;
+    testState.t3WebviewManager = undefined;
   });
 
   afterEach(() => {
@@ -637,6 +707,60 @@ describe("NativeTerminalWorkspaceController rename session", () => {
       "session-4",
       "opencode --continue",
       true,
+    );
+  });
+
+  test("should ensure the T3 runtime is running before restoring visible T3 sessions on initialize", async () => {
+    const session = createSessionRecord(3, 0, {
+      kind: "t3",
+      t3: {
+        projectId: "project-1",
+        serverOrigin: "http://127.0.0.1:3773",
+        threadId: "thread-1",
+        workspaceRoot: "/workspace",
+      },
+      title: "T3 Code",
+    });
+    const workspaceSnapshot = createWorkspaceSnapshot(session);
+    const controller = new NativeTerminalWorkspaceController(createContext(workspaceSnapshot));
+
+    await controller.initialize();
+
+    expect(testState.t3Runtime?.ensureRunning).toHaveBeenCalledWith("/workspace");
+    expect(testState.backend?.reconcileVisibleTerminals).toHaveBeenCalledTimes(1);
+    expect(testState.t3WebviewManager?.reconcileVisibleSessions).toHaveBeenCalledTimes(1);
+  });
+
+  test("should ensure the T3 runtime is running before revealing an already-visible focused T3 session", async () => {
+    const session = createSessionRecord(3, 0, {
+      kind: "t3",
+      t3: {
+        projectId: "project-1",
+        serverOrigin: "http://127.0.0.1:3773",
+        threadId: "thread-1",
+        workspaceRoot: "/workspace",
+      },
+      title: "T3 Code",
+    });
+    const workspaceSnapshot = createWorkspaceSnapshot(session);
+    workspaceSnapshot.groups[0]!.snapshot.focusedSessionId = session.sessionId;
+    const controller = new NativeTerminalWorkspaceController(createContext(workspaceSnapshot));
+
+    testState.backend?.getSessionSnapshot.mockReturnValue({
+      status: "running",
+    });
+    testState.backend?.hasLiveTerminal.mockReturnValue(true);
+    testState.backend?.focusSession.mockResolvedValue(true);
+
+    await controller.focusSession(session.sessionId);
+
+    expect(testState.t3Runtime?.ensureRunning).toHaveBeenCalledWith("/workspace");
+    expect(testState.t3WebviewManager?.revealStoredSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: session.sessionId,
+      }),
+      expect.any(Object),
+      false,
     );
   });
 });

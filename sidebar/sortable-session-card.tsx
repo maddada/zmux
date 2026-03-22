@@ -202,6 +202,11 @@ export function SortableSessionCard({
               type: "focusSession",
             });
           }}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            requestRename();
+          }}
           onContextMenu={(event: ReactMouseEvent<HTMLElement>) => {
             event.preventDefault();
             event.stopPropagation();

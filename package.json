@@ -16,6 +16,7 @@
   "publisher": "maddada",
   "files": [
     "media/**",
+    "forks/t3code-embed/dist/**",
     "out/**"
   ],
   "main": "./out/extension/extension.js",
@@ -28,6 +29,7 @@
     "storybook:test": "node ./scripts/storybook-test.mjs",
     "compile": "vp run sidebar:build && vp run debug-panel:build && tsc -p ./tsconfig.extension.json",
     "watch": "tsc -w -p ./tsconfig.extension.json",
+    "t3:embed:build": "node ./scripts/build-t3-embed.mjs",
     "lint": "vp lint",
     "fmt": "vp fmt",
     "check": "vp check",

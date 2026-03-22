@@ -10,6 +10,7 @@ const AGENT_SECONDARY_LABELS: Record<SidebarAgentIcon, readonly string[]> = {
   codex: ["codex", "codex cli", "openai codex"],
   gemini: ["gemini"],
   opencode: ["open code", "opencode"],
+  t3: ["t3", "t3 code"],
 };
 
 export type SessionCardContentProps = {

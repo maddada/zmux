@@ -1,6 +1,8 @@
 .DS_Store
+.vendor/
 logs/
 node_modules/
 dist/
 out/
 forks/ghostty-web/dist/
+forks/t3code-embed/

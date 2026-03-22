@@ -52,7 +52,17 @@ export type SidebarThemeSetting =
 
 export type SidebarThemeVariant = "light" | "dark";
 
-export type SessionRecord = {
+export type SessionKind = "terminal" | "t3";
+
+export type T3SessionMetadata = {
+  projectId: string;
+  serverOrigin: string;
+  threadId: string;
+  workspaceRoot: string;
+};
+
+type BaseSessionRecord = {
+  kind: SessionKind;
   sessionId: string;
   title: string;
   alias: string;
@@ -61,6 +71,28 @@ export type SessionRecord = {
   column: number;
   createdAt: string;
 };
+
+export type TerminalSessionRecord = BaseSessionRecord & {
+  kind: "terminal";
+};
+
+export type T3SessionRecord = BaseSessionRecord & {
+  kind: "t3";
+  t3: T3SessionMetadata;
+};
+
+export type SessionRecord = TerminalSessionRecord | T3SessionRecord;
+
+export type CreateSessionRecordOptions =
+  | {
+      kind?: "terminal";
+      title?: string;
+    }
+  | {
+      kind: "t3";
+      t3: T3SessionMetadata;
+      title?: string;
+    };
 
 export type SessionGridSnapshot = {
   focusedSessionId?: string;
@@ -418,13 +450,32 @@ export function createSessionAlias(sessionNumber: number, slotIndex: number): st
   return words[(sessionNumber * 11 + slotIndex * 3) % words.length] ?? words[0]!;
 }
 
-export function createSessionRecord(sessionNumber: number, slotIndex: number): SessionRecord {
+export function createSessionRecord(
+  sessionNumber: number,
+  slotIndex: number,
+  options?: CreateSessionRecordOptions,
+): SessionRecord {
   const position = getSlotPosition(slotIndex);
+  const title = options?.title?.trim() || `Session ${sessionNumber}`;
+  if (options?.kind === "t3") {
+    return {
+      alias: createSessionAlias(sessionNumber, slotIndex),
+      column: position.column,
+      createdAt: new Date().toISOString(),
+      kind: "t3",
+      row: position.row,
+      sessionId: `session-${sessionNumber}`,
+      slotIndex,
+      t3: options.t3,
+      title,
+    };
+  }
 
   return {
     alias: createSessionAlias(sessionNumber, slotIndex),
     column: position.column,
     createdAt: new Date().toISOString(),
+    kind: "terminal",
     row: position.row,
     sessionId: `session-${sessionNumber}`,
     slotIndex,
@@ -443,6 +494,14 @@ export function getVisiblePrimaryTitle(title: string): string | undefined {
 
 export function getOrderedSessions(snapshot: SessionGridSnapshot): SessionRecord[] {
   return [...snapshot.sessions].sort((left, right) => left.slotIndex - right.slotIndex);
+}
+
+export function isTerminalSession(session: SessionRecord): session is TerminalSessionRecord {
+  return session.kind === "terminal";
+}
+
+export function isT3Session(session: SessionRecord): session is T3SessionRecord {
+  return session.kind === "t3";
 }
 
 export function createSidebarHudState(

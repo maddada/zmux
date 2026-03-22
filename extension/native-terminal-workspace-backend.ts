@@ -7,7 +7,11 @@ import type {
   NativeTerminalDebugMoveHistoryEntry,
   NativeTerminalDebugProjection,
 } from "../shared/native-terminal-debug-contract";
-import type { SessionGridSnapshot, SessionRecord } from "../shared/session-grid-contract";
+import {
+  isT3Session,
+  type SessionGridSnapshot,
+  type SessionRecord,
+} from "../shared/session-grid-contract";
 import {
   createParkedTerminalReconcilePlan,
   type ParkedTerminalReconcilePlan,
@@ -676,7 +680,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         continue;
       }
 
-      if (!(await this.options.ensureShellSpawnAllowed())) {
+      if (!isT3Session(sessionRecord) && !(await this.options.ensureShellSpawnAllowed())) {
         this.sessions.set(
           sessionRecord.sessionId,
           createBlockedSessionSnapshot(sessionRecord.sessionId, this.options.workspaceId),
@@ -1236,20 +1240,28 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       location,
       sessionId: sessionRecord.sessionId,
     });
-    const terminal = vscode.window.createTerminal({
-      cwd: getDefaultWorkspaceCwd(),
-      env: this.createTerminalEnvironment(sessionRecord.sessionId),
-      iconPath: new vscode.ThemeIcon("terminal"),
-      location:
-        location === "panel"
-          ? vscode.TerminalLocation.Panel
-          : {
-              preserveFocus: true,
-              viewColumn: getViewColumn(location.visibleIndex),
-            },
-      name: this.getDisplayNameForSession(sessionRecord.sessionId, sessionRecord.alias),
-      shellPath: getDefaultShell(),
-    });
+    const terminalLocation =
+      location === "panel"
+        ? vscode.TerminalLocation.Panel
+        : {
+            preserveFocus: true,
+            viewColumn: getViewColumn(location.visibleIndex),
+          };
+    const terminal = isT3Session(sessionRecord)
+      ? vscode.window.createTerminal({
+          iconPath: new vscode.ThemeIcon("globe"),
+          location: terminalLocation,
+          name: this.getDisplayNameForSession(sessionRecord.sessionId, sessionRecord.alias),
+          pty: createPlaceholderTerminalPty(`T3 session ${sessionRecord.t3.threadId}`),
+        })
+      : vscode.window.createTerminal({
+          cwd: getDefaultWorkspaceCwd(),
+          env: this.createTerminalEnvironment(sessionRecord.sessionId),
+          iconPath: new vscode.ThemeIcon("terminal"),
+          location: terminalLocation,
+          name: this.getDisplayNameForSession(sessionRecord.sessionId, sessionRecord.alias),
+          shellPath: getDefaultShell(),
+        });
 
     this.createdTerminals.add(terminal);
     const projection = {
@@ -2049,6 +2061,21 @@ async function delay(durationMs: number): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, durationMs);
   });
+}
+
+function createPlaceholderTerminalPty(message: string): vscode.Pseudoterminal {
+  const writeEmitter = new vscode.EventEmitter<string>();
+
+  return {
+    close: () => {
+      writeEmitter.dispose();
+    },
+    handleInput: () => {},
+    onDidWrite: writeEmitter.event,
+    open: () => {
+      writeEmitter.fire(`\u001b[90m${message}\u001b[0m\r\n`);
+    },
+  };
 }
 
 class NativeTerminalTrace {

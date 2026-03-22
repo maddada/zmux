@@ -70,3 +70,59 @@ VSmux works great with my other tool that shows all running agent sessions in a 
 - `VSmux.sidebarTheme`: changes the sidebar theme preset
 - `VSmux.showCloseButtonOnSessionCards`: shows or hides the close button on session cards
 - `VSmux.sendRenameCommandOnSidebarRename`: stages `/rename <new name>` in the terminal when you rename from the sidebar
+
+## Local T3 Embed Setup
+
+The T3 embed frontend is intentionally local-only and gitignored. If you want T3 sessions to render inside VSmux while developing this extension, set up the local workspace below:
+
+```text
+forks/t3code-embed/
+  upstream/   # local clone of pingdotgg/t3code
+  overlay/    # your local patched T3 web files
+  dist/       # generated embed build consumed by VSmux
+```
+
+### 1. Clone T3 locally
+
+Clone T3 Code into:
+
+```bash
+git clone https://github.com/pingdotgg/t3code forks/t3code-embed/upstream
+```
+
+The integration was authored against commit `9e29c9d72895022322da52d8e961b38702bad9cc`.
+
+### 2. Recreate the local patch overlay
+
+Create the patched files under:
+
+```text
+forks/t3code-embed/overlay/apps/web/src/
+```
+
+The required file list and patch intent are documented in:
+
+- [ai/t3-embed-patches.md](/Users/madda/dev/_active/agent-tiler/ai/t3-embed-patches.md)
+- [ai/2026-03-22 t3 embedded sessions implementation.md](/Users/madda/dev/_active/agent-tiler/ai/2026-03-22%20t3%20embedded%20sessions%20implementation.md)
+
+### 3. Build the local embed bundle
+
+Make sure `bun` is installed, then run:
+
+```bash
+node ./scripts/build-t3-embed.mjs
+```
+
+That script copies the overlay into `forks/t3code-embed/upstream`, builds T3's web app, and writes the generated bundle to `forks/t3code-embed/dist`.
+
+### 4. Build the extension
+
+Run:
+
+```bash
+vp install
+vp check
+vp test
+```
+
+If `forks/t3code-embed/dist` is missing, the extension still builds, but T3 sessions will show the missing-assets placeholder until you generate the local embed bundle.

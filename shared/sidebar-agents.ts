@@ -1,5 +1,11 @@
 export const DEFAULT_SIDEBAR_AGENTS = [
   {
+    agentId: "t3",
+    command: "npx t3",
+    icon: "t3",
+    name: "T3 Code",
+  },
+  {
     agentId: "codex",
     command: "codex",
     icon: "codex",

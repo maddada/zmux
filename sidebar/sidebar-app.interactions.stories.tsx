@@ -76,6 +76,14 @@ export const SessionCardActions: Story = {
       await expectMessage({ sessionId: "session-3", type: "focusSession" });
     });
 
+    await step("rename a session with double click", async () => {
+      resetSidebarStoryMessages();
+
+      await userEvent.dblClick(sessionCard);
+
+      await expectMessage({ sessionId: "session-3", type: "promptRenameSession" });
+    });
+
     await step("rename through the session context menu", async () => {
       resetSidebarStoryMessages();
 

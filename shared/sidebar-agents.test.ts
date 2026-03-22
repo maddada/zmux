@@ -5,6 +5,13 @@ describe("createSidebarAgentButtons", () => {
   test("should expose the built-in agents by default", () => {
     expect(createSidebarAgentButtons([])).toEqual([
       {
+        agentId: "t3",
+        command: "npx t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
+      {
         agentId: "codex",
         command: "codex",
         icon: "codex",
@@ -53,6 +60,13 @@ describe("createSidebarAgentButtons", () => {
         },
       ]),
     ).toEqual([
+      {
+        agentId: "t3",
+        command: "npx t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
       {
         agentId: "codex",
         command: "codex --model gpt-5.4",
