@@ -78,6 +78,7 @@ function normalizePreviousSessionHistory(
 
   return candidate
     .filter(isPreviousSessionHistoryEntry)
+    .filter((entry) => entry.sessionRecord.kind !== "browser")
     .sort((left, right) => Date.parse(right.closedAt) - Date.parse(left.closedAt))
     .slice(0, PREVIOUS_SESSION_HISTORY_LIMIT);
 }

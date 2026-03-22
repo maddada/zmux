@@ -157,7 +157,8 @@ export function getCandidateExecutableNames(
     .split(";")
     .filter((entry) => entry.length > 0);
 
-  return pathExtensions.map((extension) => `${agent}${extension.toLowerCase()}`);
+  const pathextCandidates = pathExtensions.map((extension) => `${agent}${extension.toLowerCase()}`);
+  return agent === "codex" ? pathextCandidates : [...pathextCandidates, agent];
 }
 
 async function writeInitialSessionState(agent: AgentName, title: string): Promise<void> {

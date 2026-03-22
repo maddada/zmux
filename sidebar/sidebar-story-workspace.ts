@@ -30,6 +30,7 @@ type SidebarStoryWorkspaceOptions = {
   completionBellEnabled: boolean;
   completionSound: SidebarHydrateMessage["hud"]["completionSound"];
   debuggingMode: boolean;
+  isVsMuxDisabled: boolean;
   showCloseButtonOnSessionCards: boolean;
   showHotkeysOnSessionCards: boolean;
   theme: SidebarHydrateMessage["hud"]["theme"];
@@ -54,6 +55,7 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
       completionBellEnabled: message.hud.completionBellEnabled,
       completionSound: message.hud.completionSound,
       debuggingMode: message.hud.debuggingMode,
+      isVsMuxDisabled: message.hud.isVsMuxDisabled,
       showCloseButtonOnSessionCards: message.hud.showCloseButtonOnSessionCards,
       showHotkeysOnSessionCards: message.hud.showHotkeysOnSessionCards,
       theme: message.hud.theme,
@@ -126,6 +128,7 @@ export function createSidebarStoryMessage(
       workspace.options.completionSound,
       workspace.options.agents,
       workspace.options.commands,
+      workspace.options.isVsMuxDisabled,
     ),
     type,
   };
@@ -186,6 +189,15 @@ export function reduceSidebarStoryWorkspace(
       return {
         ...workspace,
         snapshot: toggleFullscreenSessionInWorkspace(workspace.snapshot),
+      };
+
+    case "toggleVsMuxDisabled":
+      return {
+        ...workspace,
+        options: {
+          ...workspace.options,
+          isVsMuxDisabled: !workspace.options.isVsMuxDisabled,
+        },
       };
 
     case "saveSidebarCommand": {

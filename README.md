@@ -4,9 +4,11 @@ For VS Code: https://marketplace.visualstudio.com/items?itemName=maddada.VSmux
 
 For Cursor and Others: https://open-vsx.org/extension/maddada/VSmux
 
-## New in 1.7.0
+## New in 1.8.0
 
-- Windows should work now.
+- Working on windows.
+
+## New in 1.7.0
 
 ## New in 1.6.0
 

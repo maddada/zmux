@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type {
@@ -53,11 +53,13 @@ import {
   unlockActiveEditorGroup,
   type PersistedSessionState,
 } from "./terminal-workspace-helpers";
+import { createWorkspaceTrace, RuntimeTrace } from "./runtime-trace";
 
 const SETTINGS_SECTION = "VSmux";
 const MATCH_VISIBLE_TERMINAL_ORDER_SETTING = "matchVisibleTerminalOrderInSessionsArea";
 const NATIVE_TERMINAL_ACTION_DELAY_MS_SETTING = "nativeTerminalActionDelayMs";
 const KEEP_SESSION_GROUPS_UNLOCKED_SETTING = "keepSessionGroupsUnlocked";
+const DEBUGGING_MODE_SETTING = "debuggingMode";
 const LEGACY_DO_NOT_CHANGE_EDITOR_GROUP_LOCKS_SETTING = "nativeTerminalDoNotChangeEditorGroupLocks";
 const AGENT_STATE_DIR_NAME = "terminal-session-state";
 const POLL_INTERVAL_MS = 750;
@@ -71,7 +73,6 @@ const SINGLE_SLOT_SWAP_PARK_RETRY_LIMIT = 3;
 const WINDOW_FOCUS_SETTLE_INTERVAL_MS = 50;
 const WINDOW_FOCUS_SETTLE_TIMEOUT_MS = 5_000;
 const TERMINAL_RENAME_COMMAND = "workbench.action.terminal.renameWithArg";
-const TRACE_DIRECTORY_NAME = "logs";
 const TRACE_FILE_NAME = "native-terminal-reconcile.log";
 const PROCESS_ID_ASSOCIATIONS_KEY = "nativeTerminalProcessIdBySession";
 const MOVE_HISTORY_LIMIT = 40;
@@ -122,7 +123,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   private readonly sessions = new Map<string, TerminalSessionSnapshot>();
   private suppressActivationEvents = 0;
   private readonly terminalToSessionId = new Map<vscode.Terminal, string>();
-  private readonly trace: NativeTerminalTrace;
+  private readonly trace: RuntimeTrace;
   private readonly trackedSessionIds = new Set<string>();
   private processAssociationWrite: Promise<void> = Promise.resolve();
   private reconcileWrite: Promise<void> = Promise.resolve();
@@ -139,9 +140,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   public readonly onDidChangeSessionTitle = this.changeSessionTitleEmitter.event;
 
   public constructor(private readonly options: NativeTerminalWorkspaceBackendOptions) {
-    this.trace = new NativeTerminalTrace(
-      path.join(getDefaultWorkspaceCwd(), TRACE_DIRECTORY_NAME, TRACE_FILE_NAME),
-    );
+    this.trace = createWorkspaceTrace(TRACE_FILE_NAME);
   }
 
   public async initialize(sessionRecords: readonly SessionRecord[]): Promise<void> {
@@ -158,7 +157,6 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     this.agentShellIntegration = await ensureAgentShellIntegration(
       path.join(this.options.context.globalStorageUri.fsPath, "terminal-host-daemon"),
     );
-    await this.syncConfiguration();
     this.loadStoredProcessAssociations();
 
     this.disposables.push(
@@ -222,6 +220,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         this.emitDebugStateChange();
       }),
     );
+    await this.syncConfiguration();
 
     for (const sessionRecord of sessionRecords) {
       this.trackedSessionIds.add(sessionRecord.sessionId);
@@ -516,6 +515,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         KEEP_SESSION_GROUPS_UNLOCKED_SETTING,
         configuration.get<boolean>(LEGACY_DO_NOT_CHANGE_EDITOR_GROUP_LOCKS_SETTING, true) ?? true,
       ) ?? true;
+    this.trace.setEnabled(configuration.get<boolean>(DEBUGGING_MODE_SETTING, false) ?? false);
     this.emitDebugStateChange();
   }
 
@@ -2117,50 +2117,4 @@ async function delay(durationMs: number): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, durationMs);
   });
-}
-
-class NativeTerminalTrace {
-  private pendingWrite: Promise<void> = Promise.resolve();
-
-  public constructor(private readonly filePath: string) {}
-
-  public reset(): Promise<void> {
-    this.pendingWrite = this.pendingWrite.then(async () => {
-      try {
-        await mkdir(path.dirname(this.filePath), { recursive: true });
-        await writeFile(this.filePath, "", "utf8");
-      } catch {
-        // Tracing is best-effort only.
-      }
-    });
-
-    return this.pendingWrite;
-  }
-
-  public log(tag: string, message: string, details?: unknown): Promise<void> {
-    const timestamp = new Date().toISOString();
-    const serializedDetails = details === undefined ? "" : ` ${safeSerializeTraceDetails(details)}`;
-    const line = `[${timestamp}] [${tag}] ${message}${serializedDetails}\n`;
-
-    this.pendingWrite = this.pendingWrite.then(async () => {
-      try {
-        await appendFile(this.filePath, line, "utf8");
-      } catch {
-        // Tracing is best-effort only.
-      }
-    });
-
-    return this.pendingWrite;
-  }
-}
-
-function safeSerializeTraceDetails(details: unknown): string {
-  try {
-    return JSON.stringify(details);
-  } catch (error) {
-    return JSON.stringify({
-      error: error instanceof Error ? error.message : String(error),
-      unserializable: true,
-    });
-  }
 }

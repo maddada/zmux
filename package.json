@@ -1,7 +1,7 @@
 {
   "name": "VSmux",
   "displayName": "VSmux",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
   "description": "VSmux - A VS Code extension",
   "categories": [
@@ -197,12 +197,24 @@
         "command": "VSmux.resetWorkspace",
         "title": "Reset Workspace",
         "category": "VSmux"
+      },
+      {
+        "command": "VSmux.moveToSecondarySidebar",
+        "title": "Move to Secondary Sidebar",
+        "category": "VSmux"
       }
     ],
     "viewsContainers": {
-      "secondarySidebar": [
+      "activitybar": [
         {
           "id": "VSmuxSessions",
+          "title": "VSmux",
+          "icon": "media/VSmux.svg"
+        }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "VSmuxSessionsSecondary",
           "title": "VSmux",
           "icon": "media/VSmux.svg"
         }

@@ -7,6 +7,7 @@ import {
   IconBellOff,
   IconBug,
   IconHistory,
+  IconLayoutSidebar,
   IconPlus,
   IconSettings,
 } from "@tabler/icons-react";
@@ -65,6 +66,7 @@ const INITIAL_STATE: SidebarState = {
     focusedSessionTitle: undefined,
     highlightedVisibleCount: 1,
     isFocusModeActive: false,
+    isVsMuxDisabled: false,
     showCloseButtonOnSessionCards: false,
     showHotkeysOnSessionCards: false,
     theme: getInitialSidebarTheme(),
@@ -162,6 +164,10 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
   };
 
   const requestNewSession = () => {
+    if (serverState.hud.isVsMuxDisabled) {
+      return;
+    }
+
     vscode.postMessage({ type: "createSession" });
   };
 
@@ -492,6 +498,23 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
                 className="session-context-menu-item"
                 onClick={() => {
                   setIsOverflowMenuOpen(false);
+                  vscode.postMessage({ type: "moveSidebarToOtherSide" });
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <IconLayoutSidebar
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                  stroke={1.8}
+                />
+                Move to Other Side
+              </button>
+              <button
+                className="session-context-menu-item"
+                onClick={() => {
+                  setIsOverflowMenuOpen(false);
                   vscode.postMessage({ type: "openSettings" });
                 }}
                 role="menuitem"
@@ -562,6 +585,14 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
             onDragStart={handleDragStart}
             sensors={sensors}
           >
+            <button
+              className="disable-vsmux-toggle-button"
+              data-selected={String(serverState.hud.isVsMuxDisabled)}
+              onClick={() => vscode.postMessage({ type: "toggleVsMuxDisabled" })}
+              type="button"
+            >
+              Code Mode
+            </button>
             <div className="group-list">
               {orderedGroups.map((group, groupIndex) => (
                 <SessionGroupSection

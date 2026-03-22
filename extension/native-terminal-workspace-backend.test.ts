@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, test, vi } from "vite-plus/test";
+import { access, mkdtemp, rm } from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { createSessionRecord } from "../shared/session-grid-contract";
 
 const testState = vi.hoisted(() => ({
@@ -18,6 +21,13 @@ const testState = vi.hoisted(() => ({
   }>,
   terminals: [] as unknown[],
   windowFocused: true,
+  workspaceFolders: [
+    {
+      uri: {
+        fsPath: "/workspace",
+      },
+    },
+  ],
 }));
 
 vi.mock("./agent-shell-integration", () => ({
@@ -98,13 +108,9 @@ vi.mock("vscode", () => ({
         key in testState.configurationValues ? testState.configurationValues[key] : defaultValue,
       ),
     })),
-    workspaceFolders: [
-      {
-        uri: {
-          fsPath: "/workspace",
-        },
-      },
-    ],
+    get workspaceFolders() {
+      return testState.workspaceFolders;
+    },
   },
 }));
 
@@ -124,6 +130,13 @@ describe("NativeTerminalWorkspaceBackend moveProjectionToEditor", () => {
     testState.terminalStateChangeListeners = [];
     testState.terminals = [];
     testState.windowFocused = true;
+    testState.workspaceFolders = [
+      {
+        uri: {
+          fsPath: "/workspace",
+        },
+      },
+    ];
     vi.useRealTimers();
   });
 
@@ -758,6 +771,96 @@ describe("NativeTerminalWorkspaceBackend moveProjectionToEditor", () => {
     });
   });
 });
+
+describe("NativeTerminalWorkspaceBackend debugging trace", () => {
+  let workspaceDirectory: string | undefined;
+
+  afterEach(async () => {
+    if (workspaceDirectory) {
+      await rm(workspaceDirectory, { force: true, recursive: true });
+      workspaceDirectory = undefined;
+    }
+  });
+
+  test("should not create the reconcile trace file when debugging mode is disabled", async () => {
+    workspaceDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-tiler-trace-off-"));
+    testState.workspaceFolders = [
+      {
+        uri: {
+          fsPath: workspaceDirectory,
+        },
+      },
+    ];
+
+    const backend = new NativeTerminalWorkspaceBackend({
+      context: {
+        globalStorageUri: {
+          fsPath: "/extension-storage",
+        },
+      } as never,
+      ensureShellSpawnAllowed: async () => true,
+      workspaceId: "workspace-1",
+    });
+
+    await backend.initialize([]);
+
+    await expect(
+      access(path.join(workspaceDirectory, "logs", "native-terminal-reconcile.log")),
+    ).rejects.toThrow();
+
+    backend.dispose();
+  });
+
+  test("should remove the reconcile trace file when debugging mode is turned off", async () => {
+    workspaceDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-tiler-trace-on-"));
+    testState.workspaceFolders = [
+      {
+        uri: {
+          fsPath: workspaceDirectory,
+        },
+      },
+    ];
+    testState.configurationValues.debuggingMode = true;
+
+    const backend = new NativeTerminalWorkspaceBackend({
+      context: {
+        globalStorageUri: {
+          fsPath: "/extension-storage",
+        },
+      } as never,
+      ensureShellSpawnAllowed: async () => true,
+      workspaceId: "workspace-1",
+    });
+    const traceFilePath = path.join(workspaceDirectory, "logs", "native-terminal-reconcile.log");
+
+    await backend.initialize([]);
+    await backend.clearDebugArtifacts();
+    await expect(access(traceFilePath)).resolves.toBeUndefined();
+
+    testState.configurationValues.debuggingMode = false;
+    await backend.syncConfiguration();
+
+    await waitForFileToBeRemoved(traceFilePath);
+
+    backend.dispose();
+  });
+});
+
+async function waitForFileToBeRemoved(filePath: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await access(filePath);
+    } catch {
+      return;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 25);
+    });
+  }
+
+  await expect(access(filePath)).rejects.toThrow();
+}
 
 describe("NativeTerminalWorkspaceBackend moveProjectionToPanel", () => {
   beforeEach(() => {

@@ -3,8 +3,6 @@ import { type TerminalViewMode, type VisibleSessionCount } from "../shared/sessi
 import { DebuggingStatusIndicator } from "./debugging-status-indicator";
 import { NativeTerminalWorkspaceController, SESSIONS_VIEW_ID } from "./native-terminal-workspace";
 
-const SESSION_CONTAINER_ID = "VSmuxSessions";
-
 export function activate(context: vscode.ExtensionContext): void {
   const workspace = new NativeTerminalWorkspaceController(context);
   const debuggingStatusIndicator = new DebuggingStatusIndicator(workspace);
@@ -16,6 +14,9 @@ export function activate(context: vscode.ExtensionContext): void {
     registerCommand("VSmux.openWorkspace", () => workspace.openWorkspace()),
     registerCommand("VSmux.openDebugInspector", () => workspace.openDebugInspector()),
     registerCommand("VSmux.openSettings", () => workspace.openSettings()),
+    registerCommand("VSmux.moveToSecondarySidebar", () =>
+      workspace.moveSidebarToSecondarySidebar(),
+    ),
     registerCommand("VSmux.createSession", () => workspace.createSession()),
     registerCommand("VSmux.revealSession", () => workspace.revealSession()),
     registerCommand("VSmux.restartSession", () => workspace.restartSessionFromCommand()),
@@ -37,7 +38,7 @@ export function activate(context: vscode.ExtensionContext): void {
     registerVisibleCountCommand("VSmux.showNine", workspace, 9),
     registerCommand("VSmux.toggleFullscreenSession", async () => {
       await workspace.toggleFullscreenSession();
-      await vscode.commands.executeCommand(`workbench.view.extension.${SESSION_CONTAINER_ID}`);
+      await workspace.revealSidebar();
     }),
     registerViewModeCommand("VSmux.setHorizontalView", workspace, "horizontal"),
     registerViewModeCommand("VSmux.setVerticalView", workspace, "vertical"),
@@ -67,7 +68,7 @@ function registerVisibleCountCommand(
 ): vscode.Disposable {
   return registerCommand(command, async () => {
     await workspace.setVisibleCount(visibleCount);
-    await vscode.commands.executeCommand(`workbench.view.extension.${SESSION_CONTAINER_ID}`);
+    await workspace.revealSidebar();
   });
 }
 
@@ -78,7 +79,7 @@ function registerFocusGroupCommand(
 ): vscode.Disposable {
   return registerCommand(command, async () => {
     await workspace.focusGroupByIndex(groupIndex);
-    await vscode.commands.executeCommand(`workbench.view.extension.${SESSION_CONTAINER_ID}`);
+    await workspace.revealSidebar();
   });
 }
 
@@ -105,7 +106,7 @@ function registerViewModeCommand(
 ): vscode.Disposable {
   return registerCommand(command, async () => {
     await workspace.setViewMode(viewMode);
-    await vscode.commands.executeCommand(`workbench.view.extension.${SESSION_CONTAINER_ID}`);
+    await workspace.revealSidebar();
   });
 }
 

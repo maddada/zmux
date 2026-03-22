@@ -93,16 +93,22 @@ const COMPLETION_SOUND_SETTING = "completionSound";
 const AGENTS_SETTING = "agents";
 const COMPLETION_BELL_ENABLED_KEY = "VSmux.completionBellEnabled";
 const SESSION_AGENT_COMMANDS_KEY = "VSmux.sessionAgentCommands";
+const DISABLE_VS_MUX_MODE_KEY = "VSmux.disableVsMuxMode";
 const NATIVE_TERMINAL_CONTROL_OWNER_KEY = "VSmux.nativeTerminalControlOwner";
 const NATIVE_TERMINAL_DEBUG_STATE_KEY = "VSmux.nativeTerminalDebugState";
+const SIDEBAR_WELCOME_DISMISSED_KEY = "VSmux.sidebarWelcomeDismissed";
+const SIDEBAR_LOCATION_IN_SECONDARY_KEY = "VSmux.sidebarLocationInSecondary";
 const NATIVE_TERMINAL_CONTROL_OWNER_FILE = "native-terminal-control-owner.json";
 export const SESSIONS_VIEW_ID = "VSmux.sessions";
+export const PRIMARY_SESSIONS_CONTAINER_ID = "VSmuxSessions";
+export const SECONDARY_SESSIONS_CONTAINER_ID = "VSmuxSessionsSecondary";
 const SHORTCUT_LABEL_PLATFORM = process.platform === "darwin" ? "mac" : "default";
 const WORKING_ACTIVITY_STALE_TIMEOUT_MS = 10_000;
 const COMMAND_TERMINAL_EXIT_POLL_MS = 250;
 const DEBUG_STATE_POLL_INTERVAL_MS = 500;
 const CONTROL_OWNER_STALE_MS = 5_000;
 const CONTROL_OWNER_HEARTBEAT_MS = 1_000;
+const SIDEBAR_WELCOME_OK_LABEL = "OK";
 
 type NativeTerminalWorkspaceBackendKind = "native";
 
@@ -134,6 +140,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private ownsNativeTerminalControl = false;
   private readonly sessionAgentLaunchBySessionId = new Map<string, StoredSessionAgentLaunch>();
   private readonly sidebarAgentIconBySessionId = new Map<string, SidebarAgentIcon>();
+  private sidebarWelcomeHandled = false;
   private readonly debugPanel: NativeTerminalDebugPanel;
   private readonly previousSessionHistory: PreviousSessionHistory;
   private readonly store: SessionGridStore;
@@ -199,6 +206,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       },
     });
     this.sidebarProvider = new SessionSidebarViewProvider({
+      onDidResolveView: async () => {
+        await this.maybeShowSidebarWelcome();
+      },
       onMessage: async (message) => this.handleSidebarMessage(message),
     });
 
@@ -254,14 +264,18 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   public async initialize(): Promise<void> {
     await this.migrateCompletionBellPreference();
     await this.ensureNativeTerminalControl();
-    await this.ensureT3RuntimeForStoredSessions(this.getAllSessionRecords());
+    if (!this.isVsMuxDisabled()) {
+      await this.ensureT3RuntimeForStoredSessions(this.getAllSessionRecords());
+    }
     if (this.ownsNativeTerminalControl) {
-      const disconnectedVisibleAgentSessionIds = this.getDisconnectedAgentSessionIds(
-        this.getActiveSnapshot().visibleSessionIds,
-      );
       await this.reconcileProjectedSessions();
-      for (const sessionId of disconnectedVisibleAgentSessionIds) {
-        await this.resumeAgentSessionIfConfigured(sessionId);
+      if (!this.isVsMuxDisabled()) {
+        const disconnectedVisibleAgentSessionIds = this.getDisconnectedAgentSessionIds(
+          this.getActiveSnapshot().visibleSessionIds,
+        );
+        for (const sessionId of disconnectedVisibleAgentSessionIds) {
+          await this.resumeAgentSessionIfConfigured(sessionId);
+        }
       }
     }
     await this.refreshSidebar("hydrate");
@@ -362,7 +376,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async openWorkspace(): Promise<void> {
-    await vscode.commands.executeCommand("workbench.view.extension.VSmuxSessions");
+    await this.revealSidebar();
 
     if (!(await this.ensureNativeTerminalControl())) {
       return;
@@ -370,6 +384,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     if (this.getAllSessionRecords().length === 0) {
       await this.createSession();
+      return;
+    }
+
+    if (this.isVsMuxDisabled()) {
+      await this.reconcileProjectedSessions();
+      await this.refreshSidebar();
       return;
     }
 
@@ -381,6 +401,20 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       await this.resumeAgentSessionIfConfigured(sessionId);
     }
     await this.refreshSidebar();
+  }
+
+  public async moveSidebarToSecondarySidebar(): Promise<void> {
+    await this.showSidebarMoveInstructions();
+  }
+
+  public async moveSidebarToOtherSide(): Promise<void> {
+    await this.showSidebarMoveInstructions();
+  }
+
+  public async revealSidebar(): Promise<void> {
+    await vscode.commands.executeCommand(
+      `workbench.view.extension.${this.getSidebarContainerId()}`,
+    );
   }
 
   public async openDebugInspector(): Promise<void> {
@@ -425,7 +459,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     for (const sessionRecord of this.getAllSessionRecords()) {
       const group = this.store.getSessionGroup(sessionRecord.sessionId);
       if (group) {
-        archivedSessions.push(this.createPreviousSessionEntry(group, sessionRecord));
+        const archivedSession = this.createPreviousSessionEntry(group, sessionRecord);
+        if (archivedSession) {
+          archivedSessions.push(archivedSession);
+        }
       }
       await this.backend.killSession(sessionRecord.sessionId);
       await this.t3Webviews.disposeSession(sessionRecord.sessionId);
@@ -439,6 +476,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.previousSessionHistory.append(archivedSessions);
     await this.persistSessionAgentCommands();
     await this.store.reset();
+    await this.context.workspaceState.update(this.getDisableVsMuxStorageKey(), false);
     await this.reconcileProjectedSessions();
     await this.refreshSidebar();
   }
@@ -1032,9 +1070,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    const archivedSessions = group.snapshot.sessions.map((sessionRecord) =>
-      this.createPreviousSessionEntry(group, sessionRecord),
-    );
+    const archivedSessions = group.snapshot.sessions.flatMap((sessionRecord) => {
+      const archivedSession = this.createPreviousSessionEntry(group, sessionRecord);
+      return archivedSession ? [archivedSession] : [];
+    });
     for (const sessionRecord of group.snapshot.sessions) {
       await this.t3Webviews.disposeSession(sessionRecord.sessionId);
       await this.browserSessions.disposeSession(sessionRecord.sessionId);
@@ -1072,6 +1111,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         getClampedCompletionSoundSetting(),
         getSidebarAgentButtons(),
         getSidebarCommandButtons(this.context),
+        this.isVsMuxDisabled(),
       ),
       groups: workspaceSnapshot.groups.map((group) => this.createSidebarGroup(group)),
       previousSessions: this.previousSessionHistory.getItems(),
@@ -1366,7 +1406,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private createPreviousSessionEntry(
     group: SessionGroupRecord,
     sessionRecord: SessionRecord,
-  ): PreviousSessionHistoryEntry {
+  ): PreviousSessionHistoryEntry | undefined {
+    if (isBrowserSession(sessionRecord)) {
+      return undefined;
+    }
+
     const sidebarItem = this.createSidebarItem(group, sessionRecord);
     const closedAt = new Date().toISOString();
     return {
@@ -1440,6 +1484,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
       case "toggleCompletionBell":
         await this.toggleCompletionBell();
+        return;
+
+      case "toggleVsMuxDisabled":
+        await this.toggleVsMuxDisabled();
+        return;
+
+      case "moveSidebarToOtherSide":
+        await this.moveSidebarToOtherSide();
         return;
 
       case "runSidebarAgent":
@@ -1611,6 +1663,55 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     await this.debugPanel.postMessage(
       this.getSharedDebugInspectorMessage() ?? this.createDebugInspectorMessage(),
+    );
+  }
+
+  private getSidebarContainerId(): string {
+    return this.context.globalState.get<boolean>(SIDEBAR_LOCATION_IN_SECONDARY_KEY, false)
+      ? SECONDARY_SESSIONS_CONTAINER_ID
+      : PRIMARY_SESSIONS_CONTAINER_ID;
+  }
+
+  private async maybeShowSidebarWelcome(): Promise<void> {
+    if (this.sidebarWelcomeHandled) {
+      return;
+    }
+
+    this.sidebarWelcomeHandled = true;
+    if (this.context.globalState.get<boolean>(SIDEBAR_WELCOME_DISMISSED_KEY, false)) {
+      return;
+    }
+
+    const selection = await vscode.window.showInformationMessage(
+      "Welcome to VSmux",
+      {
+        detail:
+          'VSmux keeps your sessions organized with quick switching, layout controls, grouped workspaces, and resume-friendly terminal state.\n\nBy default it lives in the main sidebar on the left. If you would rather keep Explorer or Source Control there later, run "VSmux: Move to Secondary Sidebar" to open both sidebars and then drag the VSmux icon across.',
+        modal: true,
+      },
+      SIDEBAR_WELCOME_OK_LABEL,
+    );
+
+    if (!selection) {
+      this.sidebarWelcomeHandled = false;
+      return;
+    }
+
+    await this.context.globalState.update(SIDEBAR_WELCOME_DISMISSED_KEY, true);
+  }
+
+  private async showSidebarMoveInstructions(): Promise<void> {
+    await vscode.commands.executeCommand(
+      `workbench.view.extension.${PRIMARY_SESSIONS_CONTAINER_ID}`,
+    );
+    await vscode.commands.executeCommand("workbench.action.focusAuxiliaryBar");
+    await vscode.window.showInformationMessage(
+      "Drag the VSmux icon to the other side to move it.",
+      {
+        detail:
+          "The primary and secondary sidebars are open now. Drag the VSmux icon into the other sidebar to move it there.",
+      },
+      SIDEBAR_WELCOME_OK_LABEL,
     );
   }
 
@@ -1876,6 +1977,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private async reconcileProjectedSessions(preserveFocus = false): Promise<void> {
+    if (this.isVsMuxDisabled()) {
+      await this.applyDisabledVsMuxMode();
+      return;
+    }
+
     const snapshot = this.getActiveSnapshot();
     await this.ensureT3RuntimeForVisibleSessions(snapshot);
     await this.syncT3RuntimeLease();
@@ -2116,6 +2222,35 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private getAllSessionRecords(): SessionRecord[] {
     return this.store.getSnapshot().groups.flatMap((group) => getOrderedSessions(group.snapshot));
+  }
+
+  private isVsMuxDisabled(): boolean {
+    return this.context.workspaceState.get<boolean>(this.getDisableVsMuxStorageKey(), false);
+  }
+
+  private async toggleVsMuxDisabled(): Promise<void> {
+    if (!(await this.ensureNativeTerminalControl())) {
+      return;
+    }
+
+    const nextValue = !this.isVsMuxDisabled();
+    await this.context.workspaceState.update(this.getDisableVsMuxStorageKey(), nextValue);
+    await this.reconcileProjectedSessions(true);
+    await this.refreshSidebar("hydrate");
+  }
+
+  private async applyDisabledVsMuxMode(): Promise<void> {
+    await this.backend.reconcileVisibleTerminals(createEmptyWorkspaceSessionSnapshot(), true);
+    this.t3Webviews.disposeAllSessions();
+    await vscode.commands.executeCommand("workbench.action.joinAllGroups");
+    await this.browserSessions.revealAllSessionsInOneGroup(
+      this.getAllSessionRecords().filter(isBrowserSession),
+      true,
+    );
+  }
+
+  private getDisableVsMuxStorageKey(): string {
+    return getWorkspaceStorageKey(DISABLE_VS_MUX_MODE_KEY, this.workspaceId);
   }
 
   private createSidebarCommandTerminal(

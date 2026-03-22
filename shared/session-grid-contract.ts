@@ -177,6 +177,7 @@ export type SidebarHudState = {
   debuggingMode: boolean;
   focusedSessionTitle?: string;
   isFocusModeActive: boolean;
+  isVsMuxDisabled: boolean;
   showCloseButtonOnSessionCards: boolean;
   showHotkeysOnSessionCards: boolean;
   theme: SidebarTheme;
@@ -222,6 +223,12 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "toggleCompletionBell";
+    }
+  | {
+      type: "toggleVsMuxDisabled";
+    }
+  | {
+      type: "moveSidebarToOtherSide";
     }
   | {
       type: "createSession";
@@ -568,6 +575,7 @@ export function createSidebarHudState(
   completionSound: CompletionSoundSetting = DEFAULT_COMPLETION_SOUND,
   agents: SidebarAgentButton[] = createDefaultSidebarAgentButtons(),
   commands: SidebarCommandButton[] = createDefaultSidebarCommandButtons(),
+  isVsMuxDisabled = false,
 ): SidebarHudState {
   const sessionById = new Map(snapshot.sessions.map((session) => [session.sessionId, session]));
   const focusedSession = snapshot.focusedSessionId
@@ -584,6 +592,7 @@ export function createSidebarHudState(
     focusedSessionTitle: focusedSession?.title,
     isFocusModeActive:
       snapshot.visibleCount === 1 && snapshot.fullscreenRestoreVisibleCount !== undefined,
+    isVsMuxDisabled,
     highlightedVisibleCount: snapshot.fullscreenRestoreVisibleCount ?? snapshot.visibleCount,
     showCloseButtonOnSessionCards,
     showHotkeysOnSessionCards,
