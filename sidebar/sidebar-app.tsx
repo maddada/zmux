@@ -470,7 +470,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
                 type="button"
               >
                 <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Add Command
+                Add Action
               </button>
               <button
                 className="session-context-menu-item"

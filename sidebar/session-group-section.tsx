@@ -26,8 +26,8 @@ const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 164;
 const COUNT_OPTIONS: VisibleSessionCount[] = [1, 2, 3, 4, 6, 9];
 const GROUP_CONTROL_MENU_MARGIN_PX = 12;
-const GROUP_LAYOUT_MENU_WIDTH_PX = 156;
-const GROUP_VISIBLE_COUNT_MENU_WIDTH_PX = 72;
+const GROUP_LAYOUT_MENU_WIDTH_PX = 0;
+const GROUP_VISIBLE_COUNT_MENU_WIDTH_PX = 0;
 
 type ContextMenuPosition = {
   x: number;
@@ -663,7 +663,8 @@ export function SessionGroupSection({
 }
 
 function getPortalMenuStyle(button: HTMLButtonElement | null, menuWidth: number) {
-  const position = getControlMenuPosition(button, menuWidth);
+  const effectiveMenuWidth = menuWidth || button?.offsetWidth || 0;
+  const position = getControlMenuPosition(button, effectiveMenuWidth);
   if (!position) {
     return undefined;
   }
@@ -672,7 +673,6 @@ function getPortalMenuStyle(button: HTMLButtonElement | null, menuWidth: number)
     left: `${position.x}px`,
     position: "fixed" as const,
     top: `${position.y}px`,
-    width: `${menuWidth}px`,
   };
 }
 

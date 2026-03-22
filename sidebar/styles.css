@@ -777,7 +777,7 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="t3"] {
 }
 
 .group-control-menu {
-  min-width: 156px;
+  min-width: max-content;
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
@@ -785,12 +785,15 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="t3"] {
 }
 
 .group-control-count-menu {
-  min-width: 72px;
+  min-width: max-content;
 }
 
 .group-control-menu-item {
   align-items: center;
   gap: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  width: auto;
 }
 
 .group-control-count-menu .group-control-menu-item {
