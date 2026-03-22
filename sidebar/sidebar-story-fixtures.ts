@@ -340,6 +340,7 @@ export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrat
     completionBellEnabled: false,
     completionSound: DEFAULT_COMPLETION_SOUND,
     completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),
+    debuggingMode: false,
     focusedSessionTitle: getFocusedSessionTitle(groups),
     highlightedVisibleCount: args.highlightedVisibleCount,
     isFocusModeActive: args.isFocusModeActive,

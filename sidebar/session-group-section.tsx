@@ -45,6 +45,7 @@ export type SessionGroupSectionProps = {
   index: number;
   onAutoEditHandled: () => void;
   orderedSessions: SidebarSessionItem[];
+  showDebugSessionNumbers: boolean;
   showCloseButton: boolean;
   showHotkeys: boolean;
   vscode: WebviewApi;
@@ -106,6 +107,7 @@ export function SessionGroupSection({
   index,
   onAutoEditHandled,
   orderedSessions,
+  showDebugSessionNumbers,
   showCloseButton,
   showHotkeys,
   vscode,
@@ -354,6 +356,7 @@ export function SessionGroupSection({
                 index={sessionIndex}
                 key={session.sessionId}
                 session={session}
+                showDebugSessionNumbers={showDebugSessionNumbers}
                 showCloseButton={showCloseButton}
                 showHotkeys={showHotkeys}
                 vscode={vscode}

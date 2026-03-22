@@ -1,6 +1,12 @@
 import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import type {
+  NativeTerminalBackendDebugState,
+  NativeTerminalDebugMoveAction,
+  NativeTerminalDebugMoveHistoryEntry,
+  NativeTerminalDebugProjection,
+} from "../shared/native-terminal-debug-contract";
 import type { SessionGridSnapshot, SessionRecord } from "../shared/session-grid-contract";
 import {
   createParkedTerminalReconcilePlan,
@@ -31,26 +37,36 @@ import {
   getDefaultWorkspaceCwd,
   getWorkspaceStorageKey,
   getViewColumn,
+  lockActiveEditorGroup,
   moveActiveEditorToNextGroup,
   moveActiveEditorToPreviousGroup,
   moveActiveTerminalToEditor,
   moveActiveTerminalToPanel,
   parsePersistedSessionState,
   serializePersistedSessionState,
+  unlockActiveEditorGroup,
   type PersistedSessionState,
 } from "./terminal-workspace-helpers";
 
 const SETTINGS_SECTION = "VSmux";
 const MATCH_VISIBLE_TERMINAL_ORDER_SETTING = "matchVisibleTerminalOrderInSessionsArea";
+const NATIVE_TERMINAL_ACTION_DELAY_MS_SETTING = "nativeTerminalActionDelayMs";
 const AGENT_STATE_DIR_NAME = "terminal-session-state";
 const POLL_INTERVAL_MS = 750;
 const RESTORE_SETTLE_INTERVAL_MS = 150;
 const RESTORE_SETTLE_TIMEOUT_MS = 1_500;
 const ACTIVE_TERMINAL_SETTLE_INTERVAL_MS = 25;
 const ACTIVE_TERMINAL_SETTLE_TIMEOUT_MS = 250;
+const MOVE_LOCATION_SETTLE_INTERVAL_MS = 25;
+const MOVE_LOCATION_SETTLE_TIMEOUT_MS = 300;
+const SINGLE_SLOT_SWAP_PARK_RETRY_LIMIT = 3;
+const WINDOW_FOCUS_SETTLE_INTERVAL_MS = 50;
+const WINDOW_FOCUS_SETTLE_TIMEOUT_MS = 5_000;
 const TERMINAL_RENAME_COMMAND = "workbench.action.terminal.renameWithArg";
+const TRACE_DIRECTORY_NAME = "logs";
 const TRACE_FILE_NAME = "native-terminal-reconcile.log";
 const PROCESS_ID_ASSOCIATIONS_KEY = "nativeTerminalProcessIdBySession";
+const MOVE_HISTORY_LIMIT = 40;
 
 type NativeTerminalWorkspaceBackendOptions = {
   context: vscode.ExtensionContext;
@@ -81,6 +97,7 @@ type ReadSessionAgentStateResult = {
 export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
   private agentShellIntegration: AgentShellIntegration | undefined;
   private readonly activateSessionEmitter = new vscode.EventEmitter<string>();
+  private readonly changeDebugStateEmitter = new vscode.EventEmitter<void>();
   private readonly changeSessionsEmitter = new vscode.EventEmitter<void>();
   private readonly changeSessionTitleEmitter =
     new vscode.EventEmitter<TerminalWorkspaceBackendTitleChange>();
@@ -100,16 +117,21 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   private readonly trace: NativeTerminalTrace;
   private readonly trackedSessionIds = new Set<string>();
   private processAssociationWrite: Promise<void> = Promise.resolve();
+  private reconcileWrite: Promise<void> = Promise.resolve();
+  private currentMoveAction: NativeTerminalDebugMoveAction | undefined;
+  private readonly moveHistory: NativeTerminalDebugMoveHistoryEntry[] = [];
   private managedTerminalDiscoveryVersion = 0;
   private matchVisibleTerminalOrder = false;
+  private nativeTerminalActionDelayMs = 0;
 
   public readonly onDidActivateSession = this.activateSessionEmitter.event;
+  public readonly onDidChangeDebugState = this.changeDebugStateEmitter.event;
   public readonly onDidChangeSessions = this.changeSessionsEmitter.event;
   public readonly onDidChangeSessionTitle = this.changeSessionTitleEmitter.event;
 
   public constructor(private readonly options: NativeTerminalWorkspaceBackendOptions) {
     this.trace = new NativeTerminalTrace(
-      path.join(this.options.context.globalStorageUri.fsPath, TRACE_FILE_NAME),
+      path.join(getDefaultWorkspaceCwd(), TRACE_DIRECTORY_NAME, TRACE_FILE_NAME),
     );
   }
 
@@ -134,6 +156,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       vscode.window.onDidOpenTerminal((terminal) => {
         void this.trace.log("OPEN", "onDidOpenTerminal", this.describeTerminal(terminal));
         void this.attachManagedTerminal(terminal);
+        this.emitDebugStateChange();
       }),
       vscode.window.onDidCloseTerminal((terminal) => {
         const sessionId = this.terminalToSessionId.get(terminal);
@@ -164,6 +187,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
           status: "exited",
         });
         this.changeSessionsEmitter.fire();
+        this.emitDebugStateChange();
       }),
       vscode.window.onDidChangeActiveTerminal((terminal) => {
         if (this.suppressActivationEvents > 0 || !terminal) {
@@ -186,6 +210,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         if (projection) {
           projection.location = this.resolveProjectionLocation(terminal);
         }
+        this.emitDebugStateChange();
       }),
     );
 
@@ -209,6 +234,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     await this.syncProjectionTerminalNames();
     await this.refreshSessionSnapshots();
     void this.trace.log("INIT", "initializeComplete", this.captureLayoutState());
+    this.emitDebugStateChange();
 
     this.pollTimer = setInterval(() => {
       void this.refreshSessionSnapshots().catch(() => {
@@ -219,6 +245,40 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
 
   public getLastTerminalActivityAt(sessionId: string): number | undefined {
     return this.lastTerminalActivityAtBySessionId.get(sessionId);
+  }
+
+  public async clearDebugArtifacts(): Promise<void> {
+    this.moveHistory.length = 0;
+    await this.trace.reset();
+    this.emitDebugStateChange();
+  }
+
+  public getDebugState(): NativeTerminalBackendDebugState {
+    return {
+      currentMoveAction: this.currentMoveAction
+        ? {
+            ...this.currentMoveAction,
+          }
+        : undefined,
+      lastVisibleSnapshot: this.lastVisibleSnapshot
+        ? cloneSnapshot(this.lastVisibleSnapshot)
+        : undefined,
+      layout: this.captureDebugLayoutState(),
+      matchVisibleTerminalOrder: this.matchVisibleTerminalOrder,
+      moveHistory: [...this.moveHistory],
+      nativeTerminalActionDelayMs: this.nativeTerminalActionDelayMs,
+      observedAt: new Date().toISOString(),
+      workspaceId: this.options.workspaceId,
+    };
+  }
+
+  public hasLiveTerminal(sessionId: string): boolean {
+    const projection = this.projections.get(sessionId);
+    return Boolean(
+      projection &&
+      !projection.terminal.exitStatus &&
+      vscode.window.terminals.includes(projection.terminal),
+    );
   }
 
   public dispose(): void {
@@ -232,6 +292,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     }
 
     this.activateSessionEmitter.dispose();
+    this.changeDebugStateEmitter.dispose();
     this.changeSessionsEmitter.dispose();
     this.changeSessionTitleEmitter.dispose();
   }
@@ -248,6 +309,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     });
     await this.writeSessionAgentState(sessionId, "idle", sessionSnapshot.agentName);
     this.changeSessionsEmitter.fire();
+    this.emitDebugStateChange();
     return true;
   }
 
@@ -265,6 +327,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       await this.syncTerminalName(existingProjection.terminal, sessionRecord.sessionId, true);
       const snapshot = this.createRunningSessionSnapshot(sessionRecord.sessionId);
       this.sessions.set(sessionRecord.sessionId, snapshot);
+      this.emitDebugStateChange();
       return snapshot;
     }
 
@@ -274,6 +337,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     await this.writeSessionAgentState(sessionRecord.sessionId, "idle", undefined, null);
     this.sessions.set(sessionRecord.sessionId, snapshot);
     this.changeSessionsEmitter.fire();
+    this.emitDebugStateChange();
     return snapshot;
   }
 
@@ -291,6 +355,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   }
 
   public async focusSession(sessionId: string, preserveFocus = false): Promise<boolean> {
+    this.syncClosedProjections();
     const projection = this.projections.get(sessionId);
     if (!projection) {
       return false;
@@ -329,60 +394,83 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     await this.clearProcessAssociation(sessionId);
     await this.deleteSessionAgentState(sessionId);
     this.changeSessionsEmitter.fire();
+    this.emitDebugStateChange();
   }
 
   public async reconcileVisibleTerminals(
     snapshot: SessionGridSnapshot,
     preserveFocus = false,
   ): Promise<void> {
-    const reconcileSnapshot = this.getReconcileSnapshot(snapshot);
-    const previousSnapshot = this.lastVisibleSnapshot;
-    this.lastVisibleSnapshot = cloneSnapshot(reconcileSnapshot);
-    void this.trace.log("RECONCILE", "start", {
-      nextVisibleSessionIds: [...snapshot.visibleSessionIds],
-      reconciledVisibleSessionIds: [...reconcileSnapshot.visibleSessionIds],
-      orderMode: this.matchVisibleTerminalOrder ? "match-sessions-area" : "stable-placement",
-      previousVisibleSessionIds: previousSnapshot?.visibleSessionIds ?? [],
-      preserveFocus,
-      state: this.captureLayoutState(),
+    const queuedSnapshot = cloneSnapshot(snapshot);
+    const reconcilePromise = this.reconcileWrite.then(() =>
+      this.reconcileVisibleTerminalsInternal(queuedSnapshot, preserveFocus),
+    );
+    this.reconcileWrite = reconcilePromise.catch(() => undefined);
+    await reconcilePromise;
+  }
+
+  private async reconcileVisibleTerminalsInternal(
+    snapshot: SessionGridSnapshot,
+    preserveFocus: boolean,
+  ): Promise<void> {
+    this.setCurrentMoveAction({
+      kind: "reconcileVisibleTerminals",
+      sessionId: snapshot.focusedSessionId,
+      startedAt: new Date().toISOString(),
     });
+    try {
+      this.syncClosedProjections();
+      const reconcileSnapshot = this.getReconcileSnapshot(snapshot);
+      const previousSnapshot = this.lastVisibleSnapshot;
+      this.lastVisibleSnapshot = cloneSnapshot(reconcileSnapshot);
+      void this.trace.log("RECONCILE", "start", {
+        nextVisibleSessionIds: [...snapshot.visibleSessionIds],
+        reconciledVisibleSessionIds: [...reconcileSnapshot.visibleSessionIds],
+        orderMode: this.matchVisibleTerminalOrder ? "match-sessions-area" : "stable-placement",
+        previousVisibleSessionIds: previousSnapshot?.visibleSessionIds ?? [],
+        preserveFocus,
+        state: this.captureLayoutState(),
+      });
 
-    await this.runWithoutActivationEvents(async () => {
-      this.refreshProjectionLocations();
-      await this.restoreManagedTerminals();
-      await this.ensureParkedProjections(reconcileSnapshot.sessions);
-
-      const plan = createParkedTerminalReconcilePlan(previousSnapshot, reconcileSnapshot);
-      if (
-        plan.strategy === "transfer" &&
-        this.canIncrementallyReconcileWithParkedProjections(previousSnapshot)
-      ) {
-        await this.applyParkedTerminalTransferPlan(reconcileSnapshot, plan, preserveFocus);
-      } else {
-        await this.reconcileVisibleTerminalsByMovingParkedProjections(
-          reconcileSnapshot,
-          preserveFocus,
-        );
-      }
-
-      this.refreshProjectionLocations();
-      if (!this.hasExpectedVisibleLayout(reconcileSnapshot)) {
-        void this.trace.log("LAYOUT", "cleanupPassTriggered", {
-          nextVisibleSessionIds: [...reconcileSnapshot.visibleSessionIds],
-          state: this.captureLayoutState(),
-        });
-        await this.reconcileVisibleTerminalsByMovingParkedProjections(
-          reconcileSnapshot,
-          preserveFocus,
-        );
+      await this.runWithoutActivationEvents(async () => {
         this.refreshProjectionLocations();
-      }
-    });
-    void this.trace.log("RECONCILE", "complete", {
-      nextVisibleSessionIds: [...snapshot.visibleSessionIds],
-      reconciledVisibleSessionIds: [...reconcileSnapshot.visibleSessionIds],
-      state: this.captureLayoutState(),
-    });
+        await this.restoreManagedTerminals();
+        await this.ensureParkedProjections(reconcileSnapshot.sessions);
+
+        const plan = createParkedTerminalReconcilePlan(previousSnapshot, reconcileSnapshot);
+        if (
+          plan.strategy === "transfer" &&
+          this.canIncrementallyReconcileWithParkedProjections(previousSnapshot)
+        ) {
+          await this.applyParkedTerminalTransferPlan(reconcileSnapshot, plan, preserveFocus);
+        } else {
+          await this.reconcileVisibleTerminalsByMovingParkedProjections(
+            reconcileSnapshot,
+            preserveFocus,
+          );
+        }
+
+        this.refreshProjectionLocations();
+        if (!this.hasExpectedVisibleLayout(reconcileSnapshot)) {
+          void this.trace.log("LAYOUT", "cleanupPassTriggered", {
+            nextVisibleSessionIds: [...reconcileSnapshot.visibleSessionIds],
+            state: this.captureLayoutState(),
+          });
+          await this.reconcileVisibleTerminalsByMovingParkedProjections(
+            reconcileSnapshot,
+            preserveFocus,
+          );
+          this.refreshProjectionLocations();
+        }
+      });
+      void this.trace.log("RECONCILE", "complete", {
+        nextVisibleSessionIds: [...snapshot.visibleSessionIds],
+        reconciledVisibleSessionIds: [...reconcileSnapshot.visibleSessionIds],
+        state: this.captureLayoutState(),
+      });
+    } finally {
+      this.completeCurrentMoveAction();
+    }
   }
 
   public async renameSession(sessionRecord: SessionRecord): Promise<void> {
@@ -394,6 +482,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     if (projection) {
       await this.syncTerminalName(projection.terminal, sessionRecord.sessionId, true);
     }
+    this.emitDebugStateChange();
   }
 
   public async restartSession(sessionRecord: SessionRecord): Promise<TerminalSessionSnapshot> {
@@ -402,10 +491,14 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   }
 
   public async syncConfiguration(): Promise<void> {
+    const configuration = vscode.workspace.getConfiguration(SETTINGS_SECTION);
     this.matchVisibleTerminalOrder =
-      vscode.workspace
-        .getConfiguration(SETTINGS_SECTION)
-        .get<boolean>(MATCH_VISIBLE_TERMINAL_ORDER_SETTING, false) ?? false;
+      configuration.get<boolean>(MATCH_VISIBLE_TERMINAL_ORDER_SETTING, false) ?? false;
+    this.nativeTerminalActionDelayMs = Math.max(
+      0,
+      Math.floor(configuration.get<number>(NATIVE_TERMINAL_ACTION_DELAY_MS_SETTING, 0) ?? 0),
+    );
+    this.emitDebugStateChange();
   }
 
   public async writeText(sessionId: string, data: string, shouldExecute = false): Promise<void> {
@@ -436,6 +529,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         sessionId: identity.sessionId,
         terminal: this.describeTerminal(terminal),
       });
+      this.emitDebugStateChange();
       return;
     }
 
@@ -473,6 +567,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       terminal: this.describeTerminal(terminal),
     });
     void this.syncTerminalName(terminal, identity.sessionId, true);
+    this.emitDebugStateChange();
   }
 
   private async waitForRestoreSettled(): Promise<void> {
@@ -626,6 +721,10 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       return;
     }
 
+    if (await this.tryApplyStableSingleSlotReplacement(snapshot, plan, preserveFocus)) {
+      return;
+    }
+
     for (const step of plan.demoteSteps) {
       await this.moveProjectionToPanel(step.sessionId);
     }
@@ -640,6 +739,130 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     if (focusedSessionId) {
       await this.showTerminal(this.projections.get(focusedSessionId)?.terminal, preserveFocus);
     }
+  }
+
+  private async tryApplyStableSingleSlotReplacement(
+    snapshot: SessionGridSnapshot,
+    plan: Extract<ParkedTerminalReconcilePlan, { strategy: "transfer" }>,
+    preserveFocus: boolean,
+  ): Promise<boolean> {
+    if (
+      this.matchVisibleTerminalOrder ||
+      plan.demoteSteps.length !== 1 ||
+      plan.promoteSteps.length !== 1 ||
+      plan.currentVisibleSessionIds.length !== snapshot.visibleSessionIds.length
+    ) {
+      return false;
+    }
+
+    const demoteStep = plan.demoteSteps[0];
+    const promoteStep = plan.promoteSteps[0];
+    if (demoteStep.slotIndex !== promoteStep.slotIndex) {
+      return false;
+    }
+
+    void this.trace.log("RECONCILE", "singleSlotSwap:start", {
+      demoteSessionId: demoteStep.sessionId,
+      promoteSessionId: promoteStep.sessionId,
+      slotIndex: demoteStep.slotIndex,
+    });
+    this.setCurrentMoveAction({
+      desiredVisibleIndex: promoteStep.slotIndex,
+      kind: "singleSlotSwap",
+      sessionId: promoteStep.sessionId,
+      startedAt: new Date().toISOString(),
+    });
+
+    const demoteProjection = this.projections.get(demoteStep.sessionId);
+    const targetGroupVisibleIndex =
+      demoteProjection?.location.type === "editor"
+        ? demoteProjection.location.visibleIndex
+        : promoteStep.slotIndex;
+
+    void this.trace.log("RECONCILE", "singleSlotSwap:incomingFirst", {
+      targetGroupVisibleIndex,
+      slotIndex: demoteStep.slotIndex,
+    });
+    await this.moveProjectionToEditor(promoteStep.sessionId, promoteStep.slotIndex, {
+      targetGroupVisibleIndex,
+    });
+    this.refreshProjectionLocations();
+
+    const promotedProjection = this.projections.get(promoteStep.sessionId);
+    if (
+      !promotedProjection ||
+      promotedProjection.location.type !== "editor" ||
+      promotedProjection.location.visibleIndex !== promoteStep.slotIndex
+    ) {
+      void this.trace.log("RECONCILE", "singleSlotSwap:fallback", {
+        reason: "promote-did-not-land",
+        sessionId: promoteStep.sessionId,
+        state: this.captureLayoutState(),
+      });
+      this.completeCurrentMoveAction("fallback", "promote-did-not-land");
+      return false;
+    }
+
+    const parked = await this.parkProjectionToPanelWithRetry(demoteStep.sessionId);
+    if (!parked) {
+      void this.trace.log("RECONCILE", "singleSlotSwap:fallback", {
+        reason: "demote-did-not-park",
+        sessionId: demoteStep.sessionId,
+        state: this.captureLayoutState(),
+      });
+      this.completeCurrentMoveAction("fallback", "demote-did-not-park");
+      return false;
+    }
+
+    await this.ensureDesiredEditorLayoutShape(snapshot);
+    this.refreshProjectionLocations();
+
+    if (!this.hasExpectedVisibleLayout(snapshot)) {
+      void this.trace.log("RECONCILE", "singleSlotSwap:fallback", {
+        reason: "post-swap-layout-mismatch",
+        state: this.captureLayoutState(),
+      });
+      this.completeCurrentMoveAction("fallback", "post-swap-layout-mismatch");
+      return false;
+    }
+
+    const focusedSessionId = snapshot.focusedSessionId ?? snapshot.visibleSessionIds[0];
+    if (focusedSessionId) {
+      await this.showTerminal(this.projections.get(focusedSessionId)?.terminal, preserveFocus);
+    }
+
+    void this.trace.log("RECONCILE", "singleSlotSwap:complete", {
+      slotIndex: demoteStep.slotIndex,
+      state: this.captureLayoutState(),
+    });
+    this.completeCurrentMoveAction();
+    return true;
+  }
+
+  private async parkProjectionToPanelWithRetry(sessionId: string): Promise<boolean> {
+    for (let attempt = 0; attempt < SINGLE_SLOT_SWAP_PARK_RETRY_LIMIT; attempt += 1) {
+      await this.moveProjectionToPanel(sessionId);
+      this.refreshProjectionLocations();
+
+      const projection = this.projections.get(sessionId);
+      if (!projection || projection.location.type === "panel") {
+        return true;
+      }
+
+      if (attempt + 1 >= SINGLE_SLOT_SWAP_PARK_RETRY_LIMIT) {
+        break;
+      }
+
+      void this.trace.log("MOVE", "toPanel:retry", {
+        attempt: attempt + 2,
+        resultingLocation: this.describeProjectionLocation(projection.location),
+        sessionId,
+        terminal: this.describeTerminal(projection.terminal),
+      });
+      await delay(MOVE_LOCATION_SETTLE_INTERVAL_MS);
+    }
+
+    return false;
   }
 
   private async reconcileVisibleTerminalsByMovingParkedProjections(
@@ -719,12 +942,19 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     await this.moveProjectionToEditor(focusedSessionId, visibleIndex);
   }
 
-  private async moveProjectionToEditor(sessionId: string, visibleIndex: number): Promise<void> {
+  private async moveProjectionToEditor(
+    sessionId: string,
+    visibleIndex: number,
+    options?: {
+      targetGroupVisibleIndex?: number;
+    },
+  ): Promise<void> {
     const projection = this.projections.get(sessionId);
     if (!projection) {
       return;
     }
 
+    const targetGroupVisibleIndex = options?.targetGroupVisibleIndex ?? visibleIndex;
     if (
       projection.location.type === "editor" &&
       projection.location.visibleIndex === visibleIndex
@@ -732,30 +962,43 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       return;
     }
 
-    void this.trace.log("MOVE", "toEditor:start", {
-      activeTerminal: this.describeOptionalTerminal(vscode.window.activeTerminal),
-      currentLocation: this.describeProjectionLocation(projection.location),
-      desiredVisibleIndex: visibleIndex,
-      sessionId,
-      terminal: this.describeTerminal(projection.terminal),
-    });
+    this.beginMoveAction("moveProjectionToEditor", sessionId, projection, visibleIndex);
+    try {
+      void this.trace.log("MOVE", "toEditor:start", {
+        activeTerminal: this.describeOptionalTerminal(vscode.window.activeTerminal),
+        currentLocation: this.describeProjectionLocation(projection.location),
+        desiredVisibleIndex: visibleIndex,
+        sessionId,
+        terminal: this.describeTerminal(projection.terminal),
+        targetGroupVisibleIndex,
+      });
 
-    if (projection.location.type === "panel") {
-      await focusEditorGroupByIndex(visibleIndex);
-      await this.activateTerminalForMove(projection.terminal, "toEditor", sessionId);
-      await moveActiveTerminalToEditor();
-    } else {
-      await this.activateTerminalForMove(projection.terminal, "toEditor", sessionId);
+      if (projection.location.type === "panel") {
+        await this.withUnlockedTargetEditorGroup(targetGroupVisibleIndex, async () => {
+          await this.activateTerminalForMove(projection.terminal, "toEditor", sessionId, true);
+          await this.runUiAction(() => focusEditorGroupByIndex(targetGroupVisibleIndex));
+          await this.runUiAction(() => moveActiveTerminalToEditor());
+        });
+      } else {
+        await this.activateTerminalForMove(projection.terminal, "toEditor", sessionId);
+      }
+
+      await this.focusTerminalEditorGroup(projection.terminal);
+      await this.alignActiveEditorGroupToVisibleIndex(visibleIndex);
+      projection.location = await this.waitForProjectionLocation(
+        sessionId,
+        (location) => location.type === "editor" && location.visibleIndex === visibleIndex,
+        "toEditor",
+      );
+      void this.trace.log("MOVE", "toEditor:complete", {
+        activeTerminal: this.describeOptionalTerminal(vscode.window.activeTerminal),
+        resultingLocation: this.describeProjectionLocation(projection.location),
+        sessionId,
+        state: this.captureLayoutState(),
+      });
+    } finally {
+      this.completeCurrentMoveAction();
     }
-
-    await this.alignActiveEditorGroupToVisibleIndex(visibleIndex);
-    projection.location = this.resolveProjectionLocation(projection.terminal);
-    void this.trace.log("MOVE", "toEditor:complete", {
-      activeTerminal: this.describeOptionalTerminal(vscode.window.activeTerminal),
-      resultingLocation: this.describeProjectionLocation(projection.location),
-      sessionId,
-      state: this.captureLayoutState(),
-    });
   }
 
   private async alignActiveEditorGroupToVisibleIndex(visibleIndex: number): Promise<void> {
@@ -768,7 +1011,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       activeViewColumn > expectedViewColumn &&
       safetyCounter < 8
     ) {
-      await moveActiveEditorToPreviousGroup();
+      await this.runUiAction(() => moveActiveEditorToPreviousGroup());
       activeViewColumn = getActiveEditorGroupViewColumn();
       safetyCounter += 1;
     }
@@ -778,7 +1021,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       activeViewColumn < expectedViewColumn &&
       safetyCounter < 8
     ) {
-      await moveActiveEditorToNextGroup();
+      await this.runUiAction(() => moveActiveEditorToNextGroup());
       activeViewColumn = getActiveEditorGroupViewColumn();
       safetyCounter += 1;
     }
@@ -790,21 +1033,111 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       return;
     }
 
-    void this.trace.log("MOVE", "toPanel:start", {
-      activeTerminal: this.describeOptionalTerminal(vscode.window.activeTerminal),
-      currentLocation: this.describeProjectionLocation(projection.location),
+    this.beginMoveAction("moveProjectionToPanel", sessionId, projection);
+    try {
+      void this.trace.log("MOVE", "toPanel:start", {
+        activeTerminal: this.describeOptionalTerminal(vscode.window.activeTerminal),
+        currentLocation: this.describeProjectionLocation(projection.location),
+        sessionId,
+        terminal: this.describeTerminal(projection.terminal),
+      });
+      const actualLocation = this.resolveProjectionLocation(projection.terminal);
+      if (actualLocation.type === "editor") {
+        await this.runUiAction(() => focusEditorGroupByIndex(actualLocation.visibleIndex));
+      } else {
+        const recordedLocation = projection.location;
+        if (recordedLocation.type === "editor") {
+          await this.runUiAction(() => focusEditorGroupByIndex(recordedLocation.visibleIndex));
+        }
+      }
+      await this.activateTerminalForMove(projection.terminal, "toPanel", sessionId);
+      await this.runUiAction(() => moveActiveTerminalToPanel());
+      projection.location = await this.waitForProjectionLocation(
+        sessionId,
+        (location) => location.type === "panel",
+        "toPanel",
+      );
+      void this.trace.log("MOVE", "toPanel:complete", {
+        activeTerminal: this.describeOptionalTerminal(vscode.window.activeTerminal),
+        resultingLocation: this.describeProjectionLocation(projection.location),
+        sessionId,
+        state: this.captureLayoutState(),
+      });
+    } finally {
+      this.completeCurrentMoveAction();
+    }
+  }
+
+  private async focusTerminalEditorGroup(terminal: vscode.Terminal): Promise<void> {
+    const location = this.resolveProjectionLocation(terminal);
+    if (location.type !== "editor") {
+      return;
+    }
+
+    await this.runUiAction(() => focusEditorGroupByIndex(location.visibleIndex));
+  }
+
+  private async withUnlockedTargetEditorGroup<T>(
+    visibleIndex: number,
+    callback: () => Promise<T>,
+  ): Promise<T> {
+    const targetGroup = this.getTabGroupByVisibleIndex(visibleIndex);
+    if (!targetGroup) {
+      return await callback();
+    }
+
+    const detectedLocked = Boolean((targetGroup as { isLocked?: boolean } | undefined)?.isLocked);
+    void this.trace.log("MOVE", "unlockTargetGroup:start", {
+      detectedLocked,
+      visibleIndex,
+    });
+    await this.runUiAction(() => focusEditorGroupByIndex(visibleIndex));
+    await this.runUiAction(() => unlockActiveEditorGroup());
+    try {
+      return await callback();
+    } finally {
+      await this.runUiAction(() => focusEditorGroupByIndex(visibleIndex));
+      await this.runUiAction(() => lockActiveEditorGroup());
+      void this.trace.log("MOVE", "unlockTargetGroup:complete", {
+        detectedLocked,
+        visibleIndex,
+      });
+    }
+  }
+
+  private getTabGroupByVisibleIndex(visibleIndex: number): vscode.TabGroup | undefined {
+    const viewColumn = getViewColumn(visibleIndex);
+    return vscode.window.tabGroups.all.find((group) => group.viewColumn === viewColumn);
+  }
+
+  private async waitForProjectionLocation(
+    sessionId: string,
+    matchesExpectedLocation: (location: ProjectionLocation) => boolean,
+    moveKind: "toEditor" | "toPanel",
+  ): Promise<ProjectionLocation> {
+    const projection = this.projections.get(sessionId);
+    if (!projection) {
+      return { type: "panel" };
+    }
+
+    const deadline = Date.now() + MOVE_LOCATION_SETTLE_TIMEOUT_MS;
+    let location = this.resolveProjectionLocation(projection.terminal);
+    while (Date.now() < deadline) {
+      if (matchesExpectedLocation(location)) {
+        return location;
+      }
+
+      await delay(MOVE_LOCATION_SETTLE_INTERVAL_MS);
+      location = this.resolveProjectionLocation(projection.terminal);
+    }
+
+    void this.trace.log("MOVE", "settleLocationTimeout", {
+      moveKind,
+      resultingLocation: this.describeProjectionLocation(location),
       sessionId,
       terminal: this.describeTerminal(projection.terminal),
     });
-    await this.activateTerminalForMove(projection.terminal, "toPanel", sessionId);
-    await moveActiveTerminalToPanel();
-    projection.location = this.resolveProjectionLocation(projection.terminal);
-    void this.trace.log("MOVE", "toPanel:complete", {
-      activeTerminal: this.describeOptionalTerminal(vscode.window.activeTerminal),
-      resultingLocation: this.describeProjectionLocation(projection.location),
-      sessionId,
-      state: this.captureLayoutState(),
-    });
+    return location;
   }
 
   private async applyVisibleEditorLayout(snapshot: SessionGridSnapshot): Promise<void> {
@@ -891,6 +1224,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       sessionId: sessionRecord.sessionId,
       terminal: this.describeTerminal(terminal),
     });
+    this.emitDebugStateChange();
     return projection;
   }
 
@@ -955,8 +1289,8 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
 
     return {
       ...cloneSnapshot(snapshot),
-      visibleSessionIds: nextVisibleSessionIds.filter(
-        (sessionId): sessionId is string => Boolean(sessionId),
+      visibleSessionIds: nextVisibleSessionIds.filter((sessionId): sessionId is string =>
+        Boolean(sessionId),
       ),
     };
   }
@@ -965,6 +1299,64 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     for (const projection of this.projections.values()) {
       projection.location = this.resolveProjectionLocation(projection.terminal);
     }
+  }
+
+  private emitDebugStateChange(): void {
+    this.changeDebugStateEmitter.fire();
+  }
+
+  private setCurrentMoveAction(action: NativeTerminalDebugMoveAction | undefined): void {
+    if (action) {
+      this.pushMoveHistory({
+        ...action,
+        event: "start",
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    this.currentMoveAction = action;
+    this.emitDebugStateChange();
+  }
+
+  private completeCurrentMoveAction(
+    event: NativeTerminalDebugMoveHistoryEntry["event"] = "complete",
+    detail?: string,
+  ): void {
+    if (this.currentMoveAction) {
+      this.pushMoveHistory({
+        ...this.currentMoveAction,
+        detail,
+        event,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    this.currentMoveAction = undefined;
+    this.emitDebugStateChange();
+  }
+
+  private pushMoveHistory(entry: NativeTerminalDebugMoveHistoryEntry): void {
+    this.moveHistory.unshift(entry);
+    if (this.moveHistory.length > MOVE_HISTORY_LIMIT) {
+      this.moveHistory.length = MOVE_HISTORY_LIMIT;
+    }
+  }
+
+  private beginMoveAction(
+    kind: string,
+    sessionId: string | undefined,
+    projection: SessionProjection | undefined,
+    desiredVisibleIndex?: number,
+  ): void {
+    this.setCurrentMoveAction({
+      currentLocation: this.describeProjectionLocation(projection?.location),
+      desiredVisibleIndex,
+      kind,
+      sessionId,
+      startedAt: new Date().toISOString(),
+      terminalName:
+        projection?.terminal.name ?? projection?.terminal.creationOptions.name ?? undefined,
+    });
   }
 
   private async runWithoutActivationEvents<T>(callback: () => Promise<T>): Promise<T> {
@@ -984,15 +1376,49 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       return;
     }
 
-    terminal.show(preserveFocus);
+    await this.runUiAction(() => {
+      terminal.show(preserveFocus);
+    });
+  }
+
+  private async runUiAction<T>(callback: () => Promise<T> | T): Promise<T> {
+    await this.waitForFocusedWindow();
+    if (this.nativeTerminalActionDelayMs > 0) {
+      await delay(this.nativeTerminalActionDelayMs);
+    }
+
+    return await callback();
+  }
+
+  private async waitForFocusedWindow(): Promise<void> {
+    if (vscode.window.state.focused) {
+      return;
+    }
+
+    void this.trace.log("MOVE", "awaitWindowFocus:start", {
+      activeTerminal: this.describeOptionalTerminal(vscode.window.activeTerminal),
+    });
+
+    const deadline = Date.now() + WINDOW_FOCUS_SETTLE_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (vscode.window.state.focused) {
+        void this.trace.log("MOVE", "awaitWindowFocus:complete", {});
+        return;
+      }
+
+      await delay(WINDOW_FOCUS_SETTLE_INTERVAL_MS);
+    }
+
+    void this.trace.log("MOVE", "awaitWindowFocus:timeout", {});
   }
 
   private async activateTerminalForMove(
     terminal: vscode.Terminal,
     moveKind: "toEditor" | "toPanel",
     sessionId: string,
+    preserveFocusOnShow = false,
   ): Promise<void> {
-    await this.showTerminal(terminal, false);
+    await this.showTerminal(terminal, preserveFocusOnShow);
 
     const deadline = Date.now() + ACTIVE_TERMINAL_SETTLE_TIMEOUT_MS;
     while (Date.now() < deadline) {
@@ -1187,6 +1613,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       sessionId,
       terminal: this.describeTerminal(terminal),
     });
+    this.emitDebugStateChange();
   }
 
   private captureLayoutState(): {
@@ -1211,6 +1638,98 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       terminalNames: vscode.window.terminals.map(
         (terminal) => terminal.name ?? terminal.creationOptions.name ?? "<unnamed>",
       ),
+    };
+  }
+
+  private captureDebugLayoutState(): NativeTerminalBackendDebugState["layout"] {
+    const projections = Array.from(this.projections.values()).map((projection) =>
+      this.createDebugProjection(projection),
+    );
+    const rawTabGroups = vscode.window.tabGroups.all.map((group) => ({
+      labels: group.tabs.map((tab) => tab.label),
+      terminalLabels: group.tabs
+        .filter((tab) => tab.input instanceof vscode.TabInputTerminal)
+        .map((tab) => tab.label),
+      viewColumn: group.viewColumn,
+    }));
+    const editorProjectionsBySlot = new Map<
+      number,
+      Array<{
+        sessionId: string;
+        terminalName?: string;
+      }>
+    >();
+    for (const projection of this.getEditorProjections().values()) {
+      if (projection.location.type !== "editor") {
+        continue;
+      }
+
+      const slotProjections = editorProjectionsBySlot.get(projection.location.visibleIndex) ?? [];
+      slotProjections.push({
+        sessionId: projection.sessionId,
+        terminalName: projection.terminal.name ?? projection.terminal.creationOptions.name,
+      });
+      editorProjectionsBySlot.set(projection.location.visibleIndex, slotProjections);
+    }
+
+    const visibleSurfaceGroupCount =
+      this.lastVisibleSnapshot?.visibleCount ??
+      Math.max(
+        editorProjectionsBySlot.size,
+        rawTabGroups.filter((group) => group.terminalLabels.length > 0).length,
+      );
+    const editorSurfaceGroups = Array.from(
+      { length: visibleSurfaceGroupCount },
+      (_, visibleIndex) => {
+        const viewColumn = getViewColumn(visibleIndex);
+        const matchingRawGroup = rawTabGroups.find((group) => group.viewColumn === viewColumn);
+        const slotProjections = editorProjectionsBySlot.get(visibleIndex) ?? [];
+
+        return {
+          labels: matchingRawGroup?.terminalLabels.length
+            ? [...matchingRawGroup.terminalLabels]
+            : slotProjections
+                .map((projection) => projection.terminalName ?? projection.sessionId)
+                .filter((label): label is string => Boolean(label)),
+          sessionIds: slotProjections.map((projection) => projection.sessionId),
+          viewColumn,
+          visibleIndex,
+        };
+      },
+    );
+
+    return {
+      activeTerminalName:
+        vscode.window.activeTerminal?.name ??
+        vscode.window.activeTerminal?.creationOptions.name ??
+        undefined,
+      editorSurfaceGroups,
+      parkedTerminals: projections.filter((projection) => projection.isParked),
+      processAssociations: Array.from(this.sessionIdByProcessId.entries()).map(
+        ([processId, sessionId]) => ({
+          processId,
+          sessionId,
+        }),
+      ),
+      projections,
+      rawTabGroups,
+      terminalCount: vscode.window.terminals.length,
+      terminalNames: vscode.window.terminals.map(
+        (terminal) => terminal.name ?? terminal.creationOptions.name ?? "<unnamed>",
+      ),
+      trackedSessionIds: [...this.trackedSessionIds],
+    };
+  }
+
+  private createDebugProjection(projection: SessionProjection): NativeTerminalDebugProjection {
+    return {
+      alias: this.sessionAliases.get(projection.sessionId),
+      exitCode: projection.terminal.exitStatus?.code,
+      isParked: projection.location.type === "panel",
+      isTracked: this.trackedSessionIds.has(projection.sessionId),
+      location: this.describeProjectionLocation(projection.location),
+      sessionId: projection.sessionId,
+      terminalName: projection.terminal.name ?? projection.terminal.creationOptions.name,
     };
   }
 
@@ -1254,7 +1773,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
 
   private async refreshSessionSnapshots(): Promise<void> {
     const observedAt = Date.now();
-    let changed = false;
+    let changed = this.syncClosedProjections();
 
     for (const sessionId of this.trackedSessionIds) {
       const previousSession = this.sessions.get(sessionId);
@@ -1327,6 +1846,45 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     }
 
     return previousStatus ?? "disconnected";
+  }
+
+  private syncClosedProjections(): boolean {
+    const openTerminals = new Set(vscode.window.terminals);
+    let changed = false;
+
+    for (const [sessionId, projection] of this.projections.entries()) {
+      if (openTerminals.has(projection.terminal)) {
+        continue;
+      }
+
+      this.createdTerminals.delete(projection.terminal);
+      this.terminalToSessionId.delete(projection.terminal);
+      this.projections.delete(sessionId);
+      void this.clearProcessAssociation(sessionId);
+
+      const previousSession =
+        this.sessions.get(sessionId) ??
+        createDisconnectedSessionSnapshot(sessionId, this.options.workspaceId);
+      this.sessions.set(sessionId, {
+        ...previousSession,
+        agentStatus:
+          previousSession.agentStatus === "working" ? "idle" : previousSession.agentStatus,
+        endedAt: previousSession.endedAt ?? new Date().toISOString(),
+        exitCode: previousSession.exitCode ?? 0,
+        status: "exited",
+      });
+      changed = true;
+      void this.trace.log("SYNC", "removedMissingProjection", {
+        sessionId,
+        terminal: this.describeTerminal(projection.terminal),
+      });
+    }
+
+    if (changed) {
+      this.changeSessionsEmitter.fire();
+    }
+
+    return changed;
   }
 
   private syncSessionTitle(sessionId: string, title: string | undefined): boolean {

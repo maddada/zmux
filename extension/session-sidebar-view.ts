@@ -160,6 +160,7 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
   switch (message.type) {
     case "ready":
     case "openSettings":
+    case "openDebugInspector":
     case "toggleCompletionBell":
     case "createSession":
     case "toggleFullscreenSession":

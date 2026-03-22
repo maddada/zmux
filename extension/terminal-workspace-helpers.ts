@@ -381,6 +381,14 @@ export async function moveActiveEditorToPreviousGroup(): Promise<void> {
   await vscode.commands.executeCommand("workbench.action.moveEditorToPreviousGroup");
 }
 
+export async function lockActiveEditorGroup(): Promise<void> {
+  await vscode.commands.executeCommand("workbench.action.lockEditorGroup");
+}
+
+export async function unlockActiveEditorGroup(): Promise<void> {
+  await vscode.commands.executeCommand("workbench.action.unlockEditorGroup");
+}
+
 export function matchesVisibleTerminalLayout(
   snapshot: SessionGridSnapshot,
   terminalTitleBySessionId: ReadonlyMap<string, string>,

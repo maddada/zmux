@@ -20,12 +20,13 @@
   ],
   "main": "./out/extension/extension.js",
   "scripts": {
-    "vscode:prepublish": "vp run sidebar:build && tsc -p ./tsconfig.extension.json",
+    "vscode:prepublish": "vp run sidebar:build && vp run debug-panel:build && tsc -p ./tsconfig.extension.json",
     "sidebar:build": "vp build --config vite.sidebar.config.ts",
+    "debug-panel:build": "vp build --config vite.debug-panel.config.ts",
     "storybook": "vp exec storybook dev -p 6006 --no-open",
     "storybook:build": "vp exec storybook build",
     "storybook:test": "node ./scripts/storybook-test.mjs",
-    "compile": "vp run sidebar:build && tsc -p ./tsconfig.extension.json",
+    "compile": "vp run sidebar:build && vp run debug-panel:build && tsc -p ./tsconfig.extension.json",
     "watch": "tsc -w -p ./tsconfig.extension.json",
     "lint": "vp lint",
     "fmt": "vp fmt",
@@ -68,6 +69,11 @@
       {
         "command": "VSmux.openSettings",
         "title": "Open Settings",
+        "category": "VSmux"
+      },
+      {
+        "command": "VSmux.openDebugInspector",
+        "title": "Open Move Debugger",
         "category": "VSmux"
       },
       {
@@ -276,11 +282,18 @@
           "default": false,
           "description": "Keep editor terminals in the same order as the Sessions list. This can add extra layout jitter when switching sessions."
         },
+        "VSmux.nativeTerminalActionDelayMs": {
+          "title": "Native Terminal Action Delay Ms",
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Delay native terminal move actions for debugging so you can watch layout changes more clearly."
+        },
         "VSmux.showCloseButtonOnSessionCards": {
           "title": "Show Close Button On Session Cards",
           "type": "boolean",
           "default": false,
-          "description": "Show close button on session cards. You can always cmd + click or middle click on a card to close it."
+          "description": "Reveal a close button when you hover a session card. You can always cmd + click or middle click on a card to close it."
         },
         "VSmux.showHotkeysOnSessionCards": {
           "title": "Show Hotkeys On Session Cards",

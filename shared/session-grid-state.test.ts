@@ -189,6 +189,7 @@ describe("sidebar HUD state", () => {
       "dark-green",
       false,
       false,
+      false,
       true,
       "glass",
     );
@@ -212,6 +213,7 @@ describe("sidebar HUD state", () => {
         visibleSessionIds: ["session-2"],
       },
       "dark-green",
+      false,
       false,
       false,
       false,

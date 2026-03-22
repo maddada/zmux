@@ -89,6 +89,7 @@ export type SidebarSessionItem = {
   activityLabel?: string;
   agentIcon?: SidebarAgentIcon;
   sessionId: string;
+  sessionNumber?: number;
   primaryTitle?: string;
   terminalTitle?: string;
   alias: string;
@@ -117,6 +118,7 @@ export type SidebarHudState = {
   completionBellEnabled: boolean;
   completionSound: CompletionSoundSetting;
   completionSoundLabel: string;
+  debuggingMode: boolean;
   focusedSessionTitle?: string;
   isFocusModeActive: boolean;
   showCloseButtonOnSessionCards: boolean;
@@ -156,6 +158,9 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "openSettings";
+    }
+  | {
+      type: "openDebugInspector";
     }
   | {
       type: "toggleCompletionBell";
@@ -445,6 +450,7 @@ export function createSidebarHudState(
   theme: SidebarTheme = "dark-blue",
   showCloseButtonOnSessionCards = false,
   showHotkeysOnSessionCards = false,
+  debuggingMode = false,
   completionBellEnabled = false,
   completionSound: CompletionSoundSetting = DEFAULT_COMPLETION_SOUND,
   agents: SidebarAgentButton[] = createDefaultSidebarAgentButtons(),
@@ -461,6 +467,7 @@ export function createSidebarHudState(
     completionBellEnabled,
     completionSound,
     completionSoundLabel: getCompletionSoundLabel(completionSound),
+    debuggingMode,
     focusedSessionTitle: focusedSession?.title,
     isFocusModeActive:
       snapshot.visibleCount === 1 && snapshot.fullscreenRestoreVisibleCount !== undefined,
@@ -497,6 +504,17 @@ export function createSidebarSessionItems(
     primaryTitle: getVisiblePrimaryTitle(session.title),
     row: session.row,
     sessionId: session.sessionId,
+    sessionNumber: getSessionNumber(session),
     shortcutLabel: getSessionShortcutLabel(session.slotIndex, platform),
   }));
+}
+
+function getSessionNumber(session: SessionRecord): number | undefined {
+  const match = /^session-(\d+)$/.exec(session.sessionId);
+  if (!match) {
+    return undefined;
+  }
+
+  const sessionNumber = Number.parseInt(match[1], 10);
+  return Number.isInteger(sessionNumber) && sessionNumber > 0 ? sessionNumber : undefined;
 }

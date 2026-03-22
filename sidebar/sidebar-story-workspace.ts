@@ -29,6 +29,7 @@ type SidebarStoryWorkspaceOptions = {
   commands: SidebarCommandButton[];
   completionBellEnabled: boolean;
   completionSound: SidebarHydrateMessage["hud"]["completionSound"];
+  debuggingMode: boolean;
   showCloseButtonOnSessionCards: boolean;
   showHotkeysOnSessionCards: boolean;
   theme: SidebarHydrateMessage["hud"]["theme"];
@@ -52,6 +53,7 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
       commands: message.hud.commands,
       completionBellEnabled: message.hud.completionBellEnabled,
       completionSound: message.hud.completionSound,
+      debuggingMode: message.hud.debuggingMode,
       showCloseButtonOnSessionCards: message.hud.showCloseButtonOnSessionCards,
       showHotkeysOnSessionCards: message.hud.showHotkeysOnSessionCards,
       theme: message.hud.theme,
@@ -119,6 +121,7 @@ export function createSidebarStoryMessage(
       workspace.options.theme,
       workspace.options.showCloseButtonOnSessionCards,
       workspace.options.showHotkeysOnSessionCards,
+      workspace.options.debuggingMode,
       workspace.options.completionBellEnabled,
       workspace.options.completionSound,
       workspace.options.agents,

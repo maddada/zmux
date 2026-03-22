@@ -17,6 +17,7 @@ export type SessionCardContentProps = {
   onClose?: () => void;
   secondaryRef?: RefObject<HTMLDivElement | null>;
   session: SidebarSessionItem;
+  showDebugSessionNumbers: boolean;
   showCloseButton: boolean;
   showHotkeys: boolean;
 };
@@ -26,6 +27,7 @@ export function SessionCardContent({
   onClose,
   secondaryRef,
   session,
+  showDebugSessionNumbers,
   showCloseButton,
   showHotkeys,
 }: SessionCardContentProps) {
@@ -40,6 +42,8 @@ export function SessionCardContent({
   const secondaryTitle = [terminalTitle, primaryTitle, session.detail]
     .filter((value) => value && value.length > 0)
     .join("\n");
+  const showDebugSessionNumber = showDebugSessionNumbers && session.sessionNumber !== undefined;
+  const showMeta = showHotkeys || showDebugSessionNumber;
 
   return (
     <>
@@ -86,8 +90,16 @@ export function SessionCardContent({
         ) : (
           <div />
         )}
-        <div className="session-meta" data-visible={String(showHotkeys)}>
-          {session.shortcutLabel}
+        <div
+          className="session-meta"
+          data-visible={String(showMeta)}
+        >
+          {showDebugSessionNumber ? (
+            <span className="session-debug-number">{session.sessionNumber}</span>
+          ) : null}
+          {showHotkeys ? (
+            <span className="session-shortcut-label">{session.shortcutLabel}</span>
+          ) : null}
         </div>
       </div>
     </>

@@ -14,6 +14,7 @@ export function activate(context: vscode.ExtensionContext): void {
     debuggingStatusIndicator,
     vscode.window.registerWebviewViewProvider(SESSIONS_VIEW_ID, workspace.sidebarProvider),
     registerCommand("VSmux.openWorkspace", () => workspace.openWorkspace()),
+    registerCommand("VSmux.openDebugInspector", () => workspace.openDebugInspector()),
     registerCommand("VSmux.openSettings", () => workspace.openSettings()),
     registerCommand("VSmux.createSession", () => workspace.createSession()),
     registerCommand("VSmux.revealSession", () => workspace.revealSession()),

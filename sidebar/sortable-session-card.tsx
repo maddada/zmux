@@ -26,6 +26,7 @@ export type SortableSessionCardProps = {
   groupId: string;
   index: number;
   session: SidebarSessionItem;
+  showDebugSessionNumbers: boolean;
   showCloseButton: boolean;
   showHotkeys: boolean;
   vscode: WebviewApi;
@@ -48,6 +49,7 @@ export function SortableSessionCard({
   groupId,
   index,
   session,
+  showDebugSessionNumbers,
   showCloseButton,
   showHotkeys,
   vscode,
@@ -215,6 +217,7 @@ export function SortableSessionCard({
             onClose={requestClose}
             secondaryRef={secondaryRef}
             session={session}
+            showDebugSessionNumbers={showDebugSessionNumbers}
             showCloseButton={showCloseButton}
             showHotkeys={showHotkeys}
           />

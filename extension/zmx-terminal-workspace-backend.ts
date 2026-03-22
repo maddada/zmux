@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import type { NativeTerminalBackendDebugState } from "../shared/native-terminal-debug-contract";
 import type { SessionGridSnapshot, SessionRecord } from "../shared/session-grid-contract";
 import type {
   TerminalAgentStatus,
@@ -70,6 +71,7 @@ type ReadSessionAgentStateResult = {
 export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
   private agentShellIntegration: AgentShellIntegration | undefined;
   private readonly activateSessionEmitter = new vscode.EventEmitter<string>();
+  private readonly changeDebugStateEmitter = new vscode.EventEmitter<void>();
   private readonly lastAgentStateModifiedAtBySessionId = new Map<string, number>();
   private readonly changeSessionsEmitter = new vscode.EventEmitter<void>();
   private readonly changeSessionTitleEmitter =
@@ -88,6 +90,7 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
   private zmxBinaryPath: string | undefined;
 
   public readonly onDidActivateSession = this.activateSessionEmitter.event;
+  public readonly onDidChangeDebugState = this.changeDebugStateEmitter.event;
   public readonly onDidChangeSessions = this.changeSessionsEmitter.event;
   public readonly onDidChangeSessionTitle = this.changeSessionTitleEmitter.event;
 
@@ -141,8 +144,41 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
     );
   }
 
+  public getDebugState(): NativeTerminalBackendDebugState {
+    return {
+      currentMoveAction: undefined,
+      lastVisibleSnapshot: this.lastVisibleSnapshot ? { ...this.lastVisibleSnapshot } : undefined,
+      layout: {
+        activeTerminalName:
+          vscode.window.activeTerminal?.name ??
+          vscode.window.activeTerminal?.creationOptions.name ??
+          undefined,
+        editorSurfaceGroups: [],
+        parkedTerminals: [],
+        processAssociations: [],
+        projections: [],
+        rawTabGroups: [],
+        terminalCount: 0,
+        terminalNames: [],
+        trackedSessionIds: [...this.trackedSessionIds],
+      },
+      matchVisibleTerminalOrder: false,
+      moveHistory: [],
+      nativeTerminalActionDelayMs: 0,
+      observedAt: new Date().toISOString(),
+      workspaceId: this.options.workspaceId,
+    };
+  }
+
+  public async clearDebugArtifacts(): Promise<void> {}
+
   public getLastTerminalActivityAt(sessionId: string): number | undefined {
     return this.lastTerminalActivityAtBySessionId.get(sessionId);
+  }
+
+  public hasLiveTerminal(sessionId: string): boolean {
+    const projection = this.projections.get(sessionId);
+    return Boolean(projection && !projection.terminal.exitStatus);
   }
 
   public dispose(): void {
@@ -165,6 +201,7 @@ export class ZmxTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
     this.lastTerminalActivityAtBySessionId.clear();
     this.lastTerminalTextTailBySessionId.clear();
     this.activateSessionEmitter.dispose();
+    this.changeDebugStateEmitter.dispose();
     this.changeSessionsEmitter.dispose();
     this.changeSessionTitleEmitter.dispose();
   }

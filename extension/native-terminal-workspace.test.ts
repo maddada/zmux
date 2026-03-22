@@ -1,6 +1,28 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 
 const testState = vi.hoisted(() => ({
+  backends: [] as Array<{
+    acknowledgeAttention: ReturnType<typeof vi.fn>;
+    canReuseVisibleLayout: ReturnType<typeof vi.fn>;
+    createOrAttachSession: ReturnType<typeof vi.fn>;
+    dispose: ReturnType<typeof vi.fn>;
+    focusSession: ReturnType<typeof vi.fn>;
+    getDebugState: ReturnType<typeof vi.fn>;
+    getLastTerminalActivityAt: ReturnType<typeof vi.fn>;
+    getSessionSnapshot: ReturnType<typeof vi.fn>;
+    hasLiveTerminal: ReturnType<typeof vi.fn>;
+    initialize: ReturnType<typeof vi.fn>;
+    killSession: ReturnType<typeof vi.fn>;
+    onDidActivateSession: ReturnType<typeof vi.fn>;
+    onDidChangeDebugState: ReturnType<typeof vi.fn>;
+    onDidChangeSessionTitle: ReturnType<typeof vi.fn>;
+    onDidChangeSessions: ReturnType<typeof vi.fn>;
+    reconcileVisibleTerminals: ReturnType<typeof vi.fn>;
+    renameSession: ReturnType<typeof vi.fn>;
+    restartSession: ReturnType<typeof vi.fn>;
+    syncConfiguration: ReturnType<typeof vi.fn>;
+    writeText: ReturnType<typeof vi.fn>;
+  }>,
   backend: undefined as
     | {
         acknowledgeAttention: ReturnType<typeof vi.fn>;
@@ -8,11 +30,14 @@ const testState = vi.hoisted(() => ({
         createOrAttachSession: ReturnType<typeof vi.fn>;
         dispose: ReturnType<typeof vi.fn>;
         focusSession: ReturnType<typeof vi.fn>;
+        getDebugState: ReturnType<typeof vi.fn>;
         getLastTerminalActivityAt: ReturnType<typeof vi.fn>;
         getSessionSnapshot: ReturnType<typeof vi.fn>;
+        hasLiveTerminal: ReturnType<typeof vi.fn>;
         initialize: ReturnType<typeof vi.fn>;
         killSession: ReturnType<typeof vi.fn>;
         onDidActivateSession: ReturnType<typeof vi.fn>;
+        onDidChangeDebugState: ReturnType<typeof vi.fn>;
         onDidChangeSessionTitle: ReturnType<typeof vi.fn>;
         onDidChangeSessions: ReturnType<typeof vi.fn>;
         reconcileVisibleTerminals: ReturnType<typeof vi.fn>;
@@ -41,6 +66,10 @@ const testState = vi.hoisted(() => ({
   showInputBox: vi.fn(),
   showQuickPick: vi.fn(),
   showWarningMessage: vi.fn(),
+  terminals: [] as unknown[],
+  debugPanelPostMessage: vi.fn(async () => {}),
+  debugPanelReveal: vi.fn(async () => {}),
+  debugPanelHasPanel: vi.fn(() => false),
   sidebarPostMessage: vi.fn(async () => {}),
 }));
 
@@ -62,6 +91,9 @@ vi.mock("vscode", () => ({
   window: {
     activeColorTheme: testState.activeColorTheme,
     createTerminal: testState.createTerminal,
+    get terminals() {
+      return testState.terminals;
+    },
     onDidChangeActiveColorTheme: testState.onDidChangeActiveColorTheme,
     showInformationMessage: testState.showInformationMessage,
     showInputBox: testState.showInputBox,
@@ -99,6 +131,24 @@ vi.mock("./session-sidebar-view", () => ({
   },
 }));
 
+vi.mock("./native-terminal-debug-panel", () => ({
+  NativeTerminalDebugPanel: class NativeTerminalDebugPanel {
+    public async postMessage(message: unknown): Promise<void> {
+      await testState.debugPanelPostMessage(message);
+    }
+
+    public async reveal(): Promise<void> {
+      await testState.debugPanelReveal();
+    }
+
+    public hasPanel(): boolean {
+      return testState.debugPanelHasPanel();
+    }
+
+    public dispose(): void {}
+  },
+}));
+
 vi.mock("./native-terminal-workspace-backend", () => ({
   NativeTerminalWorkspaceBackend: class NativeTerminalWorkspaceBackend {
     public constructor() {
@@ -108,11 +158,33 @@ vi.mock("./native-terminal-workspace-backend", () => ({
         createOrAttachSession: vi.fn(),
         dispose: vi.fn(),
         focusSession: vi.fn(async () => true),
+        getDebugState: vi.fn(() => ({
+          currentMoveAction: undefined,
+          lastVisibleSnapshot: undefined,
+          layout: {
+            activeTerminalName: undefined,
+            editorSurfaceGroups: [],
+            parkedTerminals: [],
+            processAssociations: [],
+            projections: [],
+            rawTabGroups: [],
+            terminalCount: 0,
+            terminalNames: [],
+            trackedSessionIds: [],
+          },
+          matchVisibleTerminalOrder: false,
+          moveHistory: [],
+          nativeTerminalActionDelayMs: 0,
+          observedAt: "2026-03-22T00:00:00.000Z",
+          workspaceId: "workspace-id",
+        })),
         getLastTerminalActivityAt: vi.fn(),
         getSessionSnapshot: vi.fn(() => undefined),
+        hasLiveTerminal: vi.fn(() => true),
         initialize: vi.fn(),
         killSession: vi.fn(),
         onDidActivateSession: vi.fn(() => ({ dispose: vi.fn() })),
+        onDidChangeDebugState: vi.fn(() => ({ dispose: vi.fn() })),
         onDidChangeSessionTitle: vi.fn(() => ({ dispose: vi.fn() })),
         onDidChangeSessions: vi.fn(() => ({ dispose: vi.fn() })),
         reconcileVisibleTerminals: vi.fn(),
@@ -121,6 +193,7 @@ vi.mock("./native-terminal-workspace-backend", () => ({
         syncConfiguration: vi.fn(),
         writeText: vi.fn(),
       };
+      testState.backends.push(testState.backend);
 
       return testState.backend;
     }
@@ -134,11 +207,13 @@ import {
   createDefaultSessionGridSnapshot,
   createSessionRecord,
 } from "../shared/session-grid-contract";
+import { getWorkspaceId, getWorkspaceStorageKey } from "./terminal-workspace-helpers";
 import { NativeTerminalWorkspaceController } from "./native-terminal-workspace";
 
 describe("NativeTerminalWorkspaceController rename session", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    testState.backends.length = 0;
     testState.backend = undefined;
     testState.configValues.clear();
     testState.createdTerminals.length = 0;
@@ -161,6 +236,13 @@ describe("NativeTerminalWorkspaceController rename session", () => {
     testState.showInputBox.mockReset();
     testState.showQuickPick.mockReset();
     testState.showWarningMessage.mockReset();
+    testState.terminals = [];
+    testState.debugPanelPostMessage.mockReset();
+    testState.debugPanelPostMessage.mockResolvedValue(undefined);
+    testState.debugPanelReveal.mockReset();
+    testState.debugPanelReveal.mockResolvedValue(undefined);
+    testState.debugPanelHasPanel.mockReset();
+    testState.debugPanelHasPanel.mockReturnValue(false);
     testState.sidebarPostMessage.mockReset();
     testState.sidebarPostMessage.mockResolvedValue(undefined);
   });
@@ -188,6 +270,57 @@ describe("NativeTerminalWorkspaceController rename session", () => {
       false,
     );
     expect(testState.backend?.renameSession).not.toHaveBeenCalled();
+  });
+
+  test("should open the move debug inspector and publish the current sidebar state", async () => {
+    const session = createSessionRecord(3, 0);
+    const workspaceSnapshot = createWorkspaceSnapshot(session);
+    const controller = new NativeTerminalWorkspaceController(createContext(workspaceSnapshot));
+
+    await controller.openDebugInspector();
+
+    expect(testState.debugPanelReveal).toHaveBeenCalledTimes(1);
+    expect(testState.debugPanelPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          sidebar: expect.objectContaining({
+            groups: expect.any(Array),
+            hud: expect.objectContaining({
+              debuggingMode: false,
+            }),
+          }),
+        }),
+        type: "hydrate",
+      }),
+    );
+  });
+
+  test("should let only the first window own native terminal reconciliation", async () => {
+    const session = createSessionRecord(3, 0);
+    const workspaceSnapshot = createWorkspaceSnapshot(session);
+    const sharedGlobalValues = new Map<string, unknown>();
+    const sharedGlobalStoragePath = `/tmp/vsmux-native-terminal-owner-test-${Math.random()
+      .toString(36)
+      .slice(2)}`;
+    const firstController = new NativeTerminalWorkspaceController(
+      createContext(workspaceSnapshot, [], sharedGlobalValues, sharedGlobalStoragePath),
+    );
+    const firstBackend = testState.backends[0];
+
+    await firstController.initialize();
+
+    expect(firstBackend?.initialize).toHaveBeenCalledTimes(1);
+    expect(firstBackend?.reconcileVisibleTerminals).toHaveBeenCalledTimes(1);
+
+    const secondController = new NativeTerminalWorkspaceController(
+      createContext(workspaceSnapshot, [], sharedGlobalValues, sharedGlobalStoragePath),
+    );
+    const secondBackend = testState.backends[1];
+
+    await secondController.initialize();
+
+    expect(secondBackend?.initialize).not.toHaveBeenCalled();
+    expect(secondBackend?.reconcileVisibleTerminals).not.toHaveBeenCalled();
   });
 
   test("should run sidebar commands in a new panel terminal instead of the VSmux backend", async () => {
@@ -303,6 +436,7 @@ describe("NativeTerminalWorkspaceController rename session", () => {
     testState.backend?.getSessionSnapshot.mockReturnValue({
       status: "exited",
     });
+    testState.backend?.hasLiveTerminal.mockReturnValue(false);
 
     await controller.focusSession(session.sessionId);
 
@@ -319,12 +453,122 @@ describe("NativeTerminalWorkspaceController rename session", () => {
     testState.backend?.getSessionSnapshot.mockReturnValue({
       status: "running",
     });
+    testState.backend?.hasLiveTerminal.mockReturnValue(true);
     testState.backend?.focusSession.mockResolvedValue(true);
 
     await controller.focusSession(session.sessionId);
 
     expect(testState.backend?.focusSession).toHaveBeenCalledWith(session.sessionId, false);
     expect(testState.backend?.reconcileVisibleTerminals).not.toHaveBeenCalled();
+  });
+
+  test("should publish closed sessions as not running in the sidebar when the terminal is gone", async () => {
+    const session = createSessionRecord(3, 0);
+    const workspaceSnapshot = createWorkspaceSnapshot(session);
+    const controller = new NativeTerminalWorkspaceController(createContext(workspaceSnapshot));
+
+    testState.backend?.getSessionSnapshot.mockReturnValue({
+      status: "running",
+    });
+    testState.backend?.hasLiveTerminal.mockReturnValue(false);
+
+    await controller.openWorkspace();
+
+    expect(testState.sidebarPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groups: expect.arrayContaining([
+          expect.objectContaining({
+            sessions: expect.arrayContaining([
+              expect.objectContaining({
+                isRunning: false,
+                sessionId: session.sessionId,
+              }),
+            ]),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  test("should describe sessions as managed by another window when this window is not the owner", async () => {
+    const session = createSessionRecord(3, 0);
+    const workspaceSnapshot = createWorkspaceSnapshot(session);
+    const ownerStorageKey = getWorkspaceStorageKey(
+      "VSmux.nativeTerminalControlOwner",
+      getWorkspaceId(),
+    );
+    const sharedGlobalValues = new Map<string, unknown>([
+      [
+        ownerStorageKey,
+        {
+          terminalCount: 1,
+          updatedAt: Date.now(),
+          windowId: "other-window",
+        },
+      ],
+    ]);
+    const controller = new NativeTerminalWorkspaceController(
+      createContext(workspaceSnapshot, [], sharedGlobalValues),
+    );
+
+    await (controller as any).refreshSidebar("hydrate");
+
+    expect(testState.sidebarPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groups: expect.arrayContaining([
+          expect.objectContaining({
+            sessions: expect.arrayContaining([
+              expect.objectContaining({
+                detail: "Managed in another VS Code window",
+                isRunning: false,
+                sessionId: session.sessionId,
+              }),
+            ]),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  test("should take ownership when this window has more managed terminals than the stored owner lease", async () => {
+    const session = createSessionRecord(3, 0);
+    const workspaceSnapshot = createWorkspaceSnapshot(session);
+    const workspaceId = getWorkspaceId();
+    const ownerStorageKey = getWorkspaceStorageKey("VSmux.nativeTerminalControlOwner", workspaceId);
+    const sharedGlobalValues = new Map<string, unknown>([
+      [
+        ownerStorageKey,
+        {
+          terminalCount: 0,
+          updatedAt: Date.now(),
+          windowId: "other-window",
+        },
+      ],
+    ]);
+    testState.terminals = [
+      {
+        creationOptions: {
+          env: {
+            VSMUX_SESSION_ID: session.sessionId,
+            VSMUX_WORKSPACE_ID: workspaceId,
+          },
+          name: session.alias,
+        },
+        name: session.alias,
+      },
+    ];
+
+    const controller = new NativeTerminalWorkspaceController(
+      createContext(workspaceSnapshot, [], sharedGlobalValues),
+    );
+
+    await controller.openWorkspace();
+
+    expect(testState.backend?.initialize).toHaveBeenCalledTimes(1);
+    expect(testState.backend?.reconcileVisibleTerminals).toHaveBeenCalledTimes(1);
+    expect((sharedGlobalValues.get(ownerStorageKey) as { windowId: string }).windowId).not.toBe(
+      "other-window",
+    );
   });
 
   test("should send a codex resume command after recreating a closed sidebar-agent session", async () => {
@@ -337,8 +581,9 @@ describe("NativeTerminalWorkspaceController rename session", () => {
 
     testState.backend?.writeText.mockClear();
     testState.backend?.getSessionSnapshot.mockReturnValue({
-      status: "exited",
+      status: "running",
     });
+    testState.backend?.hasLiveTerminal.mockReturnValue(false);
 
     await controller.focusSession("session-4");
 
@@ -360,8 +605,9 @@ describe("NativeTerminalWorkspaceController rename session", () => {
 
     testState.backend?.writeText.mockClear();
     testState.backend?.getSessionSnapshot.mockReturnValue({
-      status: "exited",
+      status: "running",
     });
+    testState.backend?.hasLiveTerminal.mockReturnValue(false);
 
     await controller.focusSession("session-4");
 
@@ -381,8 +627,9 @@ describe("NativeTerminalWorkspaceController rename session", () => {
 
     testState.backend?.writeText.mockClear();
     testState.backend?.getSessionSnapshot.mockReturnValue({
-      status: "exited",
+      status: "running",
     });
+    testState.backend?.hasLiveTerminal.mockReturnValue(false);
 
     await controller.focusSession("session-4");
 
@@ -414,17 +661,25 @@ function createWorkspaceSnapshot(
 function createContext(
   snapshot: GroupedSessionWorkspaceSnapshot,
   extraWorkspaceEntries: ReadonlyArray<readonly [string, unknown]> = [],
+  sharedGlobalValues?: Map<string, unknown>,
+  sharedGlobalStoragePath = `/tmp/vsmux-native-terminal-owner-test-${Math.random()
+    .toString(36)
+    .slice(2)}`,
 ) {
   const workspaceValues = new Map<string, unknown>([
     ["VSmux.sessionGridSnapshot", snapshot],
     ...extraWorkspaceEntries,
   ]);
-  const globalValues = new Map<string, unknown>();
+  const globalValues = sharedGlobalValues ?? new Map<string, unknown>();
 
   return {
     extensionUri: {
       fsPath: "/extension",
       toString: () => "file:///extension",
+    },
+    globalStorageUri: {
+      fsPath: sharedGlobalStoragePath,
+      toString: () => `file://${sharedGlobalStoragePath}`,
     },
     globalState: {
       get: <T>(key: string, defaultValue?: T) =>

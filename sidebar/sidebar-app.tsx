@@ -5,6 +5,7 @@ import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
 import {
   IconBell,
   IconBellOff,
+  IconBug,
   IconFocusCentered,
   IconPlus,
   IconSettings,
@@ -66,6 +67,7 @@ const INITIAL_STATE: SidebarState = {
     completionBellEnabled: false,
     completionSound: "ping",
     completionSoundLabel: "Ping",
+    debuggingMode: false,
     focusedSessionTitle: undefined,
     highlightedVisibleCount: 1,
     isFocusModeActive: false,
@@ -506,6 +508,25 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
                 />
                 Sidebar Settings
               </button>
+              {serverState.hud.debuggingMode ? (
+                <button
+                  className="session-context-menu-item"
+                  onClick={() => {
+                    setIsOverflowMenuOpen(false);
+                    vscode.postMessage({ type: "openDebugInspector" });
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconBug
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={14}
+                    stroke={1.8}
+                  />
+                  Open Move Debugger
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -605,6 +626,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
                   key={group.groupId}
                   onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
                   orderedSessions={group.orderedSessions}
+                  showDebugSessionNumbers={serverState.hud.debuggingMode}
                   showCloseButton={serverState.hud.showCloseButtonOnSessionCards}
                   showHotkeys={serverState.hud.showHotkeysOnSessionCards}
                   vscode={vscode}
