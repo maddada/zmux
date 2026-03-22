@@ -1,7 +1,15 @@
 import { Tooltip } from "@base-ui/react/tooltip";
 import { DragDropProvider } from "@dnd-kit/react";
 import { isSortable, useSortable } from "@dnd-kit/react/sortable";
-import { IconBrowser, IconPencil, IconTerminal2, IconTrash } from "@tabler/icons-react";
+import {
+  IconBrowser,
+  IconGlobe,
+  IconPencil,
+  IconPlayerPlay,
+  IconTerminal2,
+  IconTrash,
+  IconWorld,
+} from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { SidebarCommandButton } from "../shared/sidebar-commands";
@@ -394,10 +402,10 @@ function ActionKindIcon({ actionType }: ActionKindIconProps) {
   const className = "command-button-kind-icon";
 
   if (actionType === "browser") {
-    return <IconBrowser aria-hidden="true" className={className} size={15} stroke={1.8} />;
+    return <IconWorld aria-hidden="true" className={className} size={15} stroke={1.8} />;
   }
 
-  return <IconTerminal2 aria-hidden="true" className={className} size={15} stroke={1.8} />;
+  return <IconPlayerPlay aria-hidden="true" className={className} size={15} stroke={1.8} />;
 }
 
 function moveCommandId(
