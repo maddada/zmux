@@ -8,6 +8,7 @@ const testState = vi.hoisted(() => ({
   >,
   changeTabGroupListeners: [] as Array<() => void>,
   changeTabsListeners: [] as Array<() => void>,
+  closeTab: vi.fn(async () => undefined),
   configValues: new Map<string, unknown>(),
   executeCommand: vi.fn(async () => undefined),
   TabInputCustomClass: class MockTabInputCustom {
@@ -62,6 +63,7 @@ vi.mock("vscode", () => ({
   },
   window: {
     tabGroups: {
+      close: testState.closeTab,
       get all() {
         return testState.tabGroupsAll;
       },
@@ -82,6 +84,8 @@ describe("BrowserSessionManager", () => {
     testState.changeConfigurationListeners.length = 0;
     testState.changeTabGroupListeners.length = 0;
     testState.changeTabsListeners.length = 0;
+    testState.closeTab.mockReset();
+    testState.closeTab.mockResolvedValue(undefined);
     testState.configValues.clear();
     testState.executeCommand.mockReset();
     testState.executeCommand.mockResolvedValue(undefined);
@@ -166,6 +170,44 @@ describe("BrowserSessionManager", () => {
       testState.executeCommand.mock.calls.some(([command]) => command === "simpleBrowser.api.open"),
     ).toBe(false);
     expect((manager as any).managedTabsBySessionId.get(session.sessionId)?.tab).toBe(liveTab.tab);
+  });
+
+  test("should preserve managed browser tabs when the session becomes temporarily hidden", async () => {
+    const manager = new BrowserSessionManager({
+      onDidChangeSessions: vi.fn(async () => {}),
+      onDidFocusSession: vi.fn(async () => {}),
+    });
+    const session = createSessionRecord(1, 0, {
+      browser: {
+        url: "https://example.com/docs",
+      },
+      kind: "browser",
+      title: "Docs",
+    });
+    const liveTab = createBrowserPreviewTab(1, true);
+    testState.tabGroupsAll = [liveTab.group as (typeof testState.tabGroupsAll)[number]];
+    (manager as any).managedTabsBySessionId.set(session.sessionId, {
+      renderKey: "Vale|https://example.com/docs",
+      sessionId: session.sessionId,
+      tab: liveTab.tab,
+      url: "https://example.com/docs",
+      viewColumn: 1,
+    });
+
+    await manager.reconcileVisibleSessions(
+      {
+        focusedSessionId: undefined,
+        fullscreenRestoreVisibleCount: undefined,
+        sessions: [session],
+        viewMode: "grid",
+        visibleCount: 1,
+        visibleSessionIds: [],
+      },
+      true,
+    );
+
+    expect((manager as any).managedTabsBySessionId.has(session.sessionId)).toBe(true);
+    expect(testState.closeTab).not.toHaveBeenCalled();
   });
 });
 

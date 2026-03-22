@@ -86,13 +86,10 @@ export class BrowserSessionManager implements vscode.Disposable {
       );
     const visibleSessionIdSet = new Set(orderedVisibleSessions.map((session) => session.sessionId));
 
-    for (const [sessionId, managedTab] of this.managedTabsBySessionId.entries()) {
+    for (const [sessionId] of this.managedTabsBySessionId.entries()) {
       if (visibleSessionIdSet.has(sessionId)) {
         continue;
       }
-
-      await this.closeManagedTab(managedTab, true);
-      this.managedTabsBySessionId.delete(sessionId);
     }
 
     const focusedVisibleSession = orderedVisibleSessions.find(

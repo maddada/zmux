@@ -95,7 +95,7 @@ export class T3WebviewManager implements vscode.Disposable {
   }
 
   public disposeAllSessions(): void {
-    for (const sessionId of [...this.panelsBySessionId.keys()]) {
+    for (const sessionId of this.panelsBySessionId.keys()) {
       this.disposeSession(sessionId);
     }
   }

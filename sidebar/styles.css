@@ -920,23 +920,22 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="t3"] {
   align-items: center;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--app-button-background) 16%, var(--app-card-active) 84%),
-    color-mix(in srgb, var(--app-button-background) 10%, var(--app-card) 90%)
+    color-mix(in srgb, var(--app-card-active) 92%, white 8%),
+    color-mix(in srgb, var(--app-card) 96%, black 4%)
   );
-  border: 1px solid color-mix(in srgb, var(--app-button-background) 42%, var(--app-border));
-  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--app-border) 88%, transparent);
+  border-radius: 14px;
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, white 16%, transparent),
-    0 18px 28px color-mix(in srgb, var(--app-shadow) 18%, transparent);
-  color: var(--app-foreground);
+    0 10px 18px color-mix(in srgb, var(--app-shadow) 12%, transparent);
+  color: color-mix(in srgb, var(--app-foreground) 82%, var(--app-muted) 18%);
   display: flex;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   justify-content: center;
-  letter-spacing: 0.04em;
-  min-height: 88px;
-  padding: 18px;
-  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 10px;
+  padding: 8px 12px;
   width: 100%;
 }
 
@@ -944,12 +943,25 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="t3"] {
 .disable-vsmux-toggle-button:focus-visible {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--app-button-background) 24%, var(--app-card-active) 76%),
-    color-mix(in srgb, var(--app-button-background) 16%, var(--app-card) 84%)
+    color-mix(in srgb, var(--app-card-active) 84%, var(--app-button-background) 16%),
+    color-mix(in srgb, var(--app-card) 88%, var(--app-button-background) 12%)
   );
-  border-color: color-mix(in srgb, var(--app-button-background) 70%, var(--app-border));
+  border-color: color-mix(in srgb, var(--app-button-background) 44%, var(--app-border));
   color: var(--app-button-background);
   outline: none;
+}
+
+.disable-vsmux-toggle-button[data-selected="true"] {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--app-button-background) 28%, var(--app-card-active) 72%),
+    color-mix(in srgb, var(--app-button-background) 18%, var(--app-card) 82%)
+  );
+  border-color: color-mix(in srgb, var(--app-button-background) 78%, var(--app-border));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 20%, transparent),
+    0 12px 22px color-mix(in srgb, var(--app-button-background) 14%, transparent);
+  color: var(--app-button-background);
 }
 
 .group-empty-drop-target {

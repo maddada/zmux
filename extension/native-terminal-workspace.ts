@@ -387,6 +387,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
+    if (this.isVsMuxDisabled()) {
+      await this.reconcileProjectedSessions();
+      await this.refreshSidebar();
+      return;
+    }
+
     const disconnectedVisibleAgentSessionIds = this.getDisconnectedAgentSessionIds(
       this.getActiveSnapshot().visibleSessionIds,
     );
@@ -470,6 +476,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.previousSessionHistory.append(archivedSessions);
     await this.persistSessionAgentCommands();
     await this.store.reset();
+    await this.context.workspaceState.update(this.getDisableVsMuxStorageKey(), false);
     await this.reconcileProjectedSessions();
     await this.refreshSidebar();
   }

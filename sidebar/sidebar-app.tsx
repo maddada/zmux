@@ -591,33 +591,30 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
               onClick={() => vscode.postMessage({ type: "toggleVsMuxDisabled" })}
               type="button"
             >
-              Deactivate VS Mux
+              Code Mode
             </button>
-            {!serverState.hud.isVsMuxDisabled ? (
-              <div className="group-list">
-                {orderedGroups.map((group, groupIndex) => (
-                  <SessionGroupSection
-                    autoEdit={autoEditingGroupId === group.groupId}
-                    canClose={orderedGroups.length > 1}
-                    group={group}
-                    index={groupIndex}
-                    key={group.groupId}
-                    onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
-                    orderedSessions={group.orderedSessions}
-                    showDebugSessionNumbers={serverState.hud.debuggingMode}
-                    showCloseButton={serverState.hud.showCloseButtonOnSessionCards}
-                    showHotkeys={serverState.hud.showHotkeysOnSessionCards}
-                    vscode={vscode}
-                  />
-                ))}
-                <CreateGroupDropTarget
-                  isVisible={Boolean(draggedSessionId) && orderedGroups.length < MAX_GROUP_COUNT}
+            <div className="group-list">
+              {orderedGroups.map((group, groupIndex) => (
+                <SessionGroupSection
+                  autoEdit={autoEditingGroupId === group.groupId}
+                  canClose={orderedGroups.length > 1}
+                  group={group}
+                  index={groupIndex}
+                  key={group.groupId}
+                  onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
+                  orderedSessions={group.orderedSessions}
+                  showDebugSessionNumbers={serverState.hud.debuggingMode}
+                  showCloseButton={serverState.hud.showCloseButtonOnSessionCards}
+                  showHotkeys={serverState.hud.showHotkeysOnSessionCards}
+                  vscode={vscode}
                 />
-              </div>
-            ) : null}
+              ))}
+              <CreateGroupDropTarget
+                isVisible={Boolean(draggedSessionId) && orderedGroups.length < MAX_GROUP_COUNT}
+              />
+            </div>
           </DragDropProvider>
-          {!serverState.hud.isVsMuxDisabled &&
-          orderedGroups.every((group) => group.sessions.length === 0) ? (
+          {orderedGroups.every((group) => group.sessions.length === 0) ? (
             <div className="empty" data-empty-space-blocking="true">
               Create the first session to start the workspace.
             </div>
