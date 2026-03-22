@@ -921,14 +921,15 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="t3"] {
 }
 
 .previous-sessions-modal {
+  bottom: 12px;
   gap: 14px;
-  inset: 12px;
-  left: auto;
+  left: 12px;
   max-height: calc(100vh - 24px);
-  max-width: none;
+  max-width: 280px;
+  right: 12px;
   top: auto;
   transform: none;
-  width: auto;
+  width: min(280px, calc(100vw - 24px));
 }
 
 .previous-sessions-modal-body {
@@ -1176,6 +1177,36 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="t3"] {
 
 .session-history-card[data-restorable="true"] {
   cursor: pointer;
+}
+
+.previous-session-delete-button {
+  align-items: center;
+  color: var(--app-muted);
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease;
+  width: 18px;
+  z-index: 2;
+}
+
+.session-history-card:hover .previous-session-delete-button,
+.session-history-card:focus-visible .previous-session-delete-button,
+.session-history-card:focus-within .previous-session-delete-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.previous-session-delete-button:hover {
+  color: var(--app-foreground);
 }
 
 .session-status-dot {

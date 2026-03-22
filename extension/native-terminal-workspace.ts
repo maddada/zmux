@@ -315,6 +315,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       await this.resumeAgentSessionIfConfigured(sessionId);
     }
 
+    if (!preserveFocus) {
+      this.focusT3ComposerIfPossible(sessionId);
+    }
+
     const acknowledgedAttention = await this.acknowledgeSessionAttention(sessionId);
     if (changed && !acknowledgedAttention) {
       await this.refreshSidebar();
@@ -729,6 +733,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     if (archivedSession.agentLaunch) {
       await this.resumeAgentSessionIfConfigured(nextSessionRecord.sessionId);
     }
+    await this.previousSessionHistory.remove(historyId);
+    await this.refreshSidebar();
+  }
+
+  public async deletePreviousSession(historyId: string): Promise<void> {
     await this.previousSessionHistory.remove(historyId);
     await this.refreshSidebar();
   }
@@ -1407,6 +1416,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         await this.restorePreviousSession(message.historyId);
         return;
 
+      case "deletePreviousSession":
+        await this.deletePreviousSession(message.historyId);
+        return;
+
       case "moveSessionToGroup":
         await this.moveSessionToGroup(message.sessionId, message.groupId, message.targetIndex);
         return;
@@ -1779,6 +1792,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     await this.ensureT3RuntimeForStoredSessions([sessionRecord]);
     await this.t3Webviews.revealStoredSession(sessionRecord, snapshot, preserveFocus);
+  }
+
+  private focusT3ComposerIfPossible(sessionId: string): void {
+    const sessionRecord = this.store.getSession(sessionId);
+    if (!sessionRecord || !isT3Session(sessionRecord)) {
+      return;
+    }
+
+    this.t3Webviews.focusComposer(sessionId);
   }
 
   private async ensureT3RuntimeForVisibleSessions(

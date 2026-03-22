@@ -110,6 +110,7 @@ const testState = vi.hoisted(() => ({
   t3WebviewManagers: [] as Array<{
     dispose: ReturnType<typeof vi.fn>;
     disposeSession: ReturnType<typeof vi.fn>;
+    focusComposer: ReturnType<typeof vi.fn>;
     reconcileVisibleSessions: ReturnType<typeof vi.fn>;
     revealStoredSession: ReturnType<typeof vi.fn>;
   }>,
@@ -117,6 +118,7 @@ const testState = vi.hoisted(() => ({
     | {
         dispose: ReturnType<typeof vi.fn>;
         disposeSession: ReturnType<typeof vi.fn>;
+        focusComposer: ReturnType<typeof vi.fn>;
         reconcileVisibleSessions: ReturnType<typeof vi.fn>;
         revealStoredSession: ReturnType<typeof vi.fn>;
       }
@@ -295,6 +297,7 @@ vi.mock("./t3-webview-manager", () => ({
       testState.t3WebviewManager = {
         dispose: vi.fn(),
         disposeSession: vi.fn(),
+        focusComposer: vi.fn(),
         reconcileVisibleSessions: vi.fn(async () => {}),
         revealStoredSession: vi.fn(async () => {}),
       };
@@ -803,6 +806,7 @@ describe("NativeTerminalWorkspaceController rename session", () => {
       expect.any(Object),
       false,
     );
+    expect(testState.t3WebviewManager?.focusComposer).toHaveBeenCalledWith(session.sessionId);
   });
 
   test("should surface T3 sidebar activity from the T3 activity monitor", async () => {
@@ -915,6 +919,44 @@ describe("NativeTerminalWorkspaceController rename session", () => {
       `codex resume '${archivedSession.alias}'`,
       true,
     );
+    expect(testState.sidebarPostMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        previousSessions: [],
+      }),
+    );
+  });
+
+  test("should delete a previous session from history", async () => {
+    const archivedSession = createSessionRecord(3, 0);
+    const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
+    const historyEntry: PreviousSessionHistoryEntry = {
+      closedAt: "2026-03-22T08:15:00.000Z",
+      historyId: "history-1",
+      sessionRecord: archivedSession,
+      sidebarItem: {
+        activity: "idle",
+        activityLabel: undefined,
+        agentIcon: undefined,
+        alias: archivedSession.alias,
+        column: archivedSession.column,
+        detail: undefined,
+        isFocused: false,
+        isRunning: false,
+        isVisible: false,
+        primaryTitle: archivedSession.title,
+        row: archivedSession.row,
+        sessionId: archivedSession.sessionId,
+        sessionNumber: 3,
+        shortcutLabel: "⌃⌥1",
+        terminalTitle: undefined,
+      },
+    };
+    const controller = new NativeTerminalWorkspaceController(
+      createContext(workspaceSnapshot, [["VSmux.previousSessionHistory", [historyEntry]]]),
+    );
+
+    await controller.deletePreviousSession("history-1");
+
     expect(testState.sidebarPostMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({
         previousSessions: [],

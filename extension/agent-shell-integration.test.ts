@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
   detectCodexLifecycleEventFromLogLine,
+  getClaudeHookSettingsContent,
   parseAgentControlChunk,
 } from "./agent-shell-integration";
 
@@ -74,5 +75,58 @@ describe("detectCodexLifecycleEventFromLogLine", () => {
     );
 
     expect(eventType).toBeUndefined();
+  });
+});
+
+describe("getClaudeHookSettingsContent", () => {
+  test("should wire Claude lifecycle hooks into the shared notifier", () => {
+    const settings = JSON.parse(getClaudeHookSettingsContent("/tmp/vsmux-notify.sh")) as {
+      hooks: Record<
+        string,
+        Array<{ hooks: Array<{ command: string; type: string }>; matcher?: string }>
+      >;
+    };
+
+    expect(settings.hooks.UserPromptSubmit).toEqual([
+      {
+        hooks: [
+          {
+            command: "VSMUX_AGENT=claude sh '/tmp/vsmux-notify.sh'",
+            type: "command",
+          },
+        ],
+      },
+    ]);
+    expect(settings.hooks.Stop).toEqual([
+      {
+        hooks: [
+          {
+            command: "VSMUX_AGENT=claude sh '/tmp/vsmux-notify.sh'",
+            type: "command",
+          },
+        ],
+      },
+    ]);
+    expect(settings.hooks.StopFailure).toEqual([
+      {
+        hooks: [
+          {
+            command: "VSMUX_AGENT=claude sh '/tmp/vsmux-notify.sh'",
+            type: "command",
+          },
+        ],
+      },
+    ]);
+    expect(settings.hooks.Notification).toEqual([
+      {
+        hooks: [
+          {
+            command: "VSMUX_AGENT=claude sh '/tmp/vsmux-notify.sh'",
+            type: "command",
+          },
+        ],
+        matcher: "permission_prompt|idle_prompt",
+      },
+    ]);
   });
 });

@@ -1,8 +1,10 @@
+import { IconTrash } from "@tabler/icons-react";
 import { useRef } from "react";
 import type { SidebarPreviousSessionItem } from "../shared/session-grid-contract";
 import { SessionCardContent } from "./session-card-content";
 
 export type SessionHistoryCardProps = {
+  onDelete: () => void;
   onRestore: () => void;
   session: SidebarPreviousSessionItem;
   showDebugSessionNumbers: boolean;
@@ -10,6 +12,7 @@ export type SessionHistoryCardProps = {
 };
 
 export function SessionHistoryCard({
+  onDelete,
   onRestore,
   session,
   showDebugSessionNumbers,
@@ -56,6 +59,18 @@ export function SessionHistoryCard({
         role={session.isRestorable ? "button" : undefined}
         tabIndex={session.isRestorable ? 0 : -1}
       >
+        <button
+          aria-label={`Delete ${session.alias} from previous sessions`}
+          className="previous-session-delete-button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onDelete();
+          }}
+          type="button"
+        >
+          <IconTrash aria-hidden="true" size={12} stroke={1.9} />
+        </button>
         <SessionCardContent
           aliasHeadingRef={aliasHeadingRef}
           session={session}

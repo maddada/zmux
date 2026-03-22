@@ -79,6 +79,12 @@ export function PreviousSessionsModal({
                   {group.sessions.map((session) => (
                     <SessionHistoryCard
                       key={session.historyId}
+                      onDelete={() => {
+                        vscode.postMessage({
+                          historyId: session.historyId,
+                          type: "deletePreviousSession",
+                        });
+                      }}
                       onRestore={() => {
                         vscode.postMessage({
                           historyId: session.historyId,

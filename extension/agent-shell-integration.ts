@@ -17,6 +17,7 @@ export type ParsedAgentControlChunk = {
 
 export type AgentShellIntegration = {
   binDir: string;
+  claudeSettingsPath: string;
   notifyPath: string;
   opencodeConfigDir: string;
   zshDotDir: string;
@@ -25,6 +26,7 @@ export type AgentShellIntegration = {
 const AGENT_CONTROL_COMMAND = "9001";
 const AGENT_CONTROL_NAMESPACE = "VSmux";
 const AGENT_SHELL_DIR_NAME = "agent-shell-integration";
+const CLAUDE_SETTINGS_FILE_NAME = "settings.json";
 const NOTIFY_SCRIPT_NAME = "notify.sh";
 const OPENCODE_PLUGIN_FILE_NAME = "VSmux-notify.js";
 const CODEX_START_LOG_PATTERNS = [
@@ -119,6 +121,8 @@ async function createAgentShellIntegration(daemonStateDir: string): Promise<Agen
   const integrationRoot = path.join(daemonStateDir, AGENT_SHELL_DIR_NAME);
   const binDir = path.join(integrationRoot, "bin");
   const hooksDir = path.join(integrationRoot, "hooks");
+  const claudeConfigDir = path.join(hooksDir, "claude");
+  const claudeSettingsPath = path.join(claudeConfigDir, CLAUDE_SETTINGS_FILE_NAME);
   const notifyPath = path.join(hooksDir, NOTIFY_SCRIPT_NAME);
   const opencodeConfigDir = path.join(hooksDir, "opencode");
   const opencodePluginDir = path.join(opencodeConfigDir, "plugin");
@@ -127,10 +131,17 @@ async function createAgentShellIntegration(daemonStateDir: string): Promise<Agen
 
   await mkdir(binDir, { recursive: true });
   await mkdir(hooksDir, { recursive: true });
+  await mkdir(claudeConfigDir, { recursive: true });
   await mkdir(opencodePluginDir, { recursive: true });
   await mkdir(zshDotDir, { recursive: true });
 
   await writeFileIfChanged(notifyPath, getNotifyScriptContent(), 0o755);
+  await writeFileIfChanged(claudeSettingsPath, getClaudeHookSettingsContent(notifyPath), 0o644);
+  await writeFileIfChanged(
+    path.join(binDir, "claude"),
+    getClaudeWrapperContent(binDir, claudeSettingsPath),
+    0o755,
+  );
   await writeFileIfChanged(
     path.join(binDir, "codex"),
     getCodexWrapperContent(binDir, notifyPath),
@@ -162,6 +173,7 @@ async function createAgentShellIntegration(daemonStateDir: string): Promise<Agen
 
   return {
     binDir,
+    claudeSettingsPath,
     notifyPath,
     opencodeConfigDir,
     zshDotDir,
@@ -359,6 +371,7 @@ fi
 
 export PATH=${quotedBinDir}:$PATH
 rehash 2>/dev/null || true
+unalias claude 2>/dev/null || true
 unalias codex 2>/dev/null || true
 unalias opencode 2>/dev/null || true
 
@@ -444,12 +457,111 @@ if [ -z "$__VSMUX_ZSH_HOOKS_INSTALLED" ]; then
   alias vam-title='vsmux_set_title'
 fi
 
+claude() {
+  command ${quotedBinDir}/claude "$@"
+}
 codex() {
   command ${quotedBinDir}/codex "$@"
 }
 opencode() {
   command ${quotedBinDir}/opencode "$@"
 }
+`;
+}
+
+export function getClaudeHookSettingsContent(notifyPath: string): string {
+  const quotedNotifyPath = quoteShellLiteral(notifyPath);
+
+  return `${JSON.stringify(
+    {
+      hooks: {
+        UserPromptSubmit: [
+          {
+            hooks: [
+              {
+                type: "command",
+                command: `VSMUX_AGENT=claude sh ${quotedNotifyPath}`,
+              },
+            ],
+          },
+        ],
+        Stop: [
+          {
+            hooks: [
+              {
+                type: "command",
+                command: `VSMUX_AGENT=claude sh ${quotedNotifyPath}`,
+              },
+            ],
+          },
+        ],
+        StopFailure: [
+          {
+            hooks: [
+              {
+                type: "command",
+                command: `VSMUX_AGENT=claude sh ${quotedNotifyPath}`,
+              },
+            ],
+          },
+        ],
+        Notification: [
+          {
+            matcher: "permission_prompt|idle_prompt",
+            hooks: [
+              {
+                type: "command",
+                command: `VSMUX_AGENT=claude sh ${quotedNotifyPath}`,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function getClaudeWrapperContent(binDir: string, claudeSettingsPath: string): string {
+  const quotedBinDir = quoteShellLiteral(binDir);
+  const quotedSettingsPath = quoteShellLiteral(claudeSettingsPath);
+
+  return `#!/bin/bash
+# VSmux claude wrapper
+
+find_real_binary() {
+  local name="$1"
+  local IFS=:
+  for dir in $PATH; do
+    [ -z "$dir" ] && continue
+    dir="\${dir%/}"
+    case "$dir" in
+      ${quotedBinDir}) continue ;;
+    esac
+    if [ -x "$dir/$name" ] && [ ! -d "$dir/$name" ]; then
+      printf "%s\\n" "$dir/$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+REAL_BIN="$(find_real_binary "claude")"
+if [ -z "$REAL_BIN" ]; then
+  echo "VSmux: claude not found in PATH." >&2
+  exit 127
+fi
+
+export VSMUX_AGENT="claude"
+
+if [ -n "$VSMUX_SESSION_STATE_FILE" ]; then
+  _vsmux_tmp_file="$VSMUX_SESSION_STATE_FILE.tmp.$$"
+  printf 'status=idle\\nagent=%s\\ntitle=%s\\n' "$VSMUX_AGENT" "Claude Code" >"$_vsmux_tmp_file"
+  mv "$_vsmux_tmp_file" "$VSMUX_SESSION_STATE_FILE" >/dev/null 2>&1 || true
+fi
+
+exec "$REAL_BIN" --settings ${quotedSettingsPath} "$@"
 `;
 }
 

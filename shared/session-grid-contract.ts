@@ -255,6 +255,10 @@ export type SidebarToExtensionMessage =
       type: "restorePreviousSession";
     }
   | {
+      historyId: string;
+      type: "deletePreviousSession";
+    }
+  | {
       type: "moveSessionToGroup";
       groupId: string;
       sessionId: string;

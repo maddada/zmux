@@ -15,6 +15,8 @@ type T3WebviewManagerOptions = {
 
 type ManagedPanel = {
   panel: vscode.WebviewPanel;
+  pendingComposerFocus: boolean;
+  ready: boolean;
   renderKey: string;
   sessionId: string;
 };
@@ -85,6 +87,15 @@ export class T3WebviewManager implements vscode.Disposable {
     this.panelsBySessionId.delete(sessionId);
   }
 
+  public focusComposer(sessionId: string): void {
+    const managedPanel = this.panelsBySessionId.get(sessionId);
+    if (!managedPanel) {
+      return;
+    }
+
+    this.requestComposerFocus(managedPanel);
+  }
+
   private async revealSession(
     sessionRecord: T3SessionRecord,
     snapshot: SessionGridSnapshot,
@@ -101,6 +112,7 @@ export class T3WebviewManager implements vscode.Disposable {
     if (managedPanel) {
       managedPanel.panel.title = getPanelTitle(sessionRecord);
       if (managedPanel.renderKey !== nextRenderKey) {
+        managedPanel.ready = false;
         managedPanel.panel.webview.html = await this.createPanelHtml(
           managedPanel.panel.webview,
           sessionRecord,
@@ -130,11 +142,13 @@ export class T3WebviewManager implements vscode.Disposable {
         retainContextWhenHidden: true,
       },
     );
-    const nextManagedPanel = {
+    const nextManagedPanel: ManagedPanel = {
       panel,
+      pendingComposerFocus: false,
+      ready: false,
       renderKey: nextRenderKey,
       sessionId: sessionRecord.sessionId,
-    } satisfies ManagedPanel;
+    };
     this.panelsBySessionId.set(sessionRecord.sessionId, nextManagedPanel);
 
     panel.onDidDispose(() => {
@@ -149,7 +163,27 @@ export class T3WebviewManager implements vscode.Disposable {
 
       void this.options.onDidFocusSession(sessionRecord.sessionId);
     });
+    panel.webview.onDidReceiveMessage((message: unknown) => {
+      if (!isT3WebviewMessage(message)) {
+        return;
+      }
+
+      nextManagedPanel.ready = true;
+      if (nextManagedPanel.pendingComposerFocus) {
+        this.requestComposerFocus(nextManagedPanel);
+      }
+    });
     panel.webview.html = await this.createPanelHtml(panel.webview, sessionRecord);
+  }
+
+  private requestComposerFocus(managedPanel: ManagedPanel): void {
+    if (!managedPanel.ready) {
+      managedPanel.pendingComposerFocus = true;
+      return;
+    }
+
+    managedPanel.pendingComposerFocus = false;
+    void managedPanel.panel.webview.postMessage({ type: "focusComposer" });
   }
 
   private async createPanelHtml(
@@ -258,4 +292,13 @@ function createMissingEmbedHtml(webview: vscode.Webview, nonce: string): string 
 
 function createNonce(): string {
   return Math.random().toString(36).slice(2);
+}
+
+function isT3WebviewMessage(message: unknown): message is { type: "vsmuxReady" } {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    "type" in message &&
+    message.type === "vsmuxReady"
+  );
 }
