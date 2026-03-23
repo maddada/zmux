@@ -195,6 +195,41 @@ export function focusSessionInWorkspace(
   };
 }
 
+export function applyObservedActiveGroupStateInWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  focusedSessionId: string | undefined,
+  visibleSessionIds: readonly string[],
+): { changed: boolean; snapshot: GroupedSessionWorkspaceSnapshot } {
+  const normalizedSnapshot = normalizeGroupedSessionWorkspaceSnapshot(snapshot);
+  const activeGroup = getActiveGroup(normalizedSnapshot);
+  if (!activeGroup) {
+    return { changed: false, snapshot: normalizedSnapshot };
+  }
+
+  const nextGroupSnapshot = normalizeSessionGridSnapshot({
+    ...activeGroup.snapshot,
+    focusedSessionId,
+    visibleSessionIds: [...visibleSessionIds],
+  });
+  const changed =
+    activeGroup.snapshot.focusedSessionId !== nextGroupSnapshot.focusedSessionId ||
+    activeGroup.snapshot.visibleSessionIds.length !== nextGroupSnapshot.visibleSessionIds.length ||
+    activeGroup.snapshot.visibleSessionIds.some(
+      (sessionId, index) => sessionId !== nextGroupSnapshot.visibleSessionIds[index],
+    );
+  if (!changed) {
+    return { changed: false, snapshot: normalizedSnapshot };
+  }
+
+  return {
+    changed: true,
+    snapshot: {
+      ...normalizedSnapshot,
+      groups: updateGroup(normalizedSnapshot.groups, activeGroup.groupId, nextGroupSnapshot),
+    },
+  };
+}
+
 export function renameGroupInWorkspace(
   snapshot: GroupedSessionWorkspaceSnapshot,
   groupId: string,

@@ -146,6 +146,21 @@ export class BrowserSessionManager implements vscode.Disposable {
     return Boolean(this.resolveLiveTab(sessionId));
   }
 
+  public getObservedActiveSessionId(viewColumn: number | undefined): string | undefined {
+    if (!viewColumn) {
+      return undefined;
+    }
+
+    for (const [sessionId] of this.managedTabsBySessionId) {
+      const liveTab = this.resolveLiveTab(sessionId);
+      if (liveTab?.group.viewColumn === viewColumn && liveTab.isActive) {
+        return sessionId;
+      }
+    }
+
+    return undefined;
+  }
+
   public async revealAllSessionsInOneGroup(
     sessionRecords: readonly BrowserSessionRecord[],
     preserveFocus = true,

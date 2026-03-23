@@ -234,13 +234,15 @@ export class T3WebviewManager implements vscode.Disposable {
     const managedPanel = this.panelsBySessionId.get(sessionRecord.sessionId);
     const renderKey = getRenderKey(sessionRecord);
     const observedViewColumn = getObservedPanelViewColumn(getPanelTitle(sessionRecord));
+    const currentViewColumn = managedPanel?.panel.viewColumn ?? observedViewColumn;
 
     if (
       managedPanel &&
       managedPanel.renderKey === renderKey &&
-      observedViewColumn === targetViewColumn
+      currentViewColumn === targetViewColumn
     ) {
       await this.logState("PLACE", "reuse", {
+        currentViewColumn,
         isVisible,
         observedViewColumn,
         sessionId: sessionRecord.sessionId,
@@ -259,6 +261,7 @@ export class T3WebviewManager implements vscode.Disposable {
 
     if (managedPanel) {
       await this.logState("PLACE", "recreate", {
+        currentViewColumn,
         isVisible,
         observedViewColumn,
         sessionId: sessionRecord.sessionId,

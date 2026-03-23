@@ -230,6 +230,46 @@ describe("T3WebviewManager", () => {
     );
   });
 
+  test("should reuse a hidden panel already in the target group even if observed lookup misses it", async () => {
+    const manager = new T3WebviewManager({
+      context: { extensionUri: { fsPath: "/extension" } } as never,
+      onDidFocusSession: vi.fn(async () => {}),
+    });
+    vi.spyOn(manager as never, "createPanelHtml").mockResolvedValue("<html></html>" as never);
+    const visibleSession = createT3Session("session-1", "001", "Visible");
+    const hiddenSession = createT3Session("session-2", "002", "Hidden");
+    const hiddenPanel = testState.createPanel(1);
+    hiddenPanel.title = "[002] T3: Hidden";
+    (manager as any).panelsBySessionId.set(hiddenSession.sessionId, {
+      panel: hiddenPanel,
+      pendingComposerFocus: false,
+      ready: true,
+      readyWaiters: [],
+      renderKey: "Hidden|project-1|http://127.0.0.1:3773|thread-session-2|/workspace",
+      sessionId: hiddenSession.sessionId,
+    });
+
+    manager.syncSessions([visibleSession, hiddenSession]);
+
+    await manager.reconcileVisibleSessions(
+      {
+        focusedSessionId: visibleSession.sessionId,
+        fullscreenRestoreVisibleCount: undefined,
+        sessions: [visibleSession, hiddenSession],
+        viewMode: "horizontal",
+        visibleCount: 1,
+        visibleSessionIds: [visibleSession.sessionId],
+      },
+      false,
+    );
+
+    expect(hiddenPanel.dispose).not.toHaveBeenCalled();
+    expect(testState.createWebviewPanel).toHaveBeenCalledTimes(1);
+    expect((manager as any).panelsBySessionId.get(hiddenSession.sessionId)?.panel).toBe(
+      hiddenPanel,
+    );
+  });
+
   test("should queue composer focus until the embedded app reports ready", async () => {
     const manager = new T3WebviewManager({
       context: { extensionUri: { fsPath: "/extension" } } as never,
