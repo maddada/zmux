@@ -1,5 +1,10 @@
 import * as vscode from "vscode";
-import type { TerminalAgentStatus } from "../shared/terminal-host-protocol";
+import {
+  haveSameThreadStateMaps,
+  resolveThreadActivity,
+  type SnapshotResponse,
+  type T3ThreadActivityState,
+} from "./t3-activity-state";
 
 const DEFAULT_T3_WEBSOCKET_URL = "ws://127.0.0.1:3773";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -8,32 +13,6 @@ const REFRESH_DEBOUNCE_MS = 100;
 
 type T3ActivityMonitorOptions = {
   getWebSocketUrl?: () => string;
-};
-
-type SnapshotThread = {
-  deletedAt?: string | null;
-  id?: string;
-  latestTurn?: {
-    completedAt?: string | null;
-    state?: string | null;
-    turnId?: string;
-  } | null;
-  session?: {
-    activeTurnId?: string | null;
-    lastError?: string | null;
-    status?: string | null;
-    updatedAt?: string;
-  } | null;
-};
-
-type SnapshotResponse = {
-  threads?: SnapshotThread[];
-};
-
-type T3ThreadActivityState = {
-  activity: TerminalAgentStatus;
-  completionMarker?: string;
-  isRunning: boolean;
 };
 
 type PendingSnapshotRequest = {
@@ -348,99 +327,4 @@ export class T3ActivityMonitor implements vscode.Disposable {
   private getWebSocketUrl(): string {
     return this.options.getWebSocketUrl?.() ?? DEFAULT_T3_WEBSOCKET_URL;
   }
-}
-
-export function resolveThreadActivity(
-  thread: SnapshotThread,
-  previousState?: T3ThreadActivityState,
-): T3ThreadActivityState {
-  const sessionStatus = normalizeThreadSessionStatus(thread.session?.status);
-  const latestTurnState = normalizeLatestTurnState(thread.latestTurn?.state);
-  const isWorking =
-    sessionStatus === "starting" || sessionStatus === "running" || latestTurnState === "running";
-  const completionMarker = getCompletionMarker(thread);
-  const shouldRaiseAttention =
-    !isWorking &&
-    previousState !== undefined &&
-    completionMarker !== undefined &&
-    completionMarker !== previousState?.completionMarker &&
-    (latestTurnState === "completed" ||
-      latestTurnState === "interrupted" ||
-      latestTurnState === "error");
-  const shouldKeepAttention =
-    !isWorking &&
-    completionMarker !== undefined &&
-    previousState?.activity === "attention" &&
-    previousState.completionMarker === completionMarker;
-
-  return {
-    activity: isWorking
-      ? "working"
-      : shouldRaiseAttention || shouldKeepAttention
-        ? "attention"
-        : "idle",
-    completionMarker,
-    // Threads remain reopenable even when T3 has not materialized a live
-    // session object for them yet, so only explicit runtime errors should
-    // mark them as not running in the sidebar.
-    isRunning: sessionStatus !== "error",
-  };
-}
-
-function getCompletionMarker(thread: SnapshotThread): string | undefined {
-  const latestTurnState = normalizeLatestTurnState(thread.latestTurn?.state);
-  if (
-    latestTurnState === "completed" ||
-    latestTurnState === "interrupted" ||
-    latestTurnState === "error"
-  ) {
-    return [
-      "turn",
-      thread.latestTurn?.turnId ?? "",
-      latestTurnState,
-      thread.latestTurn?.completedAt ?? "",
-    ].join(":");
-  }
-
-  if (normalizeThreadSessionStatus(thread.session?.status) === "error") {
-    return [
-      "session",
-      thread.session?.updatedAt ?? "",
-      "error",
-      thread.session?.lastError ?? "",
-    ].join(":");
-  }
-
-  return undefined;
-}
-
-function normalizeThreadSessionStatus(status: unknown): string | undefined {
-  return typeof status === "string" ? status : undefined;
-}
-
-function normalizeLatestTurnState(state: unknown): string | undefined {
-  return typeof state === "string" ? state : undefined;
-}
-
-function haveSameThreadStateMaps(
-  left: ReadonlyMap<string, T3ThreadActivityState>,
-  right: ReadonlyMap<string, T3ThreadActivityState>,
-): boolean {
-  if (left.size !== right.size) {
-    return false;
-  }
-
-  for (const [threadId, leftState] of left) {
-    const rightState = right.get(threadId);
-    if (
-      !rightState ||
-      leftState.activity !== rightState.activity ||
-      leftState.isRunning !== rightState.isRunning ||
-      leftState.completionMarker !== rightState.completionMarker
-    ) {
-      return false;
-    }
-  }
-
-  return true;
 }
