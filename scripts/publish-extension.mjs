@@ -111,8 +111,6 @@ run("vp", [
   "--no-dependencies",
   "--skip-license",
   "--allow-unused-files-pattern",
-  "--changelog-path",
-  "CHANGELOG.md",
 ]);
 
 run("git", ["tag", "-a", tagName, "-m", `Release ${tagName}`]);
