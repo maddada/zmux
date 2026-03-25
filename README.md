@@ -1,4 +1,6 @@
-# VSmux: Manage all your CLI coding agents sessions without leaving your IDE.
+# VSmux - T3code & Agent CLIs Manager
+
+Manage all your CLI coding agent sessions without leaving your IDE.
 
 For VS Code: https://marketplace.visualstudio.com/items?itemName=maddada.VSmux
 
