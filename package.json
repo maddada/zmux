@@ -542,7 +542,7 @@
   ],
   "icon": "media/VSmux-marketplace-icon.png",
   "engines": {
-    "vscode": "^1.110.0"
+    "vscode": "^1.80.0"
   },
   "packageManager": "pnpm@10.14.0",
   "pnpm": {
