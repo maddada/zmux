@@ -178,17 +178,18 @@ export function getSessionShortcutLabel(slotIndex: number, platform: "default" |
 }
 
 export function createSessionAlias(sessionNumber: number, slotIndex: number): string {
-  const words = ["Atlas", "Beacon", "Comet", "Drift", "Ember", "Field", "Grove", "Harbor", "Lattice", "Mosaic", "Signal", "Vale"];
-  return words[(sessionNumber * 11 + slotIndex * 3) % words.length] ?? words[0]!;
+  void slotIndex;
+  return String(Math.max(1, Math.floor(sessionNumber)));
+}
+
+export function isNumericSessionAlias(alias: string | undefined): boolean {
+  return /^\d+$/.test(alias?.trim() ?? "");
 }
 
 export function isGeneratedSessionAlias(
   session: Pick<BaseSessionRecord, "alias" | "sessionId" | "slotIndex">,
 ): boolean {
-  return (
-    session.alias.trim() ===
-    createSessionAlias(parseSessionNumber(session.sessionId), session.slotIndex)
-  );
+  return session.alias.trim() === createSessionAlias(parseSessionNumber(session.sessionId), session.slotIndex);
 }
 
 export function createSessionRecord(

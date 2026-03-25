@@ -288,12 +288,10 @@ button:disabled {
   position: relative;
 }
 
-.sidebar-floating-controls {
+.sidebar-titlebar-controls {
   display: inline-flex;
   gap: 6px;
-  position: absolute;
-  right: 0;
-  top: -5px;
+  position: relative;
   z-index: 10;
 }
 
@@ -447,11 +445,20 @@ button:disabled {
   gap: 12px;
 }
 
-.agents-grid,
-.commands-grid {
+.agents-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.commands-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.commands-grid > * {
+  min-width: 0;
 }
 
 .agent-button,
@@ -486,6 +493,12 @@ button:disabled {
 
 .agent-button {
   min-width: 0;
+}
+
+.command-button {
+  justify-content: flex-start;
+  min-width: 0;
+  width: 100%;
 }
 
 .agent-button[data-icon-only="true"] {
@@ -568,6 +581,8 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
 }
 
 .command-button-label {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

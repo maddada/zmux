@@ -334,9 +334,7 @@
             "comebacktothecode",
             "glass",
             "ping",
-            "shamisen",
-            "supersetdoowap",
-            "supersetquick"
+            "shamisen"
           ],
           "enumItemLabels": [
             "Arcade",
@@ -346,9 +344,7 @@
             "Come Back To The Code",
             "Glass",
             "Ping",
-            "Shamisen",
-            "Superset Doo-Wap",
-            "Superset Quick"
+            "Shamisen"
           ],
           "description": "Sound played when an agent finishes and the per-project bell is enabled in the VSmux sidebar."
         },

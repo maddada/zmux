@@ -304,7 +304,7 @@ export function CommandsPanel({
                             stroke={1.8}
                           />
                         </span>
-                        <span className="command-button-label">Code Mode</span>
+                        <span className="command-button-label">Code</span>
                       </button>
                     }
                   />
@@ -408,6 +408,8 @@ function SortableCommandButton({
   onContextMenu,
   onRun,
 }: SortableCommandButtonProps) {
+  const [isLabelTruncated, setIsLabelTruncated] = useState(false);
+  const labelRef = useRef<HTMLSpanElement>(null);
   const sortable = useSortable({
     accept: "sidebar-command",
     data: createCommandDragData(command.commandId),
@@ -417,6 +419,26 @@ function SortableCommandButton({
     index,
     type: "sidebar-command",
   });
+
+  useEffect(() => {
+    const labelElement = labelRef.current;
+    if (!labelElement) {
+      return;
+    }
+
+    const updateTruncation = () => {
+      setIsLabelTruncated(labelElement.scrollWidth > labelElement.clientWidth + 1);
+    };
+
+    updateTruncation();
+
+    const resizeObserver = new ResizeObserver(updateTruncation);
+    resizeObserver.observe(labelElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [command.name]);
 
   return (
     <Tooltip.Root>
@@ -441,13 +463,17 @@ function SortableCommandButton({
             <span aria-hidden="true" className="command-button-kind-badge">
               <ActionKindIcon actionType={command.actionType} />
             </span>
-            <span className="command-button-label">{command.name}</span>
+            <span className="command-button-label" ref={labelRef}>
+              {command.name}
+            </span>
           </button>
         }
       />
       <Tooltip.Portal>
         <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
-          <Tooltip.Popup className="tooltip-popup">{getActionTooltip(command)}</Tooltip.Popup>
+          <Tooltip.Popup className="tooltip-popup">
+            {getActionTooltip(command, isLabelTruncated)}
+          </Tooltip.Popup>
         </Tooltip.Positioner>
       </Tooltip.Portal>
     </Tooltip.Root>
@@ -527,7 +553,11 @@ function isConfigured(command: SidebarCommandButton): boolean {
   return command.actionType === "browser" ? Boolean(command.url) : Boolean(command.command);
 }
 
-function getActionTooltip(command: SidebarCommandButton): string {
+function getActionTooltip(command: SidebarCommandButton, isLabelTruncated: boolean): string {
+  if (isLabelTruncated) {
+    return command.name;
+  }
+
   if (!isConfigured(command)) {
     return `Configure ${command.name}`;
   }

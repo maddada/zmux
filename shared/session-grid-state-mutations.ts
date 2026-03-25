@@ -1,4 +1,5 @@
 import {
+  isNumericSessionAlias,
   type SessionGridSnapshot,
   type SessionRecord,
   type TerminalViewMode,
@@ -111,7 +112,12 @@ export function renameSessionAliasInSnapshot(
   sessionId: string,
   alias: string,
 ): { changed: boolean; snapshot: SessionGridSnapshot } {
-  return updateSession(snapshot, sessionId, alias.trim(), "alias");
+  const normalizedAlias = alias.trim();
+  if (!normalizedAlias || isNumericSessionAlias(normalizedAlias)) {
+    return { changed: false, snapshot: normalizeSessionGridSnapshot(snapshot) };
+  }
+
+  return updateSession(snapshot, sessionId, normalizedAlias, "alias");
 }
 
 export function setSessionTitleInSnapshot(

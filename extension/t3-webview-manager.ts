@@ -118,6 +118,10 @@ export class T3WebviewManager implements vscode.Disposable {
     });
   }
 
+  public hasLivePanel(sessionId: string): boolean {
+    return this.panelsBySessionId.has(sessionId);
+  }
+
   public focusComposer(sessionId: string): void {
     const managedPanel = this.panelsBySessionId.get(sessionId);
     if (!managedPanel) {

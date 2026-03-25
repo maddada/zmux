@@ -124,7 +124,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
   const [isPreviousSessionsOpen, setIsPreviousSessionsOpen] = useState(false);
   const [isScratchPadOpen, setIsScratchPadOpen] = useState(false);
   const pendingCreateGroupRef = useRef(false);
-  const floatingControlsRef = useRef<HTMLDivElement>(null);
+  const overflowControlsRef = useRef<HTMLDivElement>(null);
   const sessionGroupsPanelRef = useRef<HTMLElement>(null);
   const draggedSessionIdRef = useRef<string>();
   const groupIdsRef = useRef<string[]>([]);
@@ -260,7 +260,7 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
         return;
       }
 
-      if (floatingControlsRef.current?.contains(target)) {
+      if (overflowControlsRef.current?.contains(target)) {
         return;
       }
 
@@ -443,132 +443,6 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
         data-sidebar-theme={serverState.hud.theme}
         onDoubleClick={handleSidebarDoubleClick}
       >
-        <div
-          className="sidebar-floating-controls"
-          data-empty-space-blocking="true"
-          ref={floatingControlsRef}
-        >
-          <ToolbarIconButton
-            ariaControls="sidebar-overflow-menu"
-            ariaExpanded={isOverflowMenuOpen}
-            ariaHasPopup="menu"
-            ariaLabel="Open sidebar menu"
-            className="floating-toolbar-button"
-            isSelected={isOverflowMenuOpen}
-            onClick={() => setIsOverflowMenuOpen((previous) => !previous)}
-            tooltip="More"
-          >
-            <OverflowIcon />
-          </ToolbarIconButton>
-          {isOverflowMenuOpen ? (
-            <div
-              aria-label="Sidebar actions"
-              className="session-context-menu sidebar-floating-menu"
-              data-empty-space-blocking="true"
-              id="sidebar-overflow-menu"
-              role="menu"
-            >
-              <button
-                className="session-context-menu-item"
-                onClick={() => {
-                  setIsOverflowMenuOpen(false);
-                  setAgentCreateRequestId((previous) => previous + 1);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Add Agent
-              </button>
-              <button
-                className="session-context-menu-item"
-                onClick={() => {
-                  setIsOverflowMenuOpen(false);
-                  setCommandCreateRequestId((previous) => previous + 1);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Add Action
-              </button>
-              <button
-                className="session-context-menu-item"
-                onClick={() => {
-                  setIsOverflowMenuOpen(false);
-                  vscode.postMessage({ type: "toggleCompletionBell" });
-                }}
-                role="menuitem"
-                type="button"
-              >
-                {serverState.hud.completionBellEnabled ? (
-                  <IconBellOff aria-hidden="true" className="session-context-menu-icon" size={14} />
-                ) : (
-                  <IconBell aria-hidden="true" className="session-context-menu-icon" size={14} />
-                )}
-                {getCompletionBellMenuLabel(serverState.hud)}
-              </button>
-              <button
-                className="session-context-menu-item"
-                onClick={() => {
-                  setIsOverflowMenuOpen(false);
-                  vscode.postMessage({ type: "moveSidebarToOtherSide" });
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <IconLayoutSidebar
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                Move to Other Side
-              </button>
-              <button
-                className="session-context-menu-item"
-                onClick={() => {
-                  setIsOverflowMenuOpen(false);
-                  vscode.postMessage({ type: "openSettings" });
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <IconSettings
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                Sidebar Settings
-              </button>
-              {serverState.hud.debuggingMode ? (
-                <button
-                  className="session-context-menu-item"
-                  onClick={() => {
-                    setIsOverflowMenuOpen(false);
-                    vscode.postMessage({ type: "openDebugInspector" });
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconBug
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  Open Move Debugger
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-        <AgentsPanel
-          agents={serverState.hud.agents}
-          createRequestId={agentCreateRequestId}
-          vscode={vscode}
-        />
         <CommandsPanel
           commands={serverState.hud.commands}
           createRequestId={commandCreateRequestId}
@@ -578,6 +452,138 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
             setIsPreviousSessionsOpen(false);
             setIsScratchPadOpen((previous) => !previous);
           }}
+          vscode={vscode}
+        />
+        <AgentsPanel
+          agents={serverState.hud.agents}
+          createRequestId={agentCreateRequestId}
+          titlebarActions={
+            <div
+              className="sidebar-titlebar-controls"
+              data-empty-space-blocking="true"
+              ref={overflowControlsRef}
+            >
+              <ToolbarIconButton
+                ariaControls="sidebar-overflow-menu"
+                ariaExpanded={isOverflowMenuOpen}
+                ariaHasPopup="menu"
+                ariaLabel="Open sidebar menu"
+                className="floating-toolbar-button section-titlebar-action-button"
+                isSelected={isOverflowMenuOpen}
+                onClick={() => setIsOverflowMenuOpen((previous) => !previous)}
+                tooltip="More"
+              >
+                <OverflowIcon />
+              </ToolbarIconButton>
+              {isOverflowMenuOpen ? (
+                <div
+                  aria-label="Sidebar actions"
+                  className="session-context-menu sidebar-floating-menu"
+                  data-empty-space-blocking="true"
+                  id="sidebar-overflow-menu"
+                  role="menu"
+                >
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => {
+                      setIsOverflowMenuOpen(false);
+                      setAgentCreateRequestId((previous) => previous + 1);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
+                    Add Agent
+                  </button>
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => {
+                      setIsOverflowMenuOpen(false);
+                      setCommandCreateRequestId((previous) => previous + 1);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
+                    Add Action
+                  </button>
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => {
+                      setIsOverflowMenuOpen(false);
+                      vscode.postMessage({ type: "toggleCompletionBell" });
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    {serverState.hud.completionBellEnabled ? (
+                      <IconBellOff
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                    ) : (
+                      <IconBell aria-hidden="true" className="session-context-menu-icon" size={14} />
+                    )}
+                    {getCompletionBellMenuLabel(serverState.hud)}
+                  </button>
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => {
+                      setIsOverflowMenuOpen(false);
+                      vscode.postMessage({ type: "moveSidebarToOtherSide" });
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconLayoutSidebar
+                      aria-hidden="true"
+                      className="session-context-menu-icon"
+                      size={14}
+                      stroke={1.8}
+                    />
+                    Move to Other Side
+                  </button>
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => {
+                      setIsOverflowMenuOpen(false);
+                      vscode.postMessage({ type: "openSettings" });
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconSettings
+                      aria-hidden="true"
+                      className="session-context-menu-icon"
+                      size={14}
+                      stroke={1.8}
+                    />
+                    Sidebar Settings
+                  </button>
+                  {serverState.hud.debuggingMode ? (
+                    <button
+                      className="session-context-menu-item"
+                      onClick={() => {
+                        setIsOverflowMenuOpen(false);
+                        vscode.postMessage({ type: "openDebugInspector" });
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconBug
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                        stroke={1.8}
+                      />
+                      Open Move Debugger
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          }
           vscode={vscode}
         />
         <section

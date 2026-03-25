@@ -65,6 +65,22 @@ describe("renameSessionAliasInSnapshot", () => {
     expect(result.changed).toBe(false);
     expect(result.snapshot).toEqual(normalizedSnapshot);
   });
+
+  test("should ignore numeric-only aliases", () => {
+    const snapshot = {
+      focusedSessionId: "session-1",
+      sessions: [createSessionRecord(1, 0)],
+      viewMode: "grid",
+      visibleCount: 1 as const,
+      visibleSessionIds: ["session-1"],
+    };
+    const normalizedSnapshot = normalizeSessionGridSnapshot(snapshot);
+
+    const result = renameSessionAliasInSnapshot(snapshot, "session-1", " 123 ");
+
+    expect(result.changed).toBe(false);
+    expect(result.snapshot).toEqual(normalizedSnapshot);
+  });
 });
 
 describe("setSessionTitleInSnapshot", () => {

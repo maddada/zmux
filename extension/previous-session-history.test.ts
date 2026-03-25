@@ -35,6 +35,25 @@ describe("PreviousSessionHistory", () => {
     expect(history.getItems()).toMatchObject([{ historyId: "history-2", isGeneratedName: false }]);
     expect(update).toHaveBeenCalledTimes(1);
   });
+
+  test("should keep legacy word aliases when clearing auto names", async () => {
+    const legacyWordAliasSession = {
+      ...createSessionRecord(1, 0),
+      alias: "Vale",
+    };
+    const update = vi.fn(async () => undefined);
+    const history = new PreviousSessionHistory({
+      workspaceState: {
+        get: vi.fn(() => [createHistoryEntry(legacyWordAliasSession, "history-1")]),
+        update,
+      },
+    } as never);
+
+    await expect(history.removeGeneratedNames()).resolves.toBe(0);
+
+    expect(history.getItems()).toMatchObject([{ historyId: "history-1", isGeneratedName: false }]);
+    expect(update).not.toHaveBeenCalled();
+  });
 });
 
 function createHistoryEntry(

@@ -1,7 +1,13 @@
 import { Tooltip } from "@base-ui/react/tooltip";
 import { IconPencil, IconTrash } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import type { SidebarAgentButton } from "../shared/sidebar-agents";
 import { AGENT_LOGOS } from "./agent-logos";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
@@ -15,6 +21,7 @@ const CONTEXT_MENU_HEIGHT_PX = 110;
 type AgentsPanelProps = {
   agents: SidebarAgentButton[];
   createRequestId: number;
+  titlebarActions?: ReactNode;
   vscode: WebviewApi;
 };
 
@@ -41,7 +48,7 @@ function clampContextMenuPosition(clientX: number, clientY: number): ContextMenu
   };
 }
 
-export function AgentsPanel({ agents, createRequestId, vscode }: AgentsPanelProps) {
+export function AgentsPanel({ agents, createRequestId, titlebarActions, vscode }: AgentsPanelProps) {
   const [contextMenu, setContextMenu] = useState<AgentMenuState>();
   const [editingAgent, setEditingAgent] = useState<AgentConfigDraft>();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -121,7 +128,14 @@ export function AgentsPanel({ agents, createRequestId, vscode }: AgentsPanelProp
         <div className="section-titlebar" data-empty-space-blocking="true">
           <div aria-hidden="true" className="section-titlebar-line" />
           <span className="section-titlebar-label">Agents</span>
-          <div aria-hidden="true" className="section-titlebar-line" />
+          {titlebarActions ? (
+            <div className="section-titlebar-actions">
+              <div aria-hidden="true" className="section-titlebar-line" />
+              {titlebarActions}
+            </div>
+          ) : (
+            <div aria-hidden="true" className="section-titlebar-line" />
+          )}
         </div>
         <div className="card commands-panel">
           <Tooltip.Provider delay={TOOLTIP_DELAY_MS}>

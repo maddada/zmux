@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { isNumericSessionAlias } from "../shared/session-grid-contract";
 import { getWorkspaceStorageKey } from "./terminal-workspace-helpers";
 
 const SESSION_AGENT_COMMANDS_KEY = "VSmux.sessionAgentCommands";
@@ -14,7 +15,7 @@ export function buildResumeAgentCommand(
 ): string | undefined {
   const agentId = agentLaunch?.agentId.trim().toLowerCase();
   const agentCommand = agentLaunch?.command.trim();
-  const normalizedAlias = sessionAlias?.trim();
+  const normalizedAlias = normalizeResumeAlias(sessionAlias);
   if (!agentCommand) {
     return undefined;
   }
@@ -40,7 +41,7 @@ export function buildCopyResumeCommandText(
   agentIconId: string | undefined,
   sessionAlias: string | undefined,
 ): string | undefined {
-  const normalizedAlias = sessionAlias?.trim();
+  const normalizedAlias = normalizeResumeAlias(sessionAlias);
   if (!normalizedAlias) {
     return undefined;
   }
@@ -128,4 +129,13 @@ function normalizeStoredSessionAgentLaunch(
 
 function quoteForSingleShellArgument(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function normalizeResumeAlias(sessionAlias: string | undefined): string | undefined {
+  const normalizedAlias = sessionAlias?.trim();
+  if (!normalizedAlias || isNumericSessionAlias(normalizedAlias)) {
+    return undefined;
+  }
+
+  return normalizedAlias;
 }

@@ -4,6 +4,7 @@ import {
   MAX_SESSION_COUNT,
   createSidebarHudState,
   getOrderedSessions,
+  isNumericSessionAlias,
   isBrowserSession,
   isT3Session,
   isTerminalSession,
@@ -65,6 +66,7 @@ import {
   persistSessionAgentLaunches,
   type StoredSessionAgentLaunch,
 } from "../native-terminal-workspace-session-agent-launch";
+import { createSessionActivationPlan } from "./session-activation";
 import {
   captureControllerTraceState,
   captureSnapshotTraceState,
@@ -365,7 +367,22 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         sessionId,
       },
       async (operation) => {
-        if (this.isAlreadyActiveSession(sessionId)) {
+        const sessionRecord = this.store.getSession(sessionId);
+        if (!sessionRecord) {
+          await operation.step("session-not-found");
+          return;
+        }
+
+        const activationPlan = createSessionActivationPlan(sessionRecord, {
+          hasLiveBrowserTab: this.browserSessions.hasLiveTab(sessionId),
+          hasLiveT3Panel: this.t3Webviews.hasLivePanel(sessionId),
+          hasLiveTerminal: this.backend.hasLiveTerminal(sessionId),
+          hasStoredAgentLaunch: this.sessionAgentLaunchBySessionId.has(sessionId),
+          isAlreadyFocused: this.isAlreadyActiveSession(sessionId),
+          isT3Running: this.getT3ActivityState(sessionRecord).isRunning,
+        });
+
+        if (activationPlan.shouldNoop) {
           await this.logControllerEvent("ACTION", "focusSession-noop", {
             preserveFocus,
             sessionId,
@@ -378,20 +395,25 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           return;
         }
 
-        const shouldResumeAgentSession =
-          this.sessionAgentLaunchBySessionId.has(sessionId) &&
-          !this.backend.hasLiveTerminal(sessionId);
-        const changed = await this.store.focusSession(sessionId);
+        const changed = activationPlan.shouldFocusStoredSession
+          ? await this.store.focusSession(sessionId)
+          : false;
         await operation.step("after-store-focus", {
+          activationPlan,
           changed,
           expected: this.captureSnapshotTraceState(this.getActiveSnapshot()),
-          shouldResumeAgentSession,
         });
+
+        if (activationPlan.shouldCreateOrAttachTerminal) {
+          const nextSessionRecord = this.store.getSession(sessionId) ?? sessionRecord;
+          await this.backend.createOrAttachSession(nextSessionRecord);
+          await operation.step("after-create-or-attach-session");
+        }
 
         await this.reconcileProjectedSessions(preserveFocus);
         await operation.step("after-reconcile");
 
-        if (shouldResumeAgentSession) {
+        if (activationPlan.shouldResumeAgentAfterReveal) {
           await this.resumeAgentSessionIfConfigured(sessionId);
           await operation.step("after-resume-agent-session");
         }
@@ -408,7 +430,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         await operation.step("after-acknowledge-attention", {
           acknowledgedAttention,
         });
-        if ((changed || !preserveFocus) && !acknowledgedAttention) {
+        if (
+          (changed || !preserveFocus || activationPlan.shouldRefreshAfterActivation) &&
+          !acknowledgedAttention
+        ) {
           await this.refreshSidebar();
           await operation.step("after-refresh-sidebar");
         }
@@ -619,6 +644,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         return;
       }
 
+      if (isNumericSessionAlias(nextAlias)) {
+        await operation.step("numeric-alias-rejected");
+        return;
+      }
+
       const changed = await this.store.renameSessionAlias(sessionId, nextAlias);
       const shouldSendRenameCommand = getSendRenameCommandOnSidebarRename();
       await operation.step("after-store-rename", {
@@ -669,7 +699,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       prompt: "Enter a session nickname",
       title: "Rename VSC-Mux Session",
       validateInput: (value) =>
-        value.trim().length === 0 ? "Session nickname cannot be empty." : undefined,
+        value.trim().length === 0
+          ? "Session nickname cannot be empty."
+          : isNumericSessionAlias(value)
+            ? "Session nickname cannot be only numbers."
+            : undefined,
       value: session.alias,
       valueSelection: [0, session.alias.length],
     });

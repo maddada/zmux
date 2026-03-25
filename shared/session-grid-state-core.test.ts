@@ -145,10 +145,10 @@ describe("normalizeSessionGridSnapshot", () => {
 });
 
 describe("session shortcut labels", () => {
-  test("should generate single-word default aliases", () => {
-    expect(createSessionAlias(1, 0)).toMatch(/^\S+$/);
-    expect(createSessionAlias(2, 1)).toMatch(/^\S+$/);
-    expect(createSessionAlias(3, 2)).toMatch(/^\S+$/);
+  test("should generate numeric default aliases from the session number", () => {
+    expect(createSessionAlias(1, 0)).toBe("1");
+    expect(createSessionAlias(2, 1)).toBe("2");
+    expect(createSessionAlias(3, 2)).toBe("3");
   });
 
   test("should format per-session shortcut text from the slot index", () => {

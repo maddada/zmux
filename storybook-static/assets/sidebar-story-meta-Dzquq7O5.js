@@ -11974,8 +11974,6 @@ var Ux,
       { fileName: `glass.mp3`, label: `Glass`, value: `glass` },
       { fileName: `ping.mp3`, label: `Ping`, value: `ping` },
       { fileName: `shamisen.mp3`, label: `Shamisen`, value: `shamisen` },
-      { fileName: `supersetdoowap.mp3`, label: `Superset Doo-Wap`, value: `supersetdoowap` },
-      { fileName: `supersetquick.mp3`, label: `Superset Quick`, value: `supersetquick` },
     ]),
       (Wx = `ping`));
   });
