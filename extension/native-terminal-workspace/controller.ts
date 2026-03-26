@@ -16,7 +16,8 @@ import {
 } from "../../shared/session-grid-contract";
 import { getSidebarAgentIconById, type SidebarAgentIcon } from "../../shared/sidebar-agents";
 import { NativeTerminalWorkspaceBackend } from "../native-terminal-workspace-backend";
-import { buildSidebarMessage } from "../native-terminal-workspace-sidebar-state";
+import { buildSidebarMessage, createPreviousSessionEntry } from "../native-terminal-workspace-sidebar-state";
+import { PreviousSessionHistory, type PreviousSessionHistoryEntry } from "../previous-session-history";
 import { getSidebarAgentButtons, getSidebarAgentButtonById, saveSidebarAgentPreference, deleteSidebarAgentPreference } from "../sidebar-agent-preferences";
 import {
   deleteSidebarCommandPreference,
@@ -76,6 +77,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private reconcileRunner: Promise<void> | undefined;
   private suppressedObservedFocusDepth = 0;
   private readonly sidebarAgentIconBySessionId = new Map<string, SidebarAgentIcon>();
+  private readonly previousSessionHistory: PreviousSessionHistory;
   private readonly store: SessionGridStore;
   private readonly terminalTitleBySessionId = new Map<string, string>();
   private t3Runtime: T3RuntimeManager | undefined;
@@ -85,6 +87,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   public constructor(private readonly context: vscode.ExtensionContext) {
     this.store = new SessionGridStore(context);
+    this.previousSessionHistory = new PreviousSessionHistory(context);
     this.isVsMuxDisabled = context.workspaceState.get<boolean>(DISABLE_VS_MUX_MODE_KEY, false) ?? false;
     this.workspaceId = getWorkspaceId();
     this.backend = new NativeTerminalWorkspaceBackend({
@@ -236,8 +239,16 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async resetWorkspace(): Promise<void> {
+    const archivedSessions = this.getAllSessionRecords()
+      .map((sessionRecord) => this.createArchivedSessionEntry(sessionRecord))
+      .filter((entry): entry is PreviousSessionHistoryEntry => entry !== undefined);
+
     for (const sessionRecord of this.getAllSessionRecords()) {
       await this.disposeSurface(sessionRecord);
+      this.clearSessionPresentationState(sessionRecord.sessionId);
+    }
+    if (archivedSessions.length > 0) {
+      await this.previousSessionHistory.append(archivedSessions);
     }
     await this.store.reset();
     await this.context.workspaceState.update(DISABLE_VS_MUX_MODE_KEY, false);
@@ -319,8 +330,16 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
+    const archivedSession = this.createArchivedSessionEntry(sessionRecord);
     await this.disposeSurface(sessionRecord);
-    await this.store.removeSession(sessionId);
+    const removed = await this.store.removeSession(sessionId);
+    if (!removed) {
+      return;
+    }
+    this.clearSessionPresentationState(sessionId);
+    if (archivedSession) {
+      await this.previousSessionHistory.append([archivedSession]);
+    }
     await this.afterStateChange();
   }
 
@@ -408,13 +427,60 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.backend.writeText(sessionRecord.sessionId, agentButton.command, true);
   }
 
-  public async restorePreviousSession(_historyId?: string): Promise<void> {
-    void vscode.window.showInformationMessage("Previous-session restore is not part of the simplified VSmux runtime.");
+  public async restorePreviousSession(historyId?: string): Promise<void> {
+    if (!historyId) {
+      return;
+    }
+
+    const archivedSession = this.previousSessionHistory.getEntry(historyId);
+    if (!archivedSession) {
+      return;
+    }
+
+    const restoredSession =
+      archivedSession.sessionRecord.kind === "t3"
+        ? await this.store.createSession({
+            kind: "t3",
+            t3: archivedSession.sessionRecord.t3,
+            title: archivedSession.sessionRecord.title,
+          })
+        : await this.store.createSession({
+            title: archivedSession.sessionRecord.title,
+          });
+    if (!restoredSession) {
+      return;
+    }
+
+    if (archivedSession.agentIcon) {
+      this.sidebarAgentIconBySessionId.set(restoredSession.sessionId, archivedSession.agentIcon);
+    }
+
+    if (archivedSession.sessionRecord.alias !== restoredSession.alias) {
+      await this.store.renameSessionAlias(
+        restoredSession.sessionId,
+        archivedSession.sessionRecord.alias,
+      );
+    }
+
+    const nextSessionRecord = this.store.getSession(restoredSession.sessionId) ?? restoredSession;
+    await this.createSurfaceIfNeeded(nextSessionRecord);
+    await this.previousSessionHistory.remove(historyId);
+    await this.afterStateChange();
   }
 
-  public async deletePreviousSession(_historyId?: string): Promise<void> {}
+  public async deletePreviousSession(historyId?: string): Promise<void> {
+    if (!historyId) {
+      return;
+    }
 
-  public async clearGeneratedPreviousSessions(): Promise<void> {}
+    await this.previousSessionHistory.remove(historyId);
+    await this.refreshSidebar();
+  }
+
+  public async clearGeneratedPreviousSessions(): Promise<void> {
+    await this.previousSessionHistory.removeGeneratedNames();
+    await this.refreshSidebar();
+  }
 
   public async saveScratchPad(content: string): Promise<void> {
     await this.context.workspaceState.update(SCRATCH_PAD_CONTENT_KEY, content);
@@ -528,8 +594,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
+    const archivedSessions = group.snapshot.sessions
+      .map((sessionRecord) => this.createArchivedSessionEntry(sessionRecord))
+      .filter((entry): entry is PreviousSessionHistoryEntry => entry !== undefined);
     for (const sessionRecord of group.snapshot.sessions) {
       await this.disposeSurface(sessionRecord);
+      this.clearSessionPresentationState(sessionRecord.sessionId);
+    }
+    if (archivedSessions.length > 0) {
+      await this.previousSessionHistory.append(archivedSessions);
     }
     await this.store.removeGroup(groupId);
     await this.afterStateChange();
@@ -659,7 +732,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       ),
       ownsNativeTerminalControl: true,
       platform: SHORTCUT_LABEL_PLATFORM,
-      previousSessions: [],
+      previousSessions: this.previousSessionHistory.getItems(),
       scratchPadContent: this.getScratchPadContent(),
       terminalHasLiveProjection: (sessionId) => this.backend.hasLiveTerminal(sessionId),
       type,
@@ -911,6 +984,46 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     const sessions = this.getAllSessionRecords();
     this.backend.syncSessions(sessions);
     this.t3Webviews.syncSessions(sessions);
+  }
+
+  private clearSessionPresentationState(sessionId: string): void {
+    this.sidebarAgentIconBySessionId.delete(sessionId);
+    this.terminalTitleBySessionId.delete(sessionId);
+  }
+
+  private createArchivedSessionEntry(
+    sessionRecord: SessionRecord,
+  ): PreviousSessionHistoryEntry | undefined {
+    const group = this.store.getSessionGroup(sessionRecord.sessionId);
+    if (!group) {
+      return undefined;
+    }
+
+    return createPreviousSessionEntry({
+      browserHasLiveProjection: () => false,
+      debuggingMode: getDebuggingMode(),
+      getEffectiveSessionActivity: (_candidateSessionRecord, sessionSnapshot) => ({
+        activity: sessionSnapshot.agentStatus,
+        agentName: sessionSnapshot.agentName,
+      }),
+      getSessionAgentLaunch: () => undefined,
+      getSessionSnapshot: (sessionId) => this.backend.getSessionSnapshot(sessionId),
+      getSidebarAgentIcon: (sessionId, snapshotAgentName, derivedAgentName) =>
+        this.sidebarAgentIconBySessionId.get(sessionId) ??
+        getSidebarAgentIconById(snapshotAgentName) ??
+        getSidebarAgentIconById(derivedAgentName),
+      getT3ActivityState: (candidateSessionRecord) => ({
+        activity: "idle",
+        isRunning: this.t3Webviews.hasLivePanel(candidateSessionRecord.sessionId),
+      }),
+      getTerminalTitle: (sessionId) => this.terminalTitleBySessionId.get(sessionId),
+      group,
+      ownsNativeTerminalControl: true,
+      platform: SHORTCUT_LABEL_PLATFORM,
+      sessionRecord,
+      terminalHasLiveProjection: (sessionId) => this.backend.hasLiveTerminal(sessionId),
+      workspaceId: this.workspaceId,
+    });
   }
 
   private async ensureShellSpawnAllowed(): Promise<boolean> {
