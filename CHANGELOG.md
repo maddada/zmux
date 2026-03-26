@@ -2,6 +2,11 @@
 
 All notable user-facing changes are documented in this file.
 
+## 1.11.1 - 2026-03-27
+
+- VSmux is much more stable now, with a focused fix for grouped session state and session moves. This should behave more reliably on both macOS and Windows.
+- Session drag, reorder, and create-group flows are more dependable, especially when the sidebar and workspace need to stay in sync after changes.
+
 ## 1.11.0 - 2026-03-27
 
 - VSmux is much more stable now, with a major rework of session projection, focus, restore, and layout reconciliation. This should behave much better on both macOS and Windows.

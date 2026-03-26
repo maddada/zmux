@@ -6,11 +6,11 @@ For VS Code: https://marketplace.visualstudio.com/items?itemName=maddada.VSmux
 
 For Cursor and Others: https://open-vsx.org/extension/maddada/VSmux
 
-## Latest Release: 1.11.0
+## Latest Release: 1.11.1
 
-- Much more stable overall, with better session projection, restore, and focus handling.
-- Better grouped sessions and split mode behavior across macOS and Windows.
-- Refreshed sidebar UI and stronger browser / T3 session reliability.
+- Much more stable overall, especially for grouped session state and session moves.
+- Better grouped session drag, reorder, and create-group behavior across macOS and Windows.
+- Stronger sidebar and workspace synchronization after session layout changes.
 
 Full release notes: [CHANGELOG.md](/Users/madda/dev/_active/agent-tiler/CHANGELOG.md)
 
