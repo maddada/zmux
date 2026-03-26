@@ -89,10 +89,7 @@ export class BrowserSessionManager implements vscode.Disposable {
     });
   }
 
-  public async openSession(
-    sessionRecord: BrowserSessionRecord,
-    preserveFocus = false,
-  ): Promise<void> {
+  public async openSession(sessionRecord: BrowserSessionRecord): Promise<void> {
     this.syncSessions([
       ...Array.from(this.sessionRecordBySessionId.values()).filter(
         (existingSessionRecord) => existingSessionRecord.sessionId !== sessionRecord.sessionId,
@@ -108,14 +105,13 @@ export class BrowserSessionManager implements vscode.Disposable {
 
     let liveTab = this.resolveLiveTab(sessionRecord.sessionId);
     if (!liveTab) {
-      liveTab = await this.openBrowserTab(sessionRecord, preserveFocus);
-    } else if (!preserveFocus) {
+      liveTab = await this.openBrowserTab(sessionRecord);
+    } else {
       await this.revealTab(liveTab, true);
     }
 
     managedTab.tab = liveTab;
     await this.logState("OPEN", liveTab ? "browser-tab" : "browser-tab-missing", {
-      preserveFocus,
       sessionId: sessionRecord.sessionId,
       url: sessionRecord.browser.url,
       viewColumn: liveTab?.group.viewColumn,
@@ -137,7 +133,6 @@ export class BrowserSessionManager implements vscode.Disposable {
   public async revealSessionInGroup(
     sessionRecord: BrowserSessionRecord,
     targetGroupIndex: number,
-    preserveFocus = false,
   ): Promise<boolean> {
     this.syncSessions([
       ...Array.from(this.sessionRecordBySessionId.values()).filter(
@@ -149,19 +144,18 @@ export class BrowserSessionManager implements vscode.Disposable {
     const targetViewColumn = targetGroupIndex + 1;
     const liveTab = this.resolveLiveTab(sessionRecord.sessionId);
     if (!liveTab) {
-      await this.openSessionInColumn(sessionRecord, targetViewColumn, preserveFocus);
+      await this.openSessionInColumn(sessionRecord, targetViewColumn);
       return true;
     }
 
     if (liveTab.group.viewColumn !== targetViewColumn) {
-      await this.moveTabToGroup(liveTab, targetGroupIndex, preserveFocus);
+      await this.moveTabToGroup(liveTab, targetGroupIndex);
       return true;
     }
 
-    await this.revealTab(liveTab, !preserveFocus);
+    await this.revealTab(liveTab, true);
 
     await this.logState("REVEAL", "browser-tab-group", {
-      preserveFocus,
       sessionId: sessionRecord.sessionId,
       targetGroupIndex,
     });
@@ -210,18 +204,13 @@ export class BrowserSessionManager implements vscode.Disposable {
     return managedTab;
   }
 
-  private async openBrowserTab(
-    sessionRecord: BrowserSessionRecord,
-    preserveFocus: boolean,
-  ): Promise<vscode.Tab | undefined> {
-    const restoreViewColumn = preserveFocus ? getActiveEditorGroupViewColumn() : undefined;
-    const targetViewColumn = restoreViewColumn ?? getActiveEditorGroupViewColumn() ?? 1;
+  private async openBrowserTab(sessionRecord: BrowserSessionRecord): Promise<vscode.Tab | undefined> {
+    const targetViewColumn = getActiveEditorGroupViewColumn() ?? 1;
     const browserTabsBeforeOpen = new Set(this.getBrowserLikeTabs(targetViewColumn));
     await vscode.commands.executeCommand(
       SIMPLE_BROWSER_OPEN_COMMAND,
       vscode.Uri.parse(sessionRecord.browser.url),
       {
-        preserveFocus,
         viewColumn: targetViewColumn,
       },
     );
@@ -233,9 +222,6 @@ export class BrowserSessionManager implements vscode.Disposable {
     if (managedTab && openedTab) {
       managedTab.lastKnownLabel = openedTab.label;
     }
-    if (preserveFocus && restoreViewColumn && restoreViewColumn !== targetViewColumn) {
-      await focusEditorGroupByIndex(restoreViewColumn - 1);
-    }
     await this.logState("OPEN", "browser-tab", {
       browserLikeTabLabelsAfterOpen: this.getBrowserLikeTabs(targetViewColumn).map(
         (tab) => tab.label,
@@ -243,7 +229,6 @@ export class BrowserSessionManager implements vscode.Disposable {
       browserLikeTabLabelsBeforeOpen: [...browserTabsBeforeOpen].map((tab) => tab.label),
       openedTabInputKind: openedTab ? getBrowserTabInputKind(openedTab) : undefined,
       openedTabLabel: openedTab?.label,
-      preserveFocus,
       sessionId: sessionRecord.sessionId,
       targetViewColumn,
       url: sessionRecord.browser.url,
@@ -254,23 +239,17 @@ export class BrowserSessionManager implements vscode.Disposable {
   private async openSessionInColumn(
     sessionRecord: BrowserSessionRecord,
     targetViewColumn: vscode.ViewColumn,
-    preserveFocus: boolean,
   ): Promise<void> {
-    const restoreViewColumn = preserveFocus ? getActiveEditorGroupViewColumn() : undefined;
     await focusEditorGroupByIndex(targetViewColumn - 1);
-    const liveTab = await this.openBrowserTab(sessionRecord, preserveFocus);
+    const liveTab = await this.openBrowserTab(sessionRecord);
     const managedTab = this.managedTabsBySessionId.get(sessionRecord.sessionId);
     if (managedTab && liveTab) {
       managedTab.tab = liveTab;
     }
     if (liveTab) {
-      await this.revealTab(liveTab, !preserveFocus);
-    }
-    if (preserveFocus && restoreViewColumn && restoreViewColumn !== targetViewColumn) {
-      await focusEditorGroupByIndex(restoreViewColumn - 1);
+      await this.revealTab(liveTab, true);
     }
     await this.logState("OPEN", "browser-tab-group", {
-      preserveFocus,
       sessionId: sessionRecord.sessionId,
       targetViewColumn,
     });
@@ -314,22 +293,11 @@ export class BrowserSessionManager implements vscode.Disposable {
     });
   }
 
-  private async moveTabToGroup(
-    tab: vscode.Tab,
-    targetGroupIndex: number,
-    preserveFocus: boolean,
-  ): Promise<void> {
-    const restoreViewColumn = preserveFocus ? getActiveEditorGroupViewColumn() : undefined;
+  private async moveTabToGroup(tab: vscode.Tab, targetGroupIndex: number): Promise<void> {
     await this.revealTab(tab, true);
     await moveActiveEditorToGroup(targetGroupIndex);
 
-    const targetViewColumn = targetGroupIndex + 1;
-    if (preserveFocus && restoreViewColumn && restoreViewColumn !== targetViewColumn) {
-      await focusEditorGroupByIndex(restoreViewColumn - 1);
-    }
-
     await this.logState("MOVE", "browser-tab-group", {
-      preserveFocus,
       tabLabel: tab.label,
       targetGroupIndex,
       url: getBrowserTabUrl(tab),

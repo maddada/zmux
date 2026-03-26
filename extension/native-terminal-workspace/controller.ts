@@ -73,7 +73,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private hasApprovedUntrustedShells = vscode.workspace.isTrusted;
   private isVsMuxDisabled: boolean;
-  private pendingReconcileRequest: { preserveFocus: boolean; version: number } | undefined;
+  private pendingReconcileRequest: { version: number } | undefined;
   private reconcileRequestVersion = 0;
   private reconcileRunner: Promise<void> | undefined;
   private suppressedObservedFocusDepth = 0;
@@ -136,7 +136,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     });
     await this.backend.initialize(this.getAllSessionRecords());
     this.syncSurfaceManagers();
-    await this.reconcileProjectedSessions(true);
+    await this.reconcileProjectedSessions();
     await this.refreshSidebar("hydrate");
   }
 
@@ -198,14 +198,13 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.afterStateChange();
   }
 
-  public async focusSession(sessionId: string, preserveFocus = false): Promise<void> {
+  public async focusSession(sessionId: string): Promise<void> {
     const sessionRecord = this.store.getSession(sessionId);
     if (!sessionRecord) {
       return;
     }
 
     logVSmuxDebug("controller.focusSession", {
-      preserveFocus,
       sessionId,
       sessionKind: sessionRecord.kind,
     });
@@ -220,7 +219,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    await this.afterStateChange(preserveFocus);
+    await this.afterStateChange();
   }
 
   public async focusSessionSlot(slotNumber: number): Promise<void> {
@@ -555,7 +554,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   public async syncSessionOrder(groupId: string, sessionIds: readonly string[]): Promise<void> {
     const changed = await this.store.syncSessionOrder(groupId, sessionIds);
     if (changed) {
-      await this.afterStateChange(true);
+      await this.afterStateChange();
     }
   }
 
@@ -625,16 +624,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.afterStateChange();
   }
 
-  private async afterStateChange(preserveFocus = false): Promise<void> {
+  private async afterStateChange(): Promise<void> {
     this.syncSurfaceManagers();
     logVSmuxDebug("controller.afterStateChange", {
       activeGroupId: this.store.getSnapshot().activeGroupId,
-      preserveFocus,
       snapshot: this.describeActiveSnapshot(),
       vsMuxDisabled: this.isVsMuxDisabled,
     });
     if (!this.isVsMuxDisabled) {
-      await this.reconcileProjectedSessions(preserveFocus);
+      await this.reconcileProjectedSessions();
     }
     await this.refreshSidebar();
   }
@@ -653,7 +651,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       deleteSidebarAgent: async (agentId) => this.deleteSidebarAgent(agentId),
       deleteSidebarCommand: async (commandId) => this.deleteSidebarCommand(commandId),
       focusGroup: async (groupId) => this.focusGroup(groupId),
-      focusSession: async (sessionId, preserveFocus) => this.focusSession(sessionId, preserveFocus === true),
+      focusSession: async (sessionId) => this.focusSession(sessionId),
       moveSessionToGroup: async (sessionId, groupId, targetIndex) =>
         this.moveSessionToGroup(sessionId, groupId, targetIndex),
       moveSidebarToOtherSide: async () => this.moveSidebarToOtherSide(),
@@ -769,12 +767,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    await this.afterStateChange(true);
+    await this.afterStateChange();
   }
 
-  private async reconcileProjectedSessions(preserveFocus = false): Promise<void> {
+  private async reconcileProjectedSessions(): Promise<void> {
     const version = ++this.reconcileRequestVersion;
-    this.pendingReconcileRequest = { preserveFocus, version };
+    this.pendingReconcileRequest = { version };
     if (!this.reconcileRunner) {
       this.reconcileRunner = this.runReconcileLoop();
     }
@@ -787,25 +785,20 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         const request = this.pendingReconcileRequest;
         this.pendingReconcileRequest = undefined;
         logVSmuxDebug("controller.reconcile.dequeue", {
-          preserveFocus: request.preserveFocus,
           version: request.version,
         });
-        await this.reconcileProjectedSessionsNow(request.version, request.preserveFocus);
+        await this.reconcileProjectedSessionsNow(request.version);
       }
     } finally {
       this.reconcileRunner = undefined;
     }
   }
 
-  private async reconcileProjectedSessionsNow(
-    requestVersion: number,
-    preserveFocus: boolean,
-  ): Promise<void> {
+  private async reconcileProjectedSessionsNow(requestVersion: number): Promise<void> {
     this.suppressedObservedFocusDepth += 1;
     try {
       if (this.isReconcileCancelled(requestVersion)) {
         logVSmuxDebug("controller.reconcile.cancelled", {
-          preserveFocus,
           reason: "superseded-before-start",
           version: requestVersion,
         });
@@ -821,7 +814,6 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         .map((sessionId) => this.store.getSession(sessionId))
         .filter((session): session is SessionRecord => session !== undefined);
       logVSmuxDebug("controller.reconcile.start", {
-        preserveFocus,
         snapshot: this.describeActiveSnapshot(),
         version: requestVersion,
         visibleSessions: visibleSessions.map((sessionRecord) => ({
@@ -879,21 +871,20 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           });
           return;
         }
-        const shouldPreserveFocus = this.getRevealPreserveFocus(
+        const shouldFocusAfterReveal = this.shouldFocusAfterReveal(
           sessionRecord,
           focusedSessionId,
-          preserveFocus,
         );
         logVSmuxDebug("controller.reconcile.reveal", {
           groupIndex,
-          preserveFocus: shouldPreserveFocus,
+          shouldFocusAfterReveal,
           sessionId: sessionRecord.sessionId,
           version: requestVersion,
         });
         await this.revealSessionInPane(
           sessionRecord,
           groupIndex,
-          shouldPreserveFocus,
+          shouldFocusAfterReveal,
           () => this.isReconcileCancelled(requestVersion),
         );
         if (this.isReconcileCancelled(requestVersion)) {
@@ -922,14 +913,13 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         if (this.isSessionProjectedCorrectly(sessionRecord, groupIndex)) {
           continue;
         }
-        const shouldPreserveFocus = this.getRevealPreserveFocus(
+        const shouldFocusAfterReveal = this.shouldFocusAfterReveal(
           sessionRecord,
           focusedSessionId,
-          preserveFocus,
         );
         logVSmuxDebug("controller.reconcile.retry", {
           groupIndex,
-          preserveFocus: shouldPreserveFocus,
+          shouldFocusAfterReveal,
           projection: this.describeProjection(sessionRecord),
           sessionId: sessionRecord.sessionId,
           version: requestVersion,
@@ -937,7 +927,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         await this.revealSessionInPane(
           sessionRecord,
           groupIndex,
-          shouldPreserveFocus,
+          shouldFocusAfterReveal,
           () => this.isReconcileCancelled(requestVersion),
         );
         if (this.isReconcileCancelled(requestVersion)) {
@@ -966,7 +956,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private async revealSessionInPane(
     sessionRecord: SessionRecord,
     groupIndex: number,
-    preserveFocus: boolean,
+    shouldFocusAfterReveal: boolean,
     isCancelled: () => boolean,
   ): Promise<void> {
     if (sessionRecord.kind === "terminal") {
@@ -974,7 +964,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       if (isCancelled()) {
         return;
       }
-      await this.backend.revealSessionInGroup(sessionRecord, groupIndex, preserveFocus, isCancelled);
+      await this.backend.revealSessionInGroup(sessionRecord, groupIndex, isCancelled);
       return;
     }
 
@@ -983,19 +973,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     await this.ensureT3Ready(sessionRecord);
-    await this.t3Webviews.revealSessionInGroup(sessionRecord, groupIndex, preserveFocus);
+    await this.t3Webviews.revealSessionInGroup(sessionRecord, groupIndex, shouldFocusAfterReveal);
   }
 
-  private getRevealPreserveFocus(
+  private shouldFocusAfterReveal(
     sessionRecord: SessionRecord,
     focusedSessionId: string | undefined,
-    preserveFocus: boolean,
   ): boolean {
-    if (sessionRecord.kind === "terminal") {
-      return false;
-    }
-
-    return preserveFocus || sessionRecord.sessionId !== focusedSessionId;
+    return sessionRecord.sessionId !== focusedSessionId;
   }
 
   private isReconcileCancelled(requestVersion: number): boolean {

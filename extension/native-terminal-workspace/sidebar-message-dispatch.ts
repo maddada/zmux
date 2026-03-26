@@ -19,7 +19,7 @@ export type SidebarMessageHandlers = {
   deleteSidebarAgent: (agentId: string) => Promise<void>;
   deleteSidebarCommand: (commandId: string) => Promise<void>;
   focusGroup: (groupId: string) => Promise<void>;
-  focusSession: (sessionId: string, preserveFocus?: boolean) => Promise<void>;
+  focusSession: (sessionId: string) => Promise<void>;
   moveSessionToGroup: (sessionId: string, groupId: string, targetIndex?: number) => Promise<void>;
   moveSidebarToOtherSide: () => Promise<void>;
   openSettings: () => Promise<void>;
@@ -117,7 +117,7 @@ export async function dispatchSidebarMessage(
       return;
     case "focusSession":
       if (message.sessionId) {
-        await handlers.focusSession(message.sessionId, message.preserveFocus === true);
+        await handlers.focusSession(message.sessionId);
       }
       return;
     case "promptRenameSession":

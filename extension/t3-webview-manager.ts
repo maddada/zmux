@@ -83,7 +83,10 @@ export class T3WebviewManager implements vscode.Disposable {
     });
   }
 
-  public async openSession(sessionRecord: T3SessionRecord, preserveFocus = false): Promise<void> {
+  public async openSession(
+    sessionRecord: T3SessionRecord,
+    shouldFocusAfterReveal = true,
+  ): Promise<void> {
     this.syncSessions([
       ...Array.from(this.sessionRecordBySessionId.values()).filter(
         (existingSessionRecord) => existingSessionRecord.sessionId !== sessionRecord.sessionId,
@@ -97,9 +100,9 @@ export class T3WebviewManager implements vscode.Disposable {
 
     if (managedPanel && managedPanel.renderKey === renderKey) {
       managedPanel.panel.title = getPanelTitle(sessionRecord);
-      managedPanel.panel.reveal(targetViewColumn, preserveFocus);
+      managedPanel.panel.reveal(targetViewColumn, !shouldFocusAfterReveal);
       await this.logState("OPEN", "reuse-panel", {
-        preserveFocus,
+        shouldFocusAfterReveal,
         sessionId: sessionRecord.sessionId,
         targetViewColumn,
       });
@@ -111,9 +114,9 @@ export class T3WebviewManager implements vscode.Disposable {
     }
 
     const nextManagedPanel = await this.createPanel(sessionRecord, renderKey, targetViewColumn);
-    nextManagedPanel.panel.reveal(targetViewColumn, preserveFocus);
+    nextManagedPanel.panel.reveal(targetViewColumn, !shouldFocusAfterReveal);
     await this.logState("OPEN", "panel", {
-      preserveFocus,
+      shouldFocusAfterReveal,
       sessionId: sessionRecord.sessionId,
       targetViewColumn,
     });
@@ -134,24 +137,24 @@ export class T3WebviewManager implements vscode.Disposable {
   public async revealSessionInGroup(
     sessionRecord: T3SessionRecord,
     targetGroupIndex: number,
-    preserveFocus = false,
+    shouldFocusAfterReveal = true,
   ): Promise<boolean> {
     const targetViewColumn = targetGroupIndex + 1;
-    const restoreViewColumn = preserveFocus ? getActiveEditorGroupViewColumn() : undefined;
-    await this.openSession(sessionRecord, preserveFocus);
+    const restoreViewColumn = shouldFocusAfterReveal ? undefined : getActiveEditorGroupViewColumn();
+    await this.openSession(sessionRecord, shouldFocusAfterReveal);
 
     const managedPanel = this.panelsBySessionId.get(sessionRecord.sessionId);
     if (!managedPanel) {
       return false;
     }
 
-    managedPanel.panel.reveal(targetViewColumn, preserveFocus);
-    if (preserveFocus && restoreViewColumn && restoreViewColumn !== targetViewColumn) {
+    managedPanel.panel.reveal(targetViewColumn, !shouldFocusAfterReveal);
+    if (!shouldFocusAfterReveal && restoreViewColumn && restoreViewColumn !== targetViewColumn) {
       await focusEditorGroupByIndex(restoreViewColumn - 1);
     }
 
     await this.logState("REVEAL", "panel-group", {
-      preserveFocus,
+      shouldFocusAfterReveal,
       sessionId: sessionRecord.sessionId,
       targetGroupIndex,
     });
@@ -215,7 +218,6 @@ export class T3WebviewManager implements vscode.Disposable {
       T3_PANEL_TYPE,
       getPanelTitle(sessionRecord),
       {
-        preserveFocus: true,
         viewColumn: targetViewColumn,
       },
       {

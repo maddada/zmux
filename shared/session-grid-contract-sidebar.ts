@@ -138,7 +138,6 @@ export type SidebarToExtensionMessage =
   | {
       type: "focusSession";
       sessionId: string;
-      preserveFocus?: boolean;
     }
   | {
       type: "promptRenameSession";

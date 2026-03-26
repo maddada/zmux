@@ -212,11 +212,7 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
       return typeof message.groupId === "string" && message.groupId.length > 0;
 
     case "focusSession":
-      return (
-        typeof message.sessionId === "string" &&
-        message.sessionId.length > 0 &&
-        (message.preserveFocus === undefined || typeof message.preserveFocus === "boolean")
-      );
+      return typeof message.sessionId === "string" && message.sessionId.length > 0;
 
     case "promptRenameSession":
     case "restartSession":
