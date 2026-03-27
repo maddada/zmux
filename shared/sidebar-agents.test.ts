@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vite-plus/test";
-import { createSidebarAgentButtons, normalizeStoredSidebarAgents } from "./sidebar-agents";
+import {
+  createSidebarAgentButtons,
+  normalizeStoredSidebarAgentOrder,
+  normalizeStoredSidebarAgents,
+} from "./sidebar-agents";
 
 describe("createSidebarAgentButtons", () => {
   test("should expose the built-in agents by default", () => {
@@ -104,6 +108,167 @@ describe("createSidebarAgentButtons", () => {
       },
     ]);
   });
+
+  test("should hide default agents that are marked hidden", () => {
+    expect(
+      createSidebarAgentButtons([
+        {
+          agentId: "codex",
+          command: "codex",
+          hidden: true,
+          icon: "codex",
+          isDefault: true,
+          name: "Codex",
+        },
+      ]),
+    ).toEqual([
+      {
+        agentId: "t3",
+        command: "npx --yes t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
+      {
+        agentId: "claude",
+        command: "claude",
+        icon: "claude",
+        isDefault: true,
+        name: "Claude",
+      },
+      {
+        agentId: "opencode",
+        command: "opencode",
+        icon: "opencode",
+        isDefault: true,
+        name: "OpenCode",
+      },
+      {
+        agentId: "gemini",
+        command: "gemini -y",
+        icon: "gemini",
+        isDefault: true,
+        name: "Gemini",
+      },
+    ]);
+  });
+
+  test("should keep custom duplicates of default agent types", () => {
+    expect(
+      createSidebarAgentButtons([
+        {
+          agentId: "custom-codex-fast",
+          command: "codex --profile fast",
+          icon: "codex",
+          isDefault: false,
+          name: "Codex Fast",
+        },
+      ]),
+    ).toEqual([
+      {
+        agentId: "t3",
+        command: "npx --yes t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
+      {
+        agentId: "codex",
+        command: "codex",
+        icon: "codex",
+        isDefault: true,
+        name: "Codex",
+      },
+      {
+        agentId: "claude",
+        command: "claude",
+        icon: "claude",
+        isDefault: true,
+        name: "Claude",
+      },
+      {
+        agentId: "opencode",
+        command: "opencode",
+        icon: "opencode",
+        isDefault: true,
+        name: "OpenCode",
+      },
+      {
+        agentId: "gemini",
+        command: "gemini -y",
+        icon: "gemini",
+        isDefault: true,
+        name: "Gemini",
+      },
+      {
+        agentId: "custom-codex-fast",
+        command: "codex --profile fast",
+        icon: "codex",
+        isDefault: false,
+        name: "Codex Fast",
+      },
+    ]);
+  });
+
+  test("should respect stored agent ordering across defaults and custom entries", () => {
+    expect(
+      createSidebarAgentButtons(
+        [
+          {
+            agentId: "custom-codex-fast",
+            command: "codex --profile fast",
+            icon: "codex",
+            isDefault: false,
+            name: "Codex Fast",
+          },
+        ],
+        ["gemini", "custom-codex-fast", "claude"],
+      ),
+    ).toEqual([
+      {
+        agentId: "gemini",
+        command: "gemini -y",
+        icon: "gemini",
+        isDefault: true,
+        name: "Gemini",
+      },
+      {
+        agentId: "custom-codex-fast",
+        command: "codex --profile fast",
+        icon: "codex",
+        isDefault: false,
+        name: "Codex Fast",
+      },
+      {
+        agentId: "claude",
+        command: "claude",
+        icon: "claude",
+        isDefault: true,
+        name: "Claude",
+      },
+      {
+        agentId: "t3",
+        command: "npx --yes t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
+      {
+        agentId: "codex",
+        command: "codex",
+        icon: "codex",
+        isDefault: true,
+        name: "Codex",
+      },
+      {
+        agentId: "opencode",
+        command: "opencode",
+        icon: "opencode",
+        isDefault: true,
+        name: "OpenCode",
+      },
+    ]);
+  });
 });
 
 describe("normalizeStoredSidebarAgents", () => {
@@ -113,6 +278,7 @@ describe("normalizeStoredSidebarAgents", () => {
         {
           agentId: " codex ",
           command: " codex ",
+          hidden: true,
           icon: "codex",
           isDefault: true,
           name: " Codex ",
@@ -128,10 +294,19 @@ describe("normalizeStoredSidebarAgents", () => {
       {
         agentId: "codex",
         command: "codex",
+        hidden: true,
         icon: "codex",
         isDefault: true,
         name: "Codex",
       },
     ]);
+  });
+});
+
+describe("normalizeStoredSidebarAgentOrder", () => {
+  test("should trim, dedupe, and ignore invalid order entries", () => {
+    expect(
+      normalizeStoredSidebarAgentOrder([" codex ", "gemini", "codex", 123, "", " gemini "]),
+    ).toEqual(["codex", "gemini"]);
   });
 });

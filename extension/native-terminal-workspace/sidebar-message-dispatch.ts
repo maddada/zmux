@@ -4,6 +4,7 @@ import type {
 } from "../../shared/session-grid-contract";
 import type { TerminalViewMode } from "../../shared/session-grid-contract";
 import type { SidebarActionType } from "../../shared/sidebar-commands";
+import type { SidebarAgentIcon } from "../../shared/sidebar-agents";
 import { logVSmuxDebug } from "../vsmux-debug-log";
 
 export type SidebarMessageHandlers = {
@@ -32,7 +33,12 @@ export type SidebarMessageHandlers = {
   runSidebarAgent: (agentId: string) => Promise<void>;
   runSidebarCommand: (commandId: string) => Promise<void>;
   saveScratchPad: (content: string) => Promise<void>;
-  saveSidebarAgent: (agentId: string | undefined, name: string, command: string) => Promise<void>;
+  saveSidebarAgent: (
+    agentId: string | undefined,
+    name: string,
+    command: string,
+    icon?: SidebarAgentIcon,
+  ) => Promise<void>;
   saveSidebarCommand: (
     commandId: string | undefined,
     name: string,
@@ -41,6 +47,7 @@ export type SidebarMessageHandlers = {
     command?: string,
     url?: string,
   ) => Promise<void>;
+  syncSidebarAgentOrder: (agentIds: readonly string[]) => Promise<void>;
   setViewMode: (viewMode: TerminalViewMode) => Promise<void>;
   setVisibleCount: (visibleCount: VisibleSessionCount) => Promise<void>;
   syncGroupOrder: (groupIds: readonly string[]) => Promise<void>;
@@ -94,7 +101,7 @@ export async function dispatchSidebarMessage(
       await handlers.runSidebarCommand(message.commandId);
       return;
     case "saveSidebarAgent":
-      await handlers.saveSidebarAgent(message.agentId, message.name, message.command);
+      await handlers.saveSidebarAgent(message.agentId, message.name, message.command, message.icon);
       return;
     case "saveSidebarCommand":
       await handlers.saveSidebarCommand(
@@ -108,6 +115,9 @@ export async function dispatchSidebarMessage(
       return;
     case "deleteSidebarAgent":
       await handlers.deleteSidebarAgent(message.agentId);
+      return;
+    case "syncSidebarAgentOrder":
+      await handlers.syncSidebarAgentOrder(message.agentIds);
       return;
     case "deleteSidebarCommand":
       await handlers.deleteSidebarCommand(message.commandId);

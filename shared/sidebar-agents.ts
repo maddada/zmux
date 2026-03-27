@@ -31,7 +31,9 @@ export const DEFAULT_SIDEBAR_AGENTS = [
   },
 ] as const;
 
-export type SidebarAgentIcon = "browser" | (typeof DEFAULT_SIDEBAR_AGENTS)[number]["icon"];
+export type DefaultSidebarAgent = (typeof DEFAULT_SIDEBAR_AGENTS)[number];
+export type DefaultSidebarAgentId = DefaultSidebarAgent["agentId"];
+export type SidebarAgentIcon = "browser" | DefaultSidebarAgent["icon"];
 
 export type SidebarAgentButton = {
   agentId: string;
@@ -44,6 +46,7 @@ export type SidebarAgentButton = {
 export type StoredSidebarAgent = {
   agentId: string;
   command: string;
+  hidden?: boolean;
   icon?: SidebarAgentIcon;
   isDefault: boolean;
   name: string;
@@ -61,31 +64,36 @@ export function createDefaultSidebarAgentButtons(): SidebarAgentButton[] {
 
 export function createSidebarAgentButtons(
   storedAgents: readonly StoredSidebarAgent[],
+  storedOrder: readonly string[] = [],
 ): SidebarAgentButton[] {
   const storedAgentById = new Map(storedAgents.map((agent) => [agent.agentId, agent]));
-  const defaultButtons = DEFAULT_SIDEBAR_AGENTS.map((agent) => {
+  const defaultButtons = DEFAULT_SIDEBAR_AGENTS.flatMap((agent) => {
     const storedAgent = storedAgentById.get(agent.agentId);
+    if (storedAgent?.hidden === true) {
+      return [];
+    }
+
     if (!storedAgent) {
-      return {
+      return [{
         agentId: agent.agentId,
         command: agent.command,
         icon: agent.icon,
         isDefault: true,
         name: agent.name,
-      };
+      }];
     }
 
-    return {
+    return [{
       agentId: storedAgent.agentId,
       command: storedAgent.command,
       icon: storedAgent.icon ?? agent.icon,
       isDefault: true,
       name: getDefaultSidebarAgentName(agent.agentId, storedAgent.name),
-    };
+    }];
   });
 
   const customButtons = storedAgents
-    .filter((agent) => !isDefaultSidebarAgentId(agent.agentId))
+    .filter((agent) => !isDefaultSidebarAgentId(agent.agentId) && agent.hidden !== true)
     .map((agent) => ({
       agentId: agent.agentId,
       command: agent.command,
@@ -94,16 +102,32 @@ export function createSidebarAgentButtons(
       name: agent.name,
     }));
 
-  return [...defaultButtons, ...customButtons];
+  return orderSidebarAgentButtons([...defaultButtons, ...customButtons], storedOrder);
 }
 
 export function isDefaultSidebarAgentId(agentId: string): boolean {
   return DEFAULT_SIDEBAR_AGENTS.some((agent) => agent.agentId === agentId);
 }
 
-export function getSidebarAgentIconById(agentId: string | undefined): SidebarAgentIcon | undefined {
+export function getDefaultSidebarAgentById(
+  agentId: string | undefined,
+): DefaultSidebarAgent | undefined {
   const normalizedAgentId = agentId?.trim().toLowerCase();
-  return DEFAULT_SIDEBAR_AGENTS.find((agent) => agent.agentId === normalizedAgentId)?.icon;
+  return DEFAULT_SIDEBAR_AGENTS.find((agent) => agent.agentId === normalizedAgentId);
+}
+
+export function getDefaultSidebarAgentByIcon(
+  icon: SidebarAgentIcon | undefined,
+): DefaultSidebarAgent | undefined {
+  if (!icon || icon === "browser") {
+    return undefined;
+  }
+
+  return DEFAULT_SIDEBAR_AGENTS.find((agent) => agent.icon === icon);
+}
+
+export function getSidebarAgentIconById(agentId: string | undefined): SidebarAgentIcon | undefined {
+  return getDefaultSidebarAgentById(agentId)?.icon;
 }
 
 export function getSidebarAgentNameByIcon(icon: SidebarAgentIcon | undefined): string | undefined {
@@ -134,6 +158,7 @@ export function normalizeStoredSidebarAgents(candidate: unknown): StoredSidebarA
     const icon = isSidebarAgentIcon(partialItem.icon) ? partialItem.icon : undefined;
     const isDefault =
       partialItem.isDefault === true || (agentId ? isDefaultSidebarAgentId(agentId) : false);
+    const hidden = partialItem.hidden === true;
 
     if (!agentId || !name || !command || seenAgentIds.has(agentId)) {
       continue;
@@ -142,6 +167,7 @@ export function normalizeStoredSidebarAgents(candidate: unknown): StoredSidebarA
     normalizedAgents.push({
       agentId,
       command,
+      hidden,
       icon,
       isDefault,
       name,
@@ -150,6 +176,31 @@ export function normalizeStoredSidebarAgents(candidate: unknown): StoredSidebarA
   }
 
   return normalizedAgents;
+}
+
+export function normalizeStoredSidebarAgentOrder(candidate: unknown): string[] {
+  if (!Array.isArray(candidate)) {
+    return [];
+  }
+
+  const normalizedOrder: string[] = [];
+  const seenAgentIds = new Set<string>();
+
+  for (const item of candidate) {
+    if (typeof item !== "string") {
+      continue;
+    }
+
+    const agentId = item.trim();
+    if (!agentId || seenAgentIds.has(agentId)) {
+      continue;
+    }
+
+    normalizedOrder.push(agentId);
+    seenAgentIds.add(agentId);
+  }
+
+  return normalizedOrder;
 }
 
 function isSidebarAgentIcon(candidate: unknown): candidate is SidebarAgentIcon {
@@ -178,4 +229,27 @@ function getDefaultSidebarAgentName(agentId: string, storedName: string): string
   }
 
   return storedName;
+}
+
+function orderSidebarAgentButtons(
+  buttons: readonly SidebarAgentButton[],
+  storedOrder: readonly string[],
+): SidebarAgentButton[] {
+  const buttonById = new Map(buttons.map((button) => [button.agentId, button] as const));
+  const orderedButtons: SidebarAgentButton[] = [];
+
+  for (const agentId of normalizeStoredSidebarAgentOrder(storedOrder)) {
+    const button = buttonById.get(agentId);
+    if (button) {
+      orderedButtons.push(button);
+    }
+  }
+
+  for (const button of buttons) {
+    if (!orderedButtons.some((candidate) => candidate.agentId === button.agentId)) {
+      orderedButtons.push(button);
+    }
+  }
+
+  return orderedButtons;
 }

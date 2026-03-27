@@ -74,6 +74,8 @@ type SessionProjection = {
   terminal: vscode.Terminal;
 };
 
+type ManagedTerminalRestorePassResult = "failed" | "moved" | "verify";
+
 const defaultNeverCancelled = (): boolean => false;
 
 export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
@@ -492,6 +494,7 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
 
   public async restoreAllManagedTerminalsToEditor(): Promise<void> {
     const terminals = [...vscode.window.terminals];
+    const verifyPassTerminals: Array<{ sessionId: string; terminal: vscode.Terminal }> = [];
     this.logBackendDebug("backend.restoreAllManagedTerminalsToEditor.start", {
       managedSessionIds: terminals
         .map((terminal) => this.terminalToSessionId.get(terminal))
@@ -504,42 +507,46 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         continue;
       }
 
-      const isActive = await this.activateTerminalForWorkbenchCommand(terminal);
-      const hasEditorTab = this.hasTerminalEditorTab(sessionId);
-      this.logBackendDebug("backend.restoreAllManagedTerminalsToEditor.activateTerminal", {
-        activeLocation: getActiveTerminalTabLocation(),
-        hasEditorTab,
-        isActive,
+      const restoreResult = await this.restoreManagedTerminalToEditorPass(
         sessionId,
-        terminalName: getTerminalDisplayName(terminal) ?? terminal.name,
-      });
-      if (!isActive) {
-        continue;
-      }
-
-      if (hasEditorTab) {
-        continue;
-      }
-
-      this.observedEditorGroupIndexBySessionId.delete(sessionId);
-      const movedToEditor = await this.moveTerminalToEditorGroup(
-        sessionId,
-        0,
         terminal,
-        defaultNeverCancelled,
         "backend.restoreAllManagedTerminalsToEditor",
+        false,
       );
-      if (!movedToEditor) {
-        this.logBackendDebug("backend.restoreAllManagedTerminalsToEditor.moveToEditor.failed", {
-          sessionId,
-          terminalName: getTerminalDisplayName(terminal) ?? terminal.name,
-        });
+      if (restoreResult === "verify") {
+        verifyPassTerminals.push({ sessionId, terminal });
+      }
+    }
+
+    this.logBackendDebug("backend.restoreAllManagedTerminalsToEditor.verifyPass.start", {
+      sessionIds: verifyPassTerminals.map(({ sessionId }) => sessionId),
+    });
+
+    for (const { sessionId, terminal } of verifyPassTerminals) {
+      if (
+        terminal.exitStatus ||
+        this.terminalToSessionId.get(terminal) !== sessionId ||
+        !vscode.window.terminals.includes(terminal)
+      ) {
         continue;
       }
-      this.logBackendDebug("backend.restoreAllManagedTerminalsToEditor.movedToEditor", {
+
+      const verified = await this.verifyManagedTerminalRestoredToEditor(sessionId, terminal);
+      this.logBackendDebug("backend.restoreAllManagedTerminalsToEditor.verifyPass.result", {
         sessionId,
         terminalName: getTerminalDisplayName(terminal) ?? terminal.name,
+        verified,
       });
+      if (verified) {
+        continue;
+      }
+
+      await this.restoreManagedTerminalToEditorPass(
+        sessionId,
+        terminal,
+        "backend.restoreAllManagedTerminalsToEditor.verifyPass",
+        true,
+      );
     }
 
     this.logBackendDebug("backend.restoreAllManagedTerminalsToEditor.complete", {
@@ -1102,6 +1109,69 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     }
 
     return this.findTerminalTabIndex(sessionId, groupIndex) !== undefined;
+  }
+
+  private async restoreManagedTerminalToEditorPass(
+    sessionId: string,
+    terminal: vscode.Terminal,
+    logPrefix: string,
+    forceMoveToEditor: boolean,
+  ): Promise<ManagedTerminalRestorePassResult> {
+    const isActive = await this.activateTerminalForWorkbenchCommand(terminal);
+    const hasEditorTab = this.hasTerminalEditorTab(sessionId);
+    this.logBackendDebug(`${logPrefix}.activateTerminal`, {
+      activeLocation: getActiveTerminalTabLocation(),
+      forceMoveToEditor,
+      hasEditorTab,
+      isActive,
+      sessionId,
+      terminalName: getTerminalDisplayName(terminal) ?? terminal.name,
+    });
+    if (!isActive) {
+      return "failed";
+    }
+
+    if (!forceMoveToEditor && hasEditorTab) {
+      return "verify";
+    }
+
+    this.observedEditorGroupIndexBySessionId.delete(sessionId);
+    const movedToEditor = await this.moveTerminalToEditorGroup(
+      sessionId,
+      0,
+      terminal,
+      defaultNeverCancelled,
+      logPrefix,
+    );
+    if (!movedToEditor) {
+      this.logBackendDebug(`${logPrefix}.moveToEditor.failed`, {
+        sessionId,
+        terminalName: getTerminalDisplayName(terminal) ?? terminal.name,
+      });
+      return "failed";
+    }
+    this.logBackendDebug(`${logPrefix}.movedToEditor`, {
+      sessionId,
+      terminalName: getTerminalDisplayName(terminal) ?? terminal.name,
+    });
+    return "moved";
+  }
+
+  private async verifyManagedTerminalRestoredToEditor(
+    sessionId: string,
+    terminal: vscode.Terminal,
+  ): Promise<boolean> {
+    const groupIndex = this.findTerminalGroupIndex(sessionId);
+    if (groupIndex === undefined) {
+      return false;
+    }
+
+    const activatedTab = await this.activateTerminalEditorTab(sessionId, groupIndex);
+    if (!activatedTab) {
+      return false;
+    }
+
+    return this.isBoundTerminalActiveInEditorGroup(terminal, groupIndex);
   }
 
   private async moveTerminalToGroup(

@@ -1,10 +1,16 @@
 import { IconX } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useId, useState } from "react";
+import {
+  DEFAULT_SIDEBAR_AGENTS,
+  getDefaultSidebarAgentByIcon,
+  type SidebarAgentIcon,
+} from "../shared/sidebar-agents";
 
 export type AgentConfigDraft = {
   agentId?: string;
   command: string;
+  icon?: SidebarAgentIcon;
   name: string;
 };
 
@@ -17,6 +23,7 @@ export type AgentConfigModalProps = {
 
 export function AgentConfigModal({ draft, isOpen, onCancel, onSave }: AgentConfigModalProps) {
   const [command, setCommand] = useState(draft.command);
+  const [icon, setIcon] = useState<SidebarAgentIcon | "custom">(draft.icon ?? "custom");
   const [name, setName] = useState(draft.name);
   const descriptionId = useId();
   const titleId = useId();
@@ -27,6 +34,7 @@ export function AgentConfigModal({ draft, isOpen, onCancel, onSave }: AgentConfi
     }
 
     setCommand(draft.command);
+    setIcon(draft.icon ?? "custom");
     setName(draft.name);
   }, [draft, isOpen]);
 
@@ -81,6 +89,55 @@ export function AgentConfigModal({ draft, isOpen, onCancel, onSave }: AgentConfi
         </div>
         <div className="command-config-fields">
           <label className="command-config-field">
+            <span className="command-config-label">Agent Type</span>
+            <select
+              className="group-title-input command-config-input"
+              onChange={(event) => {
+                const nextType = event.currentTarget.value as SidebarAgentIcon | "custom";
+                const previousDefaultAgent = getDefaultSidebarAgentByIcon(
+                  icon === "custom" ? undefined : icon,
+                );
+                const nextDefaultAgent = getDefaultSidebarAgentByIcon(
+                  nextType === "custom" ? undefined : nextType,
+                );
+
+                setIcon(nextType);
+                if (!nextDefaultAgent) {
+                  return;
+                }
+
+                setName((previousName) => {
+                  if (
+                    previousName.trim().length === 0 ||
+                    previousName === previousDefaultAgent?.name
+                  ) {
+                    return nextDefaultAgent.name;
+                  }
+
+                  return previousName;
+                });
+                setCommand((previousCommand) => {
+                  if (
+                    previousCommand.trim().length === 0 ||
+                    previousCommand === previousDefaultAgent?.command
+                  ) {
+                    return nextDefaultAgent.command;
+                  }
+
+                  return previousCommand;
+                });
+              }}
+              value={icon}
+            >
+              <option value="custom">Custom</option>
+              {DEFAULT_SIDEBAR_AGENTS.map((agent) => (
+                <option key={agent.agentId} value={agent.icon}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="command-config-field">
             <span className="command-config-label">Name</span>
             <input
               autoFocus
@@ -112,6 +169,7 @@ export function AgentConfigModal({ draft, isOpen, onCancel, onSave }: AgentConfi
               onSave({
                 agentId: draft.agentId,
                 command: command.trim(),
+                icon: icon === "custom" ? undefined : icon,
                 name: name.trim(),
               })
             }

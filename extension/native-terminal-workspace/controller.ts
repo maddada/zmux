@@ -20,7 +20,13 @@ import { getSidebarAgentIconById, type SidebarAgentIcon } from "../../shared/sid
 import { NativeTerminalWorkspaceBackend } from "../native-terminal-workspace-backend";
 import { buildSidebarMessage, createPreviousSessionEntry } from "../native-terminal-workspace-sidebar-state";
 import { PreviousSessionHistory, type PreviousSessionHistoryEntry } from "../previous-session-history";
-import { getSidebarAgentButtons, getSidebarAgentButtonById, saveSidebarAgentPreference, deleteSidebarAgentPreference } from "../sidebar-agent-preferences";
+import {
+  deleteSidebarAgentPreference,
+  getSidebarAgentButtonById,
+  getSidebarAgentButtons,
+  saveSidebarAgentPreference,
+  syncSidebarAgentOrderPreference,
+} from "../sidebar-agent-preferences";
 import {
   deleteSidebarCommandPreference,
   getSidebarCommandButtonById,
@@ -543,13 +549,19 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     agentId: string | undefined,
     name: string,
     command: string,
+    icon?: SidebarAgentIcon,
   ): Promise<void> {
-    await saveSidebarAgentPreference({ agentId, command, name });
+    await saveSidebarAgentPreference({ agentId, command, icon, name });
     await this.refreshSidebar("hydrate");
   }
 
   public async deleteSidebarAgent(agentId: string): Promise<void> {
     await deleteSidebarAgentPreference(agentId);
+    await this.refreshSidebar("hydrate");
+  }
+
+  public async syncSidebarAgentOrder(agentIds: readonly string[]): Promise<void> {
+    await syncSidebarAgentOrderPreference(agentIds);
     await this.refreshSidebar("hydrate");
   }
 
@@ -665,6 +677,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       this.backend.clearObservedEditorGroupPlacement();
       this.isVsMuxDisabled = false;
       await this.context.workspaceState.update(DISABLE_VS_MUX_MODE_KEY, this.isVsMuxDisabled);
+      this.isRestoringCodeMode = false;
       await this.afterStateChange();
     } finally {
       this.isRestoringCodeMode = false;
@@ -712,7 +725,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       runSidebarAgent: async (agentId) => this.runSidebarAgent(agentId),
       runSidebarCommand: async (commandId) => this.runSidebarCommand(commandId),
       saveScratchPad: async (content) => this.saveScratchPad(content),
-      saveSidebarAgent: async (agentId, name, command) => this.saveSidebarAgent(agentId, name, command),
+      saveSidebarAgent: async (agentId, name, command, icon) =>
+        this.saveSidebarAgent(agentId, name, command, icon),
       saveSidebarCommand: async (commandId, name, actionType, closeTerminalOnExit, command, url) =>
         this.saveSidebarCommand(
           commandId,
@@ -724,6 +738,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         ),
       setViewMode: async (viewMode) => this.setViewMode(viewMode),
       setVisibleCount: async (visibleCount) => this.setVisibleCount(visibleCount),
+      syncSidebarAgentOrder: async (agentIds) => this.syncSidebarAgentOrder(agentIds),
       syncGroupOrder: async (groupIds) => this.syncGroupOrder(groupIds),
       syncSessionOrder: async (groupId, sessionIds) => this.syncSessionOrder(groupId, sessionIds),
       syncSidebarCommandOrder: async (commandIds) => this.syncSidebarCommandOrder(commandIds),

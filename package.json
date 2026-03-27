@@ -1,7 +1,7 @@
 {
   "name": "VSmux",
   "displayName": "VSmux - T3code & Agent CLIs Manager",
-  "version": "1.11.2",
+  "version": "1.12.0",
   "private": true,
   "description": "VSmux - T3code & Agent CLIs Manager",
   "categories": [
@@ -336,17 +336,32 @@
               "icon": {
                 "type": "string",
                 "enum": [
+                  "t3",
                   "codex",
                   "claude",
-                  "opencode"
+                  "opencode",
+                  "gemini"
                 ]
+              },
+              "hidden": {
+                "type": "boolean"
               },
               "isDefault": {
                 "type": "boolean"
               }
             }
           },
-          "description": "User-level overrides and custom agents shown in the VSmux sidebar. The built-in Codex CLI, Claude Code, and OpenCode launchers are always available."
+          "description": "User-level agent definitions shown in the VSmux sidebar. Built-in agents can be customized or hidden, and extra custom variants can reuse the same agent type icons."
+        },
+        "VSmux.agentOrder": {
+          "title": "Agent Order",
+          "type": "array",
+          "scope": "application",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Internal ordering metadata for agent buttons in the VSmux sidebar."
         },
         "VSmux.sendRenameCommandOnSidebarRename": {
           "title": "Send Rename Command On Sidebar Rename",

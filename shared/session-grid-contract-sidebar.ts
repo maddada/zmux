@@ -240,11 +240,16 @@ export type SidebarToExtensionMessage =
       type: "saveSidebarAgent";
       agentId?: string;
       command: string;
+      icon?: SidebarAgentIcon;
       name: string;
     }
   | {
       type: "deleteSidebarAgent";
       agentId: string;
+    }
+  | {
+      type: "syncSidebarAgentOrder";
+      agentIds: string[];
     };
 
 export type SidebarHudSnapshot = Pick<

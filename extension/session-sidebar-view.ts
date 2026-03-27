@@ -205,6 +205,12 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
     case "deleteSidebarAgent":
       return typeof message.agentId === "string" && message.agentId.length > 0;
 
+    case "syncSidebarAgentOrder":
+      return (
+        Array.isArray(message.agentIds) &&
+        message.agentIds.every((agentId) => typeof agentId === "string" && agentId.length > 0)
+      );
+
     case "createSessionInGroup":
       return typeof message.groupId === "string" && message.groupId.length > 0;
 
@@ -304,7 +310,8 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
         (message.agentId === undefined ||
           (typeof message.agentId === "string" && message.agentId.length > 0)) &&
         typeof message.name === "string" &&
-        typeof message.command === "string"
+        typeof message.command === "string" &&
+        (message.icon === undefined || typeof message.icon === "string")
       );
 
     default:
