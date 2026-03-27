@@ -2,6 +2,12 @@
 
 All notable user-facing changes are documented in this file.
 
+## 1.11.2 - 2026-03-27
+
+- VSmux is much more stable now when reconciling and moving native terminal sessions. This should behave more reliably on both macOS and Windows.
+- Terminal tabs are targeted more accurately, so focusing a session or moving it between panes is less likely to land on the wrong tab.
+- Fast follow-up layout changes now cancel stale session work more cleanly, reducing focus and pane-sync glitches during rapid session switching.
+
 ## 1.11.1 - 2026-03-27
 
 - VSmux is much more stable now, with a focused fix for grouped session state and session moves. This should behave more reliably on both macOS and Windows.
