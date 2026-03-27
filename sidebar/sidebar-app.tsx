@@ -178,8 +178,9 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
           scratchPadContent: message.scratchPadContent ?? "",
         };
       });
-      setGroupIds(message.groups.map((group) => group.groupId));
-      setSessionIdsByGroup(createSessionIdsByGroup(message.groups));
+      const workspaceGroups = getWorkspaceSidebarGroups(message.groups);
+      setGroupIds(workspaceGroups.map((group) => group.groupId));
+      setSessionIdsByGroup(createSessionIdsByGroup(workspaceGroups));
     });
   };
 
@@ -341,9 +342,10 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
   }, [isOverflowMenuOpen]);
 
   const orderedGroups = useMemo(() => {
-    const groupById = new Map(serverState.groups.map((group) => [group.groupId, group] as const));
+    const workspaceGroups = getWorkspaceSidebarGroups(serverState.groups);
+    const groupById = new Map(workspaceGroups.map((group) => [group.groupId, group] as const));
     const sessionById = new Map(
-      serverState.groups.flatMap((group) =>
+      workspaceGroups.flatMap((group) =>
         group.sessions.map((session) => [session.sessionId, session] as const),
       ),
     );
@@ -356,6 +358,11 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
         orderedSessions: applySessionOrder(sessionById, sessionIdsByGroup[group.groupId]),
       }));
   }, [groupIds, serverState.groups, sessionIdsByGroup]);
+
+  const fixedGroups = useMemo(
+    () => serverState.groups.filter((group) => group.kind === "browser"),
+    [serverState.groups],
+  );
 
   const draggedSession = useMemo(() => {
     if (!draggedSessionId) {
@@ -762,6 +769,25 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
               </ToolbarIconButton>
             </div>
           </div>
+          {fixedGroups.length > 0 ? (
+            <div className="group-list">
+              {fixedGroups.map((group) => (
+                <SessionGroupSection
+                  autoEdit={false}
+                  canClose={false}
+                  group={group}
+                  index={-1}
+                  key={group.groupId}
+                  onAutoEditHandled={() => undefined}
+                  orderedSessions={group.sessions}
+                  showDebugSessionNumbers={serverState.hud.debuggingMode}
+                  showCloseButton={serverState.hud.showCloseButtonOnSessionCards}
+                  showHotkeys={serverState.hud.showHotkeysOnSessionCards}
+                  vscode={vscode}
+                />
+              ))}
+            </div>
+          ) : null}
           <DragDropProvider
             onDragEnd={handleDragEnd}
             onDragOver={handleDragOver}
@@ -816,7 +842,8 @@ export function SidebarApp({ vscode }: SidebarAppProps) {
               ) : null}
             </DragOverlay>
           </DragDropProvider>
-          {orderedGroups.every((group) => group.sessions.length === 0) ? (
+          {fixedGroups.length === 0 &&
+          orderedGroups.every((group) => group.sessions.length === 0) ? (
             <div className="empty" data-empty-space-blocking="true">
               Create the first session to start the workspace.
             </div>
@@ -936,6 +963,10 @@ function createSessionIdsByGroup(groups: readonly SidebarSessionGroup[]): Sessio
   return Object.fromEntries(
     groups.map((group) => [group.groupId, group.sessions.map((session) => session.sessionId)]),
   );
+}
+
+function getWorkspaceSidebarGroups(groups: readonly SidebarSessionGroup[]): SidebarSessionGroup[] {
+  return groups.filter((group) => group.kind !== "browser");
 }
 
 function cloneSessionIdsByGroup(sessionIdsByGroup: SessionIdsByGroup): SessionIdsByGroup {

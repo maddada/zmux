@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { useEffect, useId, useState } from "react";
 import type { SidebarActionType } from "../shared/sidebar-commands";
 
+const DEFAULT_BROWSER_URL = "http://localhost:5173";
+
 export type CommandConfigDraft = {
   actionType: SidebarActionType;
   closeTerminalOnExit: boolean;
@@ -38,8 +40,16 @@ export function CommandConfigModal({ draft, isOpen, onCancel, onSave }: CommandC
     setCloseTerminalOnExit(draft.closeTerminalOnExit);
     setCommand(draft.command ?? "");
     setName(draft.name);
-    setUrl(draft.url ?? "");
+    setUrl(draft.url ?? (draft.actionType === "browser" ? DEFAULT_BROWSER_URL : ""));
   }, [draft, isOpen]);
+
+  useEffect(() => {
+    if (actionType !== "browser" || url.trim().length > 0) {
+      return;
+    }
+
+    setUrl(DEFAULT_BROWSER_URL);
+  }, [actionType, url]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -66,7 +76,7 @@ export function CommandConfigModal({ draft, isOpen, onCancel, onSave }: CommandC
   const isSaveDisabled = name.trim().length === 0 || targetValue.length === 0;
   const description =
     actionType === "browser"
-      ? "This action creates a browser session in the VSmux grid and opens its URL in the VS Code integrated browser."
+      ? "This action opens the URL in a VS Code browser tab. The tab is detected and shown in the Browsers group."
       : "This action opens a new VS Code panel terminal each time it runs.";
 
   return createPortal(
@@ -97,6 +107,19 @@ export function CommandConfigModal({ draft, isOpen, onCancel, onSave }: CommandC
         </div>
         <div className="command-config-fields">
           <label className="command-config-field">
+            <span className="command-config-label">Type</span>
+            <select
+              className="group-title-input command-config-input"
+              onChange={(event) =>
+                setActionType(event.currentTarget.value === "browser" ? "browser" : "terminal")
+              }
+              value={actionType}
+            >
+              <option value="terminal">Terminal</option>
+              <option value="browser">Browser</option>
+            </select>
+          </label>
+          <label className="command-config-field">
             <span className="command-config-label">Name</span>
             <input
               autoFocus
@@ -112,7 +135,7 @@ export function CommandConfigModal({ draft, isOpen, onCancel, onSave }: CommandC
               <textarea
                 className="group-title-input command-config-input command-config-textarea"
                 onChange={(event) => setUrl(event.currentTarget.value)}
-                placeholder="https://example.com"
+                placeholder={DEFAULT_BROWSER_URL}
                 rows={3}
                 value={url}
               />

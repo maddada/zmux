@@ -18,8 +18,14 @@ import {
 } from "../../shared/session-grid-contract";
 import { getSidebarAgentIconById, type SidebarAgentIcon } from "../../shared/sidebar-agents";
 import { NativeTerminalWorkspaceBackend } from "../native-terminal-workspace-backend";
-import { buildSidebarMessage, createPreviousSessionEntry } from "../native-terminal-workspace-sidebar-state";
-import { PreviousSessionHistory, type PreviousSessionHistoryEntry } from "../previous-session-history";
+import {
+  buildSidebarMessage,
+  createPreviousSessionEntry,
+} from "../native-terminal-workspace-sidebar-state";
+import {
+  PreviousSessionHistory,
+  type PreviousSessionHistoryEntry,
+} from "../previous-session-history";
 import {
   deleteSidebarAgentPreference,
   getSidebarAgentButtonById,
@@ -42,12 +48,19 @@ import {
   getDefaultWorkspaceCwd,
   getWorkspaceId,
   haveSameEditorLayoutShape,
+  focusEditorGroupByIndex,
   setEditorLayout,
   type WorkbenchEditorLayout,
 } from "../terminal-workspace-environment";
 import { T3RuntimeManager } from "../t3-runtime-manager";
 import { T3WebviewManager } from "../t3-webview-manager";
 import { disposeVSmuxDebugLog, logVSmuxDebug, resetVSmuxDebugLog } from "../vsmux-debug-log";
+import {
+  findLiveBrowserTabBySessionId,
+  getLiveBrowserTabs,
+  isBrowserSidebarSessionId,
+  normalizeSidebarBrowserUrl,
+} from "../live-browser-tabs";
 import { dispatchSidebarMessage } from "./sidebar-message-dispatch";
 import {
   COMPLETION_BELL_ENABLED_KEY,
@@ -69,6 +82,8 @@ const SHORTCUT_LABEL_PLATFORM = process.platform === "darwin" ? "mac" : "default
 const COMMAND_TERMINAL_EXIT_POLL_MS = 250;
 const EXPLICIT_FOCUS_T3_OBSERVED_FOCUS_GUARD_MS = 750;
 const CODE_MODE_RESTORE_SNAPSHOT_KEY = "VSmux.codeModeRestoreSnapshot";
+const SIMPLE_BROWSER_OPEN_COMMAND = "simpleBrowser.api.open";
+const TOGGLE_MAXIMIZE_EDITOR_GROUP_COMMAND = "workbench.action.toggleMaximizeEditorGroup";
 
 export { SESSIONS_VIEW_ID } from "./settings";
 
@@ -90,8 +105,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private reconcileRunner: Promise<void> | undefined;
   private suppressedObservedFocusDepth = 0;
   private readonly sidebarAgentIconBySessionId = new Map<string, SidebarAgentIcon>();
+  private browserEditorGroupIsMaximized = false;
+  private readonly browserDetailBySessionId = new Map<string, string>();
   private codeModeRestoreSnapshot: GroupedSessionWorkspaceSnapshot | undefined;
   private isRestoringCodeMode = false;
+  private readonly liveBrowserTabsBySessionId = new Map<string, vscode.Tab>();
   private readonly previousSessionHistory: PreviousSessionHistory;
   private readonly store: SessionGridStore;
   private readonly terminalTitleBySessionId = new Map<string, string>();
@@ -103,9 +121,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   public constructor(private readonly context: vscode.ExtensionContext) {
     this.store = new SessionGridStore(context);
     this.previousSessionHistory = new PreviousSessionHistory(context);
-    this.isVsMuxDisabled = context.workspaceState.get<boolean>(DISABLE_VS_MUX_MODE_KEY, false) ?? false;
-    this.codeModeRestoreSnapshot =
-      context.workspaceState.get<GroupedSessionWorkspaceSnapshot>(CODE_MODE_RESTORE_SNAPSHOT_KEY);
+    this.isVsMuxDisabled =
+      context.workspaceState.get<boolean>(DISABLE_VS_MUX_MODE_KEY, false) ?? false;
+    this.codeModeRestoreSnapshot = context.workspaceState.get<GroupedSessionWorkspaceSnapshot>(
+      CODE_MODE_RESTORE_SNAPSHOT_KEY,
+    );
     this.workspaceId = getWorkspaceId();
     this.backend = new NativeTerminalWorkspaceBackend({
       context,
@@ -139,6 +159,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       }),
       vscode.window.onDidChangeActiveColorTheme(() => {
         void this.refreshSidebar("hydrate");
+      }),
+      vscode.window.tabGroups.onDidChangeTabs(() => {
+        void this.handleBrowserTabsChanged();
+      }),
+      vscode.window.tabGroups.onDidChangeTabGroups(() => {
+        void this.handleBrowserTabsChanged();
       }),
     );
   }
@@ -192,7 +218,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async revealSidebar(): Promise<void> {
-    await vscode.commands.executeCommand(`workbench.view.extension.${this.getSidebarContainerId()}`);
+    await vscode.commands.executeCommand(
+      `workbench.view.extension.${this.getSidebarContainerId()}`,
+    );
   }
 
   public async createSession(): Promise<void> {
@@ -217,9 +245,13 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   public async focusSession(sessionId: string, source?: "sidebar"): Promise<void> {
     const sessionRecord = this.store.getSession(sessionId);
     if (!sessionRecord) {
+      if (isBrowserSidebarSessionId(sessionId)) {
+        await this.focusLiveBrowserTab(sessionId);
+      }
       return;
     }
 
+    this.browserEditorGroupIsMaximized = false;
     logVSmuxDebug("controller.focusSession", {
       sessionId,
       sessionKind: sessionRecord.kind,
@@ -356,6 +388,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   public async closeSession(sessionId: string): Promise<void> {
     const sessionRecord = this.store.getSession(sessionId);
     if (!sessionRecord) {
+      if (isBrowserSidebarSessionId(sessionId)) {
+        await this.closeLiveBrowserTab(sessionId);
+      }
       return;
     }
 
@@ -373,7 +408,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async copyResumeCommand(_sessionId?: string): Promise<void> {
-    void vscode.window.showInformationMessage("Resume commands are not part of the simplified VSmux runtime.");
+    void vscode.window.showInformationMessage(
+      "Resume commands are not part of the simplified VSmux runtime.",
+    );
   }
 
   public async setVisibleCount(visibleCount: VisibleSessionCount): Promise<void> {
@@ -396,7 +433,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async toggleCompletionBell(): Promise<void> {
-    await this.context.workspaceState.update(COMPLETION_BELL_ENABLED_KEY, !this.getCompletionBellEnabled());
+    await this.context.workspaceState.update(
+      COMPLETION_BELL_ENABLED_KEY,
+      !this.getCompletionBellEnabled(),
+    );
     await this.refreshSidebar("hydrate");
   }
 
@@ -407,7 +447,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     if (commandButton.actionType === "browser") {
-      void vscode.window.showWarningMessage("Browser actions are currently disabled.");
+      const url = commandButton.url?.trim();
+      if (!url) {
+        return;
+      }
+
+      await this.openBrowserUrl(url);
       return;
     }
 
@@ -758,8 +803,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     type: SidebarHydrateMessage["type"] | SidebarSessionStateMessage["type"] = "sessionState",
   ): ExtensionToSidebarMessage {
     const activeSnapshot = this.getActiveSnapshot();
+    const browserTabs = this.refreshLiveBrowserTabs();
     return buildSidebarMessage({
       activeSnapshot,
+      browserTabs: browserTabs.map((browserTab) => ({
+        detail: browserTab.detail ?? this.browserDetailBySessionId.get(browserTab.sessionId),
+        isActive: browserTab.isActive,
+        label: browserTab.label,
+        sessionId: browserTab.sessionId,
+      })),
       browserHasLiveProjection: () => false,
       completionBellEnabled: this.getCompletionBellEnabled(),
       debuggingMode: getDebuggingMode(),
@@ -800,6 +852,140 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       workspaceId: this.workspaceId,
       workspaceSnapshot: this.store.getSnapshot(),
     });
+  }
+
+  private refreshLiveBrowserTabs() {
+    const browserTabs = getLiveBrowserTabs();
+    this.liveBrowserTabsBySessionId.clear();
+    const liveBrowserSessionIds = new Set(browserTabs.map((browserTab) => browserTab.sessionId));
+    for (const browserTab of browserTabs) {
+      this.liveBrowserTabsBySessionId.set(browserTab.sessionId, browserTab.tab);
+      if (browserTab.detail) {
+        this.browserDetailBySessionId.set(browserTab.sessionId, browserTab.detail);
+      }
+    }
+    for (const sessionId of this.browserDetailBySessionId.keys()) {
+      if (!liveBrowserSessionIds.has(sessionId)) {
+        this.browserDetailBySessionId.delete(sessionId);
+      }
+    }
+
+    if (!browserTabs.some((browserTab) => browserTab.isActive)) {
+      this.browserEditorGroupIsMaximized = false;
+    }
+
+    return browserTabs;
+  }
+
+  private async handleBrowserTabsChanged(): Promise<void> {
+    await this.refreshSidebar();
+  }
+
+  private async openBrowserUrl(url: string): Promise<void> {
+    const normalizedUrl = normalizeSidebarBrowserUrl(url);
+    if (!normalizedUrl) {
+      return;
+    }
+
+    const targetViewColumn =
+      vscode.window.tabGroups.activeTabGroup?.viewColumn ?? vscode.ViewColumn.One;
+    const browserTabsBeforeOpen = this.refreshLiveBrowserTabs().filter(
+      (browserTab) => browserTab.viewColumn === targetViewColumn,
+    );
+    const browserSessionIdsBeforeOpen = new Set(
+      browserTabsBeforeOpen.map((browserTab) => browserTab.sessionId),
+    );
+
+    await vscode.commands.executeCommand(
+      SIMPLE_BROWSER_OPEN_COMMAND,
+      vscode.Uri.parse(normalizedUrl),
+      { viewColumn: targetViewColumn },
+    );
+
+    const browserTabsAfterOpen = this.refreshLiveBrowserTabs();
+    const openedBrowserTab =
+      browserTabsAfterOpen.find(
+        (browserTab) =>
+          browserTab.viewColumn === targetViewColumn &&
+          !browserSessionIdsBeforeOpen.has(browserTab.sessionId),
+      ) ??
+      browserTabsAfterOpen.find(
+        (browserTab) =>
+          browserTab.viewColumn === targetViewColumn && browserTab.url === normalizedUrl,
+      ) ??
+      browserTabsAfterOpen.find(
+        (browserTab) =>
+          browserTab.viewColumn === targetViewColumn &&
+          browserTab.viewType === "simpleBrowser.view",
+      ) ??
+      browserTabsAfterOpen.at(-1);
+
+    if (!openedBrowserTab) {
+      await this.refreshSidebar();
+      return;
+    }
+
+    this.browserDetailBySessionId.set(openedBrowserTab.sessionId, normalizedUrl);
+    await this.revealBrowserTab(openedBrowserTab.sessionId);
+  }
+
+  private async focusLiveBrowserTab(sessionId: string): Promise<void> {
+    if (!(await this.revealBrowserTab(sessionId))) {
+      await this.refreshSidebar();
+    }
+  }
+
+  private async closeLiveBrowserTab(sessionId: string): Promise<void> {
+    const browserTab =
+      this.liveBrowserTabsBySessionId.get(sessionId) ??
+      findLiveBrowserTabBySessionId(sessionId, this.refreshLiveBrowserTabs())?.tab;
+    if (!browserTab) {
+      await this.refreshSidebar();
+      return;
+    }
+
+    try {
+      await vscode.window.tabGroups.close(browserTab, true);
+    } catch {
+      // Ignore races with tabs that were already closed outside the sidebar.
+    }
+
+    await this.refreshSidebar();
+  }
+
+  private async revealBrowserTab(sessionId: string): Promise<boolean> {
+    const browserTab = findLiveBrowserTabBySessionId(sessionId, this.refreshLiveBrowserTabs());
+    if (!browserTab) {
+      return false;
+    }
+
+    await focusEditorGroupByIndex(browserTab.viewColumn - 1);
+    const refreshedBrowserTab =
+      findLiveBrowserTabBySessionId(sessionId, this.refreshLiveBrowserTabs()) ?? browserTab;
+    const tabIndex = refreshedBrowserTab.tab.group.tabs.indexOf(refreshedBrowserTab.tab);
+    if (tabIndex >= 0 && tabIndex < 9) {
+      await vscode.commands.executeCommand(`workbench.action.openEditorAtIndex${tabIndex + 1}`);
+    }
+
+    await this.ensureBrowserEditorGroupMaximized();
+    await this.refreshSidebar();
+    return true;
+  }
+
+  private async ensureBrowserEditorGroupMaximized(): Promise<void> {
+    if (this.browserEditorGroupIsMaximized) {
+      return;
+    }
+
+    const editorGroupCount = vscode.window.tabGroups.all.filter(
+      (group) => group.viewColumn !== undefined,
+    ).length;
+    if (editorGroupCount <= 1) {
+      return;
+    }
+
+    await vscode.commands.executeCommand(TOGGLE_MAXIMIZE_EDITOR_GROUP_COMMAND);
+    this.browserEditorGroupIsMaximized = true;
   }
 
   private async handleObservedSessionFocus(sessionId: string): Promise<void> {
@@ -952,8 +1138,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           ({ sessionRecord }) => sessionRecord.sessionId === focusedSessionId,
         ),
       ];
-      const correctlyProjectedCount = projectedVisibleSessions.filter(({ groupIndex, sessionRecord }) =>
-        this.isSessionProjectedCorrectly(sessionRecord, groupIndex),
+      const correctlyProjectedCount = projectedVisibleSessions.filter(
+        ({ groupIndex, sessionRecord }) =>
+          this.isSessionProjectedCorrectly(sessionRecord, groupIndex),
       ).length;
       const shouldUseIncrementalReveal =
         correctlyProjectedCount > 0 && correctlyProjectedCount < projectedVisibleSessions.length;
@@ -965,8 +1152,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         : revealOrder;
       logVSmuxDebug("controller.reconcile.plan", {
         correctlyProjectedCount,
-        initialRevealSessionIds: initialRevealTargets.map(({ sessionRecord }) => sessionRecord.sessionId),
-        projectedSessionIds: projectedVisibleSessions.map(({ sessionRecord }) => sessionRecord.sessionId),
+        initialRevealSessionIds: initialRevealTargets.map(
+          ({ sessionRecord }) => sessionRecord.sessionId,
+        ),
+        projectedSessionIds: projectedVisibleSessions.map(
+          ({ sessionRecord }) => sessionRecord.sessionId,
+        ),
         shouldUseIncrementalReveal,
       });
 
@@ -979,21 +1170,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           });
           return;
         }
-        const shouldFocusAfterReveal = this.shouldFocusAfterReveal(
-          sessionRecord,
-          focusedSessionId,
-        );
+        const shouldFocusAfterReveal = this.shouldFocusAfterReveal(sessionRecord, focusedSessionId);
         logVSmuxDebug("controller.reconcile.reveal", {
           groupIndex,
           shouldFocusAfterReveal,
           sessionId: sessionRecord.sessionId,
           version: requestVersion,
         });
-        await this.revealSessionInPane(
-          sessionRecord,
-          groupIndex,
-          shouldFocusAfterReveal,
-          () => this.isReconcileCancelled(requestVersion),
+        await this.revealSessionInPane(sessionRecord, groupIndex, shouldFocusAfterReveal, () =>
+          this.isReconcileCancelled(requestVersion),
         );
         if (this.isReconcileCancelled(requestVersion)) {
           logVSmuxDebug("controller.reconcile.cancelled", {
@@ -1021,10 +1206,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         if (this.isSessionProjectedCorrectly(sessionRecord, groupIndex)) {
           continue;
         }
-        const shouldFocusAfterReveal = this.shouldFocusAfterReveal(
-          sessionRecord,
-          focusedSessionId,
-        );
+        const shouldFocusAfterReveal = this.shouldFocusAfterReveal(sessionRecord, focusedSessionId);
         logVSmuxDebug("controller.reconcile.retry", {
           groupIndex,
           shouldFocusAfterReveal,
@@ -1032,11 +1214,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           sessionId: sessionRecord.sessionId,
           version: requestVersion,
         });
-        await this.revealSessionInPane(
-          sessionRecord,
-          groupIndex,
-          shouldFocusAfterReveal,
-          () => this.isReconcileCancelled(requestVersion),
+        await this.revealSessionInPane(sessionRecord, groupIndex, shouldFocusAfterReveal, () =>
+          this.isReconcileCancelled(requestVersion),
         );
         if (this.isReconcileCancelled(requestVersion)) {
           logVSmuxDebug("controller.reconcile.cancelled", {
@@ -1288,14 +1467,16 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private getActiveSnapshot(): SessionGridSnapshot {
-    return this.store.getActiveGroup()?.snapshot ?? {
-      focusedSessionId: undefined,
-      fullscreenRestoreVisibleCount: undefined,
-      sessions: [],
-      viewMode: "grid",
-      visibleCount: 1,
-      visibleSessionIds: [],
-    };
+    return (
+      this.store.getActiveGroup()?.snapshot ?? {
+        focusedSessionId: undefined,
+        fullscreenRestoreVisibleCount: undefined,
+        sessions: [],
+        viewMode: "grid",
+        visibleCount: 1,
+        visibleSessionIds: [],
+      }
+    );
   }
 
   private getAllSessionRecords(): SessionRecord[] {
@@ -1317,7 +1498,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private async showSidebarMoveInstructions(): Promise<void> {
-    await vscode.commands.executeCommand(`workbench.view.extension.${PRIMARY_SESSIONS_CONTAINER_ID}`);
+    await vscode.commands.executeCommand(
+      `workbench.view.extension.${PRIMARY_SESSIONS_CONTAINER_ID}`,
+    );
     await vscode.commands.executeCommand("workbench.action.focusAuxiliaryBar");
     void vscode.window.showInformationMessage("Drag the VSmux icon to the other sidebar.");
   }

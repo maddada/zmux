@@ -8,6 +8,7 @@ import type {
 } from "./session-grid-contract-core";
 
 export type SidebarSessionItem = {
+  kind?: "browser" | "workspace";
   activity: "idle" | "working" | "attention";
   activityLabel?: string;
   agentIcon?: SidebarAgentIcon;
@@ -33,6 +34,7 @@ export type SidebarPreviousSessionItem = SidebarSessionItem & {
 };
 
 export type SidebarSessionGroup = {
+  kind?: "browser" | "workspace";
   groupId: string;
   isActive: boolean;
   isFocusModeActive: boolean;

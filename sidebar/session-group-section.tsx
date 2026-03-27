@@ -128,10 +128,12 @@ export function SessionGroupSection({
   const menuRef = useRef<HTMLDivElement>(null);
   const controlMenuRef = useRef<HTMLDivElement>(null);
   const visibleCountButtonRef = useRef<HTMLButtonElement>(null);
+  const isBrowserGroup = group.kind === "browser";
   const sortable = useSortable({
     accept: ["group", "session"],
     collisionPriority: CollisionPriority.Low,
     data: createGroupDropData(group.groupId),
+    disabled: isBrowserGroup,
     id: group.groupId,
     index,
     type: "group",
@@ -266,6 +268,10 @@ export function SessionGroupSection({
   }, [openControlMenu]);
 
   const submitRename = () => {
+    if (isBrowserGroup) {
+      return;
+    }
+
     const nextTitle = draftTitle.trim();
     setIsEditing(false);
     setDraftTitle(nextTitle || group.title);
@@ -282,6 +288,10 @@ export function SessionGroupSection({
   };
 
   const requestFocusGroup = () => {
+    if (isBrowserGroup) {
+      return;
+    }
+
     vscode.postMessage({
       groupId: group.groupId,
       type: "focusGroup",
@@ -289,6 +299,10 @@ export function SessionGroupSection({
   };
 
   const requestCreateSession = () => {
+    if (isBrowserGroup) {
+      return;
+    }
+
     vscode.postMessage({
       groupId: group.groupId,
       type: "createSessionInGroup",
@@ -296,6 +310,10 @@ export function SessionGroupSection({
   };
 
   const setVisibleCount = (visibleCount: VisibleSessionCount) => {
+    if (isBrowserGroup) {
+      return;
+    }
+
     setOpenControlMenu(undefined);
     vscode.postMessage({
       type: "setVisibleCount",
@@ -349,9 +367,15 @@ export function SessionGroupSection({
         data-drop-target={String(sortable.isDropTarget)}
         data-sidebar-group-id={group.groupId}
         onClick={() => {
-          requestFocusGroup();
+          if (!isBrowserGroup) {
+            requestFocusGroup();
+          }
         }}
         onContextMenu={(event: ReactMouseEvent<HTMLElement>) => {
+          if (isBrowserGroup) {
+            return;
+          }
+
           event.preventDefault();
           event.stopPropagation();
           setContextMenuPosition(clampContextMenuPosition(event.clientX, event.clientY));
@@ -375,7 +399,7 @@ export function SessionGroupSection({
                 <div className="group-title-handle" ref={sortable.handleRef}>
                   <div className="group-title">{group.title}</div>
                 </div>
-                {group.isActive ? (
+                {group.isActive && !isBrowserGroup ? (
                   <div
                     className="group-layout-controls"
                     onClick={(event) => {
@@ -409,19 +433,21 @@ export function SessionGroupSection({
                     </div>
                   </div>
                 ) : null}
-                <button
-                  aria-label={`Create a session in ${group.title}`}
-                  className="group-add-button"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    requestCreateSession();
-                  }}
-                  title={`Create a session in ${group.title}`}
-                  type="button"
-                >
-                  <IconPlus aria-hidden="true" className="group-add-icon" size={14} stroke={2} />
-                </button>
+                {!isBrowserGroup ? (
+                  <button
+                    aria-label={`Create a session in ${group.title}`}
+                    className="group-add-button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      requestCreateSession();
+                    }}
+                    title={`Create a session in ${group.title}`}
+                    type="button"
+                  >
+                    <IconPlus aria-hidden="true" className="group-add-icon" size={14} stroke={2} />
+                  </button>
+                ) : null}
               </div>
             )}
           </div>
@@ -450,7 +476,7 @@ export function SessionGroupSection({
           )}
         </div>
       </section>
-      {contextMenuPosition
+      {!isBrowserGroup && contextMenuPosition
         ? createPortal(
             <div
               className="session-context-menu"
@@ -493,7 +519,7 @@ export function SessionGroupSection({
             document.body,
           )
         : null}
-      {openControlMenu === "visible-count"
+      {!isBrowserGroup && openControlMenu === "visible-count"
         ? createPortal(
             <div
               className="group-control-menu session-context-menu group-control-count-menu"
@@ -521,20 +547,22 @@ export function SessionGroupSection({
             document.body,
           )
         : null}
-      <ConfirmationModal
-        confirmLabel="Terminate Group"
-        description={`This will terminate all ${orderedSessions.length} session${orderedSessions.length === 1 ? "" : "s"} in ${group.title}.`}
-        isOpen={isConfirmOpen}
-        onCancel={() => setIsConfirmOpen(false)}
-        onConfirm={() => {
-          setIsConfirmOpen(false);
-          vscode.postMessage({
-            groupId: group.groupId,
-            type: "closeGroup",
-          });
-        }}
-        title="Close group?"
-      />
+      {!isBrowserGroup ? (
+        <ConfirmationModal
+          confirmLabel="Terminate Group"
+          description={`This will terminate all ${orderedSessions.length} session${orderedSessions.length === 1 ? "" : "s"} in ${group.title}.`}
+          isOpen={isConfirmOpen}
+          onCancel={() => setIsConfirmOpen(false)}
+          onConfirm={() => {
+            setIsConfirmOpen(false);
+            vscode.postMessage({
+              groupId: group.groupId,
+              type: "closeGroup",
+            });
+          }}
+          title="Close group?"
+        />
+      ) : null}
     </>
   );
 }

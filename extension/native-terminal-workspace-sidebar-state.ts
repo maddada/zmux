@@ -28,9 +28,18 @@ import {
   getSessionActivityLabel,
 } from "./terminal-workspace-helpers";
 import type { PreviousSessionHistoryEntry } from "./previous-session-history";
+import { BROWSER_SIDEBAR_GROUP_ID } from "./live-browser-tabs";
+
+type SidebarBrowserTab = {
+  detail?: string;
+  isActive: boolean;
+  label: string;
+  sessionId: string;
+};
 
 type BuildSidebarMessageOptions = {
   activeSnapshot: SessionGridSnapshot;
+  browserTabs: readonly SidebarBrowserTab[];
   completionBellEnabled: boolean;
   debuggingMode: boolean;
   getEffectiveSessionActivity: (
@@ -86,11 +95,14 @@ type CreatePreviousSessionEntryOptions = Pick<
 export function buildSidebarMessage(
   options: BuildSidebarMessageOptions,
 ): ExtensionToSidebarMessage {
+  const browserGroup = buildBrowserSidebarGroup(options.browserTabs);
+  const workspaceGroups = options.workspaceSnapshot.groups.map((group) =>
+    buildSidebarGroup(group, group.snapshot, options),
+  );
+
   return {
     hud: options.hud,
-    groups: options.workspaceSnapshot.groups.map((group) =>
-      buildSidebarGroup(group, group.snapshot, options),
-    ),
+    groups: browserGroup ? [browserGroup, ...workspaceGroups] : workspaceGroups,
     previousSessions: options.previousSessions,
     scratchPadContent: options.scratchPadContent,
     type: options.type,
@@ -138,6 +150,7 @@ function buildSidebarGroup(
     groupId: group.groupId,
     isActive: options.workspaceSnapshot.activeGroupId === group.groupId,
     isFocusModeActive: isSessionGridFocusModeActive(presentedSnapshot),
+    kind: "workspace",
     layoutVisibleCount: getSessionGridLayoutVisibleCount(presentedSnapshot),
     sessions: getOrderedSessions(group.snapshot).map((session) =>
       buildSidebarItem(group, presentedSnapshot, session, {
@@ -148,6 +161,43 @@ function buildSidebarGroup(
     title: group.title,
     viewMode: presentedSnapshot.viewMode,
     visibleCount: presentedSnapshot.visibleCount,
+  };
+}
+
+function buildBrowserSidebarGroup(
+  browserTabs: readonly SidebarBrowserTab[],
+): SidebarSessionGroup | undefined {
+  if (browserTabs.length === 0) {
+    return undefined;
+  }
+
+  return {
+    groupId: BROWSER_SIDEBAR_GROUP_ID,
+    isActive: browserTabs.some((tab) => tab.isActive),
+    isFocusModeActive: false,
+    kind: "browser",
+    layoutVisibleCount: 1,
+    sessions: browserTabs.map((browserTab) => ({
+      activity: "idle",
+      activityLabel: undefined,
+      agentIcon: "browser",
+      alias: browserTab.label,
+      column: 0,
+      detail: browserTab.detail,
+      isFocused: browserTab.isActive,
+      isRunning: true,
+      isVisible: browserTab.isActive,
+      kind: "browser",
+      primaryTitle: browserTab.label.trim() || "Browser",
+      row: 0,
+      sessionId: browserTab.sessionId,
+      sessionNumber: undefined,
+      shortcutLabel: "",
+      terminalTitle: undefined,
+    })),
+    title: "Browsers",
+    viewMode: "grid",
+    visibleCount: 1,
   };
 }
 
@@ -187,6 +237,7 @@ function buildSidebarItem(
       isFocused,
       isRunning: isVisible || options.browserHasLiveProjection(sessionRecord.sessionId),
       isVisible,
+      kind: "workspace",
       primaryTitle: getVisiblePrimaryTitle(sessionRecord.title) ?? "Browser",
       row: sessionRecord.row,
       sessionId: sessionRecord.sessionId,
@@ -208,6 +259,7 @@ function buildSidebarItem(
       isFocused,
       isRunning: activityState.isRunning,
       isVisible,
+      kind: "workspace",
       primaryTitle: getVisiblePrimaryTitle(sessionRecord.title) ?? "T3 Code",
       row: sessionRecord.row,
       sessionId: sessionRecord.sessionId,
@@ -240,6 +292,7 @@ function buildSidebarItem(
       sessionSnapshot.status === "running" &&
       options.terminalHasLiveProjection(sessionRecord.sessionId),
     isVisible,
+    kind: "workspace",
     primaryTitle: getVisibleTerminalTitle(getVisiblePrimaryTitle(sessionRecord.title)),
     row: sessionRecord.row,
     sessionId: sessionRecord.sessionId,
