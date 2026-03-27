@@ -160,6 +160,11 @@ export class SessionGridStore {
     await this.persist();
   }
 
+  public async replaceSnapshot(snapshot: GroupedSessionWorkspaceSnapshot): Promise<void> {
+    this.snapshot = normalizeSimpleGroupedSessionWorkspaceSnapshot(snapshot);
+    await this.persist();
+  }
+
   public async removeSession(sessionId: string): Promise<boolean> {
     const result = removeSessionInSimpleWorkspace(this.snapshot, sessionId);
     this.snapshot = result.snapshot;

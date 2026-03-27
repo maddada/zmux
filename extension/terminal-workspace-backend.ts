@@ -20,6 +20,8 @@ export type TerminalWorkspaceBackend = vscode.Disposable & {
   getObservedGroupIndex: (sessionId: string) => number | undefined;
   isSessionForegroundVisible: (sessionId: string) => boolean;
   parkAllEditorTerminalsToPanel: () => Promise<void>;
+  clearObservedEditorGroupPlacement: () => void;
+  restoreAllManagedTerminalsToEditor: () => Promise<void>;
   revealSessionInGroup: (
     sessionRecord: SessionRecord,
     targetGroupIndex: number,

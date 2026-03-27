@@ -2,9 +2,11 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import {
   createSidebarHudState,
+  getOrderedSessions,
   resolveSidebarTheme,
   type ExtensionToSidebarMessage,
   type SessionGridDirection,
+  type GroupedSessionWorkspaceSnapshot,
   type SessionGridSnapshot,
   type SessionRecord,
   type SidebarHydrateMessage,
@@ -60,6 +62,7 @@ import {
 const SHORTCUT_LABEL_PLATFORM = process.platform === "darwin" ? "mac" : "default";
 const COMMAND_TERMINAL_EXIT_POLL_MS = 250;
 const EXPLICIT_FOCUS_T3_OBSERVED_FOCUS_GUARD_MS = 750;
+const CODE_MODE_RESTORE_SNAPSHOT_KEY = "VSmux.codeModeRestoreSnapshot";
 
 export { SESSIONS_VIEW_ID } from "./settings";
 
@@ -81,6 +84,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private reconcileRunner: Promise<void> | undefined;
   private suppressedObservedFocusDepth = 0;
   private readonly sidebarAgentIconBySessionId = new Map<string, SidebarAgentIcon>();
+  private codeModeRestoreSnapshot: GroupedSessionWorkspaceSnapshot | undefined;
+  private isRestoringCodeMode = false;
   private readonly previousSessionHistory: PreviousSessionHistory;
   private readonly store: SessionGridStore;
   private readonly terminalTitleBySessionId = new Map<string, string>();
@@ -93,6 +98,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     this.store = new SessionGridStore(context);
     this.previousSessionHistory = new PreviousSessionHistory(context);
     this.isVsMuxDisabled = context.workspaceState.get<boolean>(DISABLE_VS_MUX_MODE_KEY, false) ?? false;
+    this.codeModeRestoreSnapshot =
+      context.workspaceState.get<GroupedSessionWorkspaceSnapshot>(CODE_MODE_RESTORE_SNAPSHOT_KEY);
     this.workspaceId = getWorkspaceId();
     this.backend = new NativeTerminalWorkspaceBackend({
       context,
@@ -234,9 +241,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async focusSessionSlot(slotNumber: number): Promise<void> {
+    const targetIndex = Math.floor(slotNumber) - 1;
+    if (!Number.isFinite(targetIndex) || targetIndex < 0) {
+      return;
+    }
+
     const session = this.store
-      .getActiveGroupSessions()
-      .find((sessionRecord) => sessionRecord.slotIndex === Math.max(0, Math.floor(slotNumber) - 1));
+      .getSnapshot()
+      .groups.flatMap((group) => getOrderedSessions(group.snapshot))
+      .at(targetIndex);
     if (session) {
       await this.focusSession(session.sessionId);
     }
@@ -291,16 +304,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   public async renameSession(sessionId: string, title: string): Promise<void> {
     const changed = await this.store.setSessionTitle(sessionId, title);
-    if (!changed) {
-      return;
-    }
 
     const sessionRecord = this.store.getSession(sessionId);
     if (sessionRecord?.kind === "terminal") {
       await this.backend.renameSession(sessionRecord);
-      await this.backend.writeText(sessionId, `/rename ${sessionRecord.title}`);
+      await this.backend.writeText(sessionId, `/rename ${sessionRecord.title}`, false);
     }
-    await this.refreshSidebar();
+    if (changed) {
+      await this.refreshSidebar();
+    }
   }
 
   public async promptRenameSession(sessionId: string): Promise<void> {
@@ -620,19 +632,43 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   protected async toggleVsMuxDisabled(): Promise<void> {
-    this.isVsMuxDisabled = !this.isVsMuxDisabled;
-    logVSmuxDebug("controller.toggleVsMuxDisabled", {
-      nextDisabled: this.isVsMuxDisabled,
-    });
-    await this.context.workspaceState.update(DISABLE_VS_MUX_MODE_KEY, this.isVsMuxDisabled);
-    if (this.isVsMuxDisabled) {
+    if (!this.isVsMuxDisabled) {
+      this.codeModeRestoreSnapshot = cloneWorkspaceSnapshot(this.store.getSnapshot());
+      await this.context.workspaceState.update(
+        CODE_MODE_RESTORE_SNAPSHOT_KEY,
+        this.codeModeRestoreSnapshot,
+      );
+      this.isVsMuxDisabled = true;
+      logVSmuxDebug("controller.toggleVsMuxDisabled", {
+        nextDisabled: this.isVsMuxDisabled,
+      });
+      await this.context.workspaceState.update(DISABLE_VS_MUX_MODE_KEY, this.isVsMuxDisabled);
+      this.backend.clearObservedEditorGroupPlacement();
       await this.backend.parkAllEditorTerminalsToPanel();
       this.t3Webviews.disposeAllSessions();
       await this.refreshSidebar("hydrate");
       return;
     }
 
-    await this.afterStateChange();
+    this.isRestoringCodeMode = true;
+    logVSmuxDebug("controller.toggleVsMuxDisabled", {
+      nextDisabled: false,
+    });
+    try {
+      if (this.codeModeRestoreSnapshot) {
+        await this.store.replaceSnapshot(this.codeModeRestoreSnapshot);
+        this.codeModeRestoreSnapshot = undefined;
+        await this.context.workspaceState.update(CODE_MODE_RESTORE_SNAPSHOT_KEY, undefined);
+      }
+      this.backend.clearObservedEditorGroupPlacement();
+      await this.backend.restoreAllManagedTerminalsToEditor();
+      this.backend.clearObservedEditorGroupPlacement();
+      this.isVsMuxDisabled = false;
+      await this.context.workspaceState.update(DISABLE_VS_MUX_MODE_KEY, this.isVsMuxDisabled);
+      await this.afterStateChange();
+    } finally {
+      this.isRestoringCodeMode = false;
+    }
   }
 
   private async afterStateChange(): Promise<void> {
@@ -738,7 +774,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         getClampedCompletionSoundSetting(),
         getSidebarAgentButtons(),
         getSidebarCommandButtons(this.context),
-        this.isVsMuxDisabled,
+        this.isVsMuxDisabled || this.isRestoringCodeMode,
       ),
       ownsNativeTerminalControl: true,
       platform: SHORTCUT_LABEL_PLATFORM,
@@ -754,6 +790,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private async handleObservedSessionFocus(sessionId: string): Promise<void> {
     const sessionRecord = this.store.getSession(sessionId);
     if (!sessionRecord) {
+      return;
+    }
+
+    if (this.isVsMuxDisabled || this.isRestoringCodeMode) {
+      logVSmuxDebug("controller.handleObservedSessionFocus.ignoredDuringCodeMode", {
+        isRestoringCodeMode: this.isRestoringCodeMode,
+        sessionId,
+        snapshot: this.describeActiveSnapshot(),
+      });
       return;
     }
 
@@ -1307,6 +1352,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       visible: this.t3Webviews.isSessionForegroundVisible(sessionRecord.sessionId),
     };
   }
+}
+
+function cloneWorkspaceSnapshot(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+): GroupedSessionWorkspaceSnapshot {
+  return JSON.parse(JSON.stringify(snapshot)) as GroupedSessionWorkspaceSnapshot;
 }
 
 function getCommandTerminalShellArgs(shellPath: string, command: string): string[] {

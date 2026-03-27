@@ -63,7 +63,7 @@
 
 .command-button {
   container-type: inline-size;
-  justify-content: flex-start;
+  justify-content: center;
   min-width: 0;
   width: 100%;
 }
@@ -151,7 +151,7 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  text-align: left;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -173,7 +173,7 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
   width: 15px;
 }
 
-@container (min-width: 92px) {
+@container (min-width: 80px) {
   .command-button {
     gap: 6px;
   }

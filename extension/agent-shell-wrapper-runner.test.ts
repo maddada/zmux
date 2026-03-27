@@ -13,6 +13,7 @@ describe("getCandidateExecutableNames", () => {
 
   test("should keep the bare executable name on non-Windows platforms", () => {
     expect(getCandidateExecutableNames("codex", "linux")).toEqual(["codex"]);
+    expect(getCandidateExecutableNames("gemini", "linux")).toEqual(["gemini"]);
   });
 
   test("should not include the extensionless codex shim on Windows", () => {
@@ -27,5 +28,6 @@ describe("createAgentEnvironment", () => {
 
   test("should not add the Claude title override for other agents", () => {
     expect(createAgentEnvironment("codex", {}).CLAUDE_CODE_DISABLE_TERMINAL_TITLE).toBeUndefined();
+    expect(createAgentEnvironment("gemini", {}).CLAUDE_CODE_DISABLE_TERMINAL_TITLE).toBeUndefined();
   });
 });

@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { detectCodexLifecycleEventFromLogLine } from "./agent-shell-integration";
 import { writePersistedSessionStateToFile } from "./session-state-file";
 
-type AgentName = "claude" | "codex" | "opencode";
+type AgentName = "claude" | "codex" | "gemini" | "opencode";
 
 type WrapperRunnerOptions = {
   agent: AgentName;
@@ -53,6 +53,10 @@ async function main(): Promise<void> {
       args.unshift("-c", `notify=${JSON.stringify([process.execPath, options.notifyRunnerPath])}`);
       break;
     }
+    case "gemini":
+      delete environment.ELECTRON_RUN_AS_NODE;
+      await writeInitialSessionState("gemini", "Gemini");
+      break;
     case "opencode":
       delete environment.ELECTRON_RUN_AS_NODE;
       await writeInitialSessionState("opencode", "OpenCode");
@@ -100,7 +104,7 @@ function parseArgs(argv: readonly string[]): WrapperRunnerOptions {
   }
 
   const agent = getRequiredArg(values, "agent");
-  if (agent !== "claude" && agent !== "codex" && agent !== "opencode") {
+  if (agent !== "claude" && agent !== "codex" && agent !== "gemini" && agent !== "opencode") {
     throw new Error(`Unsupported agent: ${agent}`);
   }
 

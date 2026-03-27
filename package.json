@@ -360,25 +360,25 @@
       {
         "command": "VSmux.focusGroup1",
         "key": "ctrl+alt+shift+1",
-        "mac": "ctrl+alt+shift+1",
+        "mac": "cmd+alt+shift+1",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "command": "VSmux.focusGroup2",
         "key": "ctrl+alt+shift+2",
-        "mac": "ctrl+alt+shift+2",
+        "mac": "cmd+alt+shift+2",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "command": "VSmux.focusGroup3",
         "key": "ctrl+alt+shift+3",
-        "mac": "ctrl+alt+shift+3",
+        "mac": "cmd+alt+shift+3",
         "when": "!inputFocus || terminalFocus"
       },
       {
         "command": "VSmux.focusGroup4",
         "key": "ctrl+alt+shift+4",
-        "mac": "ctrl+alt+shift+4",
+        "mac": "cmd+alt+shift+4",
         "when": "!inputFocus || terminalFocus"
       },
       {

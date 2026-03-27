@@ -64,7 +64,7 @@ export async function createAgentShellIntegration(
     0o644,
   );
 
-  for (const agentName of ["claude", "codex", "opencode"] as const) {
+  for (const agentName of ["claude", "codex", "gemini", "opencode"] as const) {
     await writeFileIfChanged(
       path.join(binDir, agentName),
       getAgentWrapperShellScriptContent(agentName, {

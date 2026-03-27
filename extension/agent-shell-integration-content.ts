@@ -1,6 +1,6 @@
 import { quoteShellLiteral } from "./agent-shell-integration-utils";
 
-export type AgentWrapperName = "claude" | "codex" | "opencode";
+export type AgentWrapperName = "claude" | "codex" | "gemini" | "opencode";
 
 export function getAgentWrapperShellScriptContent(
   agentName: AgentWrapperName,
@@ -142,6 +142,7 @@ export PATH=${quotedBinDir}:$PATH
 rehash 2>/dev/null || true
 unalias claude 2>/dev/null || true
 unalias codex 2>/dev/null || true
+unalias gemini 2>/dev/null || true
 unalias opencode 2>/dev/null || true
 
 if [ -z "$__VSMUX_ZSH_HOOKS_INSTALLED" ]; then
@@ -244,6 +245,9 @@ claude() {
 }
 codex() {
   command ${quotedBinDir}/codex "$@"
+}
+gemini() {
+  command ${quotedBinDir}/gemini "$@"
 }
 opencode() {
   command ${quotedBinDir}/opencode "$@"
