@@ -291,7 +291,7 @@ export function CommandsPanel({
                             stroke={1.8}
                           />
                         </span>
-                        <span className="command-button-label">Code</span>
+                        <span className="command-button-label code-mode-button">⏸︎</span>
                       </button>
                     }
                   />

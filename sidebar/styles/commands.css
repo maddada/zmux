@@ -164,6 +164,10 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+
+  &.code-mode-button {
+    font-size: 12px;
+  }
 }
 
 .command-button-kind-badge {
