@@ -39,7 +39,45 @@ export async function createT3PanelHtml(
     threadId: sessionRecord.t3.threadId,
     workspaceRoot: sessionRecord.t3.workspaceRoot,
     wsUrl: toWebSocketOrigin(sessionRecord.t3.serverOrigin),
-  })};</script>`;
+  })};
+window.addEventListener("message", (event) => {
+  if (event.data?.type !== "focusComposer") {
+    return;
+  }
+
+  focusComposerEditor();
+});
+
+function focusComposerEditor() {
+  const maxAttempts = 8;
+  let attempt = 0;
+
+  const tryFocus = () => {
+    const composer = document.querySelector('[data-testid="composer-editor"][contenteditable="true"]');
+    if (!(composer instanceof HTMLElement)) {
+      if (attempt < maxAttempts) {
+        attempt += 1;
+        window.setTimeout(tryFocus, 50);
+      }
+      return;
+    }
+
+    composer.focus();
+    const selection = window.getSelection();
+    if (!selection) {
+      return;
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(composer);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
+
+  tryFocus();
+}
+</script>`;
 
   return html
     .replace(

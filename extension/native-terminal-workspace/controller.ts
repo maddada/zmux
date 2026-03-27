@@ -201,7 +201,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.afterStateChange();
   }
 
-  public async focusSession(sessionId: string): Promise<void> {
+  public async focusSession(sessionId: string, source?: "sidebar"): Promise<void> {
     const sessionRecord = this.store.getSession(sessionId);
     if (!sessionRecord) {
       return;
@@ -217,6 +217,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     const acknowledgedAttention = await this.acknowledgeSessionAttentionIfNeeded(sessionId);
     const changed = await this.store.focusSession(sessionId);
     if (!changed) {
+      if (source === "sidebar" && sessionRecord.kind === "t3") {
+        this.t3Webviews.focusComposer(sessionId);
+      }
       if (acknowledgedAttention) {
         await this.refreshSidebar();
       }
@@ -225,6 +228,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     await this.afterStateChange();
+    if (source === "sidebar" && sessionRecord.kind === "t3") {
+      this.t3Webviews.focusComposer(sessionId);
+    }
   }
 
   public async focusSessionSlot(slotNumber: number): Promise<void> {
@@ -656,7 +662,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       deleteSidebarAgent: async (agentId) => this.deleteSidebarAgent(agentId),
       deleteSidebarCommand: async (commandId) => this.deleteSidebarCommand(commandId),
       focusGroup: async (groupId) => this.focusGroup(groupId),
-      focusSession: async (sessionId) => this.focusSession(sessionId),
+      focusSession: async (sessionId, source) => this.focusSession(sessionId, source),
       moveSessionToGroup: async (sessionId, groupId, targetIndex) =>
         this.moveSessionToGroup(sessionId, groupId, targetIndex),
       moveSidebarToOtherSide: async () => this.moveSidebarToOtherSide(),

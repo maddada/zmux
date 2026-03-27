@@ -13,65 +13,16 @@
   gap: 12px;
 }
 
-.commands-panel-scroll-shell {
-  overflow: hidden;
-}
-
-.agents-grid {
+.agents-grid,
+.commands-grid {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(auto-fit, minmax(40px, 1fr));
 }
 
-.agents-grid > * {
-  min-width: 0;
-}
-
-.commands-grid {
-  display: grid;
-  gap: 8px;
-  grid-auto-rows: 42px;
-  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
-  max-height: calc(42px * 3 + 8px * 2);
-  overflow-x: hidden;
-  overflow-y: auto;
-  overflow-y: overlay;
-  overscroll-behavior: contain;
-  scrollbar-color: transparent transparent;
-  scrollbar-width: thin;
-}
-
-.commands-grid[data-scrollable="true"] {
-  width: calc(100% + 14px);
-}
-
+.agents-grid > *,
 .commands-grid > * {
-  height: 100%;
   min-width: 0;
-}
-
-.commands-grid:hover,
-.commands-grid:focus-within {
-  scrollbar-color: rgb(from #808080 r g b / 0.5) transparent;
-}
-
-.commands-grid::-webkit-scrollbar {
-  height: 2px;
-  width: 2px;
-}
-
-.commands-grid::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.commands-grid::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 999px;
-}
-
-.commands-grid:hover::-webkit-scrollbar-thumb,
-.commands-grid:focus-within::-webkit-scrollbar-thumb {
-  background: rgb(from #808080 r g b / 0.5);
 }
 
 .agent-button,
@@ -85,7 +36,7 @@
   flex: 0 0 auto;
   font-size: 10px;
   font-weight: 700;
-  gap: 2px;
+  gap: 0;
   justify-content: center;
   letter-spacing: 0.02em;
   max-width: 100%;
@@ -93,6 +44,7 @@
   outline: 2px solid transparent;
   outline-offset: -3px;
   padding: 0 12px;
+  box-sizing: border-box;
 }
 
 .agent-button:hover,
@@ -110,10 +62,9 @@
 }
 
 .command-button {
+  container-type: inline-size;
   justify-content: flex-start;
-  min-height: 42px;
   min-width: 0;
-  height: 100%;
   width: 100%;
 }
 
@@ -200,6 +151,7 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -207,7 +159,7 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
 .command-button-kind-badge {
   align-items: center;
   color: color-mix(in srgb, var(--app-foreground) 88%, var(--app-muted) 12%);
-  display: inline-flex;
+  display: none;
   flex: none;
   height: 16px;
   justify-content: center;
@@ -219,4 +171,14 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
   display: block;
   height: 15px;
   width: 15px;
+}
+
+@container (min-width: 92px) {
+  .command-button {
+    gap: 6px;
+  }
+
+  .command-button-kind-badge {
+    display: inline-flex;
+  }
 }
