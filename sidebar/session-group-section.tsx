@@ -300,6 +300,9 @@ export function SessionGroupSection({
 
   const requestCreateSession = () => {
     if (isBrowserGroup) {
+      vscode.postMessage({
+        type: "openBrowser",
+      });
       return;
     }
 
@@ -433,21 +436,31 @@ export function SessionGroupSection({
                     </div>
                   </div>
                 ) : null}
-                {!isBrowserGroup ? (
-                  <button
-                    aria-label={`Create a session in ${group.title}`}
-                    className="group-add-button"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      requestCreateSession();
-                    }}
-                    title={`Create a session in ${group.title}`}
-                    type="button"
-                  >
-                    <IconPlus aria-hidden="true" className="group-add-icon" size={14} stroke={2} />
-                  </button>
-                ) : null}
+                <button
+                  aria-label={
+                    isBrowserGroup
+                      ? `Open a browser in ${group.title}`
+                      : `Create a session in ${group.title}`
+                  }
+                  className={
+                    isBrowserGroup
+                      ? "group-add-button group-add-button-always-visible"
+                      : "group-add-button"
+                  }
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    requestCreateSession();
+                  }}
+                  title={
+                    isBrowserGroup
+                      ? `Open a browser in ${group.title}`
+                      : `Create a session in ${group.title}`
+                  }
+                  type="button"
+                >
+                  <IconPlus aria-hidden="true" className="group-add-icon" size={14} stroke={2} />
+                </button>
               </div>
             )}
           </div>
@@ -466,13 +479,15 @@ export function SessionGroupSection({
                 vscode={vscode}
               />
             ))
-          ) : (
+          ) : isBrowserGroup ? (
             <div
               className="group-empty-drop-target"
               data-drop-target={String(sortable.isDropTarget)}
             >
-              <div className="group-empty-state">No sessions in this group yet.</div>
+              <div className="group-empty-state">"No sessions in this group yet."</div>
             </div>
+          ) : (
+            <></>
           )}
         </div>
       </section>

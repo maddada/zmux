@@ -185,6 +185,7 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
     case "toggleVsMuxDisabled":
     case "moveSidebarToOtherSide":
     case "createSession":
+    case "openBrowser":
       return true;
     case "toggleFullscreenSession":
       return true;

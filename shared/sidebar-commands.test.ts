@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
   createSidebarCommandButtons,
+  getFirstBrowserSidebarCommandUrl,
   normalizeStoredSidebarCommandOrder,
   normalizeStoredSidebarCommands,
 } from "./sidebar-commands";
@@ -201,6 +202,38 @@ describe("createSidebarCommandButtons", () => {
         url: undefined,
       },
     ]);
+  });
+});
+
+describe("getFirstBrowserSidebarCommandUrl", () => {
+  test("should return the first browser action url in the current action order", () => {
+    const commands = createSidebarCommandButtons(
+      [
+        {
+          actionType: "browser",
+          closeTerminalOnExit: false,
+          commandId: "custom-docs",
+          isDefault: false,
+          name: "Docs",
+          url: "https://example.com/docs",
+        },
+        {
+          actionType: "browser",
+          closeTerminalOnExit: false,
+          commandId: "custom-app",
+          isDefault: false,
+          name: "App",
+          url: "https://example.com/app",
+        },
+      ],
+      ["custom-app", "custom-docs"],
+    );
+
+    expect(getFirstBrowserSidebarCommandUrl(commands)).toBe("https://example.com/app");
+  });
+
+  test("should return undefined when no browser actions exist", () => {
+    expect(getFirstBrowserSidebarCommandUrl(createSidebarCommandButtons([]))).toBeUndefined();
   });
 });
 

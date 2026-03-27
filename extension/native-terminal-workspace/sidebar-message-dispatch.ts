@@ -23,6 +23,7 @@ export type SidebarMessageHandlers = {
   focusSession: (sessionId: string, source?: "sidebar") => Promise<void>;
   moveSessionToGroup: (sessionId: string, groupId: string, targetIndex?: number) => Promise<void>;
   moveSidebarToOtherSide: () => Promise<void>;
+  openBrowser: () => Promise<void>;
   openSettings: () => Promise<void>;
   promptRenameSession: (sessionId: string) => Promise<void>;
   refreshSidebarHydrate: () => Promise<void>;
@@ -72,6 +73,9 @@ export async function dispatchSidebarMessage(
       return;
     case "createSession":
       await handlers.createSession();
+      return;
+    case "openBrowser":
+      await handlers.openBrowser();
       return;
     case "createSessionInGroup":
       await handlers.createSessionInGroup(message.groupId);

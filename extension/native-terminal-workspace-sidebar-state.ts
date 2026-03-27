@@ -102,7 +102,7 @@ export function buildSidebarMessage(
 
   return {
     hud: options.hud,
-    groups: browserGroup ? [browserGroup, ...workspaceGroups] : workspaceGroups,
+    groups: [browserGroup, ...workspaceGroups],
     previousSessions: options.previousSessions,
     scratchPadContent: options.scratchPadContent,
     type: options.type,
@@ -164,13 +164,7 @@ function buildSidebarGroup(
   };
 }
 
-function buildBrowserSidebarGroup(
-  browserTabs: readonly SidebarBrowserTab[],
-): SidebarSessionGroup | undefined {
-  if (browserTabs.length === 0) {
-    return undefined;
-  }
-
+function buildBrowserSidebarGroup(browserTabs: readonly SidebarBrowserTab[]): SidebarSessionGroup {
   return {
     groupId: BROWSER_SIDEBAR_GROUP_ID,
     isActive: browserTabs.some((tab) => tab.isActive),

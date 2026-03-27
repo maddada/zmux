@@ -316,6 +316,13 @@
           ],
           "description": "Sound played when an agent finishes and the per-project bell is enabled in the VSmux sidebar."
         },
+        "VSmux.defaultBrowserLaunchUrl": {
+          "title": "Default Browser Launch Url",
+          "type": "string",
+          "scope": "application",
+          "default": "https://www.google.com",
+          "description": "URL opened by the Browsers group + button when this workspace has no browser actions configured. If browser actions exist, the first browser action URL is used instead."
+        },
         "VSmux.agents": {
           "title": "Agents",
           "type": "array",

@@ -40,6 +40,7 @@ import {
   saveSidebarCommandPreference,
   syncSidebarCommandOrderPreference,
 } from "../sidebar-command-preferences";
+import { getFirstBrowserSidebarCommandUrl } from "../../shared/sidebar-commands";
 import { SessionGridStore } from "../session-grid-store";
 import { SessionSidebarViewProvider } from "../session-sidebar-view";
 import {
@@ -79,6 +80,7 @@ import {
   getClampedAgentManagerZoomPercent,
   getClampedCompletionSoundSetting,
   getClampedSidebarThemeSetting,
+  getDefaultBrowserLaunchUrl,
   getDebuggingMode,
   getShowCloseButtonOnSessionCards,
   getShowHotkeysOnSessionCards,
@@ -267,17 +269,23 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     });
     this.lastExplicitFocusSessionId = sessionId;
     this.lastExplicitFocusAt = Date.now();
-    const shouldRestoreDetachedTerminal =
+    const hadLiveTerminal =
+      sessionRecord.kind === "terminal" && this.backend.hasLiveTerminal(sessionRecord.sessionId);
+    const shouldReattachDetachedTerminal =
       source === "sidebar" &&
       sessionRecord.kind === "terminal" &&
-      !this.backend.hasLiveTerminal(sessionRecord.sessionId);
+      !this.backend.hasAttachedTerminal(sessionRecord.sessionId);
+    const shouldResumeDeadTerminal =
+      shouldReattachDetachedTerminal && sessionRecord.kind === "terminal" && !hadLiveTerminal;
     await this.createSurfaceIfNeeded(sessionRecord);
     const acknowledgedAttention = await this.acknowledgeSessionAttentionIfNeeded(sessionId);
     const changed = await this.store.focusSession(sessionId);
     if (!changed) {
-      if (shouldRestoreDetachedTerminal) {
+      if (shouldReattachDetachedTerminal) {
         await this.afterStateChange();
-        await this.resumeDetachedTerminalSession(sessionRecord);
+        if (shouldResumeDeadTerminal) {
+          await this.resumeDetachedTerminalSession(sessionRecord);
+        }
       }
       if (source === "sidebar" && sessionRecord.kind === "t3") {
         this.t3Webviews.focusComposer(sessionId);
@@ -290,7 +298,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     await this.afterStateChange();
-    if (shouldRestoreDetachedTerminal) {
+    if (shouldResumeDeadTerminal) {
       await this.resumeDetachedTerminalSession(sessionRecord);
     }
     if (source === "sidebar" && sessionRecord.kind === "t3") {
@@ -573,7 +581,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       this.sidebarAgentIconBySessionId.set(restoredSession.sessionId, archivedSession.agentIcon);
     }
     if (archivedSession.agentLaunch) {
-      this.sessionAgentLaunchBySessionId.set(restoredSession.sessionId, archivedSession.agentLaunch);
+      this.sessionAgentLaunchBySessionId.set(
+        restoredSession.sessionId,
+        archivedSession.agentLaunch,
+      );
     }
 
     if (archivedSession.sessionRecord.alias !== restoredSession.alias) {
@@ -810,6 +821,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       moveSessionToGroup: async (sessionId, groupId, targetIndex) =>
         this.moveSessionToGroup(sessionId, groupId, targetIndex),
       moveSidebarToOtherSide: async () => this.moveSidebarToOtherSide(),
+      openBrowser: async () => this.openDefaultBrowserUrl(),
       openSettings: async () => this.openSettings(),
       promptRenameSession: async (sessionId) => this.promptRenameSession(sessionId),
       refreshSidebarHydrate: async () => this.refreshSidebar("hydrate"),
@@ -897,7 +909,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       platform: SHORTCUT_LABEL_PLATFORM,
       previousSessions: this.previousSessionHistory.getItems(),
       scratchPadContent: this.getScratchPadContent(),
-      terminalHasLiveProjection: (sessionId) => this.backend.hasLiveTerminal(sessionId),
+      terminalHasLiveProjection: (sessionId) => this.backend.hasAttachedTerminal(sessionId),
       type,
       workspaceId: this.workspaceId,
       workspaceSnapshot: this.store.getSnapshot(),
@@ -905,7 +917,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private refreshLiveBrowserTabs() {
-    const browserTabs = getLiveBrowserTabs();
+    const t3PanelTitles = new Set(this.t3Webviews.getLivePanelTitles());
+    const browserTabs = getLiveBrowserTabs().filter(
+      (browserTab) => !t3PanelTitles.has(browserTab.label),
+    );
     this.liveBrowserTabsBySessionId.clear();
     const liveBrowserSessionIds = new Set(browserTabs.map((browserTab) => browserTab.sessionId));
     for (const browserTab of browserTabs) {
@@ -929,6 +944,13 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private async handleBrowserTabsChanged(): Promise<void> {
     await this.refreshSidebar();
+  }
+
+  private async openDefaultBrowserUrl(): Promise<void> {
+    const sidebarCommands = getSidebarCommandButtons(this.context);
+    const defaultUrl =
+      getFirstBrowserSidebarCommandUrl(sidebarCommands) ?? getDefaultBrowserLaunchUrl();
+    await this.openBrowserUrl(defaultUrl);
   }
 
   private async openBrowserUrl(url: string): Promise<void> {
@@ -1437,7 +1459,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       ownsNativeTerminalControl: true,
       platform: SHORTCUT_LABEL_PLATFORM,
       sessionRecord,
-      terminalHasLiveProjection: (sessionId) => this.backend.hasLiveTerminal(sessionId),
+      terminalHasLiveProjection: (sessionId) => this.backend.hasAttachedTerminal(sessionId),
       workspaceId: this.workspaceId,
     });
   }

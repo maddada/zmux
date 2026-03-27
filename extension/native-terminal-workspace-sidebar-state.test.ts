@@ -53,9 +53,16 @@ describe("buildSidebarMessage", () => {
     const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
     const message = buildSidebarMessage(createBuildSidebarMessageOptions(workspaceSnapshot, []));
 
-    expect(message.groups).toHaveLength(1);
-    expect(message.groups[0]?.title).toBe("Main");
-    expect(message.groups[0]?.kind).toBe("workspace");
+    expect(message.groups).toHaveLength(2);
+    expect(message.groups[0]).toEqual(
+      expect.objectContaining({
+        kind: "browser",
+        sessions: [],
+        title: "Browsers",
+      }),
+    );
+    expect(message.groups[1]?.title).toBe("Main");
+    expect(message.groups[1]?.kind).toBe("workspace");
   });
 });
 

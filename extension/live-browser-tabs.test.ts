@@ -90,4 +90,22 @@ describe("getLiveBrowserTabs", () => {
       }),
     );
   });
+
+  test("should ignore VSmux T3 webviews", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("VSmux.t3Session"),
+            isActive: true,
+            label: "T3",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toEqual([]);
+  });
 });

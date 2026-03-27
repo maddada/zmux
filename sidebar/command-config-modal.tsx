@@ -1,9 +1,7 @@
 import { IconX } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useId, useState } from "react";
-import type { SidebarActionType } from "../shared/sidebar-commands";
-
-const DEFAULT_BROWSER_URL = "http://localhost:5173";
+import { DEFAULT_BROWSER_ACTION_URL, type SidebarActionType } from "../shared/sidebar-commands";
 
 export type CommandConfigDraft = {
   actionType: SidebarActionType;
@@ -40,7 +38,7 @@ export function CommandConfigModal({ draft, isOpen, onCancel, onSave }: CommandC
     setCloseTerminalOnExit(draft.closeTerminalOnExit);
     setCommand(draft.command ?? "");
     setName(draft.name);
-    setUrl(draft.url ?? (draft.actionType === "browser" ? DEFAULT_BROWSER_URL : ""));
+    setUrl(draft.url ?? (draft.actionType === "browser" ? DEFAULT_BROWSER_ACTION_URL : ""));
   }, [draft, isOpen]);
 
   useEffect(() => {
@@ -48,7 +46,7 @@ export function CommandConfigModal({ draft, isOpen, onCancel, onSave }: CommandC
       return;
     }
 
-    setUrl(DEFAULT_BROWSER_URL);
+    setUrl(DEFAULT_BROWSER_ACTION_URL);
   }, [actionType, url]);
 
   useEffect(() => {
@@ -135,7 +133,7 @@ export function CommandConfigModal({ draft, isOpen, onCancel, onSave }: CommandC
               <textarea
                 className="group-title-input command-config-input command-config-textarea"
                 onChange={(event) => setUrl(event.currentTarget.value)}
-                placeholder={DEFAULT_BROWSER_URL}
+                placeholder={DEFAULT_BROWSER_ACTION_URL}
                 rows={3}
                 value={url}
               />

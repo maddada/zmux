@@ -17,6 +17,9 @@ export const DEFAULT_SIDEBAR_COMMANDS = [
   },
 ] as const;
 
+export const DEFAULT_BROWSER_ACTION_URL = "http://localhost:5173";
+export const DEFAULT_BROWSER_LAUNCH_URL = "https://www.google.com";
+
 export type DefaultSidebarCommandId = (typeof DEFAULT_SIDEBAR_COMMANDS)[number]["commandId"];
 export type SidebarActionType = "browser" | "terminal";
 
@@ -39,6 +42,12 @@ export type StoredSidebarCommand = {
   command?: string;
   url?: string;
 };
+
+export function getFirstBrowserSidebarCommandUrl(
+  commands: readonly SidebarCommandButton[],
+): string | undefined {
+  return commands.find((command) => command.actionType === "browser")?.url;
+}
 
 export function createDefaultSidebarCommandButtons(): SidebarCommandButton[] {
   return DEFAULT_SIDEBAR_COMMANDS.map((command) => ({

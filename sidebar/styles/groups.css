@@ -112,6 +112,12 @@
   outline: none;
 }
 
+.group-add-button-always-visible {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+
 .group-layout-controls {
   align-items: center;
   display: inline-flex;

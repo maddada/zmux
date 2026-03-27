@@ -134,6 +134,10 @@ export class T3WebviewManager implements vscode.Disposable {
     return this.panelsBySessionId.get(sessionId)?.panel.visible ?? false;
   }
 
+  public getLivePanelTitles(): string[] {
+    return [...this.panelsBySessionId.values()].map((managedPanel) => managedPanel.panel.title);
+  }
+
   public async revealSessionInGroup(
     sessionRecord: T3SessionRecord,
     targetGroupIndex: number,

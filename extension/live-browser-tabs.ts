@@ -5,6 +5,7 @@ import {
   isBrowserLikeTab,
   normalizeUrl,
 } from "./browser-session-manager/helpers";
+import { T3_PANEL_TYPE } from "./t3-webview-manager/helpers";
 
 export const BROWSER_SIDEBAR_GROUP_ID = "browser-tabs";
 
@@ -120,6 +121,10 @@ function getLiveBrowserTabMetadata(tab: vscode.Tab):
     }
   | undefined {
   const viewType = getTabViewType(tab.input);
+  if (viewType === T3_PANEL_TYPE) {
+    return undefined;
+  }
+
   const url = normalizeSidebarBrowserUrl(getBrowserTabUrl(tab));
   if (url) {
     return {

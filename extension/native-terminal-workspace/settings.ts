@@ -10,6 +10,7 @@ import {
   type SidebarThemeSetting,
   type SidebarThemeVariant,
 } from "../../shared/session-grid-contract";
+import { DEFAULT_BROWSER_LAUNCH_URL } from "../../shared/sidebar-commands";
 
 export const SETTINGS_SECTION = "VSmux";
 export const BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING = "backgroundSessionTimeoutMinutes";
@@ -23,6 +24,7 @@ export const SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING = "showCloseButtonOnSess
 export const SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING = "showHotkeysOnSessionCards";
 export const DEBUGGING_MODE_SETTING = "debuggingMode";
 export const COMPLETION_SOUND_SETTING = "completionSound";
+export const DEFAULT_BROWSER_LAUNCH_URL_SETTING = "defaultBrowserLaunchUrl";
 export const AGENTS_SETTING = "agents";
 export const COMPLETION_BELL_ENABLED_KEY = "VSmux.completionBellEnabled";
 export const DISABLE_VS_MUX_MODE_KEY = "VSmux.disableVsMuxMode";
@@ -72,6 +74,10 @@ export function getCompletionSoundConfigurationKey(): string {
 
 export function getAgentsConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${AGENTS_SETTING}`;
+}
+
+export function getDefaultBrowserLaunchUrlConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${DEFAULT_BROWSER_LAUNCH_URL_SETTING}`;
 }
 
 export function getDebuggingModeConfigurationKey(): string {
@@ -141,4 +147,14 @@ export function getClampedCompletionSoundSetting(): CompletionSoundSetting {
       .getConfiguration(SETTINGS_SECTION)
       .get<string>(COMPLETION_SOUND_SETTING, "ping") ?? "ping";
   return clampCompletionSoundSetting(value);
+}
+
+export function getDefaultBrowserLaunchUrl(): string {
+  const value =
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<string>(DEFAULT_BROWSER_LAUNCH_URL_SETTING, DEFAULT_BROWSER_LAUNCH_URL) ??
+    DEFAULT_BROWSER_LAUNCH_URL;
+
+  return value.trim() || DEFAULT_BROWSER_LAUNCH_URL;
 }

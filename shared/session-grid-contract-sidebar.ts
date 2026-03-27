@@ -127,6 +127,9 @@ export type SidebarToExtensionMessage =
       type: "createSession";
     }
   | {
+      type: "openBrowser";
+    }
+  | {
       type: "createSessionInGroup";
       groupId: string;
     }

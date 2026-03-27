@@ -196,6 +196,16 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     return this.lastTerminalActivityAtBySessionId.get(sessionId);
   }
 
+  public hasAttachedTerminal(sessionId: string): boolean {
+    const projection = this.projections.get(sessionId);
+    return Boolean(
+      projection &&
+      !projection.terminal.exitStatus &&
+      vscode.window.terminals.includes(projection.terminal) &&
+      this.hasTerminalEditorTab(sessionId),
+    );
+  }
+
   public hasLiveTerminal(sessionId: string): boolean {
     const projection = this.projections.get(sessionId);
     return Boolean(
