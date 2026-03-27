@@ -1,7 +1,7 @@
 {
   "name": "VSmux",
   "displayName": "VSmux - T3code & Agent CLIs Manager",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "private": true,
   "description": "VSmux - T3code & Agent CLIs Manager",
   "categories": [
@@ -54,7 +54,7 @@
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@types/vscode": "^1.110.0",
+    "@types/vscode": "^1.105.0",
     "@vitejs/plugin-react": "^6.0.1",
     "@vscode/vsce": "^3.7.1",
     "storybook": "^10.3.0",
@@ -491,7 +491,7 @@
   ],
   "icon": "media/VSmux-marketplace-icon.png",
   "engines": {
-    "vscode": "^1.110.0"
+    "vscode": "^1.105.0"
   },
   "packageManager": "pnpm@10.14.0",
   "pnpm": {

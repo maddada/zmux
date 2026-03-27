@@ -2,6 +2,10 @@
 
 All notable user-facing changes are documented in this file.
 
+## 1.12.1 - 2026-03-27
+
+- Fixed installation compatibility for Cursor builds based on VS Code 1.105.x, so VSmux should install again on Cursor 2.6.21 and similar versions.
+
 ## 1.12.0 - 2026-03-27
 
 - VSmux is much more stable now when restoring focus and reconciling sessions, especially during rapid session switching and code-mode recovery. This should behave more reliably on both macOS and Windows.

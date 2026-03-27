@@ -6,11 +6,11 @@ For VS Code: https://marketplace.visualstudio.com/items?itemName=maddada.VSmux
 
 For Cursor and Others: https://open-vsx.org/extension/maddada/VSmux
 
-## Latest Release: 1.12.0
+## Latest Release: 1.12.1
 
-- Much more stable overall when restoring focus and reconciling sessions.
-- Gemini is now available as a built-in sidebar agent.
-- Sidebar agents are more flexible, with better customization, hiding, and reordering.
+- Fixed installation compatibility for Cursor builds based on VS Code 1.105.x.
+- VSmux should install again on Cursor 2.6.21 and similar versions.
+- Full `1.12.0` feature changes are listed in the changelog below.
 
 Full release notes: [CHANGELOG.md](/Users/madda/dev/_active/agent-tiler/CHANGELOG.md)
 
