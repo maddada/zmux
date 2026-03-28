@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import {
   createSidebarHudState,
   getOrderedSessions,
+  isT3Session,
   resolveSidebarTheme,
   type ExtensionToSidebarMessage,
   type SessionGridDirection,
@@ -22,6 +24,7 @@ import {
   buildSidebarMessage,
   createPreviousSessionEntry,
 } from "../native-terminal-workspace-sidebar-state";
+import { getEffectiveSessionActivity } from "./activity";
 import {
   PreviousSessionHistory,
   type PreviousSessionHistoryEntry,
@@ -44,11 +47,11 @@ import { getFirstBrowserSidebarCommandUrl } from "../../shared/sidebar-commands"
 import { SessionGridStore } from "../session-grid-store";
 import { SessionSidebarViewProvider } from "../session-sidebar-view";
 import {
-  getDefaultShell,
-  getDefaultWorkspaceCwd,
-  getWorkspaceId,
-  focusEditorGroupByIndex,
-} from "../terminal-workspace-environment";
+    getDefaultShell,
+    getDefaultWorkspaceCwd,
+    getWorkspaceId,
+    focusEditorGroupByIndex,
+  } from "../terminal-workspace-environment";
 import { T3RuntimeManager } from "../t3-runtime-manager";
 import { disposeVSmuxDebugLog, logVSmuxDebug, resetVSmuxDebugLog } from "../vsmux-debug-log";
 import {
@@ -65,6 +68,11 @@ import {
   persistSessionAgentLaunches,
   type StoredSessionAgentLaunch,
 } from "../native-terminal-workspace-session-agent-launch";
+import {
+  TITLE_ACTIVITY_WINDOW_MS,
+  getTitleDerivedSessionActivityFromTransition,
+  type TitleDerivedSessionActivity,
+} from "../session-title-activity";
 import {
   COMPLETION_BELL_ENABLED_KEY,
   PRIMARY_SESSIONS_CONTAINER_ID,
@@ -89,7 +97,7 @@ import {
 import { DaemonTerminalWorkspaceBackend } from "../daemon-terminal-workspace-backend";
 import { WorkspacePanelManager } from "../workspace-panel";
 import { WorkspaceAssetServer } from "../workspace-asset-server";
-import { createT3IframeSource } from "../t3-webview-manager/html";
+import { createPendingT3IframeSource, createT3IframeSource } from "../t3-webview-manager/html";
 import { playCloseTerminalOnExitSound } from "../terminal-exit-sound";
 
 const SHORTCUT_LABEL_PLATFORM = process.platform === "darwin" ? "mac" : "default";
@@ -121,6 +129,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private readonly sessionAgentLaunchBySessionId: Map<string, StoredSessionAgentLaunch>;
   private readonly store: SessionGridStore;
   private readonly terminalTitleBySessionId = new Map<string, string>();
+  private readonly titleDerivedActivityBySessionId = new Map<string, TitleDerivedSessionActivity>();
+  private readonly titleActivityRefreshTimerBySessionId = new Map<string, NodeJS.Timeout>();
+  private readonly pendingT3SessionIds = new Set<string>();
   private t3Runtime: T3RuntimeManager | undefined;
   private readonly workspaceId: string;
   private readonly workspaceAssetServer: WorkspaceAssetServer;
@@ -159,7 +170,20 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         void this.refreshSidebar();
       }),
       this.backend.onDidChangeSessionTitle(({ sessionId, title }) => {
+        const previousTitle = this.terminalTitleBySessionId.get(sessionId);
+        const previousDerivedActivity = this.titleDerivedActivityBySessionId.get(sessionId);
         this.terminalTitleBySessionId.set(sessionId, title);
+        const nextDerivedActivity = getTitleDerivedSessionActivityFromTransition(
+          previousTitle,
+          title,
+          previousDerivedActivity,
+        );
+        if (nextDerivedActivity) {
+          this.titleDerivedActivityBySessionId.set(sessionId, nextDerivedActivity);
+        } else {
+          this.titleDerivedActivityBySessionId.delete(sessionId);
+        }
+        this.scheduleTitleActivityRefresh(sessionId, nextDerivedActivity);
         void this.refreshSidebar();
         void this.refreshWorkspacePanel();
       }),
@@ -181,6 +205,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async initialize(): Promise<void> {
+    await this.removeStalePendingT3Sessions();
     resetVSmuxDebugLog();
     logVSmuxDebug("controller.initialize", {
       activeGroupId: this.store.getSnapshot().activeGroupId,
@@ -817,6 +842,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       workspaceSnapshot.groups.find((group) => group.groupId === workspaceSnapshot.activeGroupId)
         ?.snapshot ?? this.getEmptySnapshot();
     const browserTabs = this.refreshLiveBrowserTabs();
+    const sessionActivityContext = this.createSessionActivityContext();
     return buildSidebarMessage({
       activeSnapshot,
       browserTabs: browserTabs.map((browserTab) => ({
@@ -828,10 +854,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       browserHasLiveProjection: () => false,
       completionBellEnabled: this.getCompletionBellEnabled(),
       debuggingMode: getDebuggingMode(),
-      getEffectiveSessionActivity: (_sessionRecord, sessionSnapshot) => ({
-        activity: sessionSnapshot.agentStatus,
-        agentName: sessionSnapshot.agentName,
-      }),
+      getEffectiveSessionActivity: (sessionRecord, sessionSnapshot) =>
+        getEffectiveSessionActivity(sessionActivityContext, sessionRecord, sessionSnapshot),
       getSessionAgentLaunch: (sessionId) => this.sessionAgentLaunchBySessionId.get(sessionId),
       getSessionSnapshot: (sessionId) => this.backend.getSessionSnapshot(sessionId),
       getSidebarAgentIcon: (sessionId, snapshotAgentName, derivedAgentName) =>
@@ -840,7 +864,13 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         getSidebarAgentIconById(derivedAgentName),
       getT3ActivityState: (sessionRecord) => ({
         activity: "idle",
-        isRunning: this.isSessionVisibleInWorkspace(sessionRecord.sessionId),
+        detail:
+          !isT3Session(sessionRecord) || this.pendingT3SessionIds.has(sessionRecord.sessionId)
+            ? undefined
+            : `Thread ${sessionRecord.t3.threadId.slice(0, 8)}`,
+        isRunning:
+          this.pendingT3SessionIds.has(sessionRecord.sessionId) ||
+          this.isSessionVisibleInWorkspace(sessionRecord.sessionId),
       }),
       getTerminalTitle: (sessionId) => this.terminalTitleBySessionId.get(sessionId),
       hud: createSidebarHudState(
@@ -854,6 +884,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         getClampedCompletionSoundSetting(),
         getSidebarAgentButtons(),
         getSidebarCommandButtons(this.context),
+        this.getPendingSidebarAgentIds(),
       ),
       ownsNativeTerminalControl: false,
       platform: SHORTCUT_LABEL_PLATFORM,
@@ -1106,6 +1137,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
+    if (this.pendingT3SessionIds.has(sessionRecord.sessionId) || isPendingT3Metadata(sessionRecord.t3)) {
+      return;
+    }
+
     await this.ensureT3Ready(sessionRecord);
   }
 
@@ -1118,10 +1153,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private async createT3Session(startupCommand: string): Promise<void> {
     const runtime = this.t3Runtime ?? new T3RuntimeManager(this.context);
     this.t3Runtime = runtime;
-    const sessionMetadata = await runtime.createThreadSession(undefined, startupCommand, "T3 Code");
     const sessionRecord = await this.store.createSession({
       kind: "t3",
-      t3: sessionMetadata,
+      t3: createPendingT3Metadata(runtime.getServerOrigin()),
       title: "T3 Code",
     });
     if (!sessionRecord) {
@@ -1129,7 +1163,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     this.sidebarAgentIconBySessionId.set(sessionRecord.sessionId, "t3");
+    this.pendingT3SessionIds.add(sessionRecord.sessionId);
     await this.afterStateChange();
+    void this.finishCreatingT3Session(sessionRecord.sessionId, startupCommand);
   }
 
   private async disposeSurface(sessionRecord: SessionRecord): Promise<void> {
@@ -1144,14 +1180,21 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private clearSessionPresentationState(sessionId: string): void {
+    this.pendingT3SessionIds.delete(sessionId);
     this.sidebarAgentIconBySessionId.delete(sessionId);
     this.sessionAgentLaunchBySessionId.delete(sessionId);
     this.terminalTitleBySessionId.delete(sessionId);
+    this.titleDerivedActivityBySessionId.delete(sessionId);
+    this.clearTitleActivityRefreshTimer(sessionId);
   }
 
   private createArchivedSessionEntry(
     sessionRecord: SessionRecord,
   ): PreviousSessionHistoryEntry | undefined {
+    if (sessionRecord.kind === "t3" && isPendingT3Metadata(sessionRecord.t3)) {
+      return undefined;
+    }
+
     const group = this.store.getSessionGroup(sessionRecord.sessionId);
     if (!group) {
       return undefined;
@@ -1160,10 +1203,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     return createPreviousSessionEntry({
       browserHasLiveProjection: () => false,
       debuggingMode: getDebuggingMode(),
-      getEffectiveSessionActivity: (_candidateSessionRecord, sessionSnapshot) => ({
-        activity: sessionSnapshot.agentStatus,
-        agentName: sessionSnapshot.agentName,
-      }),
+      getEffectiveSessionActivity: (candidateSessionRecord, sessionSnapshot) =>
+        getEffectiveSessionActivity(
+          this.createSessionActivityContext(),
+          candidateSessionRecord,
+          sessionSnapshot,
+        ),
       getSessionAgentLaunch: (sessionId) => this.sessionAgentLaunchBySessionId.get(sessionId),
       getSessionSnapshot: (sessionId) => this.backend.getSessionSnapshot(sessionId),
       getSidebarAgentIcon: (sessionId, snapshotAgentName, derivedAgentName) =>
@@ -1182,6 +1227,59 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       terminalHasLiveProjection: (sessionId) => this.backend.hasLiveTerminal(sessionId),
       workspaceId: this.workspaceId,
     });
+  }
+
+  private createSessionActivityContext(): Parameters<typeof getEffectiveSessionActivity>[0] {
+    return {
+      getCompletionBellEnabled: () => this.getCompletionBellEnabled(),
+      getLastTerminalActivityAt: (sessionId) => this.backend.getLastTerminalActivityAt(sessionId),
+      getSessionSnapshot: (sessionId) => this.backend.getSessionSnapshot(sessionId),
+      getT3ActivityState: (sessionRecord) => ({
+        activity: this.pendingT3SessionIds.has(sessionRecord.sessionId) ? "working" : "idle",
+        isRunning:
+          this.pendingT3SessionIds.has(sessionRecord.sessionId) ||
+          this.isSessionVisibleInWorkspace(sessionRecord.sessionId),
+      }),
+      lastKnownActivityBySessionId: new Map(),
+      playCompletionSound: async () => {},
+      terminalTitleBySessionId: this.terminalTitleBySessionId,
+      titleDerivedActivityBySessionId: this.titleDerivedActivityBySessionId,
+      workspaceId: this.workspaceId,
+    };
+  }
+
+  private scheduleTitleActivityRefresh(
+    sessionId: string,
+    activity: TitleDerivedSessionActivity | undefined,
+  ): void {
+    this.clearTitleActivityRefreshTimer(sessionId);
+    if (
+      (activity?.agentName !== "codex" && activity?.agentName !== "claude") ||
+      activity.activity !== "working" ||
+      activity.lastTitleChangeAt === undefined
+    ) {
+      return;
+    }
+
+    const delayMs = Math.max(
+      0,
+      TITLE_ACTIVITY_WINDOW_MS - (Date.now() - activity.lastTitleChangeAt) + 50,
+    );
+    const timeout = setTimeout(() => {
+      this.titleActivityRefreshTimerBySessionId.delete(sessionId);
+      void this.refreshSidebar();
+    }, delayMs);
+    this.titleActivityRefreshTimerBySessionId.set(sessionId, timeout);
+  }
+
+  private clearTitleActivityRefreshTimer(sessionId: string): void {
+    const timeout = this.titleActivityRefreshTimerBySessionId.get(sessionId);
+    if (!timeout) {
+      return;
+    }
+
+    clearTimeout(timeout);
+    this.titleActivityRefreshTimerBySessionId.delete(sessionId);
   }
 
   private getSidebarAgentIconForSession(sessionId: string): SidebarAgentIcon | undefined {
@@ -1389,6 +1487,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
             sessionId: sessionRecord.sessionId,
             sessionRecord,
             snapshot: this.backend.getSessionSnapshot(sessionRecord.sessionId),
+            terminalTitle: this.terminalTitleBySessionId.get(sessionRecord.sessionId),
           };
         }
 
@@ -1400,11 +1499,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           kind: "t3" as const,
           sessionId: sessionRecord.sessionId,
           sessionRecord,
-          html: await createT3IframeSource(
-            this.context,
-            sessionRecord,
-            this.workspaceAssetServer,
-          ),
+          html: this.pendingT3SessionIds.has(sessionRecord.sessionId) ||
+            isPendingT3Metadata(sessionRecord.t3)
+            ? createPendingT3IframeSource(sessionRecord.title)
+            : await createT3IframeSource(
+                this.context,
+                sessionRecord,
+                this.workspaceAssetServer,
+              ),
         };
       }),
       )
@@ -1454,6 +1556,97 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     const activeSnapshot = this.getActiveSnapshot();
     return activeSnapshot.visibleSessionIds.includes(sessionId);
   }
+
+  private getPendingSidebarAgentIds(): string[] {
+    return this.pendingT3SessionIds.size > 0 ? ["t3"] : [];
+  }
+
+  private async finishCreatingT3Session(
+    sessionId: string,
+    startupCommand: string,
+  ): Promise<void> {
+    try {
+      const runtime = this.t3Runtime ?? new T3RuntimeManager(this.context);
+      this.t3Runtime = runtime;
+      const sessionMetadata = await runtime.createThreadSession(undefined, startupCommand, "T3 Code");
+      const sessionRecord = this.store.getSession(sessionId);
+      if (!sessionRecord || sessionRecord.kind !== "t3" || !this.pendingT3SessionIds.has(sessionId)) {
+        return;
+      }
+
+      this.pendingT3SessionIds.delete(sessionId);
+      await this.store.setT3SessionMetadata(sessionId, sessionMetadata);
+      await this.afterStateChange();
+    } catch (error) {
+      const hadPendingSession = this.pendingT3SessionIds.delete(sessionId);
+      const sessionRecord = this.store.getSession(sessionId);
+      if (hadPendingSession && sessionRecord) {
+        await this.store.removeSession(sessionId);
+        this.clearSessionPresentationState(sessionId);
+        await this.afterStateChange();
+      } else {
+        await this.refreshSidebar();
+        await this.refreshWorkspacePanel();
+      }
+      void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async removeStalePendingT3Sessions(): Promise<void> {
+    const snapshot = this.store.getSnapshot();
+    const nextGroups = snapshot.groups.map((group) => ({
+      ...group,
+      snapshot: {
+        ...group.snapshot,
+        focusedSessionId:
+          group.snapshot.focusedSessionId &&
+          group.snapshot.sessions.some(
+            (session) =>
+              session.sessionId === group.snapshot.focusedSessionId &&
+              !(session.kind === "t3" && isPendingT3Metadata(session.t3)),
+          )
+            ? group.snapshot.focusedSessionId
+            : undefined,
+        sessions: group.snapshot.sessions.filter(
+          (session) => !(session.kind === "t3" && isPendingT3Metadata(session.t3)),
+        ),
+        visibleSessionIds: group.snapshot.visibleSessionIds.filter((sessionId) =>
+          group.snapshot.sessions.some(
+            (session) =>
+              session.sessionId === sessionId &&
+              !(session.kind === "t3" && isPendingT3Metadata(session.t3)),
+          ),
+        ),
+      },
+    }));
+    const hasChanges = nextGroups.some(
+      (group, index) => group.snapshot.sessions.length !== snapshot.groups[index]?.snapshot.sessions.length,
+    );
+    if (!hasChanges) {
+      return;
+    }
+
+    await this.store.replaceSnapshot({
+      ...snapshot,
+      groups: nextGroups,
+    });
+  }
+}
+
+function createPendingT3Metadata(serverOrigin: string) {
+  const pendingId = `pending-${randomUUID()}`;
+  return {
+    projectId: pendingId,
+    serverOrigin,
+    threadId: pendingId,
+    workspaceRoot: getDefaultWorkspaceCwd(),
+  };
+}
+
+function isPendingT3Metadata(
+  metadata: T3SessionRecord["t3"],
+): boolean {
+  return metadata.projectId.startsWith("pending-") && metadata.threadId.startsWith("pending-");
 }
 
 function cloneWorkspaceSnapshot(

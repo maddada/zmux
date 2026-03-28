@@ -185,8 +185,8 @@ export function getTerminalLineHeight(): number {
   const value =
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<number>(TERMINAL_LINE_HEIGHT_SETTING, 1.1) ?? 1.1;
-  return clampNumber(value, 1, 2, 1.1);
+      .get<number>(TERMINAL_LINE_HEIGHT_SETTING, 0.8) ?? 0.8;
+  return clampNumber(value, 0.8, 2, 0.8);
 }
 
 export function getTerminalLetterSpacing(): number {

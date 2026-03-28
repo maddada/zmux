@@ -152,9 +152,10 @@ function createWorkspaceStoryMessage(
         row: session.row,
         sessionId: session.sessionId,
         slotIndex: parseSlotIndex(session.shortcutLabel),
-        title: session.primaryTitle ?? session.terminalTitle ?? session.alias,
+        title: session.primaryTitle ?? session.alias,
       },
       snapshot: createTerminalSnapshot(session.sessionId),
+      terminalTitle: session.terminalTitle,
     }));
 
   return {
@@ -169,7 +170,7 @@ function createWorkspaceStoryMessage(
       fontFamily: "MesloLGL Nerd Font Mono",
       fontSize: 14,
       letterSpacing: 0,
-      lineHeight: 1.1,
+      lineHeight: 0.8,
     },
     type: "hydrate",
     viewMode: activeGroup?.viewMode ?? "grid",

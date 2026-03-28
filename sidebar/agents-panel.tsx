@@ -1,7 +1,7 @@
 import { Tooltip } from "@base-ui/react/tooltip";
 import { DragDropProvider } from "@dnd-kit/react";
 import { isSortable, useSortable } from "@dnd-kit/react/sortable";
-import { IconCodeDots, IconPencil, IconTrash } from "@tabler/icons-react";
+import { IconCodeDots, IconLoader2, IconPencil, IconTrash } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import {
   useEffect,
@@ -24,6 +24,7 @@ const CONTEXT_MENU_HEIGHT_PX = 110;
 type AgentsPanelProps = {
   agents: SidebarAgentButton[];
   createRequestId: number;
+  pendingAgentIds: string[];
   titlebarActions?: ReactNode;
   vscode: WebviewApi;
 };
@@ -78,6 +79,7 @@ function getAgentDragData(candidate: { data?: unknown } | null | undefined) {
 export function AgentsPanel({
   agents,
   createRequestId,
+  pendingAgentIds,
   titlebarActions,
   vscode,
 }: AgentsPanelProps) {
@@ -238,6 +240,7 @@ export function AgentsPanel({
                   <SortableAgentButton
                     agent={agent}
                     index={index}
+                    isLaunching={pendingAgentIds.includes(agent.agentId)}
                     isContextMenuOpen={contextMenu?.agent.agentId === agent.agentId}
                     key={agent.agentId}
                     onContextMenu={(event) => {
@@ -338,6 +341,7 @@ export function AgentsPanel({
 type SortableAgentButtonProps = {
   agent: SidebarAgentButton;
   index: number;
+  isLaunching: boolean;
   isContextMenuOpen: boolean;
   onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
   onRun: () => void;
@@ -346,6 +350,7 @@ type SortableAgentButtonProps = {
 function SortableAgentButton({
   agent,
   index,
+  isLaunching,
   isContextMenuOpen,
   onContextMenu,
   onRun,
@@ -353,7 +358,7 @@ function SortableAgentButton({
   const sortable = useSortable({
     accept: "sidebar-agent",
     data: createAgentDragData(agent.agentId),
-    disabled: isContextMenuOpen,
+    disabled: isContextMenuOpen || isLaunching,
     group: "sidebar-agents",
     id: agent.agentId,
     index,
@@ -365,32 +370,46 @@ function SortableAgentButton({
       <Tooltip.Trigger
         render={
           <button
-            aria-label={`Launch ${agent.name}`}
+            aria-busy={isLaunching}
+            aria-label={isLaunching ? `Starting ${agent.name}` : `Launch ${agent.name}`}
             className="agent-button"
             data-dragging={String(Boolean(sortable.isDragging))}
             data-empty-space-blocking="true"
             data-icon-only="true"
-            onClick={onRun}
-            onContextMenu={onContextMenu}
+            data-loading={String(isLaunching)}
+            disabled={isLaunching}
+            onClick={isLaunching ? undefined : onRun}
+            onContextMenu={isLaunching ? undefined : onContextMenu}
             ref={sortable.ref}
             type="button"
           >
             <span className="agent-button-icon-shell">
-              {agent.icon ? (
-                <img
-                  alt=""
+              {isLaunching ? (
+                <IconLoader2
                   aria-hidden="true"
-                  className="agent-button-icon"
-                  data-agent-icon={agent.icon}
-                  src={AGENT_LOGOS[agent.icon]}
-                />
-              ) : (
-                <IconCodeDots
-                  aria-hidden="true"
-                  className="agent-button-fallback-icon"
+                  className="agent-button-loading-icon"
                   size={18}
                   stroke={1.8}
                 />
+              ) : (
+                <>
+                  {agent.icon ? (
+                    <img
+                      alt=""
+                      aria-hidden="true"
+                      className="agent-button-icon"
+                      data-agent-icon={agent.icon}
+                      src={AGENT_LOGOS[agent.icon]}
+                    />
+                  ) : (
+                    <IconCodeDots
+                      aria-hidden="true"
+                      className="agent-button-fallback-icon"
+                      size={18}
+                      stroke={1.8}
+                    />
+                  )}
+                </>
               )}
             </span>
           </button>
@@ -399,7 +418,11 @@ function SortableAgentButton({
       <Tooltip.Portal>
         <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
           <Tooltip.Popup className="tooltip-popup">
-            {agent.command ? agent.name : `Configure ${agent.name}`}
+            {isLaunching
+              ? `Starting ${agent.name}`
+              : agent.command
+                ? agent.name
+                : `Configure ${agent.name}`}
           </Tooltip.Popup>
         </Tooltip.Positioner>
       </Tooltip.Portal>

@@ -264,7 +264,7 @@ export function createSessionRecord(
     row: position.row,
     sessionId,
     slotIndex,
-    title: `Session ${sessionNumber}`,
+    title,
   };
 }
 
@@ -299,6 +299,19 @@ export function getVisibleSessionNumber(
 export function getVisiblePrimaryTitle(title: string): string | undefined {
   const normalizedTitle = title.trim();
   if (!normalizedTitle || /^Session \d+$/.test(normalizedTitle)) {
+    return undefined;
+  }
+
+  return normalizedTitle;
+}
+
+export function getVisibleTerminalTitle(title: string | undefined): string | undefined {
+  const normalizedTitle = title?.trim();
+  if (!normalizedTitle) {
+    return undefined;
+  }
+
+  if (/^(~|\/)/.test(normalizedTitle)) {
     return undefined;
   }
 

@@ -71,6 +71,7 @@ const INITIAL_STATE: SidebarState = {
     focusedSessionTitle: undefined,
     highlightedVisibleCount: 1,
     isFocusModeActive: false,
+    pendingAgentIds: [],
     showCloseButtonOnSessionCards: false,
     showHotkeysOnSessionCards: false,
     theme: getInitialSidebarTheme(),
@@ -710,6 +711,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
         <AgentsPanel
           agents={serverState.hud.agents}
           createRequestId={agentCreateRequestId}
+          pendingAgentIds={serverState.hud.pendingAgentIds}
           titlebarActions={
             <Tooltip.Root>
               <Tooltip.Trigger

@@ -55,6 +55,7 @@ const EMPTY_STATE: NativeTerminalDebugPanelState = {
       focusedSessionTitle: undefined,
       highlightedVisibleCount: 1,
       isFocusModeActive: false,
+      pendingAgentIds: [],
       showCloseButtonOnSessionCards: false,
       showHotkeysOnSessionCards: false,
       theme: "dark-blue",

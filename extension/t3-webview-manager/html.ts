@@ -47,27 +47,12 @@ export async function createT3IframeSource(
   return createT3IframeHtml(payload);
 }
 
+export function createPendingT3IframeSource(title = "T3 Code"): string {
+  return createStatusIframeHtml(title, "Starting T3 Code…");
+}
+
 function createMissingIframeHtml(): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>T3 Code</title>
-    <style>
-      body {
-        background: #101722;
-        color: #d8e1ee;
-        font-family: sans-serif;
-        margin: 0;
-        padding: 16px;
-      }
-    </style>
-  </head>
-  <body>
-    Embedded T3 assets are missing.
-  </body>
-</html>`;
+  return createStatusIframeHtml("T3 Code", "Embedded T3 assets are missing.");
 }
 
 function resolveEmbeddedAssetUrl(assetRootUri: string, assetPath: string | undefined): string | undefined {
@@ -125,6 +110,43 @@ function createT3IframeHtml(payload: T3IframeBootstrapPayload): string {
     <div id="root"></div>
     <script id="vsmux-t3-bootstrap" type="application/json">${escapeHtmlText(JSON.stringify(payload))}</script>
     <script type="module" src="${escapeHtmlAttribute(payload.bootstrapScriptSrc)}"></script>
+  </body>
+</html>`;
+}
+
+function createStatusIframeHtml(title: string, message: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtmlText(title || "T3 Code")}</title>
+    <style>
+      html, body {
+        background: #101722;
+        color: #d8e1ee;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        align-items: center;
+        display: flex;
+        justify-content: center;
+        padding: 24px;
+      }
+
+      .status {
+        color: #d8e1ee;
+        font-size: 14px;
+        letter-spacing: 0.02em;
+        opacity: 0.86;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="status">${escapeHtmlText(message)}</div>
   </body>
 </html>`;
 }

@@ -33,6 +33,7 @@ export function createSidebarHudState(
   completionSound: CompletionSoundSetting = DEFAULT_COMPLETION_SOUND,
   agents: SidebarAgentButton[] = createDefaultSidebarAgentButtons(),
   commands: SidebarCommandButton[] = createDefaultSidebarCommandButtons(),
+  pendingAgentIds: string[] = [],
 ): SidebarHudState {
   const sessionById = new Map(snapshot.sessions.map((session) => [session.sessionId, session]));
   const focusedSession = snapshot.focusedSessionId
@@ -50,6 +51,7 @@ export function createSidebarHudState(
     focusedSessionTitle: focusedSession?.title,
     highlightedVisibleCount: getSessionGridLayoutVisibleCount(snapshot),
     isFocusModeActive: isSessionGridFocusModeActive(snapshot),
+    pendingAgentIds,
     showCloseButtonOnSessionCards,
     showHotkeysOnSessionCards,
     theme,

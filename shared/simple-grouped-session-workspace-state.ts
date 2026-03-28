@@ -9,12 +9,13 @@ import {
   getOrderedSessions,
   getSessionNumberFromSessionId,
   getSlotPosition,
-  type CreateSessionRecordOptions,
   type GroupedSessionWorkspaceSnapshot,
   type SessionGroupRecord,
   type SessionRecord,
+  type T3SessionMetadata,
   type TerminalViewMode,
   type VisibleSessionCount,
+  type CreateSessionRecordOptions,
 } from "./session-grid-contract";
 import {
   claimNextSessionDisplayId,
@@ -312,6 +313,23 @@ export function setSessionTitleInSimpleWorkspace(
     ...session,
     title: nextTitle,
   }));
+}
+
+export function setT3SessionMetadataInSimpleWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  sessionId: string,
+  t3: T3SessionMetadata,
+): WorkspaceMutationResult {
+  return updateSession(snapshot, sessionId, (session) => {
+    if (session.kind !== "t3") {
+      return session;
+    }
+
+    return {
+      ...session,
+      t3,
+    };
+  });
 }
 
 export function setVisibleCountInSimpleWorkspace(

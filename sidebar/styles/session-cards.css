@@ -68,14 +68,6 @@
   opacity: 0.98;
 }
 
-.session[data-running="false"] {
-  opacity: 0.5;
-}
-
-.session-frame[data-running="false"] {
-  opacity: 0.5;
-}
-
 .session-history-frame,
 .session-history-frame[data-running="false"] {
   opacity: 1;

@@ -170,6 +170,14 @@ export function SortableSessionCard({
     });
   };
 
+  const requestFocusSession = () => {
+    if (session.isFocused) {
+      return;
+    }
+
+    vscode.postMessage({ sessionId: session.sessionId, type: "focusSession" });
+  };
+
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
       event.preventDefault();
@@ -185,7 +193,7 @@ export function SortableSessionCard({
 
     event.preventDefault();
     event.stopPropagation();
-    vscode.postMessage({ sessionId: session.sessionId, type: "focusSession" });
+    requestFocusSession();
   };
 
   return (
@@ -227,10 +235,7 @@ export function SortableSessionCard({
               return;
             }
 
-            vscode.postMessage({
-              sessionId: session.sessionId,
-              type: "focusSession",
-            });
+            requestFocusSession();
           }}
           onContextMenu={(event: ReactMouseEvent<HTMLElement>) => {
             event.preventDefault();

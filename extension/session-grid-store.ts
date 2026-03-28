@@ -7,6 +7,7 @@ import {
   type SessionGridDirection,
   type SessionGroupRecord,
   type SessionRecord,
+  type T3SessionMetadata,
   type TerminalViewMode,
   type VisibleSessionCount,
 } from "../shared/session-grid-contract";
@@ -26,6 +27,7 @@ import {
   renameGroupInSimpleWorkspace,
   renameSessionAliasInSimpleWorkspace,
   setSessionTitleInSimpleWorkspace,
+  setT3SessionMetadataInSimpleWorkspace,
   setViewModeInSimpleWorkspace,
   setVisibleCountInSimpleWorkspace,
   syncGroupOrderInSimpleWorkspace,
@@ -185,6 +187,18 @@ export class SessionGridStore {
 
   public async setSessionTitle(sessionId: string, title: string): Promise<boolean> {
     const result = setSessionTitleInSimpleWorkspace(this.snapshot, sessionId, title);
+    this.snapshot = result.snapshot;
+    if (result.changed) {
+      await this.persist();
+    }
+    return result.changed;
+  }
+
+  public async setT3SessionMetadata(
+    sessionId: string,
+    t3: T3SessionMetadata,
+  ): Promise<boolean> {
+    const result = setT3SessionMetadataInSimpleWorkspace(this.snapshot, sessionId, t3);
     this.snapshot = result.snapshot;
     if (result.changed) {
       await this.persist();

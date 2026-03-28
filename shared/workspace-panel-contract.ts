@@ -28,6 +28,7 @@ export type WorkspacePanelTerminalPane = {
   sessionId: string;
   sessionRecord: TerminalSessionRecord;
   snapshot?: TerminalSessionSnapshot;
+  terminalTitle?: string;
 };
 
 export type WorkspacePanelT3Pane = {

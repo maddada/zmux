@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   ExtensionToWorkspacePanelMessage,
   WorkspacePanelPane,
+  WorkspacePanelTerminalPane,
 } from "../shared/workspace-panel-contract";
+import { getVisiblePrimaryTitle, getVisibleTerminalTitle } from "../shared/session-grid-contract";
 import { logWorkspaceDebug } from "./workspace-debug";
 import { TerminalPane } from "./terminal-pane";
 import { T3Pane } from "./t3-pane";
 
 type MessageSource = Pick<Window, "addEventListener" | "removeEventListener">;
-const INITIAL_TERMINAL_REMOUNT_DELAY_MS = 120;
-const INITIAL_TERMINAL_REVEAL_DELAY_MS = 240;
+const INITIAL_TERMINAL_REMOUNT_DELAY_MS = 200;
+const TERMINAL_HIDE_BEFORE_REMOUNT_DELAY_MS = 180;
 
 export type WorkspaceAppProps = {
   messageSource?: MessageSource;
@@ -19,13 +21,12 @@ export type WorkspaceAppProps = {
 };
 
 export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = window, vscode }) => {
-  const [isInitialTerminalRevealReady, setIsInitialTerminalRevealReady] = useState(false);
-  const [initialTerminalPaneRenderVersion, setInitialTerminalPaneRenderVersion] = useState(0);
+  const [areTerminalsVisible, setAreTerminalsVisible] = useState(true);
+  const [hasCompletedInitialTerminalRemount, setHasCompletedInitialTerminalRemount] = useState(false);
   const [serverState, setServerState] = useState<ExtensionToWorkspacePanelMessage | undefined>();
   const [fitVersion, setFitVersion] = useState(0);
+  const [terminalPaneRenderVersion, setTerminalPaneRenderVersion] = useState(0);
   const [localFocusedSessionId, setLocalFocusedSessionId] = useState<string | undefined>();
-  const previousFocusedSessionIdRef = useRef<string | undefined>(undefined);
-  const hasStartedInitialRevealRef = useRef(false);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent<ExtensionToWorkspacePanelMessage>) => {
@@ -64,56 +65,46 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
 
   const panes = useMemo(() => serverState?.panes ?? [], [serverState?.panes]);
   const presentedFocusedSessionId = localFocusedSessionId ?? serverState?.focusedSessionId;
+  const terminalPaneIds = useMemo(
+    () => panes.filter((pane) => pane.kind === "terminal").map((pane) => pane.sessionId),
+    [panes],
+  );
+  const terminalPaneIdsKey = terminalPaneIds.join("|");
 
   useEffect(() => {
     setLocalFocusedSessionId(serverState?.focusedSessionId);
   }, [serverState?.activeGroupId, serverState?.focusedSessionId]);
 
   useEffect(() => {
-    if (!serverState || hasStartedInitialRevealRef.current) {
+    if (terminalPaneIds.length === 0 || hasCompletedInitialTerminalRemount) {
       return;
     }
 
-    hasStartedInitialRevealRef.current = true;
-    const remountTimeoutId = window.setTimeout(() => {
-      logWorkspaceDebug(serverState.debuggingMode, "workspace.initialTerminalRemountRequested", {
-        delayMs: INITIAL_TERMINAL_REMOUNT_DELAY_MS,
-        paneIds: serverState.panes.map((pane) => pane.sessionId),
+    const debuggingMode = serverState?.debuggingMode;
+    const hideTimeoutId = window.setTimeout(() => {
+      logWorkspaceDebug(debuggingMode, "workspace.initialTerminalHideRequested", {
+        delayMs: TERMINAL_HIDE_BEFORE_REMOUNT_DELAY_MS,
+        paneIds: terminalPaneIds,
       });
-      setInitialTerminalPaneRenderVersion((currentVersion) => currentVersion + 1);
+      setAreTerminalsVisible(false);
+    }, TERMINAL_HIDE_BEFORE_REMOUNT_DELAY_MS);
+    const remountTimeoutId = window.setTimeout(() => {
+      logWorkspaceDebug(debuggingMode, "workspace.initialTerminalRemountRequested", {
+        delayMs: INITIAL_TERMINAL_REMOUNT_DELAY_MS,
+        paneIds: terminalPaneIds,
+      });
+      setTerminalPaneRenderVersion((currentVersion) => currentVersion + 1);
+      requestAnimationFrame(() => {
+        setAreTerminalsVisible(true);
+        setHasCompletedInitialTerminalRemount(true);
+      });
     }, INITIAL_TERMINAL_REMOUNT_DELAY_MS);
 
-    const revealTimeoutId = window.setTimeout(() => {
-      logWorkspaceDebug(serverState.debuggingMode, "workspace.initialTerminalRevealRequested", {
-        delayMs: INITIAL_TERMINAL_REVEAL_DELAY_MS,
-        paneIds: serverState.panes.map((pane) => pane.sessionId),
-      });
-      setIsInitialTerminalRevealReady(true);
-    }, INITIAL_TERMINAL_REVEAL_DELAY_MS);
-
     return () => {
+      window.clearTimeout(hideTimeoutId);
       window.clearTimeout(remountTimeoutId);
-      window.clearTimeout(revealTimeoutId);
     };
-  }, [serverState]);
-
-  useEffect(() => {
-    if (!isInitialTerminalRevealReady || !presentedFocusedSessionId) {
-      return;
-    }
-
-    const previousFocusedSessionId = previousFocusedSessionIdRef.current;
-    previousFocusedSessionIdRef.current = presentedFocusedSessionId;
-    if (!previousFocusedSessionId || previousFocusedSessionId === presentedFocusedSessionId) {
-      return;
-    }
-
-    logWorkspaceDebug(serverState?.debuggingMode, "focus.refitRequested", {
-      focusedSessionId: presentedFocusedSessionId,
-      paneIds: panes.map((pane) => pane.sessionId),
-    });
-    requestTerminalRefit({ dispatchBrowserResize: true });
-  }, [isInitialTerminalRevealReady, panes, presentedFocusedSessionId, serverState?.debuggingMode]);
+  }, [hasCompletedInitialTerminalRemount, serverState?.debuggingMode, terminalPaneIdsKey]);
 
   useEffect(() => {
     let settleTimeoutId: number | undefined;
@@ -193,8 +184,8 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           debuggingMode={serverState.debuggingMode}
           fitVersion={fitVersion}
           isFocused={presentedFocusedSessionId === pane.sessionId}
-          isInitialTerminalRevealReady={isInitialTerminalRevealReady}
           key={pane.sessionId}
+          areTerminalsVisible={areTerminalsVisible}
           onLocalFocus={() => {
             setLocalFocusedSessionId(pane.sessionId);
           }}
@@ -205,7 +196,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
             })
           }
           pane={pane}
-          terminalPaneRenderVersion={initialTerminalPaneRenderVersion}
+          terminalPaneRenderVersion={terminalPaneRenderVersion}
           terminalAppearance={serverState.terminalAppearance}
         />
       ))}
@@ -218,7 +209,7 @@ type WorkspacePaneViewProps = {
   debuggingMode: boolean;
   fitVersion: number;
   isFocused: boolean;
-  isInitialTerminalRevealReady: boolean;
+  areTerminalsVisible: boolean;
   onLocalFocus: () => void;
   onFocus: () => void;
   pane: WorkspacePanelPane;
@@ -231,14 +222,14 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
   debuggingMode,
   fitVersion,
   isFocused,
-  isInitialTerminalRevealReady,
+  areTerminalsVisible,
   onLocalFocus,
   onFocus,
   pane,
   terminalPaneRenderVersion,
   terminalAppearance,
 }) => {
-  const primaryTitle = pane.sessionRecord.title.trim() || pane.sessionRecord.alias;
+  const primaryTitle = getWorkspacePanePrimaryTitle(pane);
 
   return (
     <section
@@ -250,16 +241,22 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
       </header>
       <div className="workspace-pane-body">
         {pane.kind === "terminal" ? (
-          <TerminalPane
-            connection={connection}
-            debuggingMode={debuggingMode}
-            fitVersion={fitVersion}
-            isVisible={isInitialTerminalRevealReady}
-            key={`${pane.sessionId}:${String(terminalPaneRenderVersion)}`}
-            onActivate={onLocalFocus}
-            pane={pane}
-            terminalAppearance={terminalAppearance}
-          />
+          <div style={{ height: "100%", visibility: areTerminalsVisible ? "visible" : "hidden" }}>
+            <TerminalPane
+              connection={connection}
+              debuggingMode={debuggingMode}
+              fitVersion={fitVersion}
+              key={`${pane.sessionId}:${String(terminalPaneRenderVersion)}`}
+              onActivate={() => {
+                onLocalFocus();
+                if (!isFocused) {
+                  onFocus();
+                }
+              }}
+              pane={pane}
+              terminalAppearance={terminalAppearance}
+            />
+          </div>
         ) : (
           <T3Pane isFocused={isFocused} onFocus={onFocus} pane={pane} />
         )}
@@ -267,3 +264,19 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
     </section>
   );
 };
+
+function getWorkspacePanePrimaryTitle(pane: WorkspacePanelPane): string {
+  const userTitle = getVisiblePrimaryTitle(pane.sessionRecord.title);
+  if (userTitle) {
+    return userTitle;
+  }
+
+  if (pane.kind === "terminal") {
+    const terminalTitle = getVisibleTerminalTitle((pane as WorkspacePanelTerminalPane).terminalTitle);
+    if (terminalTitle) {
+      return terminalTitle;
+    }
+  }
+
+  return pane.sessionRecord.alias;
+}

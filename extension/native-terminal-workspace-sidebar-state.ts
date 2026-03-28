@@ -3,6 +3,7 @@ import {
   getSessionGridLayoutVisibleCount,
   getVisiblePrimaryTitle,
   getVisibleSessionNumber,
+  getVisibleTerminalTitle,
   getOrderedSessions,
   isBrowserSession,
   isSessionGridFocusModeActive,
@@ -53,6 +54,7 @@ type BuildSidebarMessageOptions = {
   getSessionSnapshot: (sessionId: string) => TerminalSessionSnapshot | undefined;
   getT3ActivityState: (sessionRecord: SessionRecord) => {
     activity: TerminalAgentStatus;
+    detail?: string;
     isRunning: boolean;
   };
   getTerminalTitle: (sessionId: string) => string | undefined;
@@ -219,6 +221,8 @@ function buildSidebarItem(
   const isVisible =
     isActiveGroup && presentedSnapshot.visibleSessionIds.includes(sessionRecord.sessionId);
   const isFocused = isActiveGroup && presentedSnapshot.focusedSessionId === sessionRecord.sessionId;
+  const visiblePrimaryTitle = getVisibleTerminalTitle(getVisiblePrimaryTitle(sessionRecord.title));
+  const visibleTerminalTitle = getVisibleTerminalTitle(options.getTerminalTitle(sessionRecord.sessionId));
 
   if (isBrowserSession(sessionRecord)) {
     return {
@@ -249,7 +253,13 @@ function buildSidebarItem(
       agentIcon: "t3",
       alias: sessionRecord.alias,
       column: sessionRecord.column,
-      detail: `Thread ${sessionRecord.t3.threadId.slice(0, 8)}`,
+      detail:
+        activityState.detail ??
+        (activityState.activity !== "working" &&
+        !isPendingT3ThreadId(sessionRecord.t3.threadId) &&
+        sessionRecord.t3.threadId.trim()
+          ? `Thread ${sessionRecord.t3.threadId.slice(0, 8)}`
+          : undefined),
       isFocused,
       isRunning: activityState.isRunning,
       isVisible,
@@ -287,26 +297,13 @@ function buildSidebarItem(
       options.terminalHasLiveProjection(sessionRecord.sessionId),
     isVisible,
     kind: "workspace",
-    primaryTitle: getVisibleTerminalTitle(getVisiblePrimaryTitle(sessionRecord.title)),
+    primaryTitle: visiblePrimaryTitle ?? visibleTerminalTitle,
     row: sessionRecord.row,
     sessionId: sessionRecord.sessionId,
     sessionNumber: getDebuggingSessionNumber(sessionRecord, options.debuggingMode),
     shortcutLabel: getSessionShortcutLabel(sessionRecord.slotIndex, options.platform),
-    terminalTitle: getVisibleTerminalTitle(options.getTerminalTitle(sessionRecord.sessionId)),
+    terminalTitle: visiblePrimaryTitle ? visibleTerminalTitle : undefined,
   };
-}
-
-function getVisibleTerminalTitle(title: string | undefined): string | undefined {
-  const normalizedTitle = title?.trim();
-  if (!normalizedTitle) {
-    return undefined;
-  }
-
-  if (/^(~|\/)/.test(normalizedTitle)) {
-    return undefined;
-  }
-
-  return normalizedTitle;
 }
 
 function getDebuggingSessionNumber(
@@ -318,4 +315,8 @@ function getDebuggingSessionNumber(
   }
 
   return getVisibleSessionNumber(sessionRecord);
+}
+
+function isPendingT3ThreadId(threadId: string): boolean {
+  return threadId.startsWith("pending-");
 }

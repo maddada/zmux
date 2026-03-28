@@ -55,6 +55,7 @@ export type SidebarHudState = {
   debuggingMode: boolean;
   focusedSessionTitle?: string;
   isFocusModeActive: boolean;
+  pendingAgentIds: string[];
   showCloseButtonOnSessionCards: boolean;
   showHotkeysOnSessionCards: boolean;
   theme:

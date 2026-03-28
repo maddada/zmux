@@ -13,6 +13,7 @@ import {
   focusSessionInSimpleWorkspace,
   moveSessionToGroupInSimpleWorkspace,
   normalizeSimpleGroupedSessionWorkspaceSnapshot,
+  setT3SessionMetadataInSimpleWorkspace,
   setVisibleCountInSimpleWorkspace,
 } from "./simple-grouped-session-workspace-state";
 
@@ -260,6 +261,62 @@ describe("createSessionInSimpleWorkspace", () => {
     expect(result.session?.displayId).toBe("01");
     expect(result.session?.alias).toBe("01");
     expect(result.session?.sessionId).toBe(sessionIdForDisplay("01"));
+  });
+});
+
+describe("setT3SessionMetadataInSimpleWorkspace", () => {
+  test("should update the stored T3 metadata without changing the session identity", () => {
+    const placeholderSession = createSessionRecord(1, 0, {
+      kind: "t3",
+      t3: {
+        projectId: "pending-project",
+        serverOrigin: "http://127.0.0.1:3773",
+        threadId: "pending-thread",
+        workspaceRoot: "/tmp/project",
+      },
+      title: "T3 Code",
+    });
+    const snapshot = createWorkspaceSnapshot({
+      activeGroupId: DEFAULT_MAIN_GROUP_ID,
+      groups: [
+        {
+          groupId: DEFAULT_MAIN_GROUP_ID,
+          snapshot: {
+            focusedSessionId: placeholderSession.sessionId,
+            fullscreenRestoreVisibleCount: undefined,
+            sessions: [placeholderSession],
+            viewMode: "grid",
+            visibleCount: 1,
+            visibleSessionIds: [placeholderSession.sessionId],
+          },
+          title: "Main",
+        },
+      ],
+      nextGroupNumber: 2,
+      nextSessionDisplayId: 1,
+      nextSessionNumber: 2,
+    });
+    const normalizedSessionId = snapshot.groups[0]?.snapshot.sessions[0]?.sessionId;
+
+    const result = setT3SessionMetadataInSimpleWorkspace(snapshot, normalizedSessionId ?? "", {
+      projectId: "project-123",
+      serverOrigin: "http://127.0.0.1:3773",
+      threadId: "thread-456",
+      workspaceRoot: "/tmp/project",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.snapshot.groups[0]?.snapshot.sessions[0]).toEqual(
+      expect.objectContaining({
+        sessionId: normalizedSessionId,
+        t3: {
+          projectId: "project-123",
+          serverOrigin: "http://127.0.0.1:3773",
+          threadId: "thread-456",
+          workspaceRoot: "/tmp/project",
+        },
+      }),
+    );
   });
 });
 

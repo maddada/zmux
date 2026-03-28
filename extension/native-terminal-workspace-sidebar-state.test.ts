@@ -64,6 +64,84 @@ describe("buildSidebarMessage", () => {
     expect(message.groups[1]?.title).toBe("Main");
     expect(message.groups[1]?.kind).toBe("workspace");
   });
+
+  test("should show pending T3 sessions without a fake thread detail", () => {
+    const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
+    const sessionRecord = createSessionRecord(1, 0, {
+      kind: "t3",
+      t3: {
+        projectId: "pending-project",
+        serverOrigin: "http://127.0.0.1:3773",
+        threadId: "pending-thread",
+        workspaceRoot: "/tmp/project",
+      },
+      title: "T3 Code",
+    });
+    workspaceSnapshot.groups[0].snapshot.sessions = [sessionRecord];
+    workspaceSnapshot.groups[0].snapshot.focusedSessionId = sessionRecord.sessionId;
+    workspaceSnapshot.groups[0].snapshot.visibleSessionIds = [sessionRecord.sessionId];
+
+    const message = buildSidebarMessage({
+      ...createBuildSidebarMessageOptions(workspaceSnapshot, []),
+      getT3ActivityState: () => ({
+        activity: "idle",
+        detail: undefined,
+        isRunning: true,
+      }),
+    });
+
+    expect(message.groups[1]?.sessions[0]).toEqual(
+      expect.objectContaining({
+        activity: "idle",
+        detail: undefined,
+        isRunning: true,
+        primaryTitle: "T3 Code",
+        sessionId: sessionRecord.sessionId,
+      }),
+    );
+  });
+
+  test("should promote the terminal title to the primary title when the user did not rename the session", () => {
+    const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
+    const sessionRecord = createSessionRecord(1, 0);
+    workspaceSnapshot.groups[0].snapshot.sessions = [sessionRecord];
+    workspaceSnapshot.groups[0].snapshot.focusedSessionId = sessionRecord.sessionId;
+    workspaceSnapshot.groups[0].snapshot.visibleSessionIds = [sessionRecord.sessionId];
+
+    const message = buildSidebarMessage({
+      ...createBuildSidebarMessageOptions(workspaceSnapshot, []),
+      getTerminalTitle: () => "Claude Code",
+    });
+
+    expect(message.groups[1]?.sessions[0]).toEqual(
+      expect.objectContaining({
+        primaryTitle: "Claude Code",
+        terminalTitle: undefined,
+      }),
+    );
+  });
+
+  test("should keep the user title authoritative over the terminal title", () => {
+    const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
+    const sessionRecord = createSessionRecord(1, 0, {
+      title: "Bug Fix",
+    });
+    workspaceSnapshot.groups[0].snapshot.sessions = [sessionRecord];
+    workspaceSnapshot.groups[0].snapshot.focusedSessionId = sessionRecord.sessionId;
+    workspaceSnapshot.groups[0].snapshot.visibleSessionIds = [sessionRecord.sessionId];
+
+    const message = buildSidebarMessage({
+      ...createBuildSidebarMessageOptions(workspaceSnapshot, []),
+      getTerminalTitle: () => "Claude Code",
+    });
+
+    expect(message.groups[1]?.sessions[0]).toEqual(
+      expect.objectContaining({
+        primaryTitle: "Bug Fix",
+        terminalTitle: "Claude Code",
+      }),
+    );
+  });
 });
 
 function createBuildSidebarMessageOptions(
@@ -117,6 +195,7 @@ function createSidebarHudState(): SidebarHydrateMessage["hud"] {
     focusedSessionTitle: undefined,
     highlightedVisibleCount: 1,
     isFocusModeActive: false,
+    pendingAgentIds: [],
     showCloseButtonOnSessionCards: false,
     showHotkeysOnSessionCards: false,
     theme: "dark-blue",

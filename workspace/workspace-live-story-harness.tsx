@@ -275,6 +275,8 @@ function createWorkspaceMessage(
       kind: "terminal",
       sessionId: sessionRecord.sessionId,
       sessionRecord,
+      terminalTitle:
+        workspace.sessionDecorationsById[sessionRecord.sessionId]?.terminalTitle ?? sessionRecord.title,
     }));
 
   return {
@@ -289,7 +291,7 @@ function createWorkspaceMessage(
       fontFamily: "MesloLGL Nerd Font Mono",
       fontSize: 14,
       letterSpacing: 0,
-      lineHeight: 1.1,
+      lineHeight: 0.8,
     },
     type: "hydrate",
     viewMode: activeGroup?.snapshot.viewMode ?? "vertical",

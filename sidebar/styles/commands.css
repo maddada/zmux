@@ -61,8 +61,18 @@
   width: 100%;
 }
 
+.agent-button:disabled {
+  cursor: default;
+}
+
 .agent-button[data-dragging="true"] {
   opacity: 0.6;
+}
+
+.agent-button[data-loading="true"] {
+  background: color-mix(in srgb, var(--app-button-background) 18%, var(--app-card-active) 82%);
+  border-color: color-mix(in srgb, var(--app-button-background) 44%, var(--app-border));
+  opacity: 0.92;
 }
 
 .command-button {
@@ -98,6 +108,13 @@
   width: 18px;
 }
 
+.agent-button-loading-icon {
+  animation: agent-button-spin 0.9s linear infinite;
+  display: block;
+  height: 18px;
+  width: 18px;
+}
+
 body[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="codex"],
 body[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="opencode"],
 body[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="t3"],
@@ -122,6 +139,16 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
   justify-content: center;
   letter-spacing: 0.04em;
   width: 18px;
+}
+
+@keyframes agent-button-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .command-button[data-configured="true"] {

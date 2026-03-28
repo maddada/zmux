@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type {
@@ -23,7 +22,6 @@ export type TerminalPaneProps = {
   connection: WorkspacePanelConnection;
   debuggingMode: boolean;
   fitVersion: number;
-  isVisible: boolean;
   onActivate: () => void;
   pane: WorkspacePanelTerminalPane;
   terminalAppearance: WorkspacePanelTerminalAppearance;
@@ -33,20 +31,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   connection,
   debuggingMode,
   fitVersion,
-  isVisible,
   onActivate,
   pane,
   terminalAppearance,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const isVisibleRef = useRef(isVisible);
   const terminalRef = useRef<Terminal | null>(null);
-  const isInitialLayoutReadyRef = useRef(false);
-
-  useEffect(() => {
-    isVisibleRef.current = isVisible;
-  }, [isVisible]);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -72,21 +63,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     fitRef.current = fit;
     terminal.loadAddon(fit);
     terminal.open(containerRef.current);
-    containerRef.current.style.visibility = "hidden";
 
     const unicode11 = new Unicode11Addon();
     terminal.loadAddon(unicode11);
     terminal.unicode.activeVersion = "11";
-
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        webgl.dispose();
-      });
-      terminal.loadAddon(webgl);
-    } catch {
-      // DOM renderer fallback
-    }
 
     let didDispose = false;
     let websocket: WebSocket | undefined;
@@ -164,10 +144,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       };
     };
 
-    if (document.hasFocus()) {
-      terminal.focus();
-    }
-
     requestAnimationFrame(() => {
       if (didDispose) {
         return;
@@ -179,15 +155,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       });
       fit.fit();
       terminal.refresh(0, terminal.rows - 1);
-      isInitialLayoutReadyRef.current = true;
-      updateContainerVisibility();
       connectWebsocket();
     });
-
-    const onWindowFocus = () => {
-      terminal.focus();
-    };
-    window.addEventListener("focus", onWindowFocus);
 
     const flushData = () => {
       const chunk = dataBuffer.join("");
@@ -301,29 +270,18 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
     return () => {
       didDispose = true;
-      isInitialLayoutReadyRef.current = false;
       if (flushTimer !== undefined) {
         clearTimeout(flushTimer);
         flushData();
       }
       cancelAnimationFrame(rafId);
       resizeObserver.disconnect();
-      window.removeEventListener("focus", onWindowFocus);
       themeObserver.disconnect();
       websocket?.close();
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;
     };
-
-    function updateContainerVisibility() {
-      if (!containerRef.current) {
-        return;
-      }
-
-      containerRef.current.style.visibility =
-        isVisibleRef.current && isInitialLayoutReadyRef.current ? "visible" : "hidden";
-    }
   }, [
     connection.baseUrl,
     connection.token,
@@ -351,15 +309,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       terminalRef.current?.refresh(0, terminalRef.current.rows - 1);
     });
   }, [debuggingMode, fitVersion, pane.sessionId]);
-
-  useEffect(() => {
-    if (!containerRef.current) {
-      return;
-    }
-
-    containerRef.current.style.visibility =
-      isVisible && isInitialLayoutReadyRef.current ? "visible" : "hidden";
-  }, [isVisible]);
 
   return (
     <div

@@ -281,9 +281,9 @@
         "VSmux.terminalLineHeight": {
           "title": "Terminal Line Height",
           "type": "number",
-          "minimum": 1,
+          "minimum": 0.8,
           "maximum": 2,
-          "default": 1.1,
+          "default": 0.8,
           "description": "Line height multiplier used by VSmux Ghostty terminals."
         },
         "VSmux.terminalLetterSpacing": {
