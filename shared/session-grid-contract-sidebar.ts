@@ -1,6 +1,7 @@
 import type { CompletionSoundSetting } from "./completion-sound";
 import type { SidebarAgentButton, SidebarAgentIcon } from "./sidebar-agents";
 import type { SidebarActionType, SidebarCommandButton } from "./sidebar-commands";
+import type { SidebarGitAction, SidebarGitState } from "./sidebar-git";
 import type {
   SessionGridSnapshot,
   TerminalViewMode,
@@ -54,6 +55,7 @@ export type SidebarHudState = {
   completionSoundLabel: string;
   debuggingMode: boolean;
   focusedSessionTitle?: string;
+  git: SidebarGitState;
   isFocusModeActive: boolean;
   pendingAgentIds: string[];
   showCloseButtonOnSessionCards: boolean;
@@ -216,6 +218,13 @@ export type SidebarToExtensionMessage =
   | {
       type: "runSidebarCommand";
       commandId: string;
+    }
+  | {
+      action: SidebarGitAction;
+      type: "runSidebarGitAction";
+    }
+  | {
+      type: "refreshGitState";
     }
   | {
       type: "saveSidebarCommand";

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type {
@@ -21,7 +22,6 @@ const DATA_BUFFER_FLUSH_MS = 5;
 export type TerminalPaneProps = {
   connection: WorkspacePanelConnection;
   debuggingMode: boolean;
-  fitVersion: number;
   onActivate: () => void;
   pane: WorkspacePanelTerminalPane;
   terminalAppearance: WorkspacePanelTerminalAppearance;
@@ -30,13 +30,13 @@ export type TerminalPaneProps = {
 export const TerminalPane: React.FC<TerminalPaneProps> = ({
   connection,
   debuggingMode,
-  fitVersion,
   onActivate,
   pane,
-  terminalAppearance,
+  terminalAppearance: _terminalAppearance,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const lastMeasuredSizeRef = useRef<{ height: number; width: number }>();
   const terminalRef = useRef<Terminal | null>(null);
 
   useEffect(() => {
@@ -45,17 +45,14 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     }
 
     const terminal = new Terminal({
+      theme: getTerminalTheme(),
       allowProposedApi: true,
-      cursorBlink: terminalAppearance.cursorBlink,
-      cursorStyle: terminalAppearance.cursorStyle,
-      fontFamily: terminalAppearance.fontFamily,
-      fontSize: terminalAppearance.fontSize,
+      cursorBlink: true,
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontSize: 12,
       fontWeight: "300",
       fontWeightBold: "500",
-      letterSpacing: terminalAppearance.letterSpacing,
-      lineHeight: terminalAppearance.lineHeight,
       scrollback: 200_000,
-      theme: getTerminalTheme(),
     });
     terminalRef.current = terminal;
 
@@ -67,6 +64,23 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     const unicode11 = new Unicode11Addon();
     terminal.loadAddon(unicode11);
     terminal.unicode.activeVersion = "11";
+
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      terminal.loadAddon(webgl);
+    } catch {
+      // Fall back to xterm's default renderer when WebGL is unavailable.
+    }
+
+    if (document.hasFocus()) {
+      terminal.focus();
+    }
+
+    const onWindowFocus = () => {
+      terminal.focus();
+    };
+    window.addEventListener("focus", onWindowFocus);
 
     let didDispose = false;
     let websocket: WebSocket | undefined;
@@ -145,17 +159,23 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     };
 
     requestAnimationFrame(() => {
-      if (didDispose) {
-        return;
-      }
+      requestAnimationFrame(() => {
+        if (didDispose) {
+          return;
+        }
 
-      logWorkspaceDebug(debuggingMode, "terminal.initialFit", {
-        cols: terminal.cols,
-        sessionId: pane.sessionId,
+        logWorkspaceDebug(debuggingMode, "terminal.initialFit", {
+          cols: terminal.cols,
+          sessionId: pane.sessionId,
+        });
+        fit.fit();
+        lastMeasuredSizeRef.current = {
+          height: Math.round(containerRef.current?.getBoundingClientRect().height ?? 0),
+          width: Math.round(containerRef.current?.getBoundingClientRect().width ?? 0),
+        };
+        terminal.refresh(0, terminal.rows - 1);
+        connectWebsocket();
       });
-      fit.fit();
-      terminal.refresh(0, terminal.rows - 1);
-      connectWebsocket();
     });
 
     const flushData = () => {
@@ -238,12 +258,26 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
       const { height, width } = entry.contentRect;
       if (width > 0 && height > 0) {
+        const nextMeasuredSize = {
+          height: Math.round(height),
+          width: Math.round(width),
+        };
+        const previousMeasuredSize = lastMeasuredSizeRef.current;
+        if (
+          previousMeasuredSize &&
+          previousMeasuredSize.width === nextMeasuredSize.width &&
+          previousMeasuredSize.height === nextMeasuredSize.height
+        ) {
+          return;
+        }
+
+        lastMeasuredSizeRef.current = nextMeasuredSize;
         cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(() => {
           logWorkspaceDebug(debuggingMode, "terminal.resizeObserverFit", {
-            height,
+            height: nextMeasuredSize.height,
             sessionId: pane.sessionId,
-            width,
+            width: nextMeasuredSize.width,
           });
           fit.fit();
         });
@@ -275,10 +309,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         flushData();
       }
       cancelAnimationFrame(rafId);
+      window.removeEventListener("focus", onWindowFocus);
       resizeObserver.disconnect();
       themeObserver.disconnect();
       websocket?.close();
       terminal.dispose();
+      lastMeasuredSizeRef.current = undefined;
       terminalRef.current = null;
       fitRef.current = null;
     };
@@ -286,29 +322,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     connection.baseUrl,
     connection.token,
     pane.sessionId,
-    terminalAppearance.cursorBlink,
-    terminalAppearance.cursorStyle,
-    terminalAppearance.fontFamily,
-    terminalAppearance.fontSize,
-    terminalAppearance.letterSpacing,
-    terminalAppearance.lineHeight,
     debuggingMode,
   ]);
-
-  useEffect(() => {
-    if (fitVersion === 0 || !fitRef.current || !terminalRef.current) {
-      return;
-    }
-
-    requestAnimationFrame(() => {
-      logWorkspaceDebug(debuggingMode, "terminal.focusFit", {
-        fitVersion,
-        sessionId: pane.sessionId,
-      });
-      fitRef.current?.fit();
-      terminalRef.current?.refresh(0, terminalRef.current.rows - 1);
-    });
-  }, [debuggingMode, fitVersion, pane.sessionId]);
 
   return (
     <div

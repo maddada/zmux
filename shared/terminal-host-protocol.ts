@@ -1,4 +1,4 @@
-export const TERMINAL_HOST_PROTOCOL_VERSION = 5;
+export const TERMINAL_HOST_PROTOCOL_VERSION = 6;
 
 export type TerminalSessionStatus = "starting" | "running" | "exited" | "error" | "disconnected";
 
@@ -19,6 +19,7 @@ export type TerminalSessionSnapshot = {
   shell: string;
   startedAt: string;
   status: TerminalSessionStatus;
+  title?: string;
   workspaceId: string;
   endedAt?: string;
   errorMessage?: string;

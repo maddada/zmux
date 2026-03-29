@@ -1,6 +1,7 @@
 import { DEFAULT_COMPLETION_SOUND, getCompletionSoundLabel } from "../shared/completion-sound";
 import { createDefaultSidebarAgentButtons } from "../shared/sidebar-agents";
 import { createDefaultSidebarCommandButtons } from "../shared/sidebar-commands";
+import { createDefaultSidebarGitState } from "../shared/sidebar-git";
 import type {
   SidebarHydrateMessage,
   SidebarHudState,
@@ -57,6 +58,7 @@ export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrat
     completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),
     debuggingMode: false,
     focusedSessionTitle: getFocusedSessionTitle(groups),
+    git: createDefaultSidebarGitState(),
     highlightedVisibleCount: args.highlightedVisibleCount,
     isFocusModeActive: args.isFocusModeActive,
     pendingAgentIds: [],

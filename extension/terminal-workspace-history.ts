@@ -5,6 +5,9 @@ const CODEX_WORKING_TEXT_MARKER = "esc to interrupt)";
 const CODEX_WORKING_SNIPPET_LENGTH = 220;
 const ESCAPE_SEQUENCE_PATTERN = "\\u001b";
 const BELL_SEQUENCE_PATTERN = "\\u0007";
+const OSC_PREFIX = "\u001b]";
+const ESCAPE = "\u001b";
+const MAX_TITLE_STREAM_CARRYOVER_CHARS = 4096;
 const OSC_SEQUENCE_PATTERN = new RegExp(
   `${ESCAPE_SEQUENCE_PATTERN}\\][\\s\\S]*?(?:${BELL_SEQUENCE_PATTERN}|${ESCAPE_SEQUENCE_PATTERN}\\\\)`,
   "gu",
@@ -51,6 +54,20 @@ export function extractLatestTerminalTitleFromVtHistory(history: string): string
   }
 
   return latestTitle;
+}
+
+export function parseTerminalTitleFromOutputChunk(
+  carryover: string,
+  chunk: string,
+): {
+  carryover: string;
+  title?: string;
+} {
+  const combinedOutput = `${carryover}${chunk}`;
+  return {
+    carryover: getTerminalTitleStreamCarryover(combinedOutput),
+    title: extractLatestTerminalTitleFromVtHistory(combinedOutput),
+  };
 }
 
 export function extractTerminalTextTailFromVtHistory(history: string): string | undefined {
@@ -154,4 +171,21 @@ function findOscTerminator(
   }
 
   return undefined;
+}
+
+function getTerminalTitleStreamCarryover(history: string): string {
+  const lastOscStart = history.lastIndexOf(OSC_PREFIX);
+  if (lastOscStart >= 0 && !findOscTerminator(history, lastOscStart + OSC_PREFIX.length)) {
+    return history.slice(Math.max(0, lastOscStart, history.length - MAX_TITLE_STREAM_CARRYOVER_CHARS));
+  }
+
+  if (history.endsWith(OSC_PREFIX)) {
+    return OSC_PREFIX;
+  }
+
+  if (history.endsWith(ESCAPE)) {
+    return ESCAPE;
+  }
+
+  return "";
 }

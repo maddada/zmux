@@ -16,10 +16,12 @@ import type {
   TerminalHostKillRequest,
   TerminalSessionSnapshot,
 } from "../shared/terminal-host-protocol";
+import { TERMINAL_HOST_PROTOCOL_VERSION } from "../shared/terminal-host-protocol";
 
 type DaemonInfo = {
   pid: number;
   port: number;
+  protocolVersion: typeof TERMINAL_HOST_PROTOCOL_VERSION;
   startedAt: string;
   token: string;
 };
@@ -191,7 +193,11 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
 
   private async ensureDaemonProcess(): Promise<DaemonInfo> {
     const existingInfo = await this.readDaemonInfo();
-    if (existingInfo && (await this.canReachDaemon(existingInfo))) {
+    if (
+      existingInfo &&
+      existingInfo.protocolVersion === TERMINAL_HOST_PROTOCOL_VERSION &&
+      (await this.canReachDaemon(existingInfo))
+    ) {
       return existingInfo;
     }
 

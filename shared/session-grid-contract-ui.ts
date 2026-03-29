@@ -11,6 +11,7 @@ import {
   type SessionRecord,
   type SidebarTheme,
 } from "./session-grid-contract-core";
+import { createDefaultSidebarGitState, type SidebarGitState } from "./sidebar-git";
 import type { SidebarHudState, SidebarSessionItem } from "./session-grid-contract-sidebar";
 import {
   getOrderedSessions,
@@ -34,6 +35,7 @@ export function createSidebarHudState(
   agents: SidebarAgentButton[] = createDefaultSidebarAgentButtons(),
   commands: SidebarCommandButton[] = createDefaultSidebarCommandButtons(),
   pendingAgentIds: string[] = [],
+  git: SidebarGitState = createDefaultSidebarGitState(),
 ): SidebarHudState {
   const sessionById = new Map(snapshot.sessions.map((session) => [session.sessionId, session]));
   const focusedSession = snapshot.focusedSessionId
@@ -49,6 +51,7 @@ export function createSidebarHudState(
     completionSoundLabel: getCompletionSoundLabel(completionSound),
     debuggingMode,
     focusedSessionTitle: focusedSession?.title,
+    git,
     highlightedVisibleCount: getSessionGridLayoutVisibleCount(snapshot),
     isFocusModeActive: isSessionGridFocusModeActive(snapshot),
     pendingAgentIds,

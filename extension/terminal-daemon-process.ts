@@ -10,6 +10,7 @@ import {
   readPersistedSessionStateFromFile,
   updatePersistedSessionStateFile,
 } from "./session-state-file";
+import { parseTerminalTitleFromOutputChunk } from "./terminal-workspace-history";
 import type {
   TerminalHostAcknowledgeAttentionRequest,
   TerminalHostConfigureRequest,
@@ -27,10 +28,12 @@ import type {
   TerminalSessionSnapshot,
   TerminalStateMessage,
 } from "../shared/terminal-host-protocol";
+import { TERMINAL_HOST_PROTOCOL_VERSION } from "../shared/terminal-host-protocol";
 
 type DaemonInfo = {
   pid: number;
   port: number;
+  protocolVersion: typeof TERMINAL_HOST_PROTOCOL_VERSION;
   startedAt: string;
   token: string;
 };
@@ -39,7 +42,9 @@ type ManagedSession = {
   cols: number;
   cwd: string;
   history: string;
+  liveTitle?: string;
   lastKnownPersistedTitle?: string;
+  titleCarryover: string;
   pty: pty.IPty;
   rows: number;
   sessionId: string;
@@ -102,6 +107,7 @@ server.listen(0, "127.0.0.1", async () => {
   daemonInfo = {
     pid: process.pid,
     port: address.port,
+    protocolVersion: TERMINAL_HOST_PROTOCOL_VERSION,
     startedAt: new Date().toISOString(),
     token: randomToken(),
   };
@@ -331,6 +337,7 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
     cols: request.cols,
     cwd: request.cwd,
     history: "",
+    liveTitle: undefined,
     pty: spawnedPty,
     rows: request.rows,
     sessionId: request.sessionId,
@@ -347,19 +354,26 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
       shell: request.shell,
       startedAt: new Date().toISOString(),
       status: "running",
+      title: undefined,
       workspaceId: request.workspaceId,
     },
+    titleCarryover: "",
     workspaceId: request.workspaceId,
   };
 
   spawnedPty.onData((data: string) => {
     session.history = trimHistory(`${session.history}${data}`);
+    const didChangeTitle = updateSessionLiveTitle(session, data);
     const outputMessage: TerminalOutputMessage = {
       data,
       sessionId: session.sessionId,
       type: "terminalOutput",
     };
     broadcastSessionMessage(session.sessionId, outputMessage);
+    if (didChangeTitle) {
+      broadcastControlSessionState(session.snapshot);
+      broadcastSessionState(session.sessionId, session.snapshot);
+    }
   });
 
   spawnedPty.onExit(({ exitCode }: { exitCode: number; signal?: number }) => {
@@ -400,6 +414,7 @@ async function buildSnapshot(
     agentName: persistedState.agentName,
     agentStatus: persistedState.agentStatus,
     history: includeHistory ? session.history : undefined,
+    title: session.liveTitle ?? persistedState.title,
   };
   return session.snapshot;
 }
@@ -500,6 +515,21 @@ function okResponse(
     type: "response",
     ...(payload ?? {}),
   } as TerminalHostResponse;
+}
+
+function updateSessionLiveTitle(session: ManagedSession, chunk: string): boolean {
+  const { carryover, title } = parseTerminalTitleFromOutputChunk(session.titleCarryover, chunk);
+  session.titleCarryover = carryover;
+  if (!title || title === session.liveTitle) {
+    return false;
+  }
+
+  session.liveTitle = title;
+  session.snapshot = {
+    ...session.snapshot,
+    title,
+  };
+  return true;
 }
 
 function scheduleIdleShutdownIfNeeded(): void {

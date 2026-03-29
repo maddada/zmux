@@ -26,6 +26,7 @@ export const DEBUGGING_MODE_SETTING = "debuggingMode";
 export const COMPLETION_SOUND_SETTING = "completionSound";
 export const DEFAULT_BROWSER_LAUNCH_URL_SETTING = "defaultBrowserLaunchUrl";
 export const AGENTS_SETTING = "agents";
+export const GIT_TEXT_GENERATION_AGENT_ID_SETTING = "gitTextGenerationAgentId";
 export const TERMINAL_FONT_FAMILY_SETTING = "terminalFontFamily";
 export const TERMINAL_FONT_SIZE_SETTING = "terminalFontSize";
 export const TERMINAL_LINE_HEIGHT_SETTING = "terminalLineHeight";
@@ -79,6 +80,10 @@ export function getCompletionSoundConfigurationKey(): string {
 
 export function getAgentsConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${AGENTS_SETTING}`;
+}
+
+export function getGitTextGenerationAgentIdConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${GIT_TEXT_GENERATION_AGENT_ID_SETTING}`;
 }
 
 export function getDefaultBrowserLaunchUrlConfigurationKey(): string {
@@ -168,25 +173,25 @@ export function getTerminalFontFamily(): string {
   const value =
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<string>(TERMINAL_FONT_FAMILY_SETTING, "MesloLGL Nerd Font Mono") ??
-    "MesloLGL Nerd Font Mono";
+      .get<string>(TERMINAL_FONT_FAMILY_SETTING, 'Menlo, Monaco, "Courier New", monospace') ??
+    'Menlo, Monaco, "Courier New", monospace';
 
-  return value.trim() || "MesloLGL Nerd Font Mono";
+  return value.trim() || 'Menlo, Monaco, "Courier New", monospace';
 }
 
 export function getTerminalFontSize(): number {
   const value =
-    vscode.workspace.getConfiguration(SETTINGS_SECTION).get<number>(TERMINAL_FONT_SIZE_SETTING, 14) ??
-    14;
-  return clampNumber(value, 8, 32, 14);
+    vscode.workspace.getConfiguration(SETTINGS_SECTION).get<number>(TERMINAL_FONT_SIZE_SETTING, 12) ??
+    12;
+  return clampNumber(value, 8, 32, 12);
 }
 
 export function getTerminalLineHeight(): number {
   const value =
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<number>(TERMINAL_LINE_HEIGHT_SETTING, 0.8) ?? 0.8;
-  return clampNumber(value, 0.8, 2, 0.8);
+      .get<number>(TERMINAL_LINE_HEIGHT_SETTING, 1) ?? 1;
+  return clampNumber(value, 0.8, 2, 1);
 }
 
 export function getTerminalLetterSpacing(): number {

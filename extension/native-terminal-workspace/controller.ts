@@ -149,14 +149,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       workspaceId: this.workspaceId,
     });
     this.workspaceAssetServer = new WorkspaceAssetServer(context);
-    this.workspacePanel = new WorkspacePanelManager({
-      context,
-      onMessage: async (message) => {
-        if (message.type === "focusSession") {
-          await this.focusSession(message.sessionId);
-        }
-      },
-    });
+      this.workspacePanel = new WorkspacePanelManager({
+        context,
+        onMessage: async (message) => {
+          if (message.type === "focusSession") {
+            await this.focusSession(message.sessionId, "workspace");
+          }
+        },
+      });
     this.sidebarProvider = new SessionSidebarViewProvider({
       onMessage: async (message) => this.handleSidebarMessage(message),
     });
@@ -172,12 +172,18 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       this.backend.onDidChangeSessionTitle(({ sessionId, title }) => {
         const previousTitle = this.terminalTitleBySessionId.get(sessionId);
         const previousDerivedActivity = this.titleDerivedActivityBySessionId.get(sessionId);
-        this.terminalTitleBySessionId.set(sessionId, title);
-        const nextDerivedActivity = getTitleDerivedSessionActivityFromTransition(
-          previousTitle,
-          title,
-          previousDerivedActivity,
-        );
+        if (title) {
+          this.terminalTitleBySessionId.set(sessionId, title);
+        } else {
+          this.terminalTitleBySessionId.delete(sessionId);
+        }
+        const nextDerivedActivity = title
+          ? getTitleDerivedSessionActivityFromTransition(
+              previousTitle,
+              title,
+              previousDerivedActivity,
+            )
+          : undefined;
         if (nextDerivedActivity) {
           this.titleDerivedActivityBySessionId.set(sessionId, nextDerivedActivity);
         } else {
@@ -278,7 +284,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.afterStateChange();
   }
 
-  public async focusSession(sessionId: string, source?: "sidebar"): Promise<void> {
+  public async focusSession(sessionId: string, source?: "sidebar" | "workspace"): Promise<void> {
     const sessionRecord = this.store.getSession(sessionId);
     if (!sessionRecord) {
       if (isBrowserSidebarSessionId(sessionId)) {
@@ -292,6 +298,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     logVSmuxDebug("controller.focusSession", {
       sessionId,
       sessionKind: sessionRecord.kind,
+      source,
     });
     const hadLiveTerminal =
       sessionRecord.kind === "terminal" && this.backend.hasLiveTerminal(sessionRecord.sessionId);
@@ -301,9 +308,28 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       !this.backend.hasAttachedTerminal(sessionRecord.sessionId);
     const shouldResumeDeadTerminal =
       shouldReattachDetachedTerminal && sessionRecord.kind === "terminal" && !hadLiveTerminal;
-    await this.createSurfaceIfNeeded(sessionRecord);
+    const isVisiblePresentationFocus =
+      this.isSessionVisibleInWorkspace(sessionId) && !shouldReattachDetachedTerminal;
+    if (!isVisiblePresentationFocus && this.shouldEnsureSessionSurface(sessionRecord)) {
+      await this.createSurfaceIfNeeded(sessionRecord);
+    }
     const acknowledgedAttention = await this.acknowledgeSessionAttentionIfNeeded(sessionId);
     const changed = await this.store.focusSession(sessionId);
+    if (isVisiblePresentationFocus) {
+      if (changed || acknowledgedAttention) {
+        await this.refreshWorkspacePanel();
+        await this.refreshSidebar();
+      }
+      await this.revealWorkspacePanelForSidebarFocus(source);
+      logVSmuxDebug("controller.focusSession.visiblePresentation", {
+        acknowledgedAttention,
+        changed,
+        sessionId,
+        source,
+      });
+      return;
+    }
+
     if (!changed) {
       if (shouldReattachDetachedTerminal) {
         await this.afterStateChange();
@@ -314,6 +340,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       if (acknowledgedAttention) {
         await this.refreshSidebar();
       }
+      await this.revealWorkspacePanelForSidebarFocus(source);
       logVSmuxDebug("controller.focusSession.noChange", { sessionId });
       return;
     }
@@ -1095,6 +1122,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           });
           return;
         }
+        if (!this.shouldEnsureSessionSurface(sessionRecord)) {
+          logVSmuxDebug("controller.reconcile.skipEnsure", {
+            kind: sessionRecord.kind,
+            reason: "surface-already-attached",
+            sessionId: sessionRecord.sessionId,
+            version: requestVersion,
+          });
+          continue;
+        }
         await this.createSurfaceIfNeeded(sessionRecord);
       }
 
@@ -1142,6 +1178,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     await this.ensureT3Ready(sessionRecord);
+  }
+
+  private shouldEnsureSessionSurface(sessionRecord: SessionRecord): boolean {
+    if (sessionRecord.kind !== "terminal") {
+      return true;
+    }
+
+    return !this.backend.hasAttachedTerminal(sessionRecord.sessionId);
   }
 
   private async ensureT3Ready(sessionRecord: T3SessionRecord): Promise<void> {
@@ -1463,6 +1507,16 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private clearObservedSidebarFocusState(): void {
     return;
+  }
+
+  private async revealWorkspacePanelForSidebarFocus(
+    source: "sidebar" | "workspace" | undefined,
+  ): Promise<void> {
+    if (source !== "sidebar") {
+      return;
+    }
+
+    await this.workspacePanel.reveal();
   }
 
   private async refreshWorkspacePanel(): Promise<void> {

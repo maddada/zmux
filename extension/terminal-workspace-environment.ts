@@ -62,6 +62,7 @@ export function createDisconnectedSessionSnapshot(
     shell: getDefaultShell(),
     startedAt: new Date(0).toISOString(),
     status,
+    title: undefined,
     workspaceId,
   };
 }

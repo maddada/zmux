@@ -15,7 +15,7 @@
 :root {
   color-scheme: dark;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --workspace-terminal-font: "MesloLGL Nerd Font Mono", Menlo, Monaco, monospace;
+  --workspace-terminal-font: Menlo, Monaco, "Courier New", monospace;
 }
 
 html,
@@ -37,17 +37,29 @@ body {
 .workspace-shell {
   box-sizing: border-box;
   display: flex;
+  flex-direction: column;
   gap: 12px;
   height: 100%;
   padding: 12px;
 }
 
-.workspace-shell-single {
-  flex-direction: column;
+.workspace-row {
+  display: grid;
+  flex: 1 1 0;
+  gap: 12px;
+  min-height: 0;
 }
 
-.workspace-shell-split {
-  flex-direction: row;
+.workspace-row-cols-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace-row-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workspace-row-cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .workspace-shell-empty {
@@ -69,10 +81,10 @@ body {
 }
 
 .workspace-pane {
-  background: rgba(16, 23, 34, 0.94);
-  border: 1px solid rgba(88, 111, 149, 0.36);
+  background: rgba(0, 0, 0, 0.94);
+  /* border: 1px solid rgba(88, 111, 149, 0.36); */
   border-radius: 0px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  /* box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24); */
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
@@ -89,6 +101,8 @@ body {
   align-items: center;
   border-bottom: 1px solid rgba(88, 111, 149, 0.24);
   display: flex;
+  color: #e1e1e1;
+  font-weight: 400;
   justify-content: space-between;
   min-height: 20px;
   padding: 6px 10px;

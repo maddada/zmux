@@ -21,6 +21,9 @@ export class WorkspacePanelManager implements vscode.Disposable {
     this.disposables.push(
       vscode.window.registerWebviewPanelSerializer(WORKSPACE_PANEL_TYPE, {
         deserializeWebviewPanel: async (webviewPanel) => {
+          if (!(await this.tryAdoptPanel(webviewPanel))) {
+            return;
+          }
           this.panel = webviewPanel;
           this.configurePanel(webviewPanel);
           if (this.latestMessage) {
@@ -91,6 +94,18 @@ export class WorkspacePanelManager implements vscode.Disposable {
     this.panel = panel;
     this.configurePanel(panel);
     return panel;
+  }
+
+  private async tryAdoptPanel(panel: vscode.WebviewPanel): Promise<boolean> {
+    if (!this.panel || this.panel === panel) {
+      return true;
+    }
+
+    if (panel.active || panel.visible) {
+      this.panel.reveal(panel.viewColumn ?? vscode.ViewColumn.Active, false);
+    }
+    panel.dispose();
+    return false;
   }
 
   private configurePanel(panel: vscode.WebviewPanel): void {

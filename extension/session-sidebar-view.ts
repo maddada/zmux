@@ -251,7 +251,7 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
       );
 
     case "setVisibleCount":
-      return typeof message.visibleCount === "number" && [1, 2].includes(message.visibleCount);
+      return typeof message.visibleCount === "number" && [1, 2, 3, 4, 6, 9].includes(message.visibleCount);
 
     case "setViewMode":
       return (

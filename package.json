@@ -267,7 +267,7 @@
         "VSmux.terminalFontFamily": {
           "title": "Terminal Font Family",
           "type": "string",
-          "default": "MesloLGL Nerd Font Mono",
+          "default": "Menlo, Monaco, \"Courier New\", monospace",
           "description": "Font family used by VSmux Ghostty terminals in the workspace webview."
         },
         "VSmux.terminalFontSize": {
@@ -275,7 +275,7 @@
           "type": "number",
           "minimum": 8,
           "maximum": 32,
-          "default": 14,
+          "default": 12,
           "description": "Font size used by VSmux Ghostty terminals."
         },
         "VSmux.terminalLineHeight": {
@@ -283,7 +283,7 @@
           "type": "number",
           "minimum": 0.8,
           "maximum": 2,
-          "default": 0.8,
+          "default": 1,
           "description": "Line height multiplier used by VSmux Ghostty terminals."
         },
         "VSmux.terminalLetterSpacing": {
@@ -422,6 +422,13 @@
             }
           },
           "description": "User-level agent definitions shown in the VSmux sidebar. Built-in agents can be customized or hidden, and extra custom variants can reuse the same agent type icons."
+        },
+        "VSmux.gitTextGenerationAgentId": {
+          "title": "Git Text Generation Agent Id",
+          "type": "string",
+          "scope": "application",
+          "default": "codex",
+          "description": "Agent ID from VSmux.agents used to generate Git commit messages and PR text. Defaults to codex. If unavailable, VSmux falls back to claude and then the first configured agent with a command."
         },
         "VSmux.agentOrder": {
           "title": "Agent Order",

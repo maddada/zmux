@@ -155,9 +155,9 @@
 .group-control-count-menu {
   display: grid;
   gap: 6px;
-  grid-template-columns: repeat(2, 18px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   justify-content: center;
-  min-width: 0;
+  min-width: 132px;
 }
 
 .group-control-menu-item {
@@ -171,9 +171,17 @@
 .group-control-count-menu .group-control-menu-item {
   height: 24px;
   min-width: 0;
-  padding-left: 0;
-  padding-right: 0;
+  padding-left: 8px;
+  padding-right: 8px;
   justify-content: center;
+}
+
+.group-control-count-value,
+.group-control-count-option-value {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1;
 }
 
 .group-control-menu-item[data-selected="true"] {

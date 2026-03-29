@@ -21,6 +21,7 @@ import {
 } from "react";
 import { createDefaultSidebarAgentButtons } from "../shared/sidebar-agents";
 import { createDefaultSidebarCommandButtons } from "../shared/sidebar-commands";
+import { createDefaultSidebarGitState } from "../shared/sidebar-git";
 import {
   MAX_GROUP_COUNT,
   type ExtensionToSidebarMessage,
@@ -69,6 +70,7 @@ const INITIAL_STATE: SidebarState = {
     completionSoundLabel: "Ping",
     debuggingMode: false,
     focusedSessionTitle: undefined,
+    git: createDefaultSidebarGitState(),
     highlightedVisibleCount: 1,
     isFocusModeActive: false,
     pendingAgentIds: [],
@@ -379,6 +381,8 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     if (sourceData?.kind !== "session") {
       return;
     }
+
+    draggedSessionIdRef.current = sourceData.sessionId;
 
     const sourceElement = (event.operation.source as { element?: Element | undefined }).element;
     if (sourceElement instanceof HTMLElement) {

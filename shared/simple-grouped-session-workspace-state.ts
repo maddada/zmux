@@ -1,4 +1,5 @@
 import {
+  clampVisibleSessionCount,
   DEFAULT_MAIN_GROUP_ID,
   DEFAULT_MAIN_GROUP_TITLE,
   MAX_GROUP_COUNT,
@@ -361,14 +362,16 @@ export function toggleFullscreenSessionInSimpleWorkspace(
 
   const currentVisibleCount = clampSupportedVisibleCount(activeGroup.snapshot.visibleCount);
   const restoreVisibleCount =
-    activeGroup.snapshot.fullscreenRestoreVisibleCount === 2 ? 2 : undefined;
-  if (currentVisibleCount === 1 && restoreVisibleCount === 2) {
+    activeGroup.snapshot.fullscreenRestoreVisibleCount === undefined
+      ? undefined
+      : clampSupportedVisibleCount(activeGroup.snapshot.fullscreenRestoreVisibleCount);
+  if (currentVisibleCount === 1 && restoreVisibleCount !== undefined) {
     return updateGroup(snapshot, activeGroup.groupId, (group) => ({
       ...group,
       snapshot: normalizeGroupSnapshot({
         ...group.snapshot,
         fullscreenRestoreVisibleCount: undefined,
-        visibleCount: 2,
+        visibleCount: restoreVisibleCount,
       }),
     }));
   }
@@ -377,7 +380,10 @@ export function toggleFullscreenSessionInSimpleWorkspace(
     ...group,
     snapshot: normalizeGroupSnapshot({
       ...group.snapshot,
-      fullscreenRestoreVisibleCount: group.snapshot.visibleCount > 1 ? 2 : undefined,
+      fullscreenRestoreVisibleCount:
+        group.snapshot.visibleCount > 1
+          ? clampSupportedVisibleCount(group.snapshot.visibleCount)
+          : undefined,
       visibleCount: 1,
     }),
   }));
@@ -631,7 +637,9 @@ function normalizeGroupSnapshot(snapshot: SessionGroupRecord["snapshot"]): Sessi
   return {
     focusedSessionId,
     fullscreenRestoreVisibleCount:
-      visibleCount === 1 && snapshot.fullscreenRestoreVisibleCount === 2 ? 2 : undefined,
+      visibleCount === 1 && snapshot.fullscreenRestoreVisibleCount !== undefined
+        ? clampSupportedVisibleCount(snapshot.fullscreenRestoreVisibleCount)
+        : undefined,
     sessions,
     viewMode: snapshot.viewMode ?? "grid",
     visibleCount,
@@ -673,7 +681,7 @@ function getNormalizedVisibleIds(
   }
 
   for (const session of sessions) {
-    if (visibleSessionIds.length >= 2) {
+    if (visibleSessionIds.length >= visibleCount) {
       break;
     }
     if (!visibleSessionIds.includes(session.sessionId)) {
@@ -681,12 +689,12 @@ function getNormalizedVisibleIds(
     }
   }
 
-  if (visibleSessionIds.length <= 2) {
+  if (visibleSessionIds.length <= visibleCount) {
     return visibleSessionIds;
   }
 
   const passiveVisibleIds = visibleSessionIds.filter((sessionId) => sessionId !== focusedSessionId);
-  return passiveVisibleIds.slice(0, 1).concat(focusedSessionId);
+  return passiveVisibleIds.slice(0, Math.max(0, visibleCount - 1)).concat(focusedSessionId);
 }
 
 function getNextVisibleIdsForFocusedSession(
@@ -723,18 +731,17 @@ function getNextVisibleIdsForFocusedSession(
     );
   }
 
-  const passiveVisibleId =
-    currentVisibleSessionIds.find(
-      (sessionId) =>
-        sessionId !== nextFocusedSessionId && sessionId !== currentFocusedSessionId,
-    ) ??
-    currentVisibleSessionIds.find((sessionId) => sessionId !== nextFocusedSessionId) ??
-    currentFocusedSessionId;
+  const passiveVisibleIds = currentVisibleSessionIds.filter(
+    (sessionId) =>
+      sessionId !== nextFocusedSessionId && sessionId !== currentFocusedSessionId,
+  );
   return getNormalizedVisibleIds(
     sessions,
     visibleCount,
     nextFocusedSessionId,
-    passiveVisibleId ? [passiveVisibleId, nextFocusedSessionId] : [nextFocusedSessionId],
+    passiveVisibleIds
+      .slice(0, Math.max(0, visibleCount - 1))
+      .concat(nextFocusedSessionId),
   );
 }
 
@@ -800,7 +807,7 @@ function createEmptyGroup(groupId: string, title: string): SessionGroupRecord {
 }
 
 function clampSupportedVisibleCount(value: number | undefined): VisibleSessionCount {
-  return value === 2 ? 2 : 1;
+  return clampVisibleSessionCount(value ?? 1);
 }
 
 function getNextGroupNumber(groups: readonly SessionGroupRecord[]): number {

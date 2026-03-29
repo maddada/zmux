@@ -54,20 +54,21 @@ export const ToolbarActions: Story = {
 
     await step("toggle sessions shown", async () => {
       resetSidebarStoryMessages();
-      await userEvent.click(canvas.getByRole("button", { name: "Toggle split mode for Group 4" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Select split count for Group 4" }));
+      await userEvent.click(await body.findByRole("menuitem", { name: "Show 2 splits" }));
       await expectMessage({ type: "setVisibleCount", visibleCount: 2 });
     });
 
     await step("keep the split menu available on right click", async () => {
       resetSidebarStoryMessages();
-      const splitModeButton = canvas.getByRole("button", { name: "Toggle split mode for Group 4" });
+      const splitModeButton = canvas.getByRole("button", { name: "Select split count for Group 4" });
       await openContextMenu(splitModeButton);
-      await expect(body.queryByRole("menuitem", { name: "3" })).toBeNull();
-      await expect(body.queryByRole("menuitem", { name: "4" })).toBeNull();
-      await expect(body.queryByRole("menuitem", { name: "6" })).toBeNull();
-      await expect(body.queryByRole("menuitem", { name: "9" })).toBeNull();
-      await userEvent.click(await body.findByRole("menuitem", { name: "Show 2 splits" }));
-      await expectMessage({ type: "setVisibleCount", visibleCount: 2 });
+      await body.findByRole("menuitem", { name: "Show 3 splits" });
+      await body.findByRole("menuitem", { name: "Show 4 splits" });
+      await body.findByRole("menuitem", { name: "Show 6 splits" });
+      await body.findByRole("menuitem", { name: "Show 9 splits" });
+      await userEvent.click(await body.findByRole("menuitem", { name: "Show 4 splits" }));
+      await expectMessage({ type: "setVisibleCount", visibleCount: 4 });
     });
 
     await step("keep the layout selector hidden", async () => {

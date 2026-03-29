@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createEditorLayoutPlan } from "../shared/editor-layout";
 import type {
   ExtensionToWorkspacePanelMessage,
   WorkspacePanelPane,
@@ -23,10 +24,35 @@ export type WorkspaceAppProps = {
 export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = window, vscode }) => {
   const [areTerminalsVisible, setAreTerminalsVisible] = useState(true);
   const [hasCompletedInitialTerminalRemount, setHasCompletedInitialTerminalRemount] = useState(false);
+  const [isWorkspaceFocused, setIsWorkspaceFocused] = useState(() =>
+    typeof document !== "undefined" &&
+    document.visibilityState === "visible" &&
+    document.hasFocus(),
+  );
   const [serverState, setServerState] = useState<ExtensionToWorkspacePanelMessage | undefined>();
-  const [fitVersion, setFitVersion] = useState(0);
   const [terminalPaneRenderVersion, setTerminalPaneRenderVersion] = useState(0);
   const [localFocusedSessionId, setLocalFocusedSessionId] = useState<string | undefined>();
+
+  useEffect(() => {
+    const syncWorkspaceFocusState = () => {
+      setIsWorkspaceFocused(document.visibilityState === "visible" && document.hasFocus());
+    };
+
+    syncWorkspaceFocusState();
+    window.addEventListener("blur", syncWorkspaceFocusState);
+    window.addEventListener("focus", syncWorkspaceFocusState);
+    window.addEventListener("focusin", syncWorkspaceFocusState);
+    window.addEventListener("focusout", syncWorkspaceFocusState);
+    document.addEventListener("visibilitychange", syncWorkspaceFocusState);
+
+    return () => {
+      window.removeEventListener("blur", syncWorkspaceFocusState);
+      window.removeEventListener("focus", syncWorkspaceFocusState);
+      window.removeEventListener("focusin", syncWorkspaceFocusState);
+      window.removeEventListener("focusout", syncWorkspaceFocusState);
+      document.removeEventListener("visibilitychange", syncWorkspaceFocusState);
+    };
+  }, []);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent<ExtensionToWorkspacePanelMessage>) => {
@@ -64,6 +90,24 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   }, [messageSource, vscode]);
 
   const panes = useMemo(() => serverState?.panes ?? [], [serverState?.panes]);
+  const paneRows = useMemo(() => {
+    const rowLengths = createEditorLayoutPlan(
+      Math.max(1, panes.length),
+      serverState?.viewMode ?? "grid",
+    ).rowLengths;
+    const rows: WorkspacePanelPane[][] = [];
+    let nextPaneIndex = 0;
+
+    for (const rowLength of rowLengths) {
+      const row = panes.slice(nextPaneIndex, nextPaneIndex + rowLength);
+      if (row.length > 0) {
+        rows.push(row);
+      }
+      nextPaneIndex += rowLength;
+    }
+
+    return rows;
+  }, [panes, serverState?.viewMode]);
   const presentedFocusedSessionId = localFocusedSessionId ?? serverState?.focusedSessionId;
   const terminalPaneIds = useMemo(
     () => panes.filter((pane) => pane.kind === "terminal").map((pane) => pane.sessionId),
@@ -106,58 +150,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     };
   }, [hasCompletedInitialTerminalRemount, serverState?.debuggingMode, terminalPaneIdsKey]);
 
-  useEffect(() => {
-    let settleTimeoutId: number | undefined;
-    let trailingTimeoutId: number | undefined;
-
-    const handleWindowResize = () => {
-      logWorkspaceDebug(serverState?.debuggingMode, "window.resizeRefitRequested", {
-        paneIds: panes.map((pane) => pane.sessionId),
-      });
-      requestTerminalRefit();
-      if (settleTimeoutId !== undefined) {
-        window.clearTimeout(settleTimeoutId);
-      }
-      if (trailingTimeoutId !== undefined) {
-        window.clearTimeout(trailingTimeoutId);
-      }
-
-      settleTimeoutId = window.setTimeout(() => {
-        logWorkspaceDebug(serverState?.debuggingMode, "window.resizeSettleRefitRequested", {
-          paneIds: panes.map((pane) => pane.sessionId),
-        });
-        requestTerminalRefit();
-      }, 120);
-
-      trailingTimeoutId = window.setTimeout(() => {
-        logWorkspaceDebug(serverState?.debuggingMode, "window.resizeTrailingRefitRequested", {
-          paneIds: panes.map((pane) => pane.sessionId),
-        });
-        requestTerminalRefit();
-      }, 260);
-    };
-
-    window.addEventListener("resize", handleWindowResize);
-    window.visualViewport?.addEventListener("resize", handleWindowResize);
-    return () => {
-      window.removeEventListener("resize", handleWindowResize);
-      window.visualViewport?.removeEventListener("resize", handleWindowResize);
-      if (settleTimeoutId !== undefined) {
-        window.clearTimeout(settleTimeoutId);
-      }
-      if (trailingTimeoutId !== undefined) {
-        window.clearTimeout(trailingTimeoutId);
-      }
-    };
-  }, [panes, serverState?.debuggingMode]);
-
-  function requestTerminalRefit(options?: { dispatchBrowserResize?: boolean }) {
-    if (options?.dispatchBrowserResize) {
-      window.dispatchEvent(new Event("resize"));
-    }
-    setFitVersion((currentVersion) => currentVersion + 1);
-  }
-
   if (!serverState) {
     return (
       <main className="workspace-shell workspace-shell-empty">
@@ -175,30 +167,32 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   }
 
   return (
-    <main
-      className={`workspace-shell ${panes.length > 1 ? "workspace-shell-split" : "workspace-shell-single"}`}
-    >
-      {panes.map((pane) => (
-        <WorkspacePaneView
-          connection={serverState.connection}
-          debuggingMode={serverState.debuggingMode}
-          fitVersion={fitVersion}
-          isFocused={presentedFocusedSessionId === pane.sessionId}
-          key={pane.sessionId}
-          areTerminalsVisible={areTerminalsVisible}
-          onLocalFocus={() => {
-            setLocalFocusedSessionId(pane.sessionId);
-          }}
-          onFocus={() =>
-            vscode.postMessage({
-              sessionId: pane.sessionId,
-              type: "focusSession",
-            })
-          }
-          pane={pane}
-          terminalPaneRenderVersion={terminalPaneRenderVersion}
-          terminalAppearance={serverState.terminalAppearance}
-        />
+    <main className="workspace-shell">
+      {paneRows.map((row, rowIndex) => (
+        <div className={`workspace-row workspace-row-cols-${String(row.length)}`} key={`row-${String(rowIndex)}`}>
+          {row.map((pane) => (
+            <WorkspacePaneView
+              connection={serverState.connection}
+              debuggingMode={serverState.debuggingMode}
+              isFocused={presentedFocusedSessionId === pane.sessionId}
+              isWorkspaceFocused={isWorkspaceFocused}
+              key={pane.sessionId}
+              areTerminalsVisible={areTerminalsVisible}
+              onLocalFocus={() => {
+                setLocalFocusedSessionId(pane.sessionId);
+              }}
+              onFocus={() =>
+                vscode.postMessage({
+                  sessionId: pane.sessionId,
+                  type: "focusSession",
+                })
+              }
+              pane={pane}
+              terminalPaneRenderVersion={terminalPaneRenderVersion}
+              terminalAppearance={serverState.terminalAppearance}
+            />
+          ))}
+        </div>
       ))}
     </main>
   );
@@ -207,8 +201,8 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
 type WorkspacePaneViewProps = {
   connection: ExtensionToWorkspacePanelMessage["connection"];
   debuggingMode: boolean;
-  fitVersion: number;
   isFocused: boolean;
+  isWorkspaceFocused: boolean;
   areTerminalsVisible: boolean;
   onLocalFocus: () => void;
   onFocus: () => void;
@@ -220,8 +214,8 @@ type WorkspacePaneViewProps = {
 const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
   connection,
   debuggingMode,
-  fitVersion,
   isFocused,
+  isWorkspaceFocused,
   areTerminalsVisible,
   onLocalFocus,
   onFocus,
@@ -233,7 +227,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
 
   return (
     <section
-      className={`workspace-pane ${isFocused ? "workspace-pane-focused" : ""}`}
+      className={`workspace-pane ${isFocused && isWorkspaceFocused ? "workspace-pane-focused" : ""}`}
       onMouseDown={onFocus}
     >
       <header className="workspace-pane-header">
@@ -245,7 +239,6 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
             <TerminalPane
               connection={connection}
               debuggingMode={debuggingMode}
-              fitVersion={fitVersion}
               key={`${pane.sessionId}:${String(terminalPaneRenderVersion)}`}
               onActivate={() => {
                 onLocalFocus();

@@ -4,7 +4,7 @@ import type { TerminalSessionSnapshot } from "../shared/terminal-host-protocol";
 
 export type TerminalWorkspaceBackendTitleChange = {
   sessionId: string;
-  title: string;
+  title?: string;
 };
 
 export type TerminalWorkspaceBackend = vscode.Disposable & {

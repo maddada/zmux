@@ -1,7 +1,6 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 import {
-  getTerminalSessionSurfaceTitle,
   isTerminalSession,
   type SessionRecord,
   type TerminalSessionRecord,
@@ -55,6 +54,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     this.runtime.onDidChangeSessionState((snapshot) => {
       const previousSnapshot = this.sessions.get(snapshot.sessionId);
       this.sessions.set(snapshot.sessionId, snapshot);
+      this.syncSessionTitle(snapshot.sessionId, snapshot.title);
       if (!haveSameTerminalSessionSnapshot(previousSnapshot, snapshot)) {
         this.changeSessionsEmitter.fire();
       }
@@ -133,6 +133,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       workspaceId: this.options.workspaceId,
     });
     this.sessions.set(sessionRecord.sessionId, snapshot);
+    this.syncSessionTitle(sessionRecord.sessionId, snapshot.title);
     this.changeSessionsEmitter.fire();
     return snapshot;
   }
@@ -152,18 +153,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   }
 
   public async renameSession(sessionRecord: SessionRecord): Promise<void> {
-    if (!isTerminalSession(sessionRecord)) {
-      return;
-    }
-
-    this.sessionTitleBySessionId.set(
-      sessionRecord.sessionId,
-      getTerminalSessionSurfaceTitle(sessionRecord),
-    );
-    this.changeSessionTitleEmitter.fire({
-      sessionId: sessionRecord.sessionId,
-      title: getTerminalSessionSurfaceTitle(sessionRecord),
-    });
+    void sessionRecord;
   }
 
   public async restartSession(sessionRecord: SessionRecord): Promise<TerminalSessionSnapshot> {
@@ -185,15 +175,12 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         continue;
       }
       this.sessionRecordBySessionId.set(sessionRecord.sessionId, sessionRecord);
-      this.sessionTitleBySessionId.set(
-        sessionRecord.sessionId,
-        getTerminalSessionSurfaceTitle(sessionRecord),
-      );
     }
 
     for (const sessionId of [...this.sessions.keys()]) {
       if (!this.sessionRecordBySessionId.has(sessionId)) {
         this.sessions.delete(sessionId);
+        this.sessionTitleBySessionId.delete(sessionId);
       }
     }
   }
@@ -228,6 +215,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         didChange = true;
       }
       this.sessions.set(sessionId, nextSnapshot);
+      this.syncSessionTitle(sessionId, nextSnapshot.title);
     }
 
     if (didChange) {
@@ -252,6 +240,25 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       workspaceStateKey,
       `${sessionId}.state`,
     );
+  }
+
+  private syncSessionTitle(sessionId: string, nextTitle: string | undefined): void {
+    const normalizedTitle = nextTitle?.trim() || undefined;
+    const previousTitle = this.sessionTitleBySessionId.get(sessionId);
+    if (previousTitle === normalizedTitle) {
+      return;
+    }
+
+    if (normalizedTitle) {
+      this.sessionTitleBySessionId.set(sessionId, normalizedTitle);
+    } else {
+      this.sessionTitleBySessionId.delete(sessionId);
+    }
+
+    this.changeSessionTitleEmitter.fire({
+      sessionId,
+      title: normalizedTitle,
+    });
   }
 }
 

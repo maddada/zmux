@@ -288,10 +288,10 @@ function createWorkspaceMessage(
     terminalAppearance: {
       cursorBlink: true,
       cursorStyle: "bar",
-      fontFamily: "MesloLGL Nerd Font Mono",
-      fontSize: 14,
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontSize: 12,
       letterSpacing: 0,
-      lineHeight: 0.8,
+      lineHeight: 1,
     },
     type: "hydrate",
     viewMode: activeGroup?.snapshot.viewMode ?? "vertical",

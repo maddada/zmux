@@ -1,4 +1,4 @@
-import { IconLayoutColumns, IconPencil, IconPlus, IconSquare, IconX } from "@tabler/icons-react";
+import { IconPencil, IconPlus, IconX } from "@tabler/icons-react";
 import { CollisionPriority } from "@dnd-kit/abstract";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { createPortal } from "react-dom";
@@ -24,9 +24,6 @@ const CONTEXT_MENU_HEIGHT_PX = 90;
 const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 164;
 const COUNT_OPTIONS: VisibleSessionCount[] = [1, 2, 3, 4, 6, 9];
-const SIDEBAR_VISIBLE_COUNT_OPTIONS: VisibleSessionCount[] = COUNT_OPTIONS.filter(
-  (visibleCount) => visibleCount <= 2,
-);
 const GROUP_CONTROL_MENU_MARGIN_PX = 12;
 
 type ContextMenuPosition = {
@@ -35,14 +32,6 @@ type ContextMenuPosition = {
 };
 
 type GroupControlMenu = "visible-count";
-
-type GroupVisibleCountIconProps = {
-  visibleCount: VisibleSessionCount;
-};
-
-type SplitSelectionMenuIconProps = {
-  visibleCount: VisibleSessionCount;
-};
 
 export type SessionGroupSectionProps = {
   autoEdit: boolean;
@@ -88,24 +77,8 @@ function getControlMenuPosition(button: HTMLButtonElement | null): ContextMenuPo
   };
 }
 
-function GroupVisibleCountIcon({ visibleCount }: GroupVisibleCountIconProps) {
-  if (visibleCount === 1) {
-    return <IconSquare aria-hidden="true" className="group-meta-icon" size={14} />;
-  }
-
-  return <IconLayoutColumns aria-hidden="true" className="group-meta-icon" size={14} />;
-}
-
-function SplitSelectionMenuIcon({ visibleCount }: SplitSelectionMenuIconProps) {
-  if (visibleCount === 1) {
-    return <IconSquare aria-hidden="true" className="session-context-menu-icon" size={14} />;
-  }
-
-  return <IconLayoutColumns aria-hidden="true" className="session-context-menu-icon" size={14} />;
-}
-
 function getVisibleCountMenuLabel(visibleCount: VisibleSessionCount): string {
-  return visibleCount === 1 ? "Show 1 split" : "Show 2 splits";
+  return visibleCount === 1 ? "Show 1 split" : `Show ${String(visibleCount)} splits`;
 }
 
 export function SessionGroupSection({
@@ -324,10 +297,6 @@ export function SessionGroupSection({
     });
   };
 
-  const toggleVisibleCount = () => {
-    setVisibleCount(group.layoutVisibleCount === 1 ? 2 : 1);
-  };
-
   const requestCloseGroup = () => {
     if (!canClose) {
       return;
@@ -414,11 +383,13 @@ export function SessionGroupSection({
                       <button
                         aria-expanded={openControlMenu === "visible-count"}
                         aria-haspopup="menu"
-                        aria-label={`Toggle split mode for ${group.title}`}
+                        aria-label={`Select split count for ${group.title}`}
                         className="group-add-button group-control-button"
                         data-open={String(openControlMenu === "visible-count")}
                         onClick={() => {
-                          toggleVisibleCount();
+                          setOpenControlMenu((previous) =>
+                            previous === "visible-count" ? undefined : "visible-count",
+                          );
                         }}
                         onContextMenu={(event) => {
                           event.preventDefault();
@@ -428,10 +399,12 @@ export function SessionGroupSection({
                           );
                         }}
                         ref={visibleCountButtonRef}
-                        title={`Toggle split mode for ${group.title}`}
+                        title={`Select split count for ${group.title}`}
                         type="button"
                       >
-                        <GroupVisibleCountIcon visibleCount={group.layoutVisibleCount} />
+                        <span className="group-control-count-value">
+                          {String(group.layoutVisibleCount)}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -548,7 +521,7 @@ export function SessionGroupSection({
               role="menu"
               style={getPortalMenuStyle(visibleCountButtonRef.current)}
             >
-              {SIDEBAR_VISIBLE_COUNT_OPTIONS.map((visibleCount) => (
+              {COUNT_OPTIONS.map((visibleCount) => (
                 <button
                   aria-pressed={group.layoutVisibleCount === visibleCount}
                   aria-label={getVisibleCountMenuLabel(visibleCount)}
@@ -560,7 +533,7 @@ export function SessionGroupSection({
                   title={getVisibleCountMenuLabel(visibleCount)}
                   type="button"
                 >
-                  <SplitSelectionMenuIcon visibleCount={visibleCount} />
+                  <span className="group-control-count-option-value">{String(visibleCount)}</span>
                 </button>
               ))}
             </div>,
