@@ -15,7 +15,8 @@
 :root {
   color-scheme: dark;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --workspace-terminal-font: Menlo, Monaco, "Courier New", monospace;
+  --workspace-terminal-font:
+    "MesloLGL Nerd Font Mono", Menlo, Monaco, "Courier New", monospace;
 }
 
 html,

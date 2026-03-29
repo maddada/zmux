@@ -1,9 +1,6 @@
 import { useEffect, useRef } from "react";
-import { FitAddon } from "@xterm/addon-fit";
-import { Unicode11Addon } from "@xterm/addon-unicode11";
-import { WebglAddon } from "@xterm/addon-webgl";
-import { Terminal } from "@xterm/xterm";
-import "@xterm/xterm/css/xterm.css";
+import { FitAddon, Ghostty, Terminal } from "ghostty-web";
+import ghosttyWasmUrl from "ghostty-web/ghostty-vt.wasm?url";
 import type {
   WorkspacePanelConnection,
   WorkspacePanelTerminalAppearance,
@@ -18,6 +15,16 @@ import { getTerminalTheme } from "./terminal-theme";
 import "./terminal-pane.css";
 
 const DATA_BUFFER_FLUSH_MS = 5;
+let ghosttyReadyPromise: Promise<Ghostty> | undefined;
+
+function ensureGhosttyReady(): Promise<Ghostty> {
+  ghosttyReadyPromise ??= Ghostty.load(ghosttyWasmUrl);
+  return ghosttyReadyPromise;
+}
+
+function focusTerminalInput(terminal: Terminal | null | undefined): void {
+  terminal?.focus();
+}
 
 export type TerminalPaneProps = {
   connection: WorkspacePanelConnection;
@@ -32,7 +39,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   debuggingMode,
   onActivate,
   pane,
-  terminalAppearance: _terminalAppearance,
+  terminalAppearance,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -44,50 +51,17 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       return;
     }
 
-    const terminal = new Terminal({
-      theme: getTerminalTheme(),
-      allowProposedApi: true,
-      cursorBlink: true,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: 12,
-      fontWeight: "300",
-      fontWeightBold: "500",
-      scrollback: 200_000,
-    });
-    terminalRef.current = terminal;
-
-    const fit = new FitAddon();
-    fitRef.current = fit;
-    terminal.loadAddon(fit);
-    terminal.open(containerRef.current);
-
-    const unicode11 = new Unicode11Addon();
-    terminal.loadAddon(unicode11);
-    terminal.unicode.activeVersion = "11";
-
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      terminal.loadAddon(webgl);
-    } catch {
-      // Fall back to xterm's default renderer when WebGL is unavailable.
-    }
-
-    if (document.hasFocus()) {
-      terminal.focus();
-    }
-
-    const onWindowFocus = () => {
-      terminal.focus();
-    };
-    window.addEventListener("focus", onWindowFocus);
-
     let didDispose = false;
     let websocket: WebSocket | undefined;
     let didApplyHistory = false;
     let dataBuffer: string[] = [];
     let flushTimer: number | undefined;
     let pendingSocketMessages: string[] = [];
+    let rafId = 0;
+    let terminal: Terminal | undefined;
+    let fit: FitAddon | undefined;
+    let resizeObserver: ResizeObserver | undefined;
+    let cleanupWindowFocus: (() => void) | undefined;
 
     const sendSocketMessage = (message: string) => {
       if (!websocket) {
@@ -106,7 +80,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     };
 
     const connectWebsocket = () => {
-      if (connection.mock || websocket || didDispose) {
+      if (connection.mock || websocket || didDispose || !terminal) {
         return;
       }
 
@@ -158,31 +132,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       };
     };
 
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (didDispose) {
-          return;
-        }
-
-        logWorkspaceDebug(debuggingMode, "terminal.initialFit", {
-          cols: terminal.cols,
-          sessionId: pane.sessionId,
-        });
-        fit.fit();
-        lastMeasuredSizeRef.current = {
-          height: Math.round(containerRef.current?.getBoundingClientRect().height ?? 0),
-          width: Math.round(containerRef.current?.getBoundingClientRect().width ?? 0),
-        };
-        terminal.refresh(0, terminal.rows - 1);
-        connectWebsocket();
-      });
-    });
-
     const flushData = () => {
       const chunk = dataBuffer.join("");
       dataBuffer = [];
       flushTimer = undefined;
-      if (!chunk) {
+      if (!chunk || !terminal) {
         return;
       }
 
@@ -196,7 +150,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
       if (!didApplyHistory) {
         didApplyHistory = true;
-        if (message.session.history) {
+        if (message.session.history && terminal) {
           logWorkspaceDebug(debuggingMode, "terminal.applyHistory", {
             historyLength: message.session.history.length,
             sessionId: pane.sessionId,
@@ -210,82 +164,143 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       logWorkspaceDebug(debuggingMode, "terminal.mockConnected", {
         sessionId: pane.sessionId,
       });
-      if (pane.snapshot?.history) {
+    }
+
+    void ensureGhosttyReady().then((ghostty) => {
+      if (didDispose || !containerRef.current) {
+        return;
+      }
+
+      terminal = new Terminal({
+        ghostty,
+        theme: getTerminalTheme(),
+        cursorBlink: terminalAppearance.cursorBlink,
+        cursorStyle: terminalAppearance.cursorStyle,
+        fontFamily: terminalAppearance.fontFamily,
+        fontSize: terminalAppearance.fontSize,
+        scrollback: 200_000,
+      });
+      terminalRef.current = terminal;
+
+      fit = new FitAddon();
+      fitRef.current = fit;
+      terminal.loadAddon(fit);
+      terminal.open(containerRef.current);
+
+      if (document.hasFocus()) {
+        focusTerminalInput(terminal);
+      }
+
+      const onWindowFocus = () => {
+        focusTerminalInput(terminal);
+      };
+      window.addEventListener("focus", onWindowFocus);
+      cleanupWindowFocus = () => {
+        window.removeEventListener("focus", onWindowFocus);
+      };
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (didDispose || !terminal || !fit) {
+            return;
+          }
+
+          logWorkspaceDebug(debuggingMode, "terminal.initialFit", {
+            cols: terminal.cols,
+            sessionId: pane.sessionId,
+          });
+          fit.fit();
+          lastMeasuredSizeRef.current = {
+            height: Math.round(containerRef.current?.getBoundingClientRect().height ?? 0),
+            width: Math.round(containerRef.current?.getBoundingClientRect().width ?? 0),
+          };
+          connectWebsocket();
+        });
+      });
+
+      terminal.attachCustomKeyEventHandler((event) => {
+        if (event.key === "Enter" && event.shiftKey) {
+          if (event.type === "keydown") {
+            sendSocketMessage("\x1b[13;2u");
+          }
+          return true;
+        }
+
+        if (event.type === "keydown" && event.metaKey) {
+          if (event.key === "t" || (event.key >= "1" && event.key <= "9")) {
+            return true;
+          }
+        }
+
+        return false;
+      });
+
+      terminal.onData((data) => {
+        sendSocketMessage(data);
+      });
+
+      terminal.onResize(({ cols, rows }) => {
+        const resizeMessage: TerminalResizeMessage = {
+          cols,
+          rows,
+          sessionId: pane.sessionId,
+          type: "terminalResize",
+        };
+        sendSocketMessage(JSON.stringify(resizeMessage));
+      });
+
+      if (connection.mock && pane.snapshot?.history) {
         handleTerminalStateMessage({
           session: pane.snapshot,
           type: "terminalSessionState",
         });
       }
-    }
 
-    terminal.attachCustomKeyEventHandler((event) => {
-      if (event.key === "Enter" && event.shiftKey) {
-        if (event.type === "keydown") {
-          sendSocketMessage("\x1b[13;2u");
-        }
-        return false;
-      }
-
-      if (event.type === "keydown" && event.metaKey) {
-        if (event.key === "t" || (event.key >= "1" && event.key <= "9")) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-
-    terminal.onData((data) => {
-      sendSocketMessage(data);
-    });
-
-    terminal.onResize(({ cols, rows }) => {
-      const resizeMessage: TerminalResizeMessage = {
-        cols,
-        rows,
-        sessionId: pane.sessionId,
-        type: "terminalResize",
-      };
-      sendSocketMessage(JSON.stringify(resizeMessage));
-    });
-
-    let rafId = 0;
-    const resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) {
-        return;
-      }
-
-      const { height, width } = entry.contentRect;
-      if (width > 0 && height > 0) {
-        const nextMeasuredSize = {
-          height: Math.round(height),
-          width: Math.round(width),
-        };
-        const previousMeasuredSize = lastMeasuredSizeRef.current;
-        if (
-          previousMeasuredSize &&
-          previousMeasuredSize.width === nextMeasuredSize.width &&
-          previousMeasuredSize.height === nextMeasuredSize.height
-        ) {
+      resizeObserver = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (!entry) {
           return;
         }
 
-        lastMeasuredSizeRef.current = nextMeasuredSize;
-        cancelAnimationFrame(rafId);
-        rafId = requestAnimationFrame(() => {
-          logWorkspaceDebug(debuggingMode, "terminal.resizeObserverFit", {
-            height: nextMeasuredSize.height,
-            sessionId: pane.sessionId,
-            width: nextMeasuredSize.width,
+        const { height, width } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          const nextMeasuredSize = {
+            height: Math.round(height),
+            width: Math.round(width),
+          };
+          const previousMeasuredSize = lastMeasuredSizeRef.current;
+          if (
+            previousMeasuredSize &&
+            previousMeasuredSize.width === nextMeasuredSize.width &&
+            previousMeasuredSize.height === nextMeasuredSize.height
+          ) {
+            return;
+          }
+
+          lastMeasuredSizeRef.current = nextMeasuredSize;
+          cancelAnimationFrame(rafId);
+          rafId = requestAnimationFrame(() => {
+            if (!fit) {
+              return;
+            }
+
+            logWorkspaceDebug(debuggingMode, "terminal.resizeObserverFit", {
+              height: nextMeasuredSize.height,
+              sessionId: pane.sessionId,
+              width: nextMeasuredSize.width,
+            });
+            fit.fit();
           });
-          fit.fit();
-        });
-      }
+        }
+      });
+      resizeObserver.observe(containerRef.current);
     });
-    resizeObserver.observe(containerRef.current);
 
     const onThemeChange = () => {
+      if (!terminal) {
+        return;
+      }
+
       terminal.options.theme = getTerminalTheme();
     };
     const themeObserver = new MutationObserver(() => {
@@ -309,11 +324,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         flushData();
       }
       cancelAnimationFrame(rafId);
-      window.removeEventListener("focus", onWindowFocus);
-      resizeObserver.disconnect();
+      cleanupWindowFocus?.();
+      resizeObserver?.disconnect();
       themeObserver.disconnect();
       websocket?.close();
-      terminal.dispose();
+      terminal?.dispose();
       lastMeasuredSizeRef.current = undefined;
       terminalRef.current = null;
       fitRef.current = null;
@@ -323,6 +338,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     connection.token,
     pane.sessionId,
     debuggingMode,
+    terminalAppearance.cursorBlink,
+    terminalAppearance.cursorStyle,
+    terminalAppearance.fontFamily,
+    terminalAppearance.fontSize,
   ]);
 
   return (
@@ -334,7 +353,9 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           sessionId: pane.sessionId,
         });
         onActivate();
-        terminalRef.current?.focus();
+        requestAnimationFrame(() => {
+          focusTerminalInput(terminalRef.current);
+        });
       }}
     >
       <div className="terminal-pane-canvas terminal-tab" ref={containerRef} />

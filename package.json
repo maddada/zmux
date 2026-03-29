@@ -267,7 +267,7 @@
         "VSmux.terminalFontFamily": {
           "title": "Terminal Font Family",
           "type": "string",
-          "default": "Menlo, Monaco, \"Courier New\", monospace",
+          "default": "\"MesloLGL Nerd Font Mono\", Menlo, Monaco, \"Courier New\", monospace",
           "description": "Font family used by VSmux Ghostty terminals in the workspace webview."
         },
         "VSmux.terminalFontSize": {

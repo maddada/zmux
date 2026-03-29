@@ -170,13 +170,15 @@ export function getDefaultBrowserLaunchUrl(): string {
 }
 
 export function getTerminalFontFamily(): string {
+  const defaultFontFamily =
+    '"MesloLGL Nerd Font Mono", Menlo, Monaco, "Courier New", monospace';
   const value =
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<string>(TERMINAL_FONT_FAMILY_SETTING, 'Menlo, Monaco, "Courier New", monospace') ??
-    'Menlo, Monaco, "Courier New", monospace';
+      .get<string>(TERMINAL_FONT_FAMILY_SETTING, defaultFontFamily) ??
+    defaultFontFamily;
 
-  return value.trim() || 'Menlo, Monaco, "Courier New", monospace';
+  return value.trim() || defaultFontFamily;
 }
 
 export function getTerminalFontSize(): number {
