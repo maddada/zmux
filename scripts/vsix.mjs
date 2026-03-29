@@ -50,6 +50,35 @@ function run(command, args, options = {}) {
   }
 }
 
+function runCapture(command, args, options = {}) {
+  const useCmdShim = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+  const result = useCmdShim
+    ? spawnSync(
+        process.env.ComSpec ?? "cmd.exe",
+        ["/d", "/s", "/c", [quoteCmdArg(command), ...args.map(quoteCmdArg)].join(" ")],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          shell: false,
+          stdio: ["ignore", "pipe", "pipe"],
+          ...options,
+        },
+      )
+    : spawnSync(command, args, {
+        cwd: repoRoot,
+        encoding: "utf8",
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+        ...options,
+      });
+
+  if (result.error) {
+    fail(result.error.message);
+  }
+
+  return result;
+}
+
 function commandExists(command) {
   const which = process.platform === "win32" ? "where.exe" : "which";
   const result = spawnSync(which, [command], {
@@ -60,8 +89,12 @@ function commandExists(command) {
   return result.status === 0;
 }
 
-function resolveVsixPath(installerDir, extensionName, extensionVersion) {
+function resolveVsixPath(installerDir, extensionName, extensionVersion, mode) {
   const baseName = `${extensionName}-${extensionVersion}`;
+  if (mode === "install") {
+    return join(installerDir, `${baseName}-${Date.now()}.vsix`);
+  }
+
   const defaultPath = join(installerDir, `${baseName}.vsix`);
 
   try {
@@ -78,6 +111,68 @@ function resolveVsixPath(installerDir, extensionName, extensionVersion) {
   }
 }
 
+function resolveCodeCli() {
+  const override = process.env.VSMUX_CODE_CLI?.trim();
+  if (override) {
+    return override;
+  }
+
+  const candidates =
+    process.platform === "win32"
+      ? [
+          "code.cmd",
+          "code-insiders.cmd",
+          "cursor.cmd",
+          "cursor-insiders.cmd",
+          "codium.cmd",
+          "windsurf.cmd",
+          "code",
+          "code-insiders",
+          "cursor",
+          "cursor-insiders",
+          "codium",
+          "windsurf",
+        ]
+      : [
+          "code",
+          "code-insiders",
+          "cursor",
+          "cursor-insiders",
+          "codium",
+          "windsurf",
+        ];
+
+  return candidates.find(commandExists);
+}
+
+function listInstalledExtensions(vscodeCli) {
+  const result = runCapture(vscodeCli, ["--list-extensions", "--show-versions"]);
+  if (result.status !== 0) {
+    return [];
+  }
+
+  return (result.stdout ?? "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function uninstallIfInstalled(vscodeCli, extensionId) {
+  const installedExtensions = listInstalledExtensions(vscodeCli);
+  const normalizedExtensionId = extensionId.toLowerCase();
+  const isInstalled = installedExtensions.some((line) => {
+    const [installedId] = line.split("@", 1);
+    return installedId?.trim().toLowerCase() === normalizedExtensionId;
+  });
+
+  if (!isInstalled) {
+    return;
+  }
+
+  console.log(`Uninstalling existing ${extensionId} before reinstalling...`);
+  run(vscodeCli, ["--uninstall-extension", extensionId]);
+}
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(scriptDir);
 const mode = process.argv[2];
@@ -91,13 +186,15 @@ const packageJson = await import(new URL("../package.json", import.meta.url), {
 });
 const extensionName = packageJson.default.name;
 const extensionVersion = packageJson.default.version;
+const extensionPublisher = packageJson.default.publisher;
+const extensionId = `${extensionPublisher}.${extensionName}`;
 const installerDir = join(repoRoot, "installer");
 
 if (!existsSync(installerDir)) {
   mkdirSync(installerDir, { recursive: true });
 }
 
-const vsixPath = resolveVsixPath(installerDir, extensionName, extensionVersion);
+const vsixPath = resolveVsixPath(installerDir, extensionName, extensionVersion, mode);
 
 run("pnpm", ["run", "compile"]);
 
@@ -118,17 +215,15 @@ if (mode === "package") {
   process.exit(0);
 }
 
-const vscodeCliCandidates =
-  process.platform === "win32"
-    ? ["code.cmd", "code-insiders.cmd", "code", "code-insiders"]
-    : ["code", "code-insiders"];
-
-const vscodeCli = vscodeCliCandidates.find(commandExists);
+const vscodeCli = resolveCodeCli();
 
 if (!vscodeCli) {
-  fail("Could not find a VS Code CLI. Install the 'code' command from VS Code and retry.");
+  fail(
+    "Could not find an editor CLI. Install the 'code' or 'cursor' command, or set VSMUX_CODE_CLI.",
+  );
 }
 
+uninstallIfInstalled(vscodeCli, extensionId);
 run(vscodeCli, ["--install-extension", vsixPath, "--force"]);
 
-console.log(`Installed extension with ${vscodeCli} from ${vsixPath}`);
+console.log(`Installed ${extensionId} with ${vscodeCli} from ${vsixPath}`);
