@@ -121,6 +121,10 @@ export class WorkspacePanelManager implements vscode.Disposable {
       if (!isWorkspaceMessage(message)) {
         return;
       }
+      if (message.type === "workspaceDebugLog") {
+        void this.options.onMessage(message);
+        return;
+      }
       if (message.type === "ready") {
         if (this.latestMessage) {
           void panel.webview.postMessage(this.latestMessage);
@@ -175,6 +179,13 @@ function isWorkspaceMessage(candidate: unknown): candidate is WorkspacePanelToEx
   const message = candidate as Partial<WorkspacePanelToExtensionMessage>;
   if (message.type === "ready") {
     return true;
+  }
+  if (message.type === "workspaceDebugLog") {
+    return (
+      typeof message.event === "string" &&
+      message.event.length > 0 &&
+      (message.details === undefined || typeof message.details === "string")
+    );
   }
   if (message.type === "focusSession" || message.type === "closeSession") {
     return typeof message.sessionId === "string" && message.sessionId.length > 0;

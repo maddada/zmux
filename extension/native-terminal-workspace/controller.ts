@@ -21,10 +21,18 @@ import {
   type VisibleSessionCount,
 } from "../../shared/session-grid-contract";
 import { getSidebarAgentIconById, type SidebarAgentIcon } from "../../shared/sidebar-agents";
-import type { SidebarGitAction, SidebarGitState } from "../../shared/sidebar-git";
+import {
+  resolveSidebarGitPrimaryActionState,
+  type SidebarGitAction,
+  type SidebarGitState,
+} from "../../shared/sidebar-git";
 import type { ExtensionToWorkspacePanelMessage } from "../../shared/workspace-panel-contract";
-import { runSidebarGitActionWorkflow } from "../git/actions";
-import { loadSidebarGitState } from "../git/status";
+import {
+  prepareSidebarGitCommit,
+  runSidebarGitActionWorkflow,
+  type PreparedSidebarGitCommit,
+} from "../git/actions";
+import { getGitStatusDetails, loadSidebarGitState } from "../git/status";
 import { getGitTextGenerationAgent } from "../git-text-generation-agent-preferences";
 import {
   buildSidebarMessage,
@@ -92,6 +100,7 @@ import {
   getClampedSidebarThemeSetting,
   getDefaultBrowserLaunchUrl,
   getDebuggingMode,
+  getGitSkipSuggestedCommitConfirmation,
   getShowCloseButtonOnSessionCards,
   getShowHotkeysOnSessionCards,
   getSidebarThemeVariant,
@@ -141,6 +150,22 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private readonly terminalTitleBySessionId = new Map<string, string>();
   private readonly loggedTitleSymbolKeys = new Set<string>();
   private readonly pendingT3SessionIds = new Set<string>();
+  private nextSidebarRevision = 0;
+  private focusRequestSequence = 0;
+  private pendingSidebarGitCommitConfirmation:
+    | {
+        action: SidebarGitAction;
+        agent: {
+          command: string;
+          agentId: string;
+          icon?: SidebarAgentIcon;
+          isDefault: boolean;
+          name: string;
+        };
+        preparedCommit: PreparedSidebarGitCommit;
+        requestId: string;
+      }
+    | undefined;
   private gitActionInProgress = false;
   private gitHudStateCache: { updatedAt: number; value: SidebarGitState } | undefined;
   private t3Runtime: T3RuntimeManager | undefined;
@@ -163,6 +188,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     this.workspacePanel = new WorkspacePanelManager({
       context,
       onMessage: async (message) => {
+        if (message.type === "workspaceDebugLog") {
+          logVSmuxDebug(`workspace.webview.${message.event}`, message.details);
+          return;
+        }
+
         if (message.type === "focusSession") {
           await this.focusSession(message.sessionId, "workspace");
           return;
@@ -285,10 +315,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    this.syncSurfaceManagers();
-    await this.refreshSidebar();
+    await this.refreshSidebarFromCurrentState();
     await this.createSurfaceIfNeeded(sessionRecord);
-    await this.afterStateChange();
+    await this.afterStateChange({ sidebarAlreadyRefreshed: true });
   }
 
   public async focusDirection(direction: SessionGridDirection): Promise<void> {
@@ -311,10 +340,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     this.browserEditorGroupIsMaximized = false;
     this.clearObservedSidebarFocusState();
+    const focusRequestId = ++this.focusRequestSequence;
+    const focusStartedAt = Date.now();
     logVSmuxDebug("controller.focusSession", {
+      focusRequestId,
       sessionId,
       sessionKind: sessionRecord.kind,
       source,
+      startedAt: focusStartedAt,
     });
     const hadLiveTerminal =
       sessionRecord.kind === "terminal" && this.backend.hasLiveTerminal(sessionRecord.sessionId);
@@ -324,46 +357,100 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       !this.backend.hasAttachedTerminal(sessionRecord.sessionId);
     const shouldResumeDeadTerminal =
       shouldReattachDetachedTerminal && sessionRecord.kind === "terminal" && !hadLiveTerminal;
+    const acknowledgedAttention = await this.acknowledgeSessionAttentionIfNeeded(sessionId);
+    logVSmuxDebug("controller.focusSession.afterAcknowledge", {
+      acknowledgedAttention,
+      durationMs: Date.now() - focusStartedAt,
+      focusRequestId,
+      sessionId,
+    });
+    const changed = await this.store.focusSession(sessionId);
+    logVSmuxDebug("controller.focusSession.afterStoreFocus", {
+      changed,
+      durationMs: Date.now() - focusStartedAt,
+      focusRequestId,
+      sessionId,
+      snapshot: this.describeActiveSnapshot(),
+    });
     const isVisiblePresentationFocus =
       this.isSessionVisibleInWorkspace(sessionId) && !shouldReattachDetachedTerminal;
-    if (!isVisiblePresentationFocus && this.shouldEnsureSessionSurface(sessionRecord)) {
-      await this.createSurfaceIfNeeded(sessionRecord);
-    }
-    const acknowledgedAttention = await this.acknowledgeSessionAttentionIfNeeded(sessionId);
-    const changed = await this.store.focusSession(sessionId);
+    const sidebarRefreshPromise =
+      changed || acknowledgedAttention
+        ? this.refreshSidebarFromCurrentState().then(() => {
+            logVSmuxDebug("controller.focusSession.afterSidebarRefresh", {
+              durationMs: Date.now() - focusStartedAt,
+              focusRequestId,
+              sessionId,
+            });
+          })
+        : undefined;
     if (isVisiblePresentationFocus) {
       if (changed || acknowledgedAttention) {
         await this.refreshWorkspacePanel();
-        await this.refreshSidebar();
+        logVSmuxDebug("controller.focusSession.afterImmediateWorkspaceRefresh", {
+          durationMs: Date.now() - focusStartedAt,
+          focusRequestId,
+          sessionId,
+        });
       }
       await this.revealWorkspacePanelForSidebarFocus(source);
       logVSmuxDebug("controller.focusSession.visiblePresentation", {
         acknowledgedAttention,
         changed,
+        durationMs: Date.now() - focusStartedAt,
+        focusRequestId,
         sessionId,
         source,
       });
+      if (sidebarRefreshPromise) {
+        void sidebarRefreshPromise;
+      }
       return;
+    }
+
+    if (sidebarRefreshPromise) {
+      await sidebarRefreshPromise;
     }
 
     if (!changed) {
       if (shouldReattachDetachedTerminal) {
-        await this.afterStateChange();
+        await this.afterStateChange({ sidebarAlreadyRefreshed: changed || acknowledgedAttention });
+        logVSmuxDebug("controller.focusSession.afterStateChangeNoChangePath", {
+          durationMs: Date.now() - focusStartedAt,
+          focusRequestId,
+          sessionId,
+        });
         if (shouldResumeDeadTerminal) {
           await this.resumeDetachedTerminalSession(sessionRecord);
+          logVSmuxDebug("controller.focusSession.afterResumeDetachedTerminal", {
+            durationMs: Date.now() - focusStartedAt,
+            focusRequestId,
+            sessionId,
+          });
         }
       }
-      if (acknowledgedAttention) {
-        await this.refreshSidebar();
-      }
       await this.revealWorkspacePanelForSidebarFocus(source);
-      logVSmuxDebug("controller.focusSession.noChange", { sessionId });
+      logVSmuxDebug("controller.focusSession.noChange", {
+        durationMs: Date.now() - focusStartedAt,
+        focusRequestId,
+        sessionId,
+      });
       return;
     }
 
-    await this.afterStateChange();
+    await this.afterStateChange({ sidebarAlreadyRefreshed: true });
+    logVSmuxDebug("controller.focusSession.afterStateChange", {
+      durationMs: Date.now() - focusStartedAt,
+      focusRequestId,
+      sessionId,
+    });
     if (shouldResumeDeadTerminal) {
       await this.resumeDetachedTerminalSession(sessionRecord);
+      logVSmuxDebug("controller.focusSession.afterResumeDetachedTerminal", {
+        durationMs: Date.now() - focusStartedAt,
+        focusRequestId,
+        sessionId,
+      });
     }
   }
 
@@ -481,17 +568,18 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     const archivedSession = this.createArchivedSessionEntry(sessionRecord);
-    await this.disposeSurface(sessionRecord);
     const removed = await this.store.removeSession(sessionId);
     if (!removed) {
       return;
     }
+    await this.refreshSidebarFromCurrentState();
+    await this.disposeSurface(sessionRecord);
     this.clearSessionPresentationState(sessionId);
     if (archivedSession) {
       await this.previousSessionHistory.append([archivedSession]);
     }
     await this.persistSessionAgentLaunchState();
-    await this.afterStateChange();
+    await this.afterStateChange({ sidebarAlreadyRefreshed: true });
   }
 
   public async copyResumeCommand(sessionId?: string): Promise<void> {
@@ -598,30 +686,60 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       command: agent.command,
     };
 
+    this.pendingSidebarGitCommitConfirmation = undefined;
     this.gitActionInProgress = true;
     await savePrimarySidebarGitAction(this.context, this.workspaceId, action);
     this.invalidateSidebarGitHudState();
     await this.refreshSidebar();
 
     try {
-      const result = await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: "VSmux Git",
-        },
-        async (progress) =>
-          runSidebarGitActionWorkflow({
-            action,
-            agent: runnableAgent,
-            cwd: getDefaultWorkspaceCwd(),
-            onProgress: (message) => progress.report({ message }),
-          }),
-      );
+      const cwd = getDefaultWorkspaceCwd();
+      const status = await getGitStatusDetails(cwd);
+      const needsCommit = action === "commit" || status.hasWorkingTreeChanges;
+      const shouldPromptForCommit = needsCommit && !getGitSkipSuggestedCommitConfirmation();
 
-      if (result.prUrl) {
-        await vscode.env.openExternal(vscode.Uri.parse(result.prUrl));
+      if (shouldPromptForCommit) {
+        const preparedCommit = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "VSmux Git",
+          },
+          async (progress) =>
+            prepareSidebarGitCommit({
+              action,
+              agent: runnableAgent,
+              cwd,
+              onProgress: (message) => progress.report({ message }),
+            }),
+        );
+
+        const sidebarGitState = await loadSidebarGitState(cwd, action, false);
+        const primaryAction = resolveSidebarGitPrimaryActionState(sidebarGitState);
+        const requestId = randomUUID();
+        this.pendingSidebarGitCommitConfirmation = {
+          action,
+          agent: runnableAgent,
+          preparedCommit,
+          requestId,
+        };
+        await this.sidebarProvider.postMessage({
+          action,
+          confirmLabel: primaryAction.label,
+          description:
+            preparedCommit.scope === "stagedOnly"
+              ? "Review the suggested commit title. Only staged changes will be committed."
+              : "Review the suggested commit title before continuing with all current working tree changes.",
+          requestId,
+          suggestedSubject: preparedCommit.subject,
+          type: "promptGitCommit",
+        });
+        return;
       }
-      void vscode.window.showInformationMessage(result.message);
+
+      this.gitActionInProgress = false;
+      this.invalidateSidebarGitHudState();
+      await this.refreshSidebar();
+      await this.executeSidebarGitAction(action, runnableAgent);
     } catch (error) {
       void vscode.window.showErrorMessage(getErrorMessage(error));
     } finally {
@@ -640,6 +758,85 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await savePrimarySidebarGitAction(this.context, this.workspaceId, action);
     this.invalidateSidebarGitHudState();
     await this.refreshSidebar();
+  }
+
+  public async confirmSidebarGitCommit(requestId: string, subject: string): Promise<void> {
+    const pending = this.pendingSidebarGitCommitConfirmation;
+    if (!pending || pending.requestId !== requestId || this.gitActionInProgress) {
+      return;
+    }
+
+    const trimmedSubject = subject.trim();
+    if (!trimmedSubject) {
+      void vscode.window.showErrorMessage("Commit title cannot be empty.");
+      return;
+    }
+
+    this.pendingSidebarGitCommitConfirmation = undefined;
+    await this.executeSidebarGitAction(
+      pending.action,
+      pending.agent,
+      {
+        ...pending.preparedCommit,
+        subject: trimmedSubject,
+      },
+    );
+  }
+
+  public async cancelSidebarGitCommit(requestId: string): Promise<void> {
+    if (this.pendingSidebarGitCommitConfirmation?.requestId !== requestId) {
+      return;
+    }
+
+    this.pendingSidebarGitCommitConfirmation = undefined;
+  }
+
+  private async executeSidebarGitAction(
+    action: SidebarGitAction,
+    agent: {
+      command: string;
+      agentId: string;
+      icon?: SidebarAgentIcon;
+      isDefault: boolean;
+      name: string;
+    },
+    preparedCommit?: PreparedSidebarGitCommit,
+  ): Promise<void> {
+    if (this.gitActionInProgress) {
+      return;
+    }
+
+    this.gitActionInProgress = true;
+    this.invalidateSidebarGitHudState();
+    await this.refreshSidebar();
+
+    try {
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "VSmux Git",
+        },
+        async (progress) =>
+          runSidebarGitActionWorkflow({
+            action,
+            agent,
+            cwd: getDefaultWorkspaceCwd(),
+            onProgress: (message) => progress.report({ message }),
+            preparedCommit,
+          }),
+      );
+
+      if (result.prUrl) {
+        await vscode.env.openExternal(vscode.Uri.parse(result.prUrl));
+      }
+      void vscode.window.showInformationMessage(result.message);
+    } catch (error) {
+      void vscode.window.showErrorMessage(getErrorMessage(error));
+    } finally {
+      this.gitActionInProgress = false;
+      this.invalidateSidebarGitHudState();
+      await this.refreshSidebar();
+    }
   }
 
   public async runSidebarAgent(agentId: string): Promise<void> {
@@ -666,10 +863,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       command: agentButton.command,
     });
     await this.persistSessionAgentLaunchState();
-    this.syncSurfaceManagers();
-    await this.refreshSidebar();
+    await this.refreshSidebarFromCurrentState();
     await this.backend.createOrAttachSession(sessionRecord);
-    await this.afterStateChange();
+    await this.afterStateChange({ sidebarAlreadyRefreshed: true });
     await this.backend.writeText(sessionRecord.sessionId, agentButton.command, true);
   }
 
@@ -832,16 +1028,49 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     groupId: string,
     targetIndex?: number,
   ): Promise<void> {
+    logVSmuxDebug("controller.moveSessionToGroup.start", {
+      groupId,
+      sessionId,
+      snapshot: summarizeWorkspaceSnapshotForDebug(this.store.getSnapshot()),
+      targetIndex,
+    });
     const changed = await this.store.moveSessionToGroup(sessionId, groupId, targetIndex);
+    logVSmuxDebug("controller.moveSessionToGroup.afterStore", {
+      changed,
+      groupId,
+      sessionId,
+      snapshot: summarizeWorkspaceSnapshotForDebug(this.store.getSnapshot()),
+      targetIndex,
+    });
     if (changed) {
       await this.afterStateChange();
+      logVSmuxDebug("controller.moveSessionToGroup.afterStateChange", {
+        groupId,
+        sessionId,
+        snapshot: summarizeWorkspaceSnapshotForDebug(this.store.getSnapshot()),
+        targetIndex,
+      });
     }
   }
 
   public async createGroupFromSession(sessionId: string): Promise<void> {
+    logVSmuxDebug("controller.createGroupFromSession.start", {
+      sessionId,
+      snapshot: summarizeWorkspaceSnapshotForDebug(this.store.getSnapshot()),
+    });
     const groupId = await this.store.createGroupFromSession(sessionId);
+    logVSmuxDebug("controller.createGroupFromSession.afterStore", {
+      groupId,
+      sessionId,
+      snapshot: summarizeWorkspaceSnapshotForDebug(this.store.getSnapshot()),
+    });
     if (groupId) {
       await this.afterStateChange();
+      logVSmuxDebug("controller.createGroupFromSession.afterStateChange", {
+        groupId,
+        sessionId,
+        snapshot: summarizeWorkspaceSnapshotForDebug(this.store.getSnapshot()),
+      });
     }
   }
 
@@ -859,6 +1088,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     const archivedSessions = group.snapshot.sessions
       .map((sessionRecord) => this.createArchivedSessionEntry(sessionRecord))
       .filter((entry): entry is PreviousSessionHistoryEntry => entry !== undefined);
+    await this.store.removeGroup(groupId);
+    await this.refreshSidebarFromCurrentState();
     for (const sessionRecord of group.snapshot.sessions) {
       await this.disposeSurface(sessionRecord);
       this.clearSessionPresentationState(sessionRecord.sessionId);
@@ -867,28 +1098,44 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       await this.previousSessionHistory.append(archivedSessions);
     }
     await this.persistSessionAgentLaunchState();
-    await this.store.removeGroup(groupId);
-    await this.afterStateChange();
+    await this.afterStateChange({ sidebarAlreadyRefreshed: true });
   }
 
-  private async afterStateChange(): Promise<void> {
-    this.clearObservedSidebarFocusState();
-    this.syncSurfaceManagers();
+  private async afterStateChange(options?: {
+    sidebarAlreadyRefreshed?: boolean;
+    workspaceAlreadyRefreshed?: boolean;
+  }): Promise<void> {
+    if (options?.sidebarAlreadyRefreshed) {
+      this.clearObservedSidebarFocusState();
+      this.syncSurfaceManagers();
+    } else {
+      await this.refreshSidebarFromCurrentState();
+    }
+    if (!options?.workspaceAlreadyRefreshed) {
+      await this.refreshWorkspacePanel();
+    }
     logVSmuxDebug("controller.afterStateChange", {
       activeGroupId: this.store.getSnapshot().activeGroupId,
       snapshot: this.describeActiveSnapshot(),
     });
     await this.reconcileProjectedSessions();
-    await this.refreshWorkspacePanel();
+  }
+
+  private async refreshSidebarFromCurrentState(): Promise<void> {
+    this.clearObservedSidebarFocusState();
+    this.syncSurfaceManagers();
     await this.refreshSidebar();
   }
 
   private async handleSidebarMessage(message: SidebarToExtensionMessage): Promise<void> {
     await dispatchSidebarMessage(message, {
+      cancelSidebarGitCommit: async (requestId) => this.cancelSidebarGitCommit(requestId),
       clearGeneratedPreviousSessions: async () => this.clearGeneratedPreviousSessions(),
       clearStartupSidebarRefreshes: () => {},
       closeGroup: async (groupId) => this.closeGroup(groupId),
       closeSession: async (sessionId) => this.closeSession(sessionId),
+      confirmSidebarGitCommit: async (requestId, subject) =>
+        this.confirmSidebarGitCommit(requestId, subject),
       copyResumeCommand: async (sessionId) => this.copyResumeCommand(sessionId),
       createGroupFromSession: async (sessionId) => this.createGroupFromSession(sessionId),
       createSession: async () => this.createSession(),
@@ -944,7 +1191,18 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private async refreshSidebar(
     type: SidebarHydrateMessage["type"] | SidebarSessionStateMessage["type"] = "sessionState",
   ): Promise<void> {
-    await this.sidebarProvider.postMessage(await this.createSidebarMessage(type));
+    const revision = ++this.nextSidebarRevision;
+    logVSmuxDebug("controller.refreshSidebar.start", {
+      revision,
+      snapshot: summarizeWorkspaceSnapshotForDebug(this.store.getSnapshot()),
+      type,
+    });
+    await this.sidebarProvider.postMessage(await this.createSidebarMessage(type, revision));
+    logVSmuxDebug("controller.refreshSidebar.complete", {
+      revision,
+      snapshot: summarizeWorkspaceSnapshotForDebug(this.store.getSnapshot()),
+      type,
+    });
   }
 
   private async refreshDaemonSessions(): Promise<void> {
@@ -953,6 +1211,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private async createSidebarMessage(
     type: SidebarHydrateMessage["type"] | SidebarSessionStateMessage["type"] = "sessionState",
+    revision = ++this.nextSidebarRevision,
   ): Promise<ExtensionToSidebarMessage> {
     const workspaceSnapshot = this.getPresentedWorkspaceSnapshot();
     const activeSnapshot =
@@ -1007,6 +1266,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       ),
       platform: SHORTCUT_LABEL_PLATFORM,
       previousSessions: this.previousSessionHistory.getItems(),
+      revision,
       scratchPadContent: this.getScratchPadContent(),
       terminalHasLiveProjection: (sessionId) => this.backend.hasLiveTerminal(sessionId),
       type,
@@ -1756,7 +2016,25 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private async refreshWorkspacePanel(): Promise<void> {
-    await this.workspacePanel.postMessage(await this.createWorkspacePanelMessage("sessionState"));
+    const startedAt = Date.now();
+    const message = await this.createWorkspacePanelMessage("sessionState");
+    if (message.type !== "sessionState") {
+      await this.workspacePanel.postMessage(message);
+      return;
+    }
+    logVSmuxDebug("controller.refreshWorkspacePanel.prePostMessage", {
+      activeGroupId: message.activeGroupId,
+      durationMs: Date.now() - startedAt,
+      focusedSessionId: message.focusedSessionId,
+      paneIds: message.panes.map(
+        (pane) => `${pane.sessionId}:${pane.isVisible ? "visible" : "hidden"}`,
+      ),
+    });
+    await this.workspacePanel.postMessage(message);
+    logVSmuxDebug("controller.refreshWorkspacePanel.postMessageComplete", {
+      durationMs: Date.now() - startedAt,
+      focusedSessionId: message.focusedSessionId,
+    });
   }
 
   private async createWorkspacePanelMessage(
@@ -1764,19 +2042,23 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   ): Promise<ExtensionToWorkspacePanelMessage> {
     const workspaceSnapshot = this.store.getSnapshot();
     const activeSnapshot = this.getActiveSnapshot();
-    const visibleSessions = activeSnapshot.visibleSessionIds
-      .map((sessionId) => this.store.getSession(sessionId))
+    const activeGroup = workspaceSnapshot.groups.find(
+      (group) => group.groupId === workspaceSnapshot.activeGroupId,
+    );
+    const activeGroupSessions = (activeGroup?.snapshot.sessions ?? [])
       .filter((sessionRecord): sessionRecord is SessionRecord => sessionRecord !== undefined);
+    const visibleSessionIdSet = new Set(activeSnapshot.visibleSessionIds);
     const connection = {
       ...(await this.backend.getConnection()),
       workspaceId: this.workspaceId,
     };
     const panes = (
       await Promise.all(
-        visibleSessions.map(async (sessionRecord) => {
+        activeGroupSessions.map(async (sessionRecord) => {
           if (sessionRecord.kind === "terminal") {
             return {
               kind: "terminal" as const,
+              isVisible: visibleSessionIdSet.has(sessionRecord.sessionId),
               sessionId: sessionRecord.sessionId,
               sessionRecord,
               snapshot: this.backend.getSessionSnapshot(sessionRecord.sessionId),
@@ -1790,6 +2072,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
           return {
             kind: "t3" as const,
+            isVisible: visibleSessionIdSet.has(sessionRecord.sessionId),
             sessionId: sessionRecord.sessionId,
             sessionRecord,
             html:
@@ -1960,6 +2243,19 @@ function cloneWorkspaceSnapshot(
   snapshot: GroupedSessionWorkspaceSnapshot,
 ): GroupedSessionWorkspaceSnapshot {
   return JSON.parse(JSON.stringify(snapshot)) as GroupedSessionWorkspaceSnapshot;
+}
+
+function summarizeWorkspaceSnapshotForDebug(snapshot: GroupedSessionWorkspaceSnapshot) {
+  return {
+    activeGroupId: snapshot.activeGroupId,
+    groups: snapshot.groups.map((group) => ({
+      focusedSessionId: group.snapshot.focusedSessionId,
+      groupId: group.groupId,
+      sessionIds: group.snapshot.sessions.map((session) => session.sessionId),
+      title: group.title,
+      visibleSessionIds: [...group.snapshot.visibleSessionIds],
+    })),
+  };
 }
 
 function compareSidebarDaemonSessions(

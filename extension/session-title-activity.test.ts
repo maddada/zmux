@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import {
+  SLOW_SPINNER_ACTIVITY_WINDOW_MS,
   TITLE_ACTIVITY_WINDOW_MS,
   acknowledgeTitleDerivedSessionActivity,
   getInterestingTitleSymbols,
@@ -81,6 +82,40 @@ describe("getTitleDerivedSessionActivity", () => {
       isAcknowledged: false,
       lastTitleChangeAt: Date.now(),
     });
+    const eighthActivity = getTitleDerivedSessionActivityFromTransition(undefined, "⠇ Codex");
+    expect(getTitleDerivedSessionActivity("⠇ Codex", eighthActivity)).toEqual({
+      activity: "working",
+      agentName: "codex",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: Date.now(),
+    });
+    const ninthActivity = getTitleDerivedSessionActivityFromTransition(undefined, "⠙ Codex");
+    expect(getTitleDerivedSessionActivity("⠙ Codex", ninthActivity)).toEqual({
+      activity: "working",
+      agentName: "codex",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: Date.now(),
+    });
+    const tenthActivity = getTitleDerivedSessionActivityFromTransition(undefined, "⠹ Codex");
+    expect(getTitleDerivedSessionActivity("⠹ Codex", tenthActivity)).toEqual({
+      activity: "working",
+      agentName: "codex",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: Date.now(),
+    });
+  });
+
+  test("should treat a static Codex spinner without a seen title change as idle", () => {
+    expect(getTitleDerivedSessionActivity("⠹ Codex")).toEqual({
+      activity: "idle",
+      agentName: "codex",
+      hasSeenWorking: false,
+      isAcknowledged: false,
+      lastTitleChangeAt: undefined,
+    });
   });
 
   test("should treat Codex titles without a spinner as idle", () => {
@@ -112,9 +147,24 @@ describe("getTitleDerivedSessionActivity", () => {
     });
   });
 
+  test("should detect Codex spinner titles without a known agent when the title shows a Codex glyph", () => {
+    const derivedActivity = getTitleDerivedSessionActivityFromTransition(
+      undefined,
+      "⠸ Review repository...",
+    );
+
+    expect(getTitleDerivedSessionActivity("⠸ Review repository...", derivedActivity)).toEqual({
+      activity: "working",
+      agentName: "codex",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: Date.now(),
+    });
+  });
+
   test("should treat a frozen Codex spinner as attention after the activity window", () => {
     const derivedActivity = getTitleDerivedSessionActivityFromTransition(undefined, "⠏ OpenAI Codex");
-    vi.advanceTimersByTime(TITLE_ACTIVITY_WINDOW_MS + 1);
+    vi.advanceTimersByTime(SLOW_SPINNER_ACTIVITY_WINDOW_MS + 1);
 
     expect(getTitleDerivedSessionActivity("⠏ OpenAI Codex", derivedActivity)).toEqual({
       activity: "attention",
@@ -147,7 +197,7 @@ describe("getTitleDerivedSessionActivity", () => {
       undefined,
       "· Claude Code · API Usage",
     );
-    vi.advanceTimersByTime(TITLE_ACTIVITY_WINDOW_MS + 1);
+    vi.advanceTimersByTime(SLOW_SPINNER_ACTIVITY_WINDOW_MS + 1);
 
     expect(getTitleDerivedSessionActivity("· Claude Code · API Usage", derivedActivity)).toEqual({
       activity: "attention",
@@ -178,19 +228,139 @@ describe("getTitleDerivedSessionActivity", () => {
   test("should detect Claude glyph titles from the known session agent even when the title omits Claude Code", () => {
     const derivedActivity = getTitleDerivedSessionActivityFromTransition(
       undefined,
-      "· Review repository...",
+      "⠐ Determine project purpose and scope",
       undefined,
       "claude",
     );
 
     expect(
-      getTitleDerivedSessionActivity("· Review repository...", derivedActivity, "claude"),
+      getTitleDerivedSessionActivity(
+        "⠐ Determine project purpose and scope",
+        derivedActivity,
+        "claude",
+      ),
     ).toEqual({
       activity: "working",
       agentName: "claude",
       hasSeenWorking: true,
       isAcknowledged: false,
       lastTitleChangeAt: Date.now(),
+    });
+
+    const secondDerivedActivity = getTitleDerivedSessionActivityFromTransition(
+      undefined,
+      "⠂ Review repository...",
+      undefined,
+      "claude",
+    );
+
+    expect(
+      getTitleDerivedSessionActivity("⠂ Review repository...", secondDerivedActivity, "claude"),
+    ).toEqual({
+      activity: "working",
+      agentName: "claude",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: Date.now(),
+    });
+  });
+
+  test("should detect Claude glyph titles without a known agent when the title shows a Claude glyph", () => {
+    const derivedActivity = getTitleDerivedSessionActivityFromTransition(
+      undefined,
+      "⠐ Determine project purpose and scope",
+    );
+
+    expect(getTitleDerivedSessionActivity("⠐ Determine project purpose and scope", derivedActivity)).toEqual({
+      activity: "working",
+      agentName: "claude",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: Date.now(),
+    });
+  });
+
+  test("should treat a static Claude spinner without a seen title change as idle", () => {
+    expect(getTitleDerivedSessionActivity("⠐ Determine project purpose and scope", undefined, "claude")).toEqual({
+      activity: "idle",
+      agentName: "claude",
+      hasSeenWorking: false,
+      isAcknowledged: false,
+      lastTitleChangeAt: undefined,
+    });
+  });
+
+  test("should detect Gemini working and ready titles", () => {
+    const workingActivity = getTitleDerivedSessionActivityFromTransition(undefined, "✦ agent-tiler");
+    expect(getTitleDerivedSessionActivity("✦ agent-tiler", workingActivity)).toEqual({
+      activity: "working",
+      agentName: "gemini",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: Date.now(),
+    });
+
+    expect(
+      getTitleDerivedSessionActivity("◇ agent-tiler", {
+        activity: "working",
+        agentName: "gemini",
+        hasSeenWorking: true,
+        isAcknowledged: false,
+        lastTitleChangeAt: Date.now(),
+      }),
+    ).toEqual({
+      activity: "attention",
+      agentName: "gemini",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: expect.any(Number),
+    });
+  });
+
+  test("should allow a static Gemini working glyph to count as working", () => {
+    expect(getTitleDerivedSessionActivity("✦ agent-tiler")).toEqual({
+      activity: "working",
+      agentName: "gemini",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: expect.any(Number),
+    });
+  });
+
+  test("should detect GitHub Copilot working and attention titles", () => {
+    const workingActivity = getTitleDerivedSessionActivityFromTransition(undefined, "🤖");
+    expect(getTitleDerivedSessionActivity("🤖", workingActivity)).toEqual({
+      activity: "working",
+      agentName: "copilot",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: Date.now(),
+    });
+
+    expect(
+      getTitleDerivedSessionActivity("🔔", {
+        activity: "working",
+        agentName: "copilot",
+        hasSeenWorking: true,
+        isAcknowledged: false,
+        lastTitleChangeAt: Date.now(),
+      }),
+    ).toEqual({
+      activity: "attention",
+      agentName: "copilot",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: expect.any(Number),
+    });
+  });
+
+  test("should allow a static Copilot working glyph to count as working", () => {
+    expect(getTitleDerivedSessionActivity("🤖")).toEqual({
+      activity: "working",
+      agentName: "copilot",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: expect.any(Number),
     });
   });
 });
@@ -245,6 +415,42 @@ describe("getTitleDerivedSessionActivityFromTransition", () => {
     ).toEqual({
       activity: "attention",
       agentName: "codex",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: expect.any(Number),
+    });
+  });
+
+  test("should keep the detected Codex agent when a glyph-only Codex title becomes plain text", () => {
+    expect(
+      getTitleDerivedSessionActivityFromTransition("⠸ Review repository...", "Review repository...", {
+        activity: "working",
+        agentName: "codex",
+        hasSeenWorking: true,
+        isAcknowledged: false,
+        lastTitleChangeAt: Date.now(),
+      }),
+    ).toEqual({
+      activity: "attention",
+      agentName: "codex",
+      hasSeenWorking: true,
+      isAcknowledged: false,
+      lastTitleChangeAt: expect.any(Number),
+    });
+  });
+
+  test("should keep the detected Claude agent when a glyph-only Claude title becomes an idle marker", () => {
+    expect(
+      getTitleDerivedSessionActivityFromTransition("⠐ Determine project purpose and scope", "✳ Review repository...", {
+        activity: "working",
+        agentName: "claude",
+        hasSeenWorking: true,
+        isAcknowledged: false,
+        lastTitleChangeAt: Date.now(),
+      }),
+    ).toEqual({
+      activity: "attention",
+      agentName: "claude",
       hasSeenWorking: true,
       isAcknowledged: false,
       lastTitleChangeAt: expect.any(Number),

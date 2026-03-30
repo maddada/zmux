@@ -10,6 +10,7 @@ const AGENT_SECONDARY_LABELS: Record<SidebarAgentIcon, readonly string[]> = {
   browser: ["browser"],
   claude: ["claude", "claude code"],
   codex: ["codex", "codex cli", "openai codex"],
+  copilot: ["copilot", "github copilot"],
   gemini: ["gemini"],
   opencode: ["open code", "opencode"],
   t3: ["t3", "t3 code"],
@@ -52,27 +53,8 @@ export function SessionCardContent({
 
   return (
     <>
-      {session.agentIcon === "browser" ? (
-        <IconWorld
-          aria-hidden="true"
-          className="session-agent-tabler-watermark"
-          data-agent-icon="browser"
-          size={20}
-          stroke={1.8}
-        />
-      ) : session.agentIcon ? (
-        <span
-          aria-hidden="true"
-          className="session-agent-watermark"
-          data-agent-icon={session.agentIcon}
-          style={
-            {
-              "--session-agent-logo": `url("${AGENT_LOGOS[session.agentIcon]}")`,
-            } as CSSProperties
-          }
-        />
-      ) : null}
       <div className="session-head">
+        <SessionAgentIcon agentIcon={session.agentIcon} />
         <OverflowTooltipText
           className="session-alias-heading"
           textRef={aliasHeadingRef}
@@ -117,6 +99,41 @@ export function SessionCardContent({
         </div>
       </div>
     </>
+  );
+}
+
+type SessionAgentIconProps = {
+  agentIcon: SidebarSessionItem["agentIcon"];
+};
+
+function SessionAgentIcon({ agentIcon }: SessionAgentIconProps) {
+  if (agentIcon === "browser") {
+    return (
+      <IconWorld
+        aria-hidden="true"
+        className="session-agent-tabler-icon"
+        data-agent-icon="browser"
+        size={18}
+        stroke={1.8}
+      />
+    );
+  }
+
+  if (!agentIcon) {
+    return null;
+  }
+
+  return (
+    <span
+      aria-hidden="true"
+      className="session-agent-icon"
+      data-agent-icon={agentIcon}
+      style={
+        {
+          "--session-agent-logo": `url("${AGENT_LOGOS[agentIcon]}")`,
+        } as CSSProperties
+      }
+    />
   );
 }
 

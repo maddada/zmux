@@ -13,7 +13,9 @@ export type SidebarMessageHandlers = {
   clearGeneratedPreviousSessions: () => Promise<void>;
   closeGroup: (groupId: string) => Promise<void>;
   closeSession: (sessionId: string) => Promise<void>;
+  confirmSidebarGitCommit: (requestId: string, subject: string) => Promise<void>;
   copyResumeCommand: (sessionId: string) => Promise<void>;
+  cancelSidebarGitCommit: (requestId: string) => Promise<void>;
   createGroupFromSession: (sessionId: string) => Promise<void>;
   createSession: () => Promise<void>;
   createSessionInGroup: (groupId: string) => Promise<void>;
@@ -124,6 +126,12 @@ export async function dispatchSidebarMessage(
       return;
     case "refreshGitState":
       await handlers.refreshGitState();
+      return;
+    case "confirmSidebarGitCommit":
+      await handlers.confirmSidebarGitCommit(message.requestId, message.subject);
+      return;
+    case "cancelSidebarGitCommit":
+      await handlers.cancelSidebarGitCommit(message.requestId);
       return;
     case "saveSidebarAgent":
       await handlers.saveSidebarAgent(message.agentId, message.name, message.command, message.icon);

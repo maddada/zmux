@@ -81,6 +81,7 @@ export type SidebarHudState = {
 export type SidebarHydrateMessage = {
   groups: SidebarSessionGroup[];
   previousSessions: SidebarPreviousSessionItem[];
+  revision: number;
   scratchPadContent: string;
   type: "hydrate";
   hud: SidebarHudState;
@@ -89,6 +90,7 @@ export type SidebarHydrateMessage = {
 export type SidebarSessionStateMessage = {
   groups: SidebarSessionGroup[];
   previousSessions: SidebarPreviousSessionItem[];
+  revision: number;
   scratchPadContent: string;
   type: "sessionState";
   hud: SidebarHudState;
@@ -137,12 +139,22 @@ export type SidebarDaemonSessionsStateMessage = {
   type: "daemonSessionsState";
 };
 
+export type SidebarPromptGitCommitMessage = {
+  action: SidebarGitAction;
+  confirmLabel: string;
+  description: string;
+  requestId: string;
+  suggestedSubject: string;
+  type: "promptGitCommit";
+};
+
 export type ExtensionToSidebarMessage =
   | SidebarHydrateMessage
   | SidebarSessionStateMessage
   | SidebarSessionPresentationChangedMessage
   | SidebarPlayCompletionSoundMessage
-  | SidebarDaemonSessionsStateMessage;
+  | SidebarDaemonSessionsStateMessage
+  | SidebarPromptGitCommitMessage;
 
 export type SidebarToExtensionMessage =
   | {
@@ -280,6 +292,15 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "refreshGitState";
+    }
+  | {
+      requestId: string;
+      subject: string;
+      type: "confirmSidebarGitCommit";
+    }
+  | {
+      requestId: string;
+      type: "cancelSidebarGitCommit";
     }
   | {
       type: "saveSidebarCommand";

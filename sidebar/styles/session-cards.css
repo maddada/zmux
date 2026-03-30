@@ -148,7 +148,7 @@
 .session-status-dot {
   --session-status-dot-color: var(--attention-dot);
   position: absolute;
-  left: 0;
+  right: 0;
   top: 50%;
   width: 12px;
   height: 12px;
@@ -161,7 +161,7 @@
   opacity: 0;
   pointer-events: none;
   scale: 1;
-  translate: -8px -50%;
+  translate: 8px -50%;
   z-index: 2;
   transition:
     opacity 160ms ease,
@@ -182,14 +182,14 @@
 
 .session-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
 .session-alias-heading {
-  flex: 1 1 auto;
+  grid-column: 2;
   width: 100%;
   font-size: 13px;
   font-weight: 600;
@@ -201,17 +201,13 @@
   white-space: nowrap;
 }
 
-.session-agent-watermark {
-  position: absolute;
-  right: 10px;
-  top: 50%;
+.session-agent-icon {
   width: 18px;
   height: 18px;
-  translate: 0 -50%;
-  background: var(--session-agent-watermark-color, var(--app-foreground));
-  opacity: 0.7;
+  background: var(--session-agent-icon-color, var(--app-foreground));
+  opacity: 0.82;
   pointer-events: none;
-  z-index: 0;
+  flex: none;
   -webkit-mask-image: var(--session-agent-logo);
   -webkit-mask-position: center;
   -webkit-mask-repeat: no-repeat;
@@ -220,49 +216,43 @@
   mask-position: center;
   mask-repeat: no-repeat;
   mask-size: contain;
-  transition: opacity 120ms ease;
 }
 
-.session-agent-tabler-watermark {
-  position: absolute;
-  right: 9px;
-  top: 50%;
-  color: var(--session-agent-watermark-color, var(--app-foreground));
-  opacity: 0.7;
+.session-agent-tabler-icon {
+  color: var(--session-agent-icon-color, var(--app-foreground));
+  opacity: 0.82;
+  flex: none;
   pointer-events: none;
-  translate: 0 -50%;
-  z-index: 0;
-  transition: opacity 120ms ease;
 }
 
-.session-agent-watermark[data-agent-icon="codex"] {
-  --session-agent-watermark-color: #ffffff;
+.session-agent-icon[data-agent-icon="codex"] {
+  --session-agent-icon-color: #ffffff;
 }
 
-.session-agent-tabler-watermark[data-agent-icon="browser"] {
-  --session-agent-watermark-color: #82b7ff;
+.session-agent-tabler-icon[data-agent-icon="browser"] {
+  --session-agent-icon-color: #82b7ff;
 }
 
-.session-agent-watermark[data-agent-icon="browser"] {
-  --session-agent-watermark-color: #82b7ff;
+.session-agent-icon[data-agent-icon="browser"] {
+  --session-agent-icon-color: #82b7ff;
 }
 
-.session-agent-watermark[data-agent-icon="t3"] {
-  --session-agent-watermark-color: #ffa6fb;
+.session-agent-icon[data-agent-icon="t3"] {
+  --session-agent-icon-color: #ffa6fb;
   width: 22px;
   height: 22px;
 }
 
-.session-agent-watermark[data-agent-icon="claude"] {
-  --session-agent-watermark-color: #d97757;
+.session-agent-icon[data-agent-icon="claude"] {
+  --session-agent-icon-color: #d97757;
 }
 
-.session-agent-watermark[data-agent-icon="gemini"] {
-  --session-agent-watermark-color: #8b9aff;
+.session-agent-icon[data-agent-icon="gemini"] {
+  --session-agent-icon-color: #8b9aff;
 }
 
-.session-agent-watermark[data-agent-icon="opencode"] {
-  --session-agent-watermark-color: #6d96c0;
+.session-agent-icon[data-agent-icon="opencode"] {
+  --session-agent-icon-color: #6d96c0;
 }
 
 .session-head {

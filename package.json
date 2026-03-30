@@ -444,6 +444,13 @@
           "default": "codex",
           "description": "Agent ID from VSmux.agents used to generate Git commit messages and PR text. Defaults to codex. If unavailable, VSmux falls back to claude and then the first configured agent with a command."
         },
+        "VSmux.gitSkipSuggestedCommitConfirmation": {
+          "title": "Git Skip Suggested Commit Confirmation",
+          "type": "boolean",
+          "scope": "resource",
+          "default": false,
+          "description": "Skip the sidebar commit-title confirmation modal and immediately use the suggested Git commit title."
+        },
         "VSmux.agentOrder": {
           "title": "Agent Order",
           "type": "array",

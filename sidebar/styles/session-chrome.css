@@ -118,15 +118,6 @@
   opacity: 1;
 }
 
-.session:hover .session-agent-watermark,
-.session:focus-visible .session-agent-watermark,
-.session:focus-within .session-agent-watermark,
-.session:hover .session-agent-tabler-watermark,
-.session:focus-visible .session-agent-tabler-watermark,
-.session:focus-within .session-agent-tabler-watermark {
-  opacity: 0;
-}
-
 .session-summary {
   display: block;
   min-width: 0;

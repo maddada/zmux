@@ -14,6 +14,7 @@ import type {
   TerminalStateMessage,
 } from "../shared/terminal-host-protocol";
 import { getTerminalAppearanceOptions } from "./terminal-appearance";
+import { getTerminalHistoryReplay } from "./terminal-pane-history";
 import { logWorkspaceDebug } from "./workspace-debug";
 import { getTerminalTheme } from "./terminal-theme";
 import "./terminal-pane.css";
@@ -22,7 +23,9 @@ const DATA_BUFFER_FLUSH_MS = 5;
 
 export type TerminalPaneProps = {
   connection: WorkspacePanelConnection;
+  debugLog?: (event: string, payload?: Record<string, unknown>) => void;
   debuggingMode: boolean;
+  isVisible: boolean;
   onActivate: () => void;
   pane: WorkspacePanelTerminalPane;
   terminalAppearance: WorkspacePanelTerminalAppearance;
@@ -30,15 +33,32 @@ export type TerminalPaneProps = {
 
 export const TerminalPane: React.FC<TerminalPaneProps> = ({
   connection,
+  debugLog,
   debuggingMode,
+  isVisible,
   onActivate,
   pane,
   terminalAppearance,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const debugLogRef = useRef(debugLog);
+  const debuggingModeRef = useRef(debuggingMode);
   const fitRef = useRef<FitAddon | null>(null);
   const lastMeasuredSizeRef = useRef<{ height: number; width: number }>();
   const terminalRef = useRef<Terminal | null>(null);
+
+  useEffect(() => {
+    debugLogRef.current = debugLog;
+  }, [debugLog]);
+
+  useEffect(() => {
+    debuggingModeRef.current = debuggingMode;
+  }, [debuggingMode]);
+
+  const reportDebug = (event: string, payload?: Record<string, unknown>) => {
+    logWorkspaceDebug(debuggingModeRef.current, event, payload);
+    debugLogRef.current?.(event, payload);
+  };
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -84,7 +104,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     let didDispose = false;
     let websocket: WebSocket | undefined;
     let didApplyHistory = false;
-    let dataBuffer: string[] = [];
+    let dataBuffer: Uint8Array[] = [];
     let flushTimer: number | undefined;
     let pendingSocketMessages: string[] = [];
 
@@ -117,24 +137,35 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       socketUrl.searchParams.set("rows", String(terminal.rows));
 
       websocket = new WebSocket(socketUrl.toString());
+      websocket.binaryType = "arraybuffer";
       websocket.onmessage = (event) => {
-        if (typeof event.data !== "string") {
+        if (typeof event.data === "string") {
+          if (event.data.startsWith("{")) {
+            const message = JSON.parse(event.data) as TerminalStateMessage;
+            handleTerminalStateMessage(message);
+          }
           return;
         }
 
-        if (event.data.startsWith("{")) {
-          const message = JSON.parse(event.data) as TerminalStateMessage;
-          handleTerminalStateMessage(message);
+        if (event.data instanceof ArrayBuffer) {
+          dataBuffer.push(new Uint8Array(event.data));
+          if (flushTimer === undefined) {
+            flushTimer = window.setTimeout(flushData, DATA_BUFFER_FLUSH_MS);
+          }
           return;
         }
 
-        dataBuffer.push(event.data);
-        if (flushTimer === undefined) {
-          flushTimer = window.setTimeout(flushData, DATA_BUFFER_FLUSH_MS);
+        if (event.data instanceof Blob) {
+          void event.data.arrayBuffer().then((buffer) => {
+            dataBuffer.push(new Uint8Array(buffer));
+            if (flushTimer === undefined) {
+              flushTimer = window.setTimeout(flushData, DATA_BUFFER_FLUSH_MS);
+            }
+          });
         }
       };
       websocket.onopen = () => {
-        logWorkspaceDebug(debuggingMode, "terminal.socketOpen", {
+        reportDebug("terminal.socketOpen", {
           cols: terminal.cols,
           rows: terminal.rows,
           sessionId: pane.sessionId,
@@ -145,13 +176,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         pendingSocketMessages = [];
       };
       websocket.onclose = () => {
-        logWorkspaceDebug(debuggingMode, "terminal.socketClose", {
+        reportDebug("terminal.socketClose", {
           sessionId: pane.sessionId,
         });
         pendingSocketMessages = [];
       };
       websocket.onerror = () => {
-        logWorkspaceDebug(debuggingMode, "terminal.socketError", {
+        reportDebug("terminal.socketError", {
           sessionId: pane.sessionId,
         });
         pendingSocketMessages = [];
@@ -164,7 +195,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           return;
         }
 
-        logWorkspaceDebug(debuggingMode, "terminal.initialFit", {
+        reportDebug("terminal.initialFit", {
           cols: terminal.cols,
           sessionId: pane.sessionId,
         });
@@ -179,14 +210,17 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     });
 
     const flushData = () => {
-      const chunk = dataBuffer.join("");
-      dataBuffer = [];
-      flushTimer = undefined;
-      if (!chunk) {
+      if (dataBuffer.length === 0) {
+        flushTimer = undefined;
         return;
       }
 
-      terminal.write(chunk);
+      const chunks = dataBuffer;
+      dataBuffer = [];
+      flushTimer = undefined;
+      for (const chunk of chunks) {
+        terminal.write(chunk);
+      }
     };
 
     const handleTerminalStateMessage = (message: TerminalStateMessage) => {
@@ -194,20 +228,19 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         return;
       }
 
-      if (!didApplyHistory) {
-        didApplyHistory = true;
-        if (message.session.history) {
-          logWorkspaceDebug(debuggingMode, "terminal.applyHistory", {
-            historyLength: message.session.history.length,
-            sessionId: pane.sessionId,
-          });
-          terminal.write(message.session.history);
-        }
+      const historyReplay = getTerminalHistoryReplay(message.session, didApplyHistory);
+      didApplyHistory = historyReplay.didApplyHistory;
+      if (historyReplay.history !== undefined) {
+        reportDebug("terminal.applyHistory", {
+          historyLength: historyReplay.history.length,
+          sessionId: pane.sessionId,
+        });
+        terminal.write(historyReplay.history);
       }
     };
 
     if (connection.mock) {
-      logWorkspaceDebug(debuggingMode, "terminal.mockConnected", {
+      reportDebug("terminal.mockConnected", {
         sessionId: pane.sessionId,
       });
       if (pane.snapshot?.history) {
@@ -274,7 +307,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         lastMeasuredSizeRef.current = nextMeasuredSize;
         cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(() => {
-          logWorkspaceDebug(debuggingMode, "terminal.resizeObserverFit", {
+          reportDebug("terminal.resizeObserverFit", {
             height: nextMeasuredSize.height,
             sessionId: pane.sessionId,
             width: nextMeasuredSize.width,
@@ -318,12 +351,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       terminalRef.current = null;
       fitRef.current = null;
     };
-  }, [
-    connection.baseUrl,
-    connection.token,
-    pane.sessionId,
-    debuggingMode,
-  ]);
+  }, [connection.baseUrl, connection.token, pane.sessionId]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -343,12 +371,48 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     terminalAppearance.lineHeight,
   ]);
 
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!terminalRef.current || !containerRef.current) {
+          return;
+        }
+
+        const bounds = containerRef.current.getBoundingClientRect();
+        if (bounds.width <= 0 || bounds.height <= 0) {
+          return;
+        }
+
+        reportDebug("terminal.visibleRefit", {
+          height: Math.round(bounds.height),
+          sessionId: pane.sessionId,
+          width: Math.round(bounds.width),
+        });
+        lastMeasuredSizeRef.current = {
+          height: Math.round(bounds.height),
+          width: Math.round(bounds.width),
+        };
+        fitRef.current?.fit();
+        terminal.refresh(0, terminal.rows - 1);
+      });
+    });
+  }, [debugLog, isVisible, pane.sessionId, debuggingMode]);
+
   return (
     <div
-      className="terminal-pane-root"
+      className={`terminal-pane-root ${isVisible ? "" : "terminal-pane-root-hidden"}`.trim()}
       onMouseDown={(event) => {
         event.stopPropagation();
-        logWorkspaceDebug(debuggingMode, "terminal.mouseActivate", {
+        reportDebug("terminal.mouseActivate", {
           sessionId: pane.sessionId,
         });
         onActivate();

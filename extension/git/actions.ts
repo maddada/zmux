@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getSidebarGitDisabledReason, type SidebarGitAction } from "../../shared/sidebar-git";
@@ -19,17 +19,65 @@ type RunnableSidebarAgentButton = SidebarAgentButton & {
   command: string;
 };
 
+export type SidebarGitCommitScope = "allChanges" | "stagedOnly";
+
+export type PreparedSidebarGitCommit = {
+  body: string;
+  scope: SidebarGitCommitScope;
+  subject: string;
+};
+
 export type RunSidebarGitActionInput = {
   action: SidebarGitAction;
   agent: RunnableSidebarAgentButton;
   cwd: string;
   onProgress?: (message: string) => void;
+  preparedCommit?: PreparedSidebarGitCommit;
 };
 
 export type RunSidebarGitActionResult = {
   message: string;
   prUrl?: string;
 };
+
+export type PrepareSidebarGitCommitInput = {
+  action: SidebarGitAction;
+  agent: RunnableSidebarAgentButton;
+  cwd: string;
+  onProgress?: (message: string) => void;
+};
+
+export async function prepareSidebarGitCommit(
+  input: PrepareSidebarGitCommitInput,
+): Promise<PreparedSidebarGitCommit> {
+  const status = await getGitStatusDetails(input.cwd);
+  const sidebarState = await loadSidebarGitState(input.cwd, input.action, false);
+  const disabledReason = getSidebarGitDisabledReason(sidebarState, input.action);
+  if (disabledReason) {
+    throw new Error(disabledReason);
+  }
+
+  input.onProgress?.("Preparing commit changes...");
+  const commitContext = await prepareCommitContext(input.cwd, status);
+  if (!commitContext) {
+    throw new Error("No changes available to commit.");
+  }
+
+  input.onProgress?.("Generating commit message...");
+  const generated = await generateCommitMessage({
+    agent: input.agent,
+    branch: status.branch,
+    cwd: input.cwd,
+    stagedPatch: commitContext.stagedPatch,
+    stagedSummary: commitContext.stagedSummary,
+  });
+
+  return {
+    body: generated.body,
+    scope: commitContext.scope,
+    subject: generated.subject,
+  };
+}
 
 export async function runSidebarGitActionWorkflow(
   input: RunSidebarGitActionInput,
@@ -42,7 +90,13 @@ export async function runSidebarGitActionWorkflow(
   }
 
   if (input.action === "commit") {
-    const commitResult = await commitWorkingTree(input.cwd, status, input.agent, input.onProgress);
+    const commitResult = await commitWorkingTree(
+      input.cwd,
+      status,
+      input.agent,
+      input.onProgress,
+      input.preparedCommit,
+    );
     return {
       message: `Committed ${shortenSha(commitResult.commitSha)}: ${commitResult.subject}`,
     };
@@ -50,7 +104,13 @@ export async function runSidebarGitActionWorkflow(
 
   let latestCommit: { commitSha: string; subject: string } | undefined;
   if (status.hasWorkingTreeChanges) {
-    latestCommit = await commitWorkingTree(input.cwd, status, input.agent, input.onProgress);
+    latestCommit = await commitWorkingTree(
+      input.cwd,
+      status,
+      input.agent,
+      input.onProgress,
+      input.preparedCommit,
+    );
     status = await getGitStatusDetails(input.cwd);
   }
 
@@ -99,24 +159,33 @@ async function commitWorkingTree(
   status: GitStatusDetails,
   agent: RunnableSidebarAgentButton,
   onProgress?: (message: string) => void,
+  preparedCommit?: PreparedSidebarGitCommit,
 ): Promise<{ commitSha: string; subject: string }> {
-  onProgress?.("Staging changes...");
-  const commitContext = await prepareCommitContext(cwd);
-  if (!commitContext) {
-    throw new Error("No working tree changes to commit.");
+  let generated = preparedCommit;
+  if (!generated) {
+    onProgress?.("Preparing commit changes...");
+    const commitContext = await prepareCommitContext(cwd, status);
+    if (!commitContext) {
+      throw new Error("No working tree changes to commit.");
+    }
+
+    onProgress?.("Generating commit message...");
+    const commitMessage = await generateCommitMessage({
+      agent,
+      branch: status.branch,
+      cwd,
+      stagedPatch: commitContext.stagedPatch,
+      stagedSummary: commitContext.stagedSummary,
+    });
+    generated = {
+      body: commitMessage.body,
+      scope: commitContext.scope,
+      subject: commitMessage.subject,
+    };
   }
 
-  onProgress?.("Generating commit message...");
-  const generated = await generateCommitMessage({
-    agent,
-    branch: status.branch,
-    cwd,
-    stagedPatch: commitContext.stagedPatch,
-    stagedSummary: commitContext.stagedSummary,
-  });
-
   onProgress?.("Committing...");
-  const commitSha = await commitChanges(cwd, generated.subject, generated.body);
+  const commitSha = await commitChanges(cwd, generated.subject, generated.body, generated.scope);
   return {
     commitSha,
     subject: generated.subject,
@@ -198,21 +267,69 @@ async function createPullRequest(
 
 async function prepareCommitContext(
   cwd: string,
-): Promise<{ stagedPatch: string; stagedSummary: string } | null> {
-  await runGitCommand(cwd, ["add", "-A"]);
-  const stagedSummary = (await runGitStdout(cwd, ["diff", "--cached", "--name-status"])).trim();
+  status: Pick<GitStatusDetails, "hasStagedChanges" | "hasWorkingTreeChanges">,
+): Promise<{ scope: SidebarGitCommitScope; stagedPatch: string; stagedSummary: string } | null> {
+  if (!status.hasWorkingTreeChanges) {
+    return null;
+  }
+
+  if (status.hasStagedChanges) {
+    return loadCommitContextFromIndex(cwd, "stagedOnly");
+  }
+
+  return loadCommitContextFromTemporaryIndex(cwd);
+}
+
+async function loadCommitContextFromIndex(
+  cwd: string,
+  scope: SidebarGitCommitScope,
+  env?: NodeJS.ProcessEnv,
+): Promise<{ scope: SidebarGitCommitScope; stagedPatch: string; stagedSummary: string } | null> {
+  const stagedSummary = (await runGitStdout(cwd, ["diff", "--cached", "--name-status"], 60_000, env)).trim();
   if (!stagedSummary) {
     return null;
   }
 
-  const stagedPatch = await runGitStdout(cwd, ["diff", "--cached", "--patch", "--minimal"]);
+  const stagedPatch = await runGitStdout(cwd, ["diff", "--cached", "--patch", "--minimal"], 60_000, env);
   return {
+    scope,
     stagedPatch,
     stagedSummary,
   };
 }
 
-async function commitChanges(cwd: string, subject: string, body: string): Promise<string> {
+async function loadCommitContextFromTemporaryIndex(
+  cwd: string,
+): Promise<{ scope: SidebarGitCommitScope; stagedPatch: string; stagedSummary: string } | null> {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "vsmux-git-index-"));
+  const tempIndexPath = path.join(tempDir, "index");
+
+  try {
+    const gitIndexPath = (await runGitStdout(cwd, ["rev-parse", "--git-path", "index"])).trim();
+    if (gitIndexPath) {
+      await copyFile(path.resolve(cwd, gitIndexPath), tempIndexPath).catch(() => undefined);
+    }
+
+    const env = {
+      ...process.env,
+      GIT_INDEX_FILE: tempIndexPath,
+    };
+    await runGitCommand(cwd, ["add", "-A"], 60_000, env);
+    return loadCommitContextFromIndex(cwd, "allChanges", env);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true }).catch(() => undefined);
+  }
+}
+
+async function commitChanges(
+  cwd: string,
+  subject: string,
+  body: string,
+  scope: SidebarGitCommitScope,
+): Promise<string> {
+  if (scope === "allChanges") {
+    await runGitCommand(cwd, ["add", "-A"]);
+  }
   const args = ["commit", "-m", subject];
   const trimmedBody = body.trim();
   if (trimmedBody) {

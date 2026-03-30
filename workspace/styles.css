@@ -36,30 +36,11 @@ body {
 
 .workspace-shell {
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: var(--workspace-pane-gap, 12px);
+  grid-auto-rows: minmax(0, 1fr);
   height: 100%;
   padding: 12px;
-}
-
-.workspace-row {
-  display: grid;
-  flex: 1 1 0;
-  gap: var(--workspace-pane-gap, 12px);
-  min-height: 0;
-}
-
-.workspace-row-cols-1 {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.workspace-row-cols-2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.workspace-row-cols-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .workspace-shell-empty {
@@ -90,6 +71,10 @@ body {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+}
+
+.workspace-pane-hidden {
+  display: none;
 }
 
 .workspace-pane-focused {

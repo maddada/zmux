@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import * as path from "node:path";
-import { WebSocketServer, type WebSocket } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import * as pty from "@lydell/node-pty";
 import {
   createManagedTerminalEnvironment,
@@ -11,12 +11,13 @@ import {
   updatePersistedSessionStateFile,
 } from "./session-state-file";
 import {
-  TITLE_ACTIVITY_WINDOW_MS,
+  getTitleActivityWindowMs,
   acknowledgeTitleDerivedSessionActivity,
   getTitleDerivedSessionActivity,
   getTitleDerivedSessionActivityFromTransition,
   type TitleDerivedSessionActivity,
 } from "./session-title-activity";
+import { TerminalDaemonRingBuffer } from "./terminal-daemon-ring-buffer";
 import { createTerminalDaemonSessionKey } from "./terminal-daemon-session-scope";
 import { parseTerminalTitleFromOutputChunk } from "./terminal-workspace-history";
 import type {
@@ -31,7 +32,6 @@ import type {
   TerminalHostWriteRequest,
   TerminalHostResizeRequest,
   TerminalInputMessage,
-  TerminalOutputMessage,
   TerminalResizeMessage,
   TerminalSessionSnapshot,
   TerminalStateMessage,
@@ -49,9 +49,10 @@ type DaemonInfo = {
 type ManagedSession = {
   cols: number;
   cwd: string;
-  history: string;
+  historyBuffer: TerminalDaemonRingBuffer;
   liveTitle?: string;
   lastKnownPersistedTitle?: string;
+  pendingAttachQueues: Buffer[][];
   titleActivity?: TitleDerivedSessionActivity;
   titleActivityTimer?: NodeJS.Timeout;
   titleCarryover: string;
@@ -70,7 +71,7 @@ type ControlClient = {
 };
 
 const DEFAULT_IDLE_SHUTDOWN_TIMEOUT_MS = 5 * 60_000;
-const MAX_HISTORY_CHARS = 250_000;
+const MAX_HISTORY_BYTES = 8 * 1024 * 1024;
 const INFO_FILE_NAME = "daemon-info.json";
 
 const stateDir = getStateDirFromArgs();
@@ -173,47 +174,9 @@ function attachSessionSocket(
   }
 
   clearIdleShutdownTimer();
-  const sockets = sessionSocketsBySessionKey.get(sessionKey) ?? new Set<WebSocket>();
-  sockets.add(socket);
-  sessionSocketsBySessionKey.set(sessionKey, sockets);
-
   const initialCols = parsePositiveNumber(searchParams.get("cols"));
   const initialRows = parsePositiveNumber(searchParams.get("rows"));
-  if (initialCols && initialRows) {
-    resizeSession(session, initialCols, initialRows);
-  }
-
-  void buildSnapshot(session, false).then((snapshot) => {
-    broadcastControlSessionState(snapshot);
-    broadcastSessionState(session.sessionKey, snapshot);
-  });
-  void sendSessionState(socket, session, true);
-
-  socket.on("message", (buffer: Buffer) => {
-    void handleSessionMessage(sessionKey, buffer.toString());
-  });
-  socket.on("close", () => {
-    sockets.delete(socket);
-    if (sockets.size === 0) {
-      sessionSocketsBySessionKey.delete(sessionKey);
-    }
-    void buildSnapshot(session, false).then((snapshot) => {
-      broadcastControlSessionState(snapshot);
-      broadcastSessionState(session.sessionKey, snapshot);
-    });
-    scheduleIdleShutdownIfNeeded();
-  });
-  socket.on("error", () => {
-    sockets.delete(socket);
-    if (sockets.size === 0) {
-      sessionSocketsBySessionKey.delete(sessionKey);
-    }
-    void buildSnapshot(session, false).then((snapshot) => {
-      broadcastControlSessionState(snapshot);
-      broadcastSessionState(session.sessionKey, snapshot);
-    });
-    scheduleIdleShutdownIfNeeded();
-  });
+  void attachSessionSocketWithReplay(session, sessionKey, socket, initialCols, initialRows);
 }
 
 async function handleControlMessage(client: ControlClient, rawMessage: string): Promise<void> {
@@ -362,6 +325,7 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
   const spawnedPty = pty.spawn(request.shell, [], {
     cols: request.cols,
     cwd: request.cwd,
+    encoding: null,
     env: {
       ...process.env,
       ...createManagedTerminalEnvironment(
@@ -377,8 +341,9 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
   const session: ManagedSession = {
     cols: request.cols,
     cwd: request.cwd,
-    history: "",
+    historyBuffer: new TerminalDaemonRingBuffer(MAX_HISTORY_BYTES),
     liveTitle: undefined,
+    pendingAttachQueues: [],
     pty: spawnedPty,
     rows: request.rows,
     sessionId: request.sessionId,
@@ -405,14 +370,13 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
   };
 
   spawnedPty.onData((data: string) => {
-    session.history = trimHistory(`${session.history}${data}`);
-    const didChangeTitle = updateSessionLiveTitle(session, data);
-    const outputMessage: TerminalOutputMessage = {
-      data,
-      sessionId: session.sessionId,
-      type: "terminalOutput",
-    };
-    broadcastSessionMessage(session.sessionKey, outputMessage);
+    const outputBuffer = normalizePtyOutputChunk(data);
+    session.historyBuffer.write(outputBuffer);
+    for (const pendingAttachQueue of session.pendingAttachQueues) {
+      pendingAttachQueue.push(outputBuffer);
+    }
+    const didChangeTitle = updateSessionLiveTitle(session, outputBuffer.toString("utf8"));
+    broadcastSessionMessage(session.sessionKey, outputBuffer);
     if (didChangeTitle) {
       // Title changes only need to reach control clients; the terminal pane
       // itself does not consume live title updates after initial history sync.
@@ -458,7 +422,7 @@ async function buildSnapshot(
     ...session.snapshot,
     agentName: session.titleActivity?.agentName ?? persistedState.agentName,
     agentStatus: session.titleActivity?.activity ?? persistedState.agentStatus,
-    history: includeHistory ? session.history : undefined,
+    history: includeHistory ? session.historyBuffer.snapshot().toString("utf8") : undefined,
     isAttached: (sessionSocketsBySessionKey.get(session.sessionKey)?.size ?? 0) > 0,
     title: session.liveTitle ?? persistedState.title,
   };
@@ -486,9 +450,9 @@ function broadcastSessionState(sessionKey: string, snapshot: TerminalSessionSnap
 
 function broadcastSessionMessage(
   sessionKey: string,
-  message: TerminalOutputMessage | TerminalStateMessage,
+  message: Buffer | TerminalStateMessage,
 ): void {
-  const payload = message.type === "terminalOutput" ? message.data : JSON.stringify(message);
+  const payload = Buffer.isBuffer(message) ? message : JSON.stringify(message);
   for (const socket of sessionSocketsBySessionKey.get(sessionKey) ?? []) {
     socket.send(payload);
   }
@@ -598,7 +562,9 @@ function scheduleTitleActivityRefresh(session: ManagedSession): void {
 
   const delayMs = Math.max(
     0,
-    TITLE_ACTIVITY_WINDOW_MS - (Date.now() - session.titleActivity.lastTitleChangeAt) + 50,
+    getTitleActivityWindowMs(session.titleActivity.agentName) -
+      (Date.now() - session.titleActivity.lastTitleChangeAt) +
+      50,
   );
   session.titleActivityTimer = setTimeout(() => {
     session.titleActivityTimer = undefined;
@@ -710,16 +676,108 @@ function randomToken(): string {
   return `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
 }
 
-function trimHistory(history: string): string {
-  if (history.length <= MAX_HISTORY_CHARS) {
-    return history;
-  }
-
-  return history.slice(history.length - MAX_HISTORY_CHARS);
+function normalizePtyOutputChunk(data: string | Buffer): Buffer {
+  return Buffer.isBuffer(data) ? data : Buffer.from(data, "utf8");
 }
 
 async function writeJsonAtomically(filePath: string, value: DaemonInfo): Promise<void> {
   const tempFilePath = `${filePath}.tmp.${process.pid}`;
   await writeFile(tempFilePath, JSON.stringify(value, undefined, 2), "utf8");
   await rename(tempFilePath, filePath);
+}
+
+async function attachSessionSocketWithReplay(
+  session: ManagedSession,
+  sessionKey: string,
+  socket: WebSocket,
+  initialCols: number | undefined,
+  initialRows: number | undefined,
+): Promise<void> {
+  const pendingAttachQueue: Buffer[] = [];
+  session.pendingAttachQueues.push(pendingAttachQueue);
+
+  try {
+    if (initialCols && initialRows) {
+      resizeSession(session, initialCols, initialRows);
+    }
+
+    await sendSessionState(socket, session, true);
+    if (socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    flushPendingAttachQueue(socket, pendingAttachQueue);
+    if (socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    removePendingAttachQueue(session, pendingAttachQueue);
+    const sockets = sessionSocketsBySessionKey.get(sessionKey) ?? new Set<WebSocket>();
+    sockets.add(socket);
+    sessionSocketsBySessionKey.set(sessionKey, sockets);
+
+    bindSessionSocket(session, sessionKey, socket, sockets);
+    const snapshot = await buildSnapshot(session, false);
+    broadcastControlSessionState(snapshot);
+  } catch {
+    socket.close();
+    scheduleIdleShutdownIfNeeded();
+  } finally {
+    removePendingAttachQueue(session, pendingAttachQueue);
+  }
+}
+
+function flushPendingAttachQueue(socket: WebSocket, pendingAttachQueue: Buffer[]): void {
+  let flushedCount = 0;
+  for (const chunk of pendingAttachQueue) {
+    if (socket.readyState !== WebSocket.OPEN) {
+      break;
+    }
+    socket.send(chunk);
+    flushedCount += 1;
+  }
+
+  if (flushedCount > 0) {
+    pendingAttachQueue.splice(0, flushedCount);
+  }
+}
+
+function bindSessionSocket(
+  session: ManagedSession,
+  sessionKey: string,
+  socket: WebSocket,
+  sockets: Set<WebSocket>,
+): void {
+  socket.on("message", (buffer: Buffer) => {
+    void handleSessionMessage(sessionKey, buffer.toString());
+  });
+  socket.on("close", () => {
+    sockets.delete(socket);
+    if (sockets.size === 0) {
+      sessionSocketsBySessionKey.delete(sessionKey);
+    }
+    void buildSnapshot(session, false).then((snapshot) => {
+      broadcastControlSessionState(snapshot);
+      broadcastSessionState(session.sessionKey, snapshot);
+    });
+    scheduleIdleShutdownIfNeeded();
+  });
+  socket.on("error", () => {
+    sockets.delete(socket);
+    if (sockets.size === 0) {
+      sessionSocketsBySessionKey.delete(sessionKey);
+    }
+    void buildSnapshot(session, false).then((snapshot) => {
+      broadcastControlSessionState(snapshot);
+      broadcastSessionState(session.sessionKey, snapshot);
+    });
+    scheduleIdleShutdownIfNeeded();
+  });
+}
+
+function removePendingAttachQueue(session: ManagedSession, pendingAttachQueue: Buffer[]): void {
+  const queueIndex = session.pendingAttachQueues.indexOf(pendingAttachQueue);
+  if (queueIndex >= 0) {
+    session.pendingAttachQueues.splice(queueIndex, 1);
+  }
 }

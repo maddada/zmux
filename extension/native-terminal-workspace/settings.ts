@@ -27,6 +27,7 @@ export const COMPLETION_SOUND_SETTING = "completionSound";
 export const DEFAULT_BROWSER_LAUNCH_URL_SETTING = "defaultBrowserLaunchUrl";
 export const AGENTS_SETTING = "agents";
 export const GIT_TEXT_GENERATION_AGENT_ID_SETTING = "gitTextGenerationAgentId";
+export const GIT_SKIP_SUGGESTED_COMMIT_CONFIRMATION_SETTING = "gitSkipSuggestedCommitConfirmation";
 export const TERMINAL_FONT_FAMILY_SETTING = "terminalFontFamily";
 export const TERMINAL_FONT_SIZE_SETTING = "terminalFontSize";
 export const TERMINAL_LINE_HEIGHT_SETTING = "terminalLineHeight";
@@ -86,6 +87,10 @@ export function getAgentsConfigurationKey(): string {
 
 export function getGitTextGenerationAgentIdConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${GIT_TEXT_GENERATION_AGENT_ID_SETTING}`;
+}
+
+export function getGitSkipSuggestedCommitConfirmationConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${GIT_SKIP_SUGGESTED_COMMIT_CONFIRMATION_SETTING}`;
 }
 
 export function getDefaultBrowserLaunchUrlConfigurationKey(): string {
@@ -169,6 +174,14 @@ export function getDefaultBrowserLaunchUrl(): string {
     DEFAULT_BROWSER_LAUNCH_URL;
 
   return value.trim() || DEFAULT_BROWSER_LAUNCH_URL;
+}
+
+export function getGitSkipSuggestedCommitConfirmation(): boolean {
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<boolean>(GIT_SKIP_SUGGESTED_COMMIT_CONFIRMATION_SETTING, false) ?? false
+  );
 }
 
 export function getTerminalFontFamily(): string {

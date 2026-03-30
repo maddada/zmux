@@ -1,11 +1,16 @@
 import type { SidebarSessionActivityState } from "../shared/session-grid-contract";
 
 const CLAUDE_CODE_IDLE_MARKERS = ["✳", "*"] as const;
-const CLAUDE_CODE_WORKING_MARKERS = ["·"] as const;
+const CLAUDE_CODE_WORKING_MARKERS = ["⠐", "⠂", "·"] as const;
 const CLAUDE_CODE_TITLE = "Claude Code";
 const CODEX_TITLE_KEYWORD = "codex";
-const CODEX_WORKING_MARKERS = ["⠸", "⠴", "⠼", "⠧", "⠦", "⠏", "⠋"] as const;
+const CODEX_WORKING_MARKERS = ["⠸", "⠴", "⠼", "⠧", "⠦", "⠏", "⠋", "⠇", "⠙", "⠹"] as const;
+const GEMINI_WORKING_MARKER = "✦";
+const GEMINI_IDLE_MARKER = "◇";
+const COPILOT_WORKING_MARKER = "🤖";
+const COPILOT_IDLE_MARKER = "🔔";
 export const TITLE_ACTIVITY_WINDOW_MS = 1_000;
+export const SLOW_SPINNER_ACTIVITY_WINDOW_MS = 3_000;
 
 export type TitleDerivedSessionActivity = {
   activity: SidebarSessionActivityState;
@@ -22,7 +27,7 @@ export function getTitleDerivedSessionActivity(
   previousDerivedActivity?: TitleDerivedSessionActivity,
   knownAgentName?: string,
 ): TitleDerivedSessionActivity | undefined {
-  const titleState = getTitleState(title, knownAgentName);
+  const titleState = getTitleState(title, knownAgentName ?? previousDerivedActivity?.agentName);
   if (!titleState) {
     return getFallbackActivity(previousDerivedActivity);
   }
@@ -45,10 +50,21 @@ export function getTitleDerivedSessionActivity(
     };
   }
 
-  const effectiveLastTitleChangeAt = lastTitleChangeAt ?? Date.now();
+  const effectiveLastTitleChangeAt =
+    lastTitleChangeAt ??
+    (requiresObservedTitleTransitions(titleState.agentName) ? undefined : Date.now());
+  if (effectiveLastTitleChangeAt === undefined) {
+    return {
+      activity: hasSeenWorking && !isAcknowledged ? "attention" : "idle",
+      agentName: titleState.agentName,
+      hasSeenWorking,
+      isAcknowledged,
+      lastTitleChangeAt: undefined,
+    };
+  }
   return {
     activity:
-      Date.now() - effectiveLastTitleChangeAt <= TITLE_ACTIVITY_WINDOW_MS
+      Date.now() - effectiveLastTitleChangeAt <= getTitleActivityWindowMs(titleState.agentName)
         ? "working"
         : isAcknowledged
           ? "idle"
@@ -66,7 +82,7 @@ export function getTitleDerivedSessionActivityFromTransition(
   previousDerivedActivity?: TitleDerivedSessionActivity,
   knownAgentName?: string,
 ): TitleDerivedSessionActivity | undefined {
-  const nextTitleState = getTitleState(nextTitle, knownAgentName);
+  const nextTitleState = getTitleState(nextTitle, knownAgentName ?? previousDerivedActivity?.agentName);
   if (nextTitleState) {
     const sameAgent = previousDerivedActivity?.agentName === nextTitleState.agentName;
     const hasSeenWorking = sameAgent
@@ -148,7 +164,7 @@ export function getInterestingTitleSymbols(title: string): string[] {
 function getTitleState(
   title: string,
   knownAgentName?: string,
-): { agentName: "claude" | "codex"; state: "idle" | "working" } | undefined {
+): { agentName: "claude" | "codex" | "copilot" | "gemini"; state: "idle" | "working" } | undefined {
   const normalizedAgentName = normalizeKnownAgentName(knownAgentName);
 
   const claudeCodeTitleState = getClaudeCodeTitleState(title, normalizedAgentName === "claude");
@@ -167,6 +183,22 @@ function getTitleState(
     };
   }
 
+  const geminiTitleState = getGeminiTitleState(title, normalizedAgentName === "gemini");
+  if (geminiTitleState) {
+    return {
+      agentName: "gemini",
+      state: geminiTitleState,
+    };
+  }
+
+  const copilotTitleState = getCopilotTitleState(title, normalizedAgentName === "copilot");
+  if (copilotTitleState) {
+    return {
+      agentName: "copilot",
+      state: copilotTitleState,
+    };
+  }
+
   return undefined;
 }
 
@@ -178,16 +210,46 @@ function getClaudeCodeTitleState(
   const lowerTitle = normalizedTitle.toLowerCase();
   const lowerClaudeCodeTitle = CLAUDE_CODE_TITLE.toLowerCase();
 
-  if (!allowAgentHintMatch && !lowerTitle.includes(lowerClaudeCodeTitle)) {
+  const hasClaudeKeyword = lowerTitle.includes(lowerClaudeCodeTitle);
+  const hasClaudeInferenceMarker =
+    normalizedTitle.includes("✳") ||
+    normalizedTitle.includes("⠐") ||
+    normalizedTitle.includes("⠂");
+  if (!allowAgentHintMatch && !hasClaudeKeyword && !hasClaudeInferenceMarker) {
     return undefined;
   }
 
-  if (containsAnyMarker(normalizedTitle, CLAUDE_CODE_IDLE_MARKERS)) {
-    return "idle";
+  if (
+    normalizedTitle.includes("✳") ||
+    allowAgentHintMatch ||
+    hasClaudeKeyword ||
+    normalizedTitle.includes("*")
+  ) {
+    if (containsAnyMarker(normalizedTitle, CLAUDE_CODE_IDLE_MARKERS)) {
+      return "idle";
+    }
   }
 
-  if (containsAnyMarker(normalizedTitle, CLAUDE_CODE_WORKING_MARKERS)) {
-    return "working";
+  if (
+    normalizedTitle.includes("⠐") ||
+    normalizedTitle.includes("⠂") ||
+    allowAgentHintMatch ||
+    hasClaudeKeyword ||
+    normalizedTitle.includes("·")
+  ) {
+    if (containsAnyMarker(normalizedTitle, CLAUDE_CODE_WORKING_MARKERS)) {
+      return "working";
+    }
+  }
+
+  if (allowAgentHintMatch || hasClaudeKeyword) {
+    if (containsAnyMarker(normalizedTitle, CLAUDE_CODE_IDLE_MARKERS)) {
+      return "idle";
+    }
+
+    if (containsAnyMarker(normalizedTitle, CLAUDE_CODE_WORKING_MARKERS)) {
+      return "working";
+    }
   }
 
   return undefined;
@@ -195,15 +257,64 @@ function getClaudeCodeTitleState(
 
 function getCodexTitleState(title: string, allowAgentHintMatch = false): "idle" | "working" | undefined {
   const normalizedTitle = title.trim().replace(/\s+/g, " ");
-  if (!allowAgentHintMatch && !normalizedTitle.toLowerCase().includes(CODEX_TITLE_KEYWORD)) {
+  const hasCodexKeyword = normalizedTitle.toLowerCase().includes(CODEX_TITLE_KEYWORD);
+  const hasCodexWorkingMarker = getCodexWorkingMarker(normalizedTitle) !== undefined;
+  if (!allowAgentHintMatch && !hasCodexKeyword && !hasCodexWorkingMarker) {
     return undefined;
   }
 
-  if (getCodexWorkingMarker(normalizedTitle) !== undefined) {
+  if (hasCodexWorkingMarker) {
     return "working";
   }
 
   return "idle";
+}
+
+function getGeminiTitleState(title: string, allowAgentHintMatch = false): "idle" | "working" | undefined {
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  const lowerTitle = normalizedTitle.toLowerCase();
+  if (
+    !allowAgentHintMatch &&
+    !lowerTitle.includes("gemini") &&
+    !normalizedTitle.includes(GEMINI_WORKING_MARKER) &&
+    !normalizedTitle.includes(GEMINI_IDLE_MARKER)
+  ) {
+    return undefined;
+  }
+
+  if (normalizedTitle.includes(GEMINI_WORKING_MARKER)) {
+    return "working";
+  }
+
+  if (normalizedTitle.includes(GEMINI_IDLE_MARKER)) {
+    return "idle";
+  }
+
+  return undefined;
+}
+
+function getCopilotTitleState(title: string, allowAgentHintMatch = false): "idle" | "working" | undefined {
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  const lowerTitle = normalizedTitle.toLowerCase();
+  if (
+    !allowAgentHintMatch &&
+    !lowerTitle.includes("copilot") &&
+    !lowerTitle.includes("github copilot") &&
+    !normalizedTitle.includes(COPILOT_WORKING_MARKER) &&
+    !normalizedTitle.includes(COPILOT_IDLE_MARKER)
+  ) {
+    return undefined;
+  }
+
+  if (normalizedTitle.includes(COPILOT_WORKING_MARKER)) {
+    return "working";
+  }
+
+  if (normalizedTitle.includes(COPILOT_IDLE_MARKER)) {
+    return "idle";
+  }
+
+  return undefined;
 }
 
 function getCodexWorkingMarker(title: string): string | undefined {
@@ -216,13 +327,41 @@ function containsAnyMarker(title: string, markers: readonly string[]): boolean {
 
 function normalizeKnownAgentName(
   knownAgentName: string | undefined,
-): "claude" | "codex" | undefined {
+): "claude" | "codex" | "copilot" | "gemini" | undefined {
   const normalizedAgentName = knownAgentName?.trim().toLowerCase();
-  if (normalizedAgentName === "claude" || normalizedAgentName === "codex") {
+  if (normalizedAgentName === "claude code") {
+    return "claude";
+  }
+  if (normalizedAgentName === "codex cli") {
+    return "codex";
+  }
+  if (normalizedAgentName === "github copilot") {
+    return "copilot";
+  }
+  if (
+    normalizedAgentName === "claude" ||
+    normalizedAgentName === "codex" ||
+    normalizedAgentName === "gemini" ||
+    normalizedAgentName === "copilot"
+  ) {
     return normalizedAgentName;
   }
 
   return undefined;
+}
+
+function requiresObservedTitleTransitions(
+  agentName: TitleDerivedSessionActivity["agentName"],
+): boolean {
+  return agentName === "claude" || agentName === "codex";
+}
+
+export function getTitleActivityWindowMs(
+  agentName: TitleDerivedSessionActivity["agentName"],
+): number {
+  return requiresObservedTitleTransitions(agentName)
+    ? SLOW_SPINNER_ACTIVITY_WINDOW_MS
+    : TITLE_ACTIVITY_WINDOW_MS;
 }
 
 function getFallbackActivity(

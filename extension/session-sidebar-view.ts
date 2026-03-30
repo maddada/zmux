@@ -15,6 +15,8 @@ type SessionSidebarViewOptions = {
 
 export class SessionSidebarViewProvider implements vscode.Disposable, vscode.WebviewViewProvider {
   private readonly disposables: vscode.Disposable[] = [];
+  private messageQueue: Promise<void> = Promise.resolve();
+  private nextMessageSequence = 0;
   private view: vscode.WebviewView | undefined;
   private latestMessage: ExtensionToSidebarMessage | undefined;
 
@@ -30,7 +32,14 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
 
   public async postMessage(message: ExtensionToSidebarMessage): Promise<void> {
     if (message.type === "hydrate" || message.type === "sessionState") {
-      this.latestMessage = message;
+      if (
+        !this.latestMessage ||
+        this.latestMessage.type !== "hydrate" &&
+          this.latestMessage.type !== "sessionState" ||
+        this.latestMessage.revision <= message.revision
+      ) {
+        this.latestMessage = message;
+      }
     }
 
     if (!this.view) {
@@ -83,7 +92,30 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
             sessionId: message.sessionId,
           });
         }
-        void this.options.onMessage(message);
+        const messageSequence = ++this.nextMessageSequence;
+        logVSmuxDebug("sidebar.webview.messageQueued", {
+          messageSequence,
+          type: message.type,
+        });
+        this.messageQueue = this.messageQueue
+          .then(async () => {
+            logVSmuxDebug("sidebar.webview.messageStarted", {
+              messageSequence,
+              type: message.type,
+            });
+            await this.options.onMessage(message);
+            logVSmuxDebug("sidebar.webview.messageCompleted", {
+              messageSequence,
+              type: message.type,
+            });
+          })
+          .catch((error) => {
+            logVSmuxDebug("sidebar.webview.messageHandlerError", {
+              error: error instanceof Error ? error.message : String(error),
+              messageSequence,
+              type: message.type,
+            });
+          });
       }),
     );
 
@@ -211,6 +243,16 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
 
     case "refreshGitState":
       return true;
+
+    case "confirmSidebarGitCommit":
+      return (
+        typeof message.requestId === "string" &&
+        message.requestId.length > 0 &&
+        typeof message.subject === "string"
+      );
+
+    case "cancelSidebarGitCommit":
+      return typeof message.requestId === "string" && message.requestId.length > 0;
 
     case "syncSidebarCommandOrder":
       return (

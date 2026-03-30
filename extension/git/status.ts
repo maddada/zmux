@@ -19,7 +19,9 @@ export type GitStatusDetails = {
   defaultBranch: string | null;
   hasGitHubCli: boolean;
   hasOriginRemote: boolean;
+  hasStagedChanges: boolean;
   hasUpstream: boolean;
+  hasUnstagedChanges: boolean;
   hasWorkingTreeChanges: boolean;
   isRepo: boolean;
   pr: SidebarGitPullRequest | null;
@@ -83,6 +85,8 @@ export async function getGitStatusDetails(cwd: string): Promise<GitStatusDetails
   let upstreamRef: string | null = null;
   let aheadCount = 0;
   let behindCount = 0;
+  let hasStagedChanges = false;
+  let hasUnstagedChanges = false;
   let hasWorkingTreeChanges = false;
   const changedFilesWithoutNumstat = new Set<string>();
 
@@ -105,6 +109,22 @@ export async function getGitStatusDetails(cwd: string): Promise<GitStatusDetails
     }
     if (line.trim().length > 0 && !line.startsWith("#")) {
       hasWorkingTreeChanges = true;
+      if (line.startsWith("? ")) {
+        hasUnstagedChanges = true;
+      } else if (line.startsWith("u ")) {
+        hasStagedChanges = true;
+        hasUnstagedChanges = true;
+      } else {
+        const parsedStatus = parsePorcelainStatus(line);
+        if (parsedStatus) {
+          if (parsedStatus.indexStatus !== ".") {
+            hasStagedChanges = true;
+          }
+          if (parsedStatus.workTreeStatus !== ".") {
+            hasUnstagedChanges = true;
+          }
+        }
+      }
       const filePath = parsePorcelainPath(line);
       if (filePath) {
         changedFilesWithoutNumstat.add(filePath);
@@ -156,7 +176,9 @@ export async function getGitStatusDetails(cwd: string): Promise<GitStatusDetails
     defaultBranch,
     hasGitHubCli,
     hasOriginRemote,
+    hasStagedChanges,
     hasUpstream: upstreamRef !== null,
+    hasUnstagedChanges,
     hasWorkingTreeChanges,
     isRepo: true,
     pr: hasGitHubCli && branch ? await getCurrentPullRequest(cwd) : null,
@@ -270,7 +292,9 @@ function createEmptyStatusDetails(): GitStatusDetails {
     defaultBranch: null,
     hasGitHubCli: false,
     hasOriginRemote: false,
+    hasStagedChanges: false,
     hasUpstream: false,
+    hasUnstagedChanges: false,
     hasWorkingTreeChanges: false,
     isRepo: false,
     pr: null,
@@ -300,6 +324,22 @@ function parseRemoteNames(stdout: string): string[] {
     .split(/\r?\n/g)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
+}
+
+function parsePorcelainStatus(value: string): {
+  indexStatus: string;
+  workTreeStatus: string;
+} | null {
+  const match = value.match(/^[12u] ([A-Z.]{2}) /);
+  if (!match) {
+    return null;
+  }
+
+  const status = match[1] ?? "..";
+  return {
+    indexStatus: status[0] ?? ".",
+    workTreeStatus: status[1] ?? ".",
+  };
 }
 
 function parseNumstatEntries(stdout: string): GitWorkingTreeFile[] {

@@ -11,6 +11,7 @@ export type ShellCommandResult = {
 
 type RunShellCommandOptions = {
   cwd: string;
+  env?: NodeJS.ProcessEnv;
   interactiveShell?: boolean;
   stdin?: string;
   timeoutMs?: number;
@@ -25,7 +26,7 @@ export async function runShellCommand(
   return new Promise((resolve, reject) => {
     const child = spawn(shellPath, getShellCommandArgs(shellPath, command, options.interactiveShell), {
       cwd: options.cwd,
-      env: process.env,
+      env: options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     const stdoutChunks: Buffer[] = [];
@@ -74,9 +75,11 @@ export async function runGitCommand(
   cwd: string,
   args: readonly string[],
   timeoutMs = 60_000,
+  env?: NodeJS.ProcessEnv,
 ): Promise<ShellCommandResult> {
   const result = await runShellCommand(buildCommandLine("git", args), {
     cwd,
+    env,
     timeoutMs,
   });
 
@@ -91,8 +94,9 @@ export async function runGitStdout(
   cwd: string,
   args: readonly string[],
   timeoutMs = 60_000,
+  env?: NodeJS.ProcessEnv,
 ): Promise<string> {
-  const result = await runGitCommand(cwd, args, timeoutMs);
+  const result = await runGitCommand(cwd, args, timeoutMs, env);
   return result.stdout;
 }
 

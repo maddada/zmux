@@ -12,6 +12,12 @@ export const DEFAULT_SIDEBAR_AGENTS = [
     name: "Codex",
   },
   {
+    agentId: "copilot",
+    command: "copilot",
+    icon: "copilot",
+    name: "Copilot",
+  },
+  {
     agentId: "claude",
     command: "claude",
     icon: "claude",

@@ -31,6 +31,7 @@ export type WorkspacePanelLayoutAppearance = {
 
 export type WorkspacePanelTerminalPane = {
   kind: "terminal";
+  isVisible: boolean;
   sessionId: string;
   sessionRecord: TerminalSessionRecord;
   snapshot?: TerminalSessionSnapshot;
@@ -39,6 +40,7 @@ export type WorkspacePanelTerminalPane = {
 
 export type WorkspacePanelT3Pane = {
   kind: "t3";
+  isVisible: boolean;
   sessionId: string;
   sessionRecord: T3SessionRecord;
   html: string;
@@ -96,8 +98,15 @@ export type WorkspacePanelSyncSessionOrderMessage = {
   sessionIds: string[];
 };
 
+export type WorkspacePanelDebugLogMessage = {
+  details?: string;
+  event: string;
+  type: "workspaceDebugLog";
+};
+
 export type WorkspacePanelToExtensionMessage =
   | WorkspacePanelReadyMessage
   | WorkspacePanelFocusSessionMessage
   | WorkspacePanelCloseSessionMessage
-  | WorkspacePanelSyncSessionOrderMessage;
+  | WorkspacePanelSyncSessionOrderMessage
+  | WorkspacePanelDebugLogMessage;

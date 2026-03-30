@@ -66,6 +66,7 @@ type BuildSidebarMessageOptions = {
   hud: SidebarHydrateMessage["hud"];
   platform: "default" | "mac";
   previousSessions: SidebarPreviousSessionItem[];
+  revision: number;
   scratchPadContent: string;
   terminalHasLiveProjection: (sessionId: string) => boolean;
   browserHasLiveProjection: (sessionId: string) => boolean;
@@ -122,6 +123,7 @@ export function buildSidebarMessage(
     hud: options.hud,
     groups: [browserGroup, ...workspaceGroups],
     previousSessions: options.previousSessions,
+    revision: options.revision,
     scratchPadContent: options.scratchPadContent,
     type: options.type,
   };

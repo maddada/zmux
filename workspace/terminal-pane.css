@@ -3,6 +3,10 @@
   width: 100%;
 }
 
+.terminal-pane-root-hidden {
+  display: none;
+}
+
 .terminal-pane-canvas {
   height: 100%;
   width: 100%;

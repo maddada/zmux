@@ -211,7 +211,10 @@ function buildCommitMessagePrompt(input: {
       ? "Return a JSON object with keys: subject, body, branch."
       : "Return a JSON object with keys: subject, body.",
     "Rules:",
-    "- subject must be imperative, <= 72 chars, and no trailing period",
+    "- subject must use the format feat(area): commit message",
+    "- always use feat as the type unless the diff clearly demands a different conventional-commit type",
+    "- area must be a short lowercase scope like ui, git, sidebar, sessions, or api",
+    "- subject must stay imperative, <= 72 chars, and have no trailing period",
     "- body can be empty string or short bullet points",
     ...(wantsBranch ? ["- branch must be a short semantic git branch fragment for this change"] : []),
     "- capture the primary user-visible or developer-visible change",
@@ -283,7 +286,20 @@ function sanitizeCommitSubject(value: string): string {
   if (!sanitized) {
     throw new Error("Agent returned an empty commit subject.");
   }
-  return sanitized.slice(0, 72).trim();
+
+  const normalized = sanitized.slice(0, 72).trim();
+  if (/^[a-z]+\([a-z0-9._/-]+\):\s+.+$/i.test(normalized)) {
+    return normalized;
+  }
+
+  const stripped = normalized
+    .replace(/^[a-z]+(\([^)]+\))?:\s*/i, "")
+    .trim();
+  if (!stripped) {
+    throw new Error("Agent returned an empty commit subject.");
+  }
+
+  return `feat(changes): ${stripped}`.slice(0, 72).trim();
 }
 
 function sanitizePrTitle(value: string): string {
