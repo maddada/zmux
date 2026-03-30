@@ -5,6 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type {
+  WorkspacePanelAutoFocusRequest,
   WorkspacePanelConnection,
   WorkspacePanelTerminalAppearance,
   WorkspacePanelTerminalPane,
@@ -22,6 +23,7 @@ import "./terminal-pane.css";
 const DATA_BUFFER_FLUSH_MS = 5;
 
 export type TerminalPaneProps = {
+  autoFocusRequest?: WorkspacePanelAutoFocusRequest;
   connection: WorkspacePanelConnection;
   debugLog?: (event: string, payload?: Record<string, unknown>) => void;
   debuggingMode: boolean;
@@ -32,6 +34,7 @@ export type TerminalPaneProps = {
 };
 
 export const TerminalPane: React.FC<TerminalPaneProps> = ({
+  autoFocusRequest,
   connection,
   debugLog,
   debuggingMode,
@@ -44,6 +47,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const debugLogRef = useRef(debugLog);
   const debuggingModeRef = useRef(debuggingMode);
   const fitRef = useRef<FitAddon | null>(null);
+  const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const lastMeasuredSizeRef = useRef<{ height: number; width: number }>();
   const terminalRef = useRef<Terminal | null>(null);
 
@@ -406,6 +410,31 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       });
     });
   }, [debugLog, isVisible, pane.sessionId, debuggingMode]);
+
+  useEffect(() => {
+    if (
+      !autoFocusRequest ||
+      handledAutoFocusRequestIdRef.current === autoFocusRequest.requestId ||
+      !isVisible
+    ) {
+      return;
+    }
+
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    handledAutoFocusRequestIdRef.current = autoFocusRequest.requestId;
+    requestAnimationFrame(() => {
+      terminal.focus();
+      reportDebug("terminal.autoFocusRequestApplied", {
+        requestId: autoFocusRequest.requestId,
+        sessionId: pane.sessionId,
+        source: autoFocusRequest.source,
+      });
+    });
+  }, [autoFocusRequest, isVisible, pane.sessionId]);
 
   return (
     <div

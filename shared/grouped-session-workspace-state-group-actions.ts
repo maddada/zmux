@@ -140,6 +140,36 @@ export function syncGroupOrderInWorkspace(
   };
 }
 
+export function createGroupInWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+): { changed: boolean; groupId?: string; snapshot: GroupedSessionWorkspaceSnapshot } {
+  const normalizedSnapshot = normalizeGroupedSessionWorkspaceSnapshot(snapshot);
+  if (normalizedSnapshot.groups.length >= MAX_GROUP_COUNT) {
+    return { changed: false, snapshot: normalizedSnapshot };
+  }
+
+  const nextGroupNumber = normalizedSnapshot.nextGroupNumber;
+  const groupId = `group-${nextGroupNumber}`;
+
+  return {
+    changed: true,
+    groupId,
+    snapshot: {
+      ...normalizedSnapshot,
+      activeGroupId: groupId,
+      groups: [
+        ...normalizedSnapshot.groups,
+        {
+          groupId,
+          snapshot: createDefaultSessionGridSnapshot(),
+          title: `Group ${nextGroupNumber}`,
+        },
+      ],
+      nextGroupNumber: nextGroupNumber + 1,
+    },
+  };
+}
+
 export function moveSessionToGroupInWorkspace(
   snapshot: GroupedSessionWorkspaceSnapshot,
   sessionId: string,

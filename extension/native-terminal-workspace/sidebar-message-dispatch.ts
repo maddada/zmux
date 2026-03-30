@@ -15,6 +15,7 @@ export type SidebarMessageHandlers = {
   confirmSidebarGitCommit: (requestId: string, subject: string) => Promise<void>;
   copyResumeCommand: (sessionId: string) => Promise<void>;
   cancelSidebarGitCommit: (requestId: string) => Promise<void>;
+  createGroup: () => Promise<void>;
   createGroupFromSession: (sessionId: string) => Promise<void>;
   createSession: () => Promise<void>;
   createSessionInGroup: (groupId: string) => Promise<void>;
@@ -23,7 +24,7 @@ export type SidebarMessageHandlers = {
   killTerminalDaemon: () => Promise<void>;
   deleteSidebarAgent: (agentId: string) => Promise<void>;
   deleteSidebarCommand: (commandId: string) => Promise<void>;
-  focusGroup: (groupId: string) => Promise<void>;
+  focusGroup: (groupId: string, source?: "sidebar") => Promise<void>;
   focusSession: (sessionId: string, source?: "sidebar" | "workspace") => Promise<void>;
   moveSessionToGroup: (sessionId: string, groupId: string, targetIndex?: number) => Promise<void>;
   moveSidebarToOtherSide: () => Promise<void>;
@@ -88,7 +89,7 @@ export async function dispatchSidebarMessage(
       await handlers.createSessionInGroup(message.groupId);
       return;
     case "focusGroup":
-      await handlers.focusGroup(message.groupId);
+      await handlers.focusGroup(message.groupId, "sidebar");
       return;
     case "toggleFullscreenSession":
       await handlers.toggleFullscreenSession();
@@ -204,6 +205,9 @@ export async function dispatchSidebarMessage(
       return;
     case "saveScratchPad":
       await handlers.saveScratchPad(message.content);
+      return;
+    case "createGroup":
+      await handlers.createGroup();
       return;
     case "moveSessionToGroup":
       await handlers.moveSessionToGroup(message.sessionId, message.groupId, message.targetIndex);

@@ -6,14 +6,14 @@ import type {
 import { createDisconnectedSessionSnapshot } from "../terminal-workspace-helpers";
 
 type SessionActivityContext = {
-  getCompletionBellEnabled: () => boolean;
+  cancelPendingCompletionSound: (sessionId: string) => void;
   getSessionSnapshot: (sessionId: string) => TerminalSessionSnapshot | undefined;
   getT3ActivityState: (sessionRecord: SessionRecord) => {
     activity: TerminalAgentStatus;
     isRunning: boolean;
   };
   lastKnownActivityBySessionId: Map<string, TerminalAgentStatus>;
-  playCompletionSound: () => Promise<void>;
+  queueCompletionSound: (sessionId: string) => void;
   workspaceId: string;
 };
 
@@ -41,32 +41,31 @@ export async function syncKnownSessionActivities(
   playSound: boolean,
 ): Promise<void> {
   const nextActivityBySessionId = new Map<string, TerminalAgentStatus>();
-  let shouldPlayCompletionSound = false;
 
   for (const sessionRecord of sessionRecords) {
     const sessionSnapshot =
       context.getSessionSnapshot(sessionRecord.sessionId) ??
       createDisconnectedSessionSnapshot(sessionRecord.sessionId, context.workspaceId);
     const effectiveActivity = getEffectiveSessionActivity(context, sessionRecord, sessionSnapshot);
+    const previousActivity = context.lastKnownActivityBySessionId.get(sessionRecord.sessionId);
     nextActivityBySessionId.set(sessionRecord.sessionId, effectiveActivity.activity);
 
-    if (
-      playSound &&
-      effectiveActivity.activity === "attention" &&
-      context.lastKnownActivityBySessionId.get(sessionRecord.sessionId) !== "attention"
-    ) {
-      shouldPlayCompletionSound = true;
+    if (!playSound) {
+      continue;
     }
+
+    if (effectiveActivity.activity === "attention") {
+      if (previousActivity !== "attention") {
+        context.queueCompletionSound(sessionRecord.sessionId);
+      }
+      continue;
+    }
+
+    context.cancelPendingCompletionSound(sessionRecord.sessionId);
   }
 
   context.lastKnownActivityBySessionId.clear();
   for (const [sessionId, activity] of nextActivityBySessionId) {
     context.lastKnownActivityBySessionId.set(sessionId, activity);
   }
-
-  if (!shouldPlayCompletionSound || !context.getCompletionBellEnabled()) {
-    return;
-  }
-
-  await context.playCompletionSound();
 }

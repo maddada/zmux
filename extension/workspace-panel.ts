@@ -3,6 +3,7 @@ import type {
   ExtensionToWorkspacePanelMessage,
   WorkspacePanelToExtensionMessage,
 } from "../shared/workspace-panel-contract";
+import { stripWorkspacePanelTransientFields } from "../shared/workspace-panel-contract";
 
 const WORKSPACE_PANEL_TYPE = "vsmux.workspace";
 const WORKSPACE_PANEL_TITLE = "VSmux";
@@ -57,7 +58,7 @@ export class WorkspacePanelManager implements vscode.Disposable {
   }
 
   public async postMessage(message: ExtensionToWorkspacePanelMessage): Promise<void> {
-    this.latestMessage = message;
+    this.latestMessage = stripWorkspacePanelTransientFields(message);
     if (!this.panel) {
       return;
     }

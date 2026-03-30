@@ -257,6 +257,9 @@ export type SidebarToExtensionMessage =
       sessionId: string;
     }
   | {
+      type: "createGroup";
+    }
+  | {
       type: "setVisibleCount";
       visibleCount: VisibleSessionCount;
     }

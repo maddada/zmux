@@ -3,6 +3,7 @@ import { createEditorLayoutPlan } from "../shared/editor-layout";
 import type {
   ExtensionToWorkspacePanelMessage,
   WorkspacePanelPane,
+  WorkspacePanelAutoFocusRequest,
   WorkspacePanelTerminalPane,
   WorkspacePanelHydrateMessage,
   WorkspacePanelSessionStateMessage,
@@ -359,14 +360,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     );
   }
 
-  if (visiblePanes.length === 0) {
-    return (
-      <main className="workspace-shell workspace-shell-empty">
-        <div className="workspace-empty-state">No visible sessions in the active group.</div>
-      </main>
-    );
-  }
-
   return (
     <main className="workspace-shell" style={workspaceShellStyle}>
       {orderedPanes.map((pane) => (
@@ -396,6 +389,11 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           pane={pane}
           terminalAppearance={workspaceState.terminalAppearance}
           canDrag={pane.kind === "terminal" && pane.isVisible && reorderablePaneIds.length > 1}
+          autoFocusRequest={
+            workspaceState.autoFocusRequest?.sessionId === pane.sessionId
+              ? workspaceState.autoFocusRequest
+              : undefined
+          }
           isDragging={draggedPaneId === pane.sessionId}
           isDropTarget={dropTargetPaneId === pane.sessionId && draggedPaneId !== pane.sessionId}
           onDragEnd={clearDragState}
@@ -439,11 +437,15 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           }}
         />
       ))}
+      {visiblePanes.length === 0 ? (
+        <div className="workspace-empty-state">No visible sessions in the active group.</div>
+      ) : null}
     </main>
   );
 };
 
 type WorkspacePaneViewProps = {
+  autoFocusRequest?: WorkspacePanelAutoFocusRequest;
   connection: WorkspacePanelHydrateMessage["connection"];
   debugLog: (event: string, payload?: Record<string, unknown>) => void;
   debuggingMode: boolean;
@@ -465,6 +467,7 @@ type WorkspacePaneViewProps = {
 };
 
 const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
+  autoFocusRequest,
   connection,
   debugLog,
   debuggingMode,
@@ -523,6 +526,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
       <div className="workspace-pane-body">
         {pane.kind === "terminal" ? (
           <TerminalPane
+            autoFocusRequest={autoFocusRequest}
             connection={connection}
             debugLog={debugLog}
             debuggingMode={debuggingMode}
@@ -537,7 +541,12 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
             terminalAppearance={terminalAppearance}
           />
         ) : (
-          <T3Pane isFocused={isFocused} onFocus={onFocus} pane={pane} />
+          <T3Pane
+            autoFocusRequest={autoFocusRequest}
+            isFocused={isFocused}
+            onFocus={onFocus}
+            pane={pane}
+          />
         )}
       </div>
     </section>

@@ -109,10 +109,18 @@
 
 .session-history-card {
   cursor: default;
+  padding-left: calc(28px * var(--sidebar-density-scale));
 }
 
 .session-history-card[data-restorable="true"] {
   cursor: pointer;
+}
+
+.session-history-frame .session-floating-agent-icon,
+.session-history-frame .session-floating-agent-tabler-icon {
+  left: calc(10px * var(--sidebar-density-scale));
+  top: 50%;
+  translate: 0 -50%;
 }
 
 .previous-session-delete-button {

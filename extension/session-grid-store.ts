@@ -12,6 +12,7 @@ import {
   type VisibleSessionCount,
 } from "../shared/session-grid-contract";
 import {
+  createGroupInSimpleWorkspace,
   createGroupFromSessionInSimpleWorkspace,
   createSessionInSimpleWorkspace,
   focusGroupByIndexInSimpleWorkspace,
@@ -290,6 +291,22 @@ export class SessionGridStore {
       next: summarizeWorkspaceSnapshot(this.snapshot),
       previous: summarizeWorkspaceSnapshot(previousSnapshot),
       sessionId,
+    });
+    if (result.changed) {
+      await this.persist();
+    }
+    return result.groupId;
+  }
+
+  public async createGroup(): Promise<string | undefined> {
+    const previousSnapshot = this.snapshot;
+    const result = createGroupInSimpleWorkspace(this.snapshot);
+    this.snapshot = result.snapshot;
+    logVSmuxDebug("store.createGroup", {
+      changed: result.changed,
+      groupId: result.groupId,
+      next: summarizeWorkspaceSnapshot(this.snapshot),
+      previous: summarizeWorkspaceSnapshot(previousSnapshot),
     });
     if (result.changed) {
       await this.persist();

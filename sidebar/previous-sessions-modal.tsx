@@ -32,10 +32,6 @@ export function PreviousSessionsModal({
     () => groupPreviousSessionsByDay(filteredSessions),
     [filteredSessions],
   );
-  const generatedNameCount = useMemo(
-    () => previousSessions.filter((session) => session.isGeneratedName).length,
-    [previousSessions],
-  );
 
   useEffect(() => {
     if (!isOpen) {
@@ -101,22 +97,6 @@ export function PreviousSessionsModal({
             type="text"
             value={searchQuery}
           />
-          <button
-            className="previous-sessions-clear-button"
-            disabled={generatedNameCount === 0}
-            onClick={() => {
-              if (generatedNameCount === 0) {
-                return;
-              }
-
-              vscode.postMessage({
-                type: "clearGeneratedPreviousSessions",
-              });
-            }}
-            type="button"
-          >
-            Clear Auto Names{generatedNameCount > 0 ? ` (${generatedNameCount})` : ""}
-          </button>
         </div>
         <div className="previous-sessions-modal-body">
           {groupedSessions.length > 0 ? (

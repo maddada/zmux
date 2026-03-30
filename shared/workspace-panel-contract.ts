@@ -29,6 +29,12 @@ export type WorkspacePanelLayoutAppearance = {
   paneGap: number;
 };
 
+export type WorkspacePanelAutoFocusRequest = {
+  requestId: number;
+  sessionId: string;
+  source: "sidebar";
+};
+
 export type WorkspacePanelTerminalPane = {
   kind: "terminal";
   isVisible: boolean;
@@ -51,6 +57,7 @@ export type WorkspacePanelPane = WorkspacePanelTerminalPane | WorkspacePanelT3Pa
 export type WorkspacePanelHydrateMessage = {
   type: "hydrate";
   activeGroupId: string;
+  autoFocusRequest?: WorkspacePanelAutoFocusRequest;
   connection: WorkspacePanelConnection;
   debuggingMode: boolean;
   focusedSessionId?: string;
@@ -110,3 +117,14 @@ export type WorkspacePanelToExtensionMessage =
   | WorkspacePanelCloseSessionMessage
   | WorkspacePanelSyncSessionOrderMessage
   | WorkspacePanelDebugLogMessage;
+
+export function stripWorkspacePanelTransientFields(
+  message: ExtensionToWorkspacePanelMessage,
+): ExtensionToWorkspacePanelMessage {
+  if (message.type === "terminalPresentationChanged" || !message.autoFocusRequest) {
+    return message;
+  }
+
+  const { autoFocusRequest: _autoFocusRequest, ...stableMessage } = message;
+  return stableMessage;
+}

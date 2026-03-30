@@ -41,7 +41,6 @@ import { playCompletionSound } from "./completion-sound-player";
 import { AgentsPanel } from "./agents-panel";
 import { CommandsPanel } from "./commands-panel";
 import { DaemonSessionsModal } from "./daemon-sessions-modal";
-import { CreateGroupDropTarget } from "./create-group-drop-target";
 import { GitCommitModal } from "./git-commit-modal";
 import { PreviousSessionsModal } from "./previous-sessions-modal";
 import { ScratchPadModal } from "./scratch-pad-modal";
@@ -131,7 +130,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   const [structureRevision, setStructureRevision] = useState(0);
   const [isStartupInteractionBlocked, setIsStartupInteractionBlocked] = useState(true);
   const [autoEditingGroupId, setAutoEditingGroupId] = useState<string>();
-  const [draggedSessionId, setDraggedSessionId] = useState<string>();
   const [agentCreateRequestId, setAgentCreateRequestId] = useState(0);
   const [commandCreateRequestId, setCommandCreateRequestId] = useState(0);
   const [isOverflowMenuOpen, setIsOverflowMenuOpen] = useState(false);
@@ -443,8 +441,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     if (sourceData?.kind !== "session") {
       return;
     }
-
-    setDraggedSessionId(sourceData.sessionId);
   }) satisfies DragDropEventHandlers["onDragStart"];
 
   const handleDragEnd = ((event) => {
@@ -452,8 +448,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     const currentSessionIdsByGroup = sessionIdsByGroupRef.current;
     const authoritativeGroupIds = workspaceGroups.map((group) => group.groupId);
     const authoritativeSessionIdsByGroup = createSessionIdsByGroup(workspaceGroups);
-
-    setDraggedSessionId(undefined);
 
     const sourceData = getSidebarDropData(event.operation.source as { data?: unknown });
     const targetData = getSidebarDropData(event.operation.target as { data?: unknown });
@@ -483,15 +477,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     }
 
     if (event.canceled) {
-      return;
-    }
-
-    if (targetData?.kind === "create-group") {
-      pendingCreateGroupRef.current = true;
-      vscode.postMessage({
-        sessionId: sourceData.sessionId,
-        type: "createGroupFromSession",
-      });
       return;
     }
 
@@ -783,11 +768,22 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
                   vscode={vscode}
                 />
               ))}
-              <CreateGroupDropTarget
-                isVisible={Boolean(draggedSessionId) && orderedGroups.length < MAX_GROUP_COUNT}
-              />
             </div>
           </DragDropProvider>
+          <button
+            aria-label="Create a new group"
+            className="group-create-button"
+            data-empty-space-blocking="true"
+            disabled={orderedGroups.length >= MAX_GROUP_COUNT}
+            onClick={() => {
+              pendingCreateGroupRef.current = true;
+              vscode.postMessage({ type: "createGroup" });
+            }}
+            type="button"
+          >
+            <IconPlus aria-hidden="true" className="group-create-button-icon" size={14} />
+            New Group
+          </button>
           {fixedGroups.length === 0 &&
           orderedGroups.every((group) => group.sessions.length === 0) ? (
             <div className="empty" data-empty-space-blocking="true">

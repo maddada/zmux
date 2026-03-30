@@ -296,6 +296,9 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
     case "createGroupFromSession":
       return typeof message.sessionId === "string" && message.sessionId.length > 0;
 
+    case "createGroup":
+      return true;
+
     case "syncSessionOrder":
       return (
         typeof message.groupId === "string" &&

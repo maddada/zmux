@@ -27,7 +27,10 @@ import {
   type SidebarGitAction,
   type SidebarGitState,
 } from "../../shared/sidebar-git";
-import type { ExtensionToWorkspacePanelMessage } from "../../shared/workspace-panel-contract";
+import type {
+  ExtensionToWorkspacePanelMessage,
+  WorkspacePanelAutoFocusRequest,
+} from "../../shared/workspace-panel-contract";
 import {
   prepareSidebarGitCommit,
   runSidebarGitActionWorkflow,
@@ -122,6 +125,7 @@ import { playCloseTerminalOnExitSound } from "../terminal-exit-sound";
 
 const SHORTCUT_LABEL_PLATFORM = process.platform === "darwin" ? "mac" : "default";
 const COMMAND_TERMINAL_EXIT_POLL_MS = 250;
+const COMPLETION_SOUND_CONFIRMATION_DELAY_MS = 2_000;
 const SIMPLE_BROWSER_OPEN_COMMAND = "simpleBrowser.api.open";
 const TOGGLE_MAXIMIZE_EDITOR_GROUP_COMMAND = "workbench.action.toggleMaximizeEditorGroup";
 
@@ -149,10 +153,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private readonly sessionAgentLaunchBySessionId: Map<string, StoredSessionAgentLaunch>;
   private readonly store: SessionGridStore;
   private readonly terminalTitleBySessionId = new Map<string, string>();
+  private readonly lastKnownActivityBySessionId = new Map<string, "idle" | "working" | "attention">();
+  private readonly pendingCompletionSoundTimeoutBySessionId = new Map<string, NodeJS.Timeout>();
   private readonly loggedTitleSymbolKeys = new Set<string>();
   private readonly pendingT3SessionIds = new Set<string>();
   private nextSidebarRevision = 0;
+  private nextWorkspaceAutoFocusRequestId = 0;
   private focusRequestSequence = 0;
+  private pendingWorkspaceAutoFocusRequest: WorkspacePanelAutoFocusRequest | undefined;
   private pendingSidebarGitCommitConfirmation:
     | {
         action: SidebarGitAction;
@@ -272,6 +280,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public dispose(): void {
+    for (const timeout of this.pendingCompletionSoundTimeoutBySessionId.values()) {
+      clearTimeout(timeout);
+    }
+    this.pendingCompletionSoundTimeoutBySessionId.clear();
     this.t3Runtime?.dispose();
     disposeVSmuxDebugLog();
     while (this.disposables.length > 0) {
@@ -376,6 +388,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       sessionId,
       snapshot: this.describeActiveSnapshot(),
     });
+    if (source === "sidebar") {
+      this.enqueueWorkspaceAutoFocus(sessionId, "sidebar");
+    }
     const isVisiblePresentationFocus =
       this.isSessionVisibleInWorkspace(sessionId) && !shouldReattachDetachedTerminal;
     const sidebarRefreshPromise =
@@ -980,11 +995,20 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.refreshSidebar("hydrate");
   }
 
-  public async focusGroup(groupId: string): Promise<void> {
+  public async focusGroup(groupId: string, source?: "sidebar"): Promise<void> {
     this.clearObservedSidebarFocusState();
     const changed = await this.store.focusGroup(groupId);
+    if (source === "sidebar") {
+      this.enqueueWorkspaceAutoFocusForFocusedSession("sidebar");
+    }
     if (changed) {
       await this.afterStateChange();
+      return;
+    }
+
+    if (source === "sidebar" && this.pendingWorkspaceAutoFocusRequest) {
+      await this.refreshWorkspacePanel();
+      await this.revealWorkspacePanelForSidebarFocus(source);
     }
   }
 
@@ -1030,6 +1054,13 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   public async createGroupFromSession(sessionId: string): Promise<void> {
     const groupId = await this.store.createGroupFromSession(sessionId);
+    if (groupId) {
+      await this.afterStateChange();
+    }
+  }
+
+  public async createGroup(): Promise<void> {
+    const groupId = await this.store.createGroup();
     if (groupId) {
       await this.afterStateChange();
     }
@@ -1098,6 +1129,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       confirmSidebarGitCommit: async (requestId, subject) =>
         this.confirmSidebarGitCommit(requestId, subject),
       copyResumeCommand: async (sessionId) => this.copyResumeCommand(sessionId),
+      createGroup: async () => this.createGroup(),
       createGroupFromSession: async (sessionId) => this.createGroupFromSession(sessionId),
       createSession: async () => this.createSession(),
       createSessionInGroup: async (groupId) => this.createSessionInGroup(groupId),
@@ -1107,7 +1139,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       killTerminalDaemon: async () => this.killTerminalDaemon(),
       deleteSidebarAgent: async (agentId) => this.deleteSidebarAgent(agentId),
       deleteSidebarCommand: async (commandId) => this.deleteSidebarCommand(commandId),
-      focusGroup: async (groupId) => this.focusGroup(groupId),
+      focusGroup: async (groupId, source) => this.focusGroup(groupId, source),
       focusSession: async (sessionId, source) => this.focusSession(sessionId, source),
       moveSessionToGroup: async (sessionId, groupId, targetIndex) =>
         this.moveSessionToGroup(sessionId, groupId, targetIndex),
@@ -1697,6 +1729,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     this.sidebarAgentIconBySessionId.delete(sessionId);
     this.sessionAgentLaunchBySessionId.delete(sessionId);
     this.terminalTitleBySessionId.delete(sessionId);
+    this.lastKnownActivityBySessionId.delete(sessionId);
+    this.clearPendingCompletionSound(sessionId);
   }
 
   private createArchivedSessionEntry(
@@ -1741,7 +1775,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private createSessionActivityContext(): Parameters<typeof getEffectiveSessionActivity>[0] {
     return {
-      getCompletionBellEnabled: () => this.getCompletionBellEnabled(),
+      cancelPendingCompletionSound: (sessionId) => this.clearPendingCompletionSound(sessionId),
       getSessionSnapshot: (sessionId) => this.backend.getSessionSnapshot(sessionId),
       getT3ActivityState: (sessionRecord) => ({
         activity: this.pendingT3SessionIds.has(sessionRecord.sessionId) ? "working" : "idle",
@@ -1749,10 +1783,47 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           this.pendingT3SessionIds.has(sessionRecord.sessionId) ||
           this.isSessionVisibleInWorkspace(sessionRecord.sessionId),
       }),
-      lastKnownActivityBySessionId: new Map(),
-      playCompletionSound: async () => {},
+      lastKnownActivityBySessionId: this.lastKnownActivityBySessionId,
+      queueCompletionSound: (sessionId) => this.queueCompletionSound(sessionId),
       workspaceId: this.workspaceId,
     };
+  }
+
+  private clearPendingCompletionSound(sessionId: string): void {
+    const timeout = this.pendingCompletionSoundTimeoutBySessionId.get(sessionId);
+    if (!timeout) {
+      return;
+    }
+
+    clearTimeout(timeout);
+    this.pendingCompletionSoundTimeoutBySessionId.delete(sessionId);
+  }
+
+  private queueCompletionSound(sessionId: string): void {
+    if (!this.getCompletionBellEnabled()) {
+      return;
+    }
+
+    if (this.pendingCompletionSoundTimeoutBySessionId.has(sessionId)) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      this.pendingCompletionSoundTimeoutBySessionId.delete(sessionId);
+      if (!this.getCompletionBellEnabled()) {
+        return;
+      }
+
+      if (this.backend.getSessionSnapshot(sessionId)?.agentStatus !== "attention") {
+        return;
+      }
+
+      void this.sidebarProvider.postMessage({
+        sound: getClampedCompletionSoundSetting(),
+        type: "playCompletionSound",
+      });
+    }, COMPLETION_SOUND_CONFIRMATION_DELAY_MS);
+    this.pendingCompletionSoundTimeoutBySessionId.set(sessionId, timeout);
   }
 
   private getSidebarAgentIconForSession(sessionId: string): SidebarAgentIcon | undefined {
@@ -2018,6 +2089,34 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     return;
   }
 
+  private enqueueWorkspaceAutoFocus(
+    sessionId: string,
+    source: WorkspacePanelAutoFocusRequest["source"],
+  ): void {
+    this.pendingWorkspaceAutoFocusRequest = {
+      requestId: ++this.nextWorkspaceAutoFocusRequestId,
+      sessionId,
+      source,
+    };
+  }
+
+  private enqueueWorkspaceAutoFocusForFocusedSession(
+    source: WorkspacePanelAutoFocusRequest["source"],
+  ): void {
+    const focusedSessionId = this.getActiveSnapshot().focusedSessionId;
+    if (!focusedSessionId) {
+      return;
+    }
+
+    this.enqueueWorkspaceAutoFocus(focusedSessionId, source);
+  }
+
+  private consumeWorkspaceAutoFocusRequest(): WorkspacePanelAutoFocusRequest | undefined {
+    const autoFocusRequest = this.pendingWorkspaceAutoFocusRequest;
+    this.pendingWorkspaceAutoFocusRequest = undefined;
+    return autoFocusRequest;
+  }
+
   private async revealWorkspacePanelForSidebarFocus(
     source: "sidebar" | "workspace" | undefined,
   ): Promise<void> {
@@ -2060,14 +2159,22 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     );
     const activeGroupSessions = (activeGroup?.snapshot.sessions ?? [])
       .filter((sessionRecord): sessionRecord is SessionRecord => sessionRecord !== undefined);
+    const allTerminalSessions = workspaceSnapshot.groups.flatMap((group) =>
+      group.snapshot.sessions.filter(
+        (sessionRecord): sessionRecord is SessionRecord =>
+          sessionRecord !== undefined && sessionRecord.kind === "terminal",
+      ),
+    );
     const visibleSessionIdSet = new Set(activeSnapshot.visibleSessionIds);
     const connection = {
       ...(await this.backend.getConnection()),
       workspaceId: this.workspaceId,
     };
+    const autoFocusRequest = this.consumeWorkspaceAutoFocusRequest();
     const panes = (
       await Promise.all(
-        activeGroupSessions.map(async (sessionRecord) => {
+        [...allTerminalSessions, ...activeGroupSessions.filter((sessionRecord) => sessionRecord.kind !== "terminal")].map(
+          async (sessionRecord) => {
           if (sessionRecord.kind === "terminal") {
             return {
               kind: "terminal" as const,
@@ -2098,13 +2205,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
                     this.workspaceAssetServer,
                   ),
           };
-        }),
+          },
+        ),
       )
     ).filter((pane): pane is NonNullable<typeof pane> => pane !== undefined);
 
     if (type === "hydrate") {
       return {
         activeGroupId: workspaceSnapshot.activeGroupId,
+        autoFocusRequest,
         connection,
         debuggingMode: getDebuggingMode(),
         focusedSessionId: activeSnapshot.focusedSessionId,
@@ -2120,6 +2229,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     return {
       activeGroupId: workspaceSnapshot.activeGroupId,
+      autoFocusRequest,
       connection,
       debuggingMode: getDebuggingMode(),
       focusedSessionId: activeSnapshot.focusedSessionId,

@@ -145,6 +145,76 @@ describe("WorkspacePanelManager", () => {
 
     manager.dispose();
   });
+
+  test("should not replay one-shot autofocus requests after the initial post", async () => {
+    const manager = new WorkspacePanelManager({
+      context: createMockContext(),
+      onMessage: vi.fn(),
+    });
+
+    await manager.reveal();
+
+    const panel = createdPanels[0];
+    expect(panel).toBeDefined();
+
+    await manager.postMessage({
+      activeGroupId: "group-1",
+      autoFocusRequest: {
+        requestId: 3,
+        sessionId: "session-1",
+        source: "sidebar",
+      },
+      connection: {
+        baseUrl: "http://127.0.0.1:8080",
+        token: "token",
+        workspaceId: "workspace-1",
+      },
+      debuggingMode: false,
+      focusedSessionId: "session-1",
+      layoutAppearance: {
+        activePaneBorderColor: "#fff",
+        paneGap: 12,
+      },
+      panes: [],
+      terminalAppearance: {
+        cursorBlink: true,
+        cursorStyle: "bar",
+        fontFamily: "monospace",
+        fontSize: 12,
+        letterSpacing: 0,
+        lineHeight: 1,
+      },
+      type: "sessionState",
+      viewMode: "grid",
+      visibleCount: 1,
+      workspaceSnapshot: {
+        activeGroupId: "group-1",
+        groups: [],
+        nextSessionDisplayId: 1,
+        nextSessionNumber: 1,
+      },
+    });
+
+    expect(panel.webview.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        autoFocusRequest: {
+          requestId: 3,
+          sessionId: "session-1",
+          source: "sidebar",
+        },
+      }),
+    );
+
+    panel.webview.messageListeners[0]?.({ type: "ready" });
+
+    expect(panel.webview.postMessage).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({
+        autoFocusRequest: expect.anything(),
+      }),
+    );
+
+    manager.dispose();
+  });
 });
 
 function createMockContext() {

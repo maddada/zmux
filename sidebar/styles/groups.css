@@ -317,46 +317,41 @@
   width: 100%;
 }
 
-.group-create-target {
+.group-create-button {
   align-items: center;
-  border: 1px dashed color-mix(in srgb, var(--app-button-background) 42%, var(--app-border));
-  border-radius: 22px;
-  color: var(--app-muted);
-  display: grid;
-  gap: 6px;
-  justify-items: center;
-  min-height: 84px;
-  padding: 16px 12px;
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
-    box-shadow 140ms ease;
-}
-
-.group-create-target[data-drop-target="true"] {
-  border-color: color-mix(in srgb, var(--app-button-background) 76%, var(--app-border));
-  background: color-mix(in srgb, var(--app-button-background) 12%, transparent);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--app-button-background) 18%, transparent),
-    0 14px 30px color-mix(in srgb, var(--app-button-background) 10%, transparent);
-}
-
-.group-create-plus {
-  align-items: center;
-  background: color-mix(in srgb, var(--app-button-background) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-button-background) 34%, transparent);
-  border-radius: 999px;
-  color: color-mix(in srgb, var(--app-button-background) 72%, var(--app-foreground) 28%);
+  background: color-mix(in srgb, var(--app-card-active) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: calc(16px * var(--sidebar-density-scale));
+  color: color-mix(in srgb, var(--app-button-background) 76%, var(--app-foreground) 24%);
+  cursor: pointer;
   display: inline-flex;
-  font-size: 24px;
-  height: 42px;
+  gap: calc(8px * var(--sidebar-density-scale));
   justify-content: center;
-  line-height: 1;
-  width: 42px;
+  margin-top: calc(10px * var(--sidebar-density-scale));
+  min-height: calc(38px * var(--sidebar-density-scale));
+  padding: calc(10px * var(--sidebar-density-scale)) calc(14px * var(--sidebar-density-scale));
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+  width: 100%;
 }
 
-.group-create-copy {
-  font-size: 12px;
-  font-weight: 600;
-  text-align: center;
+.group-create-button:hover,
+.group-create-button:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 12%, var(--app-card-active) 88%);
+  border-color: color-mix(in srgb, var(--app-button-background) 54%, var(--app-border));
+  color: var(--app-button-background);
+  outline: none;
+}
+
+.group-create-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.group-create-button-icon {
+  display: block;
+  flex: none;
 }

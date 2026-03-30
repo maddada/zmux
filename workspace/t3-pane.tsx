@@ -1,15 +1,30 @@
 import { useEffect, useRef } from "react";
-import type { WorkspacePanelT3Pane } from "../shared/workspace-panel-contract";
+import type {
+  WorkspacePanelAutoFocusRequest,
+  WorkspacePanelT3Pane,
+} from "../shared/workspace-panel-contract";
 
 export type T3PaneProps = {
+  autoFocusRequest?: WorkspacePanelAutoFocusRequest;
   isFocused: boolean;
   onFocus: () => void;
   pane: WorkspacePanelT3Pane;
 };
 
-export const T3Pane: React.FC<T3PaneProps> = ({ isFocused, onFocus, pane }) => {
+export const T3Pane: React.FC<T3PaneProps> = ({
+  autoFocusRequest,
+  isFocused,
+  onFocus,
+  pane,
+}) => {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const blobUrlRef = useRef<string | undefined>(undefined);
+  const lastHandledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
+  const previousIsFocusedRef = useRef(isFocused);
+
+  const requestComposerFocus = () => {
+    iframeRef.current?.contentWindow?.postMessage({ type: "focusComposer" }, "*");
+  };
 
   useEffect(() => {
     const blob = new Blob([pane.html], { type: "text/html" });
@@ -29,12 +44,25 @@ export const T3Pane: React.FC<T3PaneProps> = ({ isFocused, onFocus, pane }) => {
   }, [pane.html]);
 
   useEffect(() => {
-    if (!isFocused) {
+    const wasFocused = previousIsFocusedRef.current;
+    previousIsFocusedRef.current = isFocused;
+    if (isFocused && !wasFocused) {
+      requestComposerFocus();
+    }
+  }, [isFocused, pane.sessionId]);
+
+  useEffect(() => {
+    if (
+      !isFocused ||
+      !autoFocusRequest ||
+      lastHandledAutoFocusRequestIdRef.current === autoFocusRequest.requestId
+    ) {
       return;
     }
 
-    iframeRef.current?.contentWindow?.postMessage({ type: "focusComposer" }, "*");
-  }, [isFocused, pane.sessionId]);
+    lastHandledAutoFocusRequestIdRef.current = autoFocusRequest.requestId;
+    requestComposerFocus();
+  }, [autoFocusRequest, isFocused]);
 
   return (
     <div className="t3-pane-root" onMouseDown={onFocus}>
@@ -44,7 +72,7 @@ export const T3Pane: React.FC<T3PaneProps> = ({ isFocused, onFocus, pane }) => {
           if (!isFocused) {
             return;
           }
-          iframeRef.current?.contentWindow?.postMessage({ type: "focusComposer" }, "*");
+          requestComposerFocus();
         }}
         ref={iframeRef}
         sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"

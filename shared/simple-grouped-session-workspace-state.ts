@@ -41,9 +41,9 @@ export function normalizeSimpleGroupedSessionWorkspaceSnapshot(
   snapshot: GroupedSessionWorkspaceSnapshot | undefined,
 ): GroupedSessionWorkspaceSnapshot {
   const baseSnapshot = snapshot ?? createDefaultGroupedSessionWorkspaceSnapshot();
-  const preparedGroups = baseSnapshot.groups
-    .map((group, index) => prepareGroupForDisplayIdNormalization(group, index))
-    .filter((group) => group.snapshot.sessions.length > 0 || group.groupId === DEFAULT_MAIN_GROUP_ID);
+  const preparedGroups = baseSnapshot.groups.map((group, index) =>
+    prepareGroupForDisplayIdNormalization(group, index),
+  );
   const groups =
     preparedGroups.length > 0
       ? preparedGroups
@@ -574,6 +574,33 @@ export function createGroupFromSessionInSimpleWorkspace(
     ...snapshotWithoutSession,
     activeGroupId: nextGroupId,
     groups: [...snapshotWithoutSession.groups, nextGroup],
+    nextGroupNumber: nextGroupNumber + 1,
+  });
+
+  return {
+    changed: !areSnapshotsEqual(normalizedSnapshot, nextSnapshot),
+    groupId: nextGroupId,
+    snapshot: nextSnapshot,
+  };
+}
+
+export function createGroupInSimpleWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+): CreateGroupResult {
+  const normalizedSnapshot = normalizeSimpleGroupedSessionWorkspaceSnapshot(snapshot);
+  if (normalizedSnapshot.groups.length >= MAX_GROUP_COUNT) {
+    return { changed: false, snapshot: normalizedSnapshot };
+  }
+
+  const nextGroupNumber = Math.max(
+    normalizedSnapshot.nextGroupNumber,
+    getNextGroupNumber(normalizedSnapshot.groups),
+  );
+  const nextGroupId = `group-${nextGroupNumber}`;
+  const nextSnapshot = normalizeSimpleGroupedSessionWorkspaceSnapshot({
+    ...normalizedSnapshot,
+    activeGroupId: nextGroupId,
+    groups: [...normalizedSnapshot.groups, createEmptyGroup(nextGroupId, `Group ${nextGroupNumber}`)],
     nextGroupNumber: nextGroupNumber + 1,
   });
 

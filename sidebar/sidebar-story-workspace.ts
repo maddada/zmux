@@ -14,6 +14,7 @@ import {
 import type { SidebarAgentButton } from "../shared/sidebar-agents";
 import type { SidebarCommandButton } from "../shared/sidebar-commands";
 import {
+  createGroupInWorkspace,
   createGroupFromSessionInWorkspace,
   focusGroupInWorkspace,
   focusSessionInWorkspace,
@@ -341,6 +342,11 @@ export function reduceSidebarStoryWorkspace(
 
     case "createGroupFromSession": {
       const result = createGroupFromSessionInWorkspace(workspace.snapshot, message.sessionId);
+      return result.changed ? { ...workspace, snapshot: result.snapshot } : undefined;
+    }
+
+    case "createGroup": {
+      const result = createGroupInWorkspace(workspace.snapshot);
       return result.changed ? { ...workspace, snapshot: result.snapshot } : undefined;
     }
 

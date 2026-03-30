@@ -6,6 +6,7 @@ import {
   type GroupedSessionWorkspaceSnapshot,
 } from "./session-grid-contract";
 import {
+  createGroupInWorkspace,
   createGroupFromSessionInWorkspace,
   createSessionInWorkspace,
   focusGroupByIndexInWorkspace,
@@ -114,6 +115,42 @@ describe("createGroupFromSessionInWorkspace", () => {
     expect(
       result.snapshot.groups[1]?.snapshot.sessions.map((session) => session.sessionId),
     ).toEqual(["session-2"]);
+  });
+});
+
+describe("createGroupInWorkspace", () => {
+  test("should append an empty active group", () => {
+    const result = createGroupInWorkspace(
+      createWorkspaceSnapshot({
+        activeGroupId: DEFAULT_MAIN_GROUP_ID,
+        groups: [
+          {
+            groupId: DEFAULT_MAIN_GROUP_ID,
+            snapshot: {
+              focusedSessionId: "session-1",
+              sessions: [createSessionRecord(1, 0)],
+              viewMode: "grid",
+              visibleCount: 1,
+              visibleSessionIds: ["session-1"],
+            },
+            title: "Main",
+          },
+        ],
+        nextGroupNumber: 2,
+        nextSessionNumber: 2,
+      }),
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.groupId).toBe("group-2");
+    expect(result.snapshot.activeGroupId).toBe("group-2");
+    expect(result.snapshot.groups).toHaveLength(2);
+    expect(result.snapshot.groups[1]).toMatchObject({
+      groupId: "group-2",
+      title: "Group 2",
+    });
+    expect(result.snapshot.groups[1]?.snapshot.sessions).toEqual([]);
+    expect(result.snapshot.nextGroupNumber).toBe(3);
   });
 });
 
