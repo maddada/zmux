@@ -190,6 +190,7 @@ describe("WorkspacePanelManager", () => {
       workspaceSnapshot: {
         activeGroupId: "group-1",
         groups: [],
+        nextGroupNumber: 1,
         nextSessionDisplayId: 1,
         nextSessionNumber: 1,
       },

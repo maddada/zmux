@@ -10,7 +10,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { resolveThreadActivity } from "./t3-activity-monitor";
+import { resolveThreadActivity } from "./t3-activity-state";
 
 describe("resolveThreadActivity", () => {
   test("should keep threads without a live session object marked as running", () => {

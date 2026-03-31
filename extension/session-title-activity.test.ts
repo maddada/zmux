@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import {
   SLOW_SPINNER_ACTIVITY_WINDOW_MS,
-  TITLE_ACTIVITY_WINDOW_MS,
   acknowledgeTitleDerivedSessionActivity,
   getInterestingTitleSymbols,
   getTitleDerivedSessionActivity,

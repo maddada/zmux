@@ -1,6 +1,6 @@
 import { Tooltip } from "@base-ui/react/tooltip";
-import { DragDropProvider } from "@dnd-kit/react";
-import { isSortable, useSortable } from "@dnd-kit/react/sortable";
+import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
+import { isSortableOperation, useSortable } from "@dnd-kit/react/sortable";
 import { IconCodeDots, IconLoader2, IconPencil, IconTrash } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import {
@@ -64,15 +64,21 @@ function createAgentDragData(agentId: string): AgentDragData {
   };
 }
 
-function getAgentDragData(candidate: { data?: unknown } | null | undefined) {
-  const data = candidate?.data;
-  if (!data || typeof data !== "object" || !("kind" in data)) {
+function getAgentDragData(candidate: unknown): AgentDragData | undefined {
+  if (!hasData(candidate)) {
     return undefined;
   }
 
-  const parsedData = data as Partial<AgentDragData>;
-  return parsedData.kind === "sidebar-agent" && typeof parsedData.agentId === "string"
-    ? (parsedData as AgentDragData)
+  const data = candidate.data;
+  if (!isObjectRecord(data) || !("kind" in data)) {
+    return undefined;
+  }
+
+  return data.kind === "sidebar-agent" && typeof data.agentId === "string"
+    ? {
+        agentId: data.agentId,
+        kind: "sidebar-agent",
+      }
     : undefined;
 }
 
@@ -98,14 +104,14 @@ export function AgentsPanel({
     }
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) {
+      if (isNode(event.target) && menuRef.current?.contains(event.target)) {
         return;
       }
 
       setContextMenu(undefined);
     };
     const handleContextMenu = (event: MouseEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) {
+      if (isNode(event.target) && menuRef.current?.contains(event.target)) {
         return;
       }
 
@@ -181,24 +187,18 @@ export function AgentsPanel({
       .filter((agent): agent is SidebarAgentButton => agent !== undefined);
   }, [agents, draftAgentIds]);
 
-  const handleDragEnd = (event: {
-    canceled?: boolean;
-    operation: {
-      source: unknown;
-      target: unknown;
-    };
-  }) => {
+  const handleDragEnd = ((event) => {
     if (event.canceled) {
       return;
     }
 
-    const { source, target } = event.operation;
-    if (!isSortable(source) || !isSortable(target)) {
+    if (!isSortableOperation(event.operation)) {
       return;
     }
 
+    const { source, target } = event.operation;
     const sourceData = getAgentDragData(source);
-    const targetData = getAgentDragData(target as { data?: unknown });
+    const targetData = getAgentDragData(target);
     if (!sourceData || !targetData || sourceData.agentId === targetData.agentId) {
       return;
     }
@@ -219,7 +219,7 @@ export function AgentsPanel({
       agentIds: nextAgentIds,
       type: "syncSidebarAgentOrder",
     });
-  };
+  }) satisfies DragDropEventHandlers["onDragEnd"];
 
   return (
     <>
@@ -478,4 +478,16 @@ function haveSameAgentOrder(left: readonly string[], right: readonly string[]): 
   }
 
   return left.every((agentId, index) => agentId === right[index]);
+}
+
+function hasData(candidate: unknown): candidate is { data?: unknown } {
+  return isObjectRecord(candidate) && "data" in candidate;
+}
+
+function isNode(value: EventTarget | null): value is Node {
+  return value instanceof Node;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

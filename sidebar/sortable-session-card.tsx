@@ -11,6 +11,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useShallow } from "zustand/react/shallow";
+import type { SidebarSessionItem } from "../shared/session-grid-contract";
 import { SessionCardContent, SessionFloatingAgentIcon } from "./session-card-content";
 import { createSessionDragData } from "./sidebar-dnd";
 import { useSidebarStore } from "./sidebar-store";

@@ -72,9 +72,7 @@ describe("getLiveBrowserTabs", () => {
         tabs: [
           {
             input: new vscode.TabInputCustom(
-              {
-                toString: () => "http://localhost:5173",
-              },
+              vscode.Uri.parse("http://localhost:5173"),
               "test.browser",
             ),
             isActive: false,
@@ -122,12 +120,8 @@ describe("getLiveBrowserTabs", () => {
         tabs: [
           {
             input: new vscode.TabInputTextDiff(
-              {
-                toString: () => "file:///tmp/original.ts",
-              },
-              {
-                toString: () => "file:///tmp/modified.ts",
-              },
+              vscode.Uri.parse("file:///tmp/original.ts"),
+              vscode.Uri.parse("file:///tmp/modified.ts"),
             ),
             isActive: true,
             label: "original.ts ↔ modified.ts",
@@ -201,9 +195,7 @@ describe("getLiveBrowserTabs", () => {
         tabs: [
           {
             input: new vscode.TabInputCustom(
-              {
-                toString: () => "vscode-webview://workspace-panel",
-              },
+              vscode.Uri.parse("vscode-webview://workspace-panel"),
               "some.restored.custom",
             ),
             isActive: true,
@@ -224,9 +216,7 @@ describe("getLiveBrowserTabs", () => {
         tabs: [
           {
             input: new vscode.TabInputCustom(
-              {
-                toString: () => "http://127.0.0.1:41111/workspace/index.html",
-              },
+              vscode.Uri.parse("http://127.0.0.1:41111/workspace/index.html"),
               "simpleBrowser.view",
             ),
             isActive: true,
@@ -247,9 +237,7 @@ describe("getLiveBrowserTabs", () => {
         tabs: [
           {
             input: new vscode.TabInputCustom(
-              {
-                toString: () => "https://example.com/vsmux",
-              },
+              vscode.Uri.parse("https://example.com/vsmux"),
               "simpleBrowser.view",
             ),
             isActive: true,

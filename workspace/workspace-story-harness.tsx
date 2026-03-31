@@ -29,7 +29,7 @@ const STORYBOOK_CONNECTION = {
   mock: true,
   token: "storybook",
   workspaceId: "storybook-workspace",
-} as const;
+};
 
 export function WorkspaceStoryHarness({
   debuggingMode = false,
@@ -37,8 +37,8 @@ export function WorkspaceStoryHarness({
 }: WorkspaceStoryHarnessProps) {
   const [workspace, setWorkspace] = useState(() => createSidebarStoryWorkspace(message));
   const workspaceRef = useRef(workspace);
-  const sidebarMessageSource = useRef(new EventTarget() as StoryMessageSource).current;
-  const workspaceMessageSource = useRef(new EventTarget() as StoryMessageSource).current;
+  const sidebarMessageSource = useRef<StoryMessageSource>(createStoryMessageSource()).current;
+  const workspaceMessageSource = useRef<StoryMessageSource>(createStoryMessageSource()).current;
 
   const applyWorkspaceMessage = (nextMessage: SidebarToExtensionMessage) => {
     const nextWorkspace = reduceSidebarStoryWorkspace(workspaceRef.current, nextMessage);
@@ -62,13 +62,14 @@ export function WorkspaceStoryHarness({
 
   const workspaceVscode = useMemo(
     () => ({
-      postMessage(nextMessage: { sessionId?: string; type?: string }) {
-        if (nextMessage.type !== "focusSession" || typeof nextMessage.sessionId !== "string") {
+      postMessage(nextMessage: unknown) {
+        const focusMessage = getFocusSessionMessage(nextMessage);
+        if (!focusMessage) {
           return;
         }
 
         applyWorkspaceMessage({
-          sessionId: nextMessage.sessionId,
+          sessionId: focusMessage.sessionId,
           type: "focusSession",
         });
       },
@@ -151,6 +152,7 @@ function createWorkspaceStoryMessage(
         session !== undefined && session.isVisible,
     )
     .map<WorkspacePanelTerminalPane>((session) => ({
+      isVisible: true,
       kind: "terminal",
       sessionId: session.sessionId,
       sessionRecord: {
@@ -242,4 +244,25 @@ function parseSlotIndex(shortcutLabel: string): number {
 
 function dispatchStoryMessage(source: StoryMessageSource, data: unknown) {
   source.dispatchEvent(new MessageEvent("message", { data }));
+}
+
+function createStoryMessageSource(): StoryMessageSource {
+  return new EventTarget();
+}
+
+function getFocusSessionMessage(
+  value: unknown,
+): { sessionId: string; type: "focusSession" } | undefined {
+  return isObjectRecord(value) &&
+    value.type === "focusSession" &&
+    typeof value.sessionId === "string"
+    ? {
+        sessionId: value.sessionId,
+        type: "focusSession",
+      }
+    : undefined;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

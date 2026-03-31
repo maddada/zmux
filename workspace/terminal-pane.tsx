@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { IconArrowBigDownFilled } from "@tabler/icons-react";
+import { IconArrowDownBar } from "@tabler/icons-react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -11,9 +11,7 @@ import type {
   WorkspacePanelTerminalAppearance,
   WorkspacePanelTerminalPane,
 } from "../shared/workspace-panel-contract";
-import type {
-  TerminalResizeMessage,
-} from "../shared/terminal-host-protocol";
+import type { TerminalResizeMessage } from "../shared/terminal-host-protocol";
 import { getTerminalAppearanceOptions } from "./terminal-appearance";
 import { logWorkspaceDebug } from "./workspace-debug";
 import { getTerminalTheme } from "./terminal-theme";
@@ -57,7 +55,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const handledRefreshRequestIdRef = useRef(refreshRequestId);
   const isVisibleRef = useRef(isVisible);
-  const lastMeasuredSizeRef = useRef<{ height: number; width: number }>();
+  const lastMeasuredSizeRef = useRef<{ height: number; width: number } | undefined>(undefined);
   const nudgeTerminalHeightRef = useRef<((afterNudge?: () => void) => void) | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const updateScrollToBottomButtonVisibilityRef = useRef<(() => void) | null>(null);
@@ -104,6 +102,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     terminal.loadAddon(unicode11);
     terminal.unicode.activeVersion = "11";
 
+    let rendererMode: "fallback" | "unknown" | "webgl" = "unknown";
+
     try {
       const webgl = new WebglAddon();
       rendererMode = "webgl";
@@ -148,7 +148,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     let pendingSocketMessages: string[] = [];
     let pendingReconnectRefitAfterData = false;
     let reconnectRefitTimeoutId: number | undefined;
-    let rendererMode: "fallback" | "unknown" | "webgl" = "unknown";
     let suppressPasteEvent = false;
     let socketConnectionSequence = 0;
     let socketConnectionId = 0;
@@ -752,6 +751,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
   useEffect(() => {
     if (!isVisible) {
+      lastMeasuredSizeRef.current = undefined;
       return;
     }
 
@@ -771,20 +771,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           return;
         }
 
-        const nextMeasuredSize = {
+        lastMeasuredSizeRef.current = {
           height: Math.round(bounds.height),
           width: Math.round(bounds.width),
         };
-        const previousMeasuredSize = lastMeasuredSizeRef.current;
-        if (
-          previousMeasuredSize &&
-          previousMeasuredSize.width === nextMeasuredSize.width &&
-          previousMeasuredSize.height === nextMeasuredSize.height
-        ) {
-          return;
-        }
-
-        lastMeasuredSizeRef.current = nextMeasuredSize;
         fitRef.current?.fit();
         terminal.refresh(0, terminal.rows - 1);
         updateScrollToBottomButtonVisibilityRef.current?.();
@@ -798,12 +788,32 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     }
 
     handledRefreshRequestIdRef.current = refreshRequestId;
+    lastMeasuredSizeRef.current = undefined;
     if (!isVisible) {
       return;
     }
 
     requestAnimationFrame(() => {
-      nudgeTerminalHeightRef.current?.();
+      requestAnimationFrame(() => {
+        const container = containerRef.current;
+        const terminal = terminalRef.current;
+        if (!container || !terminal) {
+          return;
+        }
+
+        const bounds = container.getBoundingClientRect();
+        if (bounds.width <= 0 || bounds.height <= 0) {
+          return;
+        }
+
+        lastMeasuredSizeRef.current = {
+          height: Math.round(bounds.height),
+          width: Math.round(bounds.width),
+        };
+        fitRef.current?.fit();
+        terminal.refresh(0, terminal.rows - 1);
+        updateScrollToBottomButtonVisibilityRef.current?.();
+      });
     });
   }, [isVisible, refreshRequestId]);
 
@@ -862,7 +872,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           }}
           type="button"
         >
-          <IconArrowBigDownFilled aria-hidden size={16} stroke={1.8} />
+          <IconArrowDownBar aria-hidden size={16} stroke={1.8} />
         </button>
       ) : null}
     </div>

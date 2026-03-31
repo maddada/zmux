@@ -95,6 +95,8 @@ describe("createSessionActivationPlan", () => {
     const sessionRecord = createSessionRecord(1, 0, {
       kind: "t3",
       t3: {
+        projectId: "project-1",
+        serverOrigin: "http://127.0.0.1:3773",
         threadId: "thread-1",
         workspaceRoot: "/workspace",
       },
@@ -123,6 +125,8 @@ describe("createSessionActivationPlan", () => {
     const sessionRecord = createSessionRecord(1, 0, {
       kind: "t3",
       t3: {
+        projectId: "project-1",
+        serverOrigin: "http://127.0.0.1:3773",
         threadId: "thread-1",
         workspaceRoot: "/workspace",
       },

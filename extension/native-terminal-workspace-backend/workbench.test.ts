@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vite-plus/test";
-import { vi } from "vitest";
+import { vi } from "vite-plus/test";
 
 vi.mock("vscode", () => ({
   TabInputTerminal: class MockTabInputTerminal {},
@@ -47,7 +47,7 @@ type MockTerminal = {
   exitStatus?: {
     code?: number;
   };
-  name?: string;
+  name: string;
 };
 
 describe("native terminal workbench helpers", () => {
@@ -180,6 +180,8 @@ describe("native terminal workbench helpers", () => {
         creationOptions: {
           name: "created-name",
         },
+        exitStatus: undefined,
+        name: "",
       }),
     ).toBe("created-name");
   });

@@ -81,6 +81,7 @@ describe("sortPanesBySessionIds", () => {
 
 function createTerminalPane(sessionId: string): WorkspacePanelPane {
   return {
+    isVisible: true,
     kind: "terminal",
     sessionId,
     sessionRecord: {

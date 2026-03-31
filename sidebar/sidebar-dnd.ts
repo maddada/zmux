@@ -52,24 +52,36 @@ export function createCreateGroupDropData(): CreateGroupDropData {
   };
 }
 
-export function getSidebarDropData(candidate: { data?: unknown } | null | undefined) {
-  const data = candidate?.data;
-  if (!data || typeof data !== "object" || !("kind" in data)) {
+export function getSidebarDropData(candidate: unknown): SidebarDropData | undefined {
+  if (!hasData(candidate)) {
     return undefined;
   }
 
-  const parsedData = data as Partial<SidebarDropData>;
-  switch (parsedData.kind) {
+  const data = candidate.data;
+  if (!isObjectRecord(data) || !("kind" in data)) {
+    return undefined;
+  }
+
+  switch (data.kind) {
     case "session":
-      return typeof parsedData.groupId === "string" && typeof parsedData.sessionId === "string"
-        ? (parsedData as SessionDragData)
+      return typeof data.groupId === "string" && typeof data.sessionId === "string"
+        ? {
+            groupId: data.groupId,
+            kind: "session",
+            sessionId: data.sessionId,
+          }
         : undefined;
 
     case "group":
-      return typeof parsedData.groupId === "string" ? (parsedData as GroupDropData) : undefined;
+      return typeof data.groupId === "string"
+        ? {
+            groupId: data.groupId,
+            kind: "group",
+          }
+        : undefined;
 
     case "create-group":
-      return parsedData as CreateGroupDropData;
+      return { kind: "create-group" };
 
     default:
       return undefined;
@@ -257,6 +269,14 @@ function getSidebarSessionDropTargetFromElement(
     kind: "group",
     position: relativeY > bounds.top + bounds.height / 2 ? "end" : "start",
   };
+}
+
+function hasData(candidate: unknown): candidate is { data?: unknown } {
+  return isObjectRecord(candidate) && "data" in candidate;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function isDraggingElement(element: Element): boolean {

@@ -23,7 +23,6 @@ import { useShallow } from "zustand/react/shallow";
 import {
   MAX_GROUP_COUNT,
   type ExtensionToSidebarMessage,
-  type SidebarToExtensionMessage,
 } from "../shared/session-grid-contract";
 import { playCompletionSound } from "./completion-sound-player";
 import { AgentsPanel } from "./agents-panel";
@@ -193,7 +192,9 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
 
   useEffect(() => {
     const handleMessage = (event: Event) => {
-      handleWindowMessage(event as MessageEvent<ExtensionToSidebarMessage>);
+      if (event instanceof MessageEvent) {
+        handleWindowMessage(event);
+      }
     };
 
     messageSource.addEventListener("message", handleMessage);
@@ -329,12 +330,13 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   );
 
   const handleDragStart = ((event) => {
-    const sourceData = getSidebarDropData(event.operation.source as { data?: unknown });
+    const nativeEvent = getDragNativeEvent(event);
+    const sourceData = getSidebarDropData(event.operation.source);
     postSidebarDebugLog("session.dragStart", {
-      nativeEventType: event.nativeEvent?.type,
-      point: getClientPoint(event.nativeEvent),
+      nativeEventType: nativeEvent?.type,
+      point: getClientPoint(nativeEvent),
       sourceData,
-      targetData: getSidebarDropData(event.operation.target as { data?: unknown }),
+      targetData: getSidebarDropData(event.operation.target),
     });
     if (sourceData?.kind !== "session") {
       setSessionDragIndicator(undefined);
@@ -345,11 +347,19 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   }) satisfies DragDropEventHandlers["onDragStart"];
 
   const handleDragMove = ((event) => {
-    updateSessionDragIndicator(event.nativeEvent, event.operation.source, event.operation.target);
+    updateSessionDragIndicator(
+      getDragNativeEvent(event),
+      event.operation.source,
+      event.operation.target,
+    );
   }) satisfies DragDropEventHandlers["onDragMove"];
 
   const handleDragOver = ((event) => {
-    updateSessionDragIndicator(event.nativeEvent, event.operation.source, event.operation.target);
+    updateSessionDragIndicator(
+      getDragNativeEvent(event),
+      event.operation.source,
+      event.operation.target,
+    );
   }) satisfies DragDropEventHandlers["onDragOver"];
 
   const handleDragEnd = ((event) => {
@@ -359,12 +369,13 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     const authoritativeGroupIds = workspaceGroupIds;
     const previousSessionIdsByGroup = effectiveSessionIdsByGroup;
 
-    const sourceData = getSidebarDropData(event.operation.source as { data?: unknown });
-    const targetData = getSidebarDropData(event.operation.target as { data?: unknown });
+    const nativeEvent = getDragNativeEvent(event);
+    const sourceData = getSidebarDropData(event.operation.source);
+    const targetData = getSidebarDropData(event.operation.target);
     const resolvedSessionDropTarget =
       sourceData?.kind === "session"
         ? resolveSessionDropTargetFromPoint(
-            event.nativeEvent,
+            nativeEvent,
             currentSessionIdsByGroup,
             targetData,
             sourceData,
@@ -372,8 +383,8 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
         : undefined;
     postSidebarDebugLog("session.dragEnd", {
       canceled: event.canceled,
-      nativeEventType: event.nativeEvent?.type,
-      point: getClientPoint(event.nativeEvent),
+      nativeEventType: nativeEvent?.type,
+      point: getClientPoint(nativeEvent),
       resolvedSessionDropTarget,
       sourceData,
       targetData,
@@ -865,32 +876,6 @@ function createWorkspaceSessionIdsByGroup(
   );
 }
 
-function getWorkspaceSidebarGroups(groups: readonly SidebarSessionGroup[]): SidebarSessionGroup[] {
-  return groups.filter((group) => group.kind !== "browser");
-}
-
-function applySessionOrder(
-  sessionById: ReadonlyMap<string, SidebarSessionItem>,
-  orderedSessionIds: readonly string[] | undefined,
-): SidebarSessionItem[] {
-  if (!orderedSessionIds || orderedSessionIds.length === 0) {
-    return [...sessionById.values()];
-  }
-
-  const orderedSessions = orderedSessionIds
-    .map((sessionId) => sessionById.get(sessionId))
-    .filter((session): session is SidebarSessionItem => session !== undefined);
-  const orderedSessionIdsSet = new Set(orderedSessions.map((session) => session.sessionId));
-
-  for (const session of sessionById.values()) {
-    if (!orderedSessionIdsSet.has(session.sessionId)) {
-      orderedSessions.push(session);
-    }
-  }
-
-  return orderedSessions;
-}
-
 function findSessionGroupId(
   sessionIdsByGroup: SessionIdsByGroup,
   sessionId: string,
@@ -909,8 +894,8 @@ function haveSameSessionOrder(left: readonly string[], right: readonly string[])
 }
 
 function findCreatedGroupId(
-  previousGroups: readonly SidebarSessionGroup[],
-  nextGroups: readonly SidebarSessionGroup[],
+  previousGroups: readonly { groupId: string }[],
+  nextGroups: readonly { groupId: string }[],
 ): string | undefined {
   const previousGroupIds = new Set(previousGroups.map((group) => group.groupId));
   return nextGroups.find((group) => !previousGroupIds.has(group.groupId))?.groupId;
@@ -997,7 +982,7 @@ function isSourceSessionDropTarget(
 function getSidebarSessionDropTargetFromDropData(
   targetData: ReturnType<typeof getSidebarDropData>,
   point: ReturnType<typeof getClientPoint>,
-) {
+): SidebarSessionDropTarget | undefined {
   if (targetData?.kind === "session") {
     const sessionElement = getTargetSessionElement(targetData.sessionId, point);
     if (!sessionElement) {
@@ -1006,10 +991,12 @@ function getSidebarSessionDropTargetFromDropData(
 
     const bounds = sessionElement.getBoundingClientRect();
     const relativeY = point?.y ?? bounds.top + bounds.height / 2;
+    const position: "after" | "before" =
+      relativeY > bounds.top + bounds.height / 2 ? "after" : "before";
     return {
       groupId: targetData.groupId,
-      kind: "session" as const,
-      position: relativeY > bounds.top + bounds.height / 2 ? ("after" as const) : ("before" as const),
+      kind: "session",
+      position,
       sessionId: targetData.sessionId,
     };
   }
@@ -1024,10 +1011,12 @@ function getSidebarSessionDropTargetFromDropData(
 
     const bounds = groupElement.getBoundingClientRect();
     const relativeY = point?.y ?? bounds.top;
+    const position: "end" | "start" =
+      relativeY > bounds.top + bounds.height / 2 ? "end" : "start";
     return {
       groupId: targetData.groupId,
-      kind: "group" as const,
-      position: relativeY > bounds.top + bounds.height / 2 ? ("end" as const) : ("start" as const),
+      kind: "group",
+      position,
     };
   }
 
@@ -1051,4 +1040,12 @@ function getTargetSessionElement(
   return Array.from(document.querySelectorAll<HTMLElement>(selector)).find(
     (sessionElement) => sessionElement.dataset.dragging !== "true",
   );
+}
+
+function getDragNativeEvent(value: unknown): Event | undefined {
+  return isObjectRecord(value) && value.nativeEvent instanceof Event ? value.nativeEvent : undefined;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

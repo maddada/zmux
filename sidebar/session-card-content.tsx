@@ -105,6 +105,10 @@ type SessionAgentIconProps = {
   agentIcon: SidebarSessionItem["agentIcon"];
 };
 
+type SessionAgentLogoStyle = CSSProperties & {
+  "--session-agent-logo": string;
+};
+
 export function SessionFloatingAgentIcon({ agentIcon }: SessionAgentIconProps) {
   if (agentIcon === "browser") {
     return (
@@ -122,16 +126,16 @@ export function SessionFloatingAgentIcon({ agentIcon }: SessionAgentIconProps) {
     return null;
   }
 
+  const agentLogoStyle: SessionAgentLogoStyle = {
+    "--session-agent-logo": `url("${AGENT_LOGOS[agentIcon]}")`,
+  };
+
   return (
     <span
       aria-hidden="true"
       className="session-floating-agent-icon"
       data-agent-icon={agentIcon}
-      style={
-        {
-          "--session-agent-logo": `url("${AGENT_LOGOS[agentIcon]}")`,
-        } as CSSProperties
-      }
+      style={agentLogoStyle}
     />
   );
 }
@@ -175,7 +179,7 @@ function OverflowTooltipText({
   tooltipWhen = "overflow",
 }: OverflowTooltipTextProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const openTimeoutIdRef = useRef<number>();
+  const openTimeoutIdRef = useRef<number | undefined>(undefined);
 
   const clearOpenTimeout = () => {
     if (openTimeoutIdRef.current === undefined) {

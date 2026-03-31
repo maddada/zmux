@@ -38,8 +38,8 @@ export function WorkspaceLiveStoryHarness() {
   const [workspace, setWorkspace] = useState<SidebarStoryWorkspace | undefined>();
   const [connection, setConnection] = useState<WorkspacePanelConnection | undefined>();
   const workspaceRef = useRef(workspace);
-  const sidebarMessageSource = useRef(new EventTarget() as StoryMessageSource).current;
-  const workspaceMessageSource = useRef(new EventTarget() as StoryMessageSource).current;
+  const sidebarMessageSource = useRef<StoryMessageSource>(createStoryMessageSource()).current;
+  const workspaceMessageSource = useRef<StoryMessageSource>(createStoryMessageSource()).current;
 
   const applyWorkspaceMessage = (nextMessage: Parameters<WebviewApi["postMessage"]>[0]) => {
     if (!workspaceRef.current) {
@@ -67,13 +67,14 @@ export function WorkspaceLiveStoryHarness() {
 
   const workspaceVscode = useMemo(
     () => ({
-      postMessage(nextMessage: { sessionId?: string; type?: string }) {
-        if (nextMessage.type !== "focusSession" || typeof nextMessage.sessionId !== "string") {
+      postMessage(nextMessage: unknown) {
+        const focusMessage = getFocusSessionMessage(nextMessage);
+        if (!focusMessage) {
           return;
         }
 
         applyWorkspaceMessage({
-          sessionId: nextMessage.sessionId,
+          sessionId: focusMessage.sessionId,
           type: "focusSession",
         });
       },
@@ -94,7 +95,13 @@ export function WorkspaceLiveStoryHarness() {
           throw new Error(`Bootstrap failed with ${String(response.status)}.`);
         }
 
-        return (await response.json()) as LiveBootstrapResponse;
+        const payload = await response.json();
+        const bootstrap = parseLiveBootstrapResponse(payload);
+        if (!bootstrap) {
+          throw new Error("Bootstrap response was malformed.");
+        }
+
+        return bootstrap;
       })
       .then((bootstrap) => {
         if (didCancel) {
@@ -223,7 +230,7 @@ function createLiveStoryWorkspace(
           fullscreenRestoreVisibleCount: undefined,
           sessions: sessionRecords,
           viewMode: "vertical",
-          visibleCount: Math.min(2, Math.max(1, sessionRecords.length)) as 1 | 2,
+          visibleCount: getInitialVisibleCount(sessionRecords.length),
           visibleSessionIds: sessionRecords.slice(0, 2).map((session) => session.sessionId),
         },
         title: "Live",
@@ -277,6 +284,7 @@ function createWorkspaceMessage(
     .map((sessionId) => sessionById.get(sessionId))
     .filter((session): session is TerminalSessionRecord => session?.kind === "terminal")
     .map<WorkspacePanelTerminalPane>((sessionRecord) => ({
+      isVisible: true,
       kind: "terminal",
       sessionId: sessionRecord.sessionId,
       sessionRecord,
@@ -312,4 +320,78 @@ function createWorkspaceMessage(
 
 function dispatchStoryMessage(source: StoryMessageSource, data: unknown) {
   source.dispatchEvent(new MessageEvent("message", { data }));
+}
+
+function createStoryMessageSource(): StoryMessageSource {
+  return new EventTarget();
+}
+
+function getFocusSessionMessage(
+  value: unknown,
+): { sessionId: string; type: "focusSession" } | undefined {
+  return isObjectRecord(value) &&
+    value.type === "focusSession" &&
+    typeof value.sessionId === "string"
+    ? {
+        sessionId: value.sessionId,
+        type: "focusSession",
+      }
+    : undefined;
+}
+
+function getInitialVisibleCount(sessionCount: number): 1 | 2 {
+  return sessionCount <= 1 ? 1 : 2;
+}
+
+function parseLiveBootstrapResponse(value: unknown): LiveBootstrapResponse | undefined {
+  if (!isObjectRecord(value)) {
+    return undefined;
+  }
+
+  const connection = parseWorkspacePanelConnection(value.connection);
+  const sessions = Array.isArray(value.sessions)
+    ? value.sessions.map(parseLiveBootstrapSession)
+    : undefined;
+  if (!connection || !sessions || sessions.some((session) => session === undefined)) {
+    return undefined;
+  }
+
+  return {
+    connection,
+    sessions,
+  };
+}
+
+function parseLiveBootstrapSession(value: unknown): LiveBootstrapSession | undefined {
+  return isObjectRecord(value) &&
+    typeof value.alias === "string" &&
+    typeof value.displayId === "string" &&
+    typeof value.sessionId === "string" &&
+    typeof value.title === "string"
+    ? {
+        alias: value.alias,
+        displayId: value.displayId,
+        sessionId: value.sessionId,
+        title: value.title,
+      }
+    : undefined;
+}
+
+function parseWorkspacePanelConnection(value: unknown): WorkspacePanelConnection | undefined {
+  return isObjectRecord(value) &&
+    typeof value.baseUrl === "string" &&
+    typeof value.token === "string" &&
+    typeof value.workspaceId === "string" &&
+    (value.mock === undefined || typeof value.mock === "boolean")
+    ? {
+        baseUrl: value.baseUrl,
+        mock: value.mock,
+        token: value.token,
+        workspaceId: value.workspaceId,
+      }
+    : undefined;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

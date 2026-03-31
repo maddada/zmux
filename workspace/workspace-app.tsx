@@ -4,7 +4,6 @@ import type {
   ExtensionToWorkspacePanelMessage,
   WorkspacePanelPane,
   WorkspacePanelAutoFocusRequest,
-  WorkspacePanelTerminalPane,
   WorkspacePanelHydrateMessage,
   WorkspacePanelSessionStateMessage,
 } from "../shared/workspace-panel-contract";
@@ -33,6 +32,11 @@ export type WorkspaceAppProps = {
   };
 };
 
+type WorkspaceShellStyle = CSSProperties & {
+  "--workspace-active-pane-border-color"?: string;
+  "--workspace-pane-gap": string;
+};
+
 export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = window, vscode }) => {
   const [isWorkspaceFocused, setIsWorkspaceFocused] = useState(
     () =>
@@ -54,8 +58,8 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         startedAt: number;
       }
     | undefined
-  >();
-  const pendingFocusedSessionIdRef = useRef<string>();
+  >(undefined);
+  const pendingFocusedSessionIdRef = useRef<string | undefined>(undefined);
   const workspaceState =
     serverState && (serverState.type === "hydrate" || serverState.type === "sessionState")
       ? serverState
@@ -132,11 +136,12 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     };
 
     const handleMessage = (event: MessageEvent<ExtensionToWorkspacePanelMessage>) => {
-      if (!event.data) {
+      const nextMessage = event.data;
+      if (!nextMessage) {
         return;
       }
 
-      if (event.data.type === "terminalPresentationChanged") {
+      if (nextMessage.type === "terminalPresentationChanged") {
         setServerState((previousState) => {
           if (
             !previousState ||
@@ -148,12 +153,12 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           return {
             ...previousState,
             panes: previousState.panes.map((pane) =>
-              pane.kind !== "terminal" || pane.sessionId !== event.data.sessionId
+              pane.kind !== "terminal" || pane.sessionId !== nextMessage.sessionId
                 ? pane
                 : {
                     ...pane,
-                    snapshot: event.data.snapshot ?? pane.snapshot,
-                    terminalTitle: event.data.terminalTitle,
+                    snapshot: nextMessage.snapshot ?? pane.snapshot,
+                    terminalTitle: nextMessage.terminalTitle,
                   },
             ),
           };
@@ -161,11 +166,11 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         return;
       }
 
-      if (event.data.type !== "hydrate" && event.data.type !== "sessionState") {
+      if (nextMessage.type !== "hydrate" && nextMessage.type !== "sessionState") {
         return;
       }
 
-      applyWorkspaceStateMessage(event.data);
+      applyWorkspaceStateMessage(nextMessage);
     };
 
     const handleIframeFocus = (event: MessageEvent<{ sessionId?: string; type?: string }>) => {
@@ -179,12 +184,18 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       });
     };
 
-    messageSource.addEventListener("message", handleMessage as EventListener);
+    const handleWorkspaceMessage = (event: Event) => {
+      if (event instanceof MessageEvent) {
+        handleMessage(event);
+      }
+    };
+
+    messageSource.addEventListener("message", handleWorkspaceMessage);
     window.addEventListener("message", handleIframeFocus);
     vscode.postMessage({ type: "ready" });
 
     return () => {
-      messageSource.removeEventListener("message", handleMessage as EventListener);
+      messageSource.removeEventListener("message", handleWorkspaceMessage);
       window.removeEventListener("message", handleIframeFocus);
     };
   }, [messageSource, vscode]);
@@ -234,21 +245,17 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     return nextLayoutBySessionId;
   }, [visiblePanes, workspaceState?.viewMode]);
   const presentedFocusedSessionId = localFocusedSessionId ?? workspaceState?.focusedSessionId;
-  const terminalPaneIds = useMemo(
-    () => orderedPanes.filter((pane) => pane.kind === "terminal").map((pane) => pane.sessionId),
-    [orderedPanes],
-  );
   const visiblePaneIds = useMemo(
     () => visiblePanes.map((pane) => pane.sessionId),
     [visiblePanes],
   );
+  const visiblePaneIdsKey = visiblePaneIds.join("|");
   const reorderablePaneIds = useMemo(
     () => orderedPanes.filter((pane) => pane.kind === "terminal").map((pane) => pane.sessionId),
     [orderedPanes],
   );
-  const workspaceShellStyle = useMemo<CSSProperties>(
-    () =>
-      ({
+  const workspaceShellStyle = useMemo<WorkspaceShellStyle>(
+    () => ({
         "--workspace-active-pane-border-color":
           workspaceState?.layoutAppearance.activePaneBorderColor,
         "--workspace-pane-gap": `${String(workspaceState?.layoutAppearance.paneGap ?? 12)}px`,
@@ -260,7 +267,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
               ),
             }
           : {}),
-      }) as CSSProperties,
+      }),
     [
       workspaceState?.layoutAppearance.activePaneBorderColor,
       workspaceState?.layoutAppearance.paneGap,
@@ -297,6 +304,20 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     setDraggedPaneId(undefined);
     setDropTargetPaneId(undefined);
   }, [workspacePaneIdsKey, workspaceState?.activeGroupId]);
+
+  useEffect(() => {
+    if (!workspaceState) {
+      return;
+    }
+
+    const repairTimerId = window.setTimeout(() => {
+      setTerminalRefreshRequestId((currentValue) => currentValue + 1);
+    }, 250);
+
+    return () => {
+      window.clearTimeout(repairTimerId);
+    };
+  }, [visiblePaneIdsKey, workspacePaneIdsKey, workspaceState?.activeGroupId]);
 
   const requestFocusSession = (sessionId: string) => {
     const requestId = ++focusRequestSequenceRef.current;
@@ -525,6 +546,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
       onDrop={canDrag ? onDrop : undefined}
       onMouseDown={() => {
         onLocalFocus();
+        onRefreshAllTerminals();
         if (!isFocused) {
           debugLog("focus.mouseDownRequestsFocus", {
             sessionId: pane.sessionId,
@@ -558,6 +580,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
             isVisible={pane.isVisible}
             onActivate={() => {
               onLocalFocus();
+              onRefreshAllTerminals();
               if (!isFocused) {
                 onFocus();
               }
@@ -586,9 +609,7 @@ function getWorkspacePanePrimaryTitle(pane: WorkspacePanelPane): string {
   }
 
   if (pane.kind === "terminal") {
-    const terminalTitle = getVisibleTerminalTitle(
-      (pane as WorkspacePanelTerminalPane).terminalTitle,
-    );
+    const terminalTitle = getVisibleTerminalTitle(pane.terminalTitle);
     if (terminalTitle) {
       return terminalTitle;
     }
