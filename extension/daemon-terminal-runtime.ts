@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, unlink } from "node:fs/promises";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import * as vscode from "vscode";
@@ -40,9 +40,21 @@ type PendingRequest = {
   resolve: (value: TerminalHostResponse) => void;
 };
 
+type DaemonLaunchLockPayload = {
+  acquiredAt: number;
+  pid: number;
+};
+
+type DaemonLaunchLock = {
+  release: () => Promise<void>;
+};
+
 const CONTROL_CONNECT_TIMEOUT_MS = 3_000;
 const DAEMON_READY_TIMEOUT_MS = 10_000;
+const DAEMON_LAUNCH_LOCK_STALE_MS = 30_000;
+const DAEMON_STATE_DIR_NAME = "terminal-daemon";
 const INFO_FILE_NAME = "daemon-info.json";
+const LAUNCH_LOCK_FILE_NAME = "daemon-launch.lock";
 
 export type DaemonTerminalConnection = {
   baseUrl: string;
@@ -256,29 +268,44 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   }
 
   private async ensureDaemonProcess(): Promise<DaemonInfo> {
-    const existingInfo = await this.readDaemonInfo();
-    if (
-      existingInfo &&
-      existingInfo.protocolVersion === TERMINAL_HOST_PROTOCOL_VERSION &&
-      (await this.canReachDaemon(existingInfo))
-    ) {
-      return existingInfo;
-    }
-
-    const daemonScriptPath = path.join(__dirname, "terminal-daemon-process.js");
-    const daemonStateDir = path.join(this.context.globalStorageUri.fsPath, "terminal-daemon");
-    const child = spawn(process.execPath, [daemonScriptPath, "--state-dir", daemonStateDir], {
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
-
     const deadline = Date.now() + DAEMON_READY_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      const info = await this.readDaemonInfo();
+      const info = await this.getReachableDaemonInfo();
       if (info && (await this.canReachDaemon(info))) {
         return info;
       }
+
+      const daemonStateDir = this.getDaemonStateDir();
+      const launchLock = await this.tryAcquireLaunchLock(daemonStateDir);
+      if (!launchLock) {
+        await delay(150);
+        continue;
+      }
+
+      try {
+        const lockedInfo = await this.getReachableDaemonInfo();
+        if (lockedInfo) {
+          return lockedInfo;
+        }
+
+        const daemonScriptPath = path.join(__dirname, "terminal-daemon-process.js");
+        const child = spawn(process.execPath, [daemonScriptPath, "--state-dir", daemonStateDir], {
+          detached: true,
+          stdio: "ignore",
+        });
+        child.unref();
+
+        while (Date.now() < deadline) {
+          const readyInfo = await this.getReachableDaemonInfo();
+          if (readyInfo) {
+            return readyInfo;
+          }
+          await delay(150);
+        }
+      } finally {
+        await launchLock.release();
+      }
+
       await delay(150);
     }
 
@@ -286,7 +313,7 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   }
 
   private async readDaemonInfo(): Promise<DaemonInfo | undefined> {
-    const daemonStateDir = path.join(this.context.globalStorageUri.fsPath, "terminal-daemon");
+    const daemonStateDir = this.getDaemonStateDir();
     const infoFilePath = path.join(daemonStateDir, INFO_FILE_NAME);
     try {
       await access(infoFilePath);
@@ -326,7 +353,7 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   }
 
   private async getExistingDaemonInfo(): Promise<DaemonInfo | undefined> {
-    const existingInfo = await this.readDaemonInfo();
+    const existingInfo = await this.getReachableDaemonInfo();
     if (
       !existingInfo ||
       existingInfo.protocolVersion !== TERMINAL_HOST_PROTOCOL_VERSION ||
@@ -336,6 +363,78 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
     }
 
     return existingInfo;
+  }
+
+  private async getReachableDaemonInfo(): Promise<DaemonInfo | undefined> {
+    const daemonInfo = await this.readDaemonInfo();
+    if (
+      !daemonInfo ||
+      daemonInfo.protocolVersion !== TERMINAL_HOST_PROTOCOL_VERSION ||
+      !(await this.canReachDaemon(daemonInfo))
+    ) {
+      return undefined;
+    }
+
+    return daemonInfo;
+  }
+
+  private getDaemonStateDir(): string {
+    return path.join(this.context.globalStorageUri.fsPath, DAEMON_STATE_DIR_NAME);
+  }
+
+  private async tryAcquireLaunchLock(daemonStateDir: string): Promise<DaemonLaunchLock | undefined> {
+    await mkdir(daemonStateDir, { recursive: true });
+    const lockFilePath = path.join(daemonStateDir, LAUNCH_LOCK_FILE_NAME);
+
+    try {
+      const lockHandle = await open(lockFilePath, "wx");
+      try {
+        const payload: DaemonLaunchLockPayload = {
+          acquiredAt: Date.now(),
+          pid: process.pid,
+        };
+        await lockHandle.writeFile(JSON.stringify(payload));
+      } finally {
+        await lockHandle.close();
+      }
+
+      return {
+        release: async () => {
+          try {
+            await unlink(lockFilePath);
+          } catch {
+            // Another process may already have cleaned up a stale lock.
+          }
+        },
+      };
+    } catch (error) {
+      if (!isFileExistsError(error)) {
+        throw error;
+      }
+    }
+
+    await this.pruneStaleLaunchLock(lockFilePath);
+    return undefined;
+  }
+
+  private async pruneStaleLaunchLock(lockFilePath: string): Promise<void> {
+    try {
+      const rawLock = await readFile(lockFilePath, "utf8");
+      const payload = JSON.parse(rawLock) as Partial<DaemonLaunchLockPayload>;
+      const ownerPid = typeof payload.pid === "number" ? payload.pid : undefined;
+      const acquiredAt = typeof payload.acquiredAt === "number" ? payload.acquiredAt : 0;
+      const isStale =
+        !ownerPid ||
+        !isProcessAlive(ownerPid) ||
+        Date.now() - acquiredAt > DAEMON_LAUNCH_LOCK_STALE_MS;
+      if (!isStale) {
+        return;
+      }
+
+      await unlink(lockFilePath);
+    } catch {
+      // Ignore malformed or already-removed lock files.
+    }
   }
 
   private async openControlSocket(daemonInfo: DaemonInfo): Promise<WebSocket> {
@@ -444,4 +543,27 @@ async function delay(durationMs: number): Promise<void> {
   await new Promise<void>((resolve) => {
     setTimeout(resolve, durationMs);
   });
+}
+
+function isFileExistsError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "EEXIST"
+  );
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ESRCH"
+    );
+  }
 }

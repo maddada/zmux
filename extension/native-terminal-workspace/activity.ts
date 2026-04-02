@@ -5,6 +5,8 @@ import type {
 } from "../../shared/terminal-host-protocol";
 import { createDisconnectedSessionSnapshot } from "../terminal-workspace-helpers";
 
+export const MIN_WORKING_DURATION_BEFORE_ATTENTION_MS = 2_000;
+
 type SessionActivityContext = {
   cancelPendingCompletionSound: (sessionId: string) => void;
   getSessionSnapshot: (sessionId: string) => TerminalSessionSnapshot | undefined;
@@ -14,6 +16,7 @@ type SessionActivityContext = {
   };
   lastKnownActivityBySessionId: Map<string, TerminalAgentStatus>;
   queueCompletionSound: (sessionId: string) => void;
+  workingStartedAtBySessionId: Map<string, number>;
   workspaceId: string;
 };
 
@@ -29,6 +32,38 @@ export function getEffectiveSessionActivity(
     };
   }
 
+  const sessionId = sessionRecord.sessionId;
+  if (sessionSnapshot.agentStatus === "working") {
+    if (!context.workingStartedAtBySessionId.has(sessionId)) {
+      context.workingStartedAtBySessionId.set(sessionId, Date.now());
+    }
+
+    return {
+      activity: "working",
+      agentName: sessionSnapshot.agentName,
+    };
+  }
+
+  if (sessionSnapshot.agentStatus === "attention") {
+    const workingStartedAt = context.workingStartedAtBySessionId.get(sessionId);
+    if (
+      workingStartedAt === undefined ||
+      Date.now() - workingStartedAt < MIN_WORKING_DURATION_BEFORE_ATTENTION_MS
+    ) {
+      context.workingStartedAtBySessionId.delete(sessionId);
+      return {
+        activity: "idle",
+        agentName: sessionSnapshot.agentName,
+      };
+    }
+
+    return {
+      activity: "attention",
+      agentName: sessionSnapshot.agentName,
+    };
+  }
+
+  context.workingStartedAtBySessionId.delete(sessionId);
   return {
     activity: sessionSnapshot.agentStatus,
     agentName: sessionSnapshot.agentName,

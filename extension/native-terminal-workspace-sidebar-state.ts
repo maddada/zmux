@@ -147,7 +147,7 @@ export function createPreviousSessionEntry(
   );
   const closedAt = new Date().toISOString();
   return {
-    agentIcon: options.getSidebarAgentIcon(options.sessionRecord.sessionId, undefined, undefined),
+    agentIcon: sidebarItem.agentIcon,
     agentLaunch: options.getSessionAgentLaunch(options.sessionRecord.sessionId),
     closedAt,
     historyId: `${options.sessionRecord.sessionId}:${closedAt}`,

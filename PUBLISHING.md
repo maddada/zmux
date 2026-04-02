@@ -13,7 +13,7 @@ It is written for this repo as it exists today.
 - Name: `VSmux`
 - Display name: `VSmux - T3code & Agent CLIs Manager`
 - Publisher / namespace: `maddada`
-- Current minimum editor compatibility: `engines.vscode: ^1.105.0`
+- Current minimum editor compatibility: `engines.vscode: ^1.80.0`
 
 ## Repo Commands
 

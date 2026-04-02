@@ -19,6 +19,7 @@ vi.mock("../terminal-workspace-helpers", () => ({
 }));
 
 import { syncKnownSessionActivities } from "./activity";
+import { MIN_WORKING_DURATION_BEFORE_ATTENTION_MS } from "./activity";
 
 function createSnapshot(
   sessionId: string,
@@ -41,11 +42,14 @@ function createSnapshot(
 
 describe("syncKnownSessionActivities", () => {
   test("should queue a completion sound only when a session first turns attention", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     const session = createSessionRecord(1, 0);
     const snapshots = new Map<string, TerminalSessionSnapshot>([
       [session.sessionId, createSnapshot(session.sessionId, "idle")],
     ]);
     const lastKnownActivityBySessionId = new Map<string, TerminalSessionSnapshot["agentStatus"]>();
+    const workingStartedAtBySessionId = new Map<string, number>();
     const queueCompletionSound = vi.fn();
     const cancelPendingCompletionSound = vi.fn();
     const context = {
@@ -54,12 +58,18 @@ describe("syncKnownSessionActivities", () => {
       getT3ActivityState: () => ({ activity: "idle" as const, isRunning: false }),
       lastKnownActivityBySessionId,
       queueCompletionSound,
+      workingStartedAtBySessionId,
       workspaceId: "workspace-1",
     };
 
     await syncKnownSessionActivities(context, [session], true);
     expect(queueCompletionSound).not.toHaveBeenCalled();
 
+    snapshots.set(session.sessionId, createSnapshot(session.sessionId, "working"));
+    await syncKnownSessionActivities(context, [session], true);
+    expect(queueCompletionSound).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(MIN_WORKING_DURATION_BEFORE_ATTENTION_MS);
     snapshots.set(session.sessionId, createSnapshot(session.sessionId, "attention"));
     await syncKnownSessionActivities(context, [session], true);
     expect(queueCompletionSound).toHaveBeenCalledTimes(1);
@@ -67,16 +77,21 @@ describe("syncKnownSessionActivities", () => {
 
     await syncKnownSessionActivities(context, [session], true);
     expect(queueCompletionSound).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
   });
 
   test("should cancel a pending completion sound when attention clears before confirmation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     const session = createSessionRecord(1, 0);
     const snapshots = new Map<string, TerminalSessionSnapshot>([
-      [session.sessionId, createSnapshot(session.sessionId, "attention")],
+      [session.sessionId, createSnapshot(session.sessionId, "working")],
     ]);
     const lastKnownActivityBySessionId = new Map<string, TerminalSessionSnapshot["agentStatus"]>([
-      [session.sessionId, "idle"],
+      [session.sessionId, "working"],
     ]);
+    const workingStartedAtBySessionId = new Map<string, number>([[session.sessionId, Date.now()]]);
     const queueCompletionSound = vi.fn();
     const cancelPendingCompletionSound = vi.fn();
     const context = {
@@ -85,14 +100,51 @@ describe("syncKnownSessionActivities", () => {
       getT3ActivityState: () => ({ activity: "idle" as const, isRunning: false }),
       lastKnownActivityBySessionId,
       queueCompletionSound,
+      workingStartedAtBySessionId,
       workspaceId: "workspace-1",
     };
 
+    vi.advanceTimersByTime(MIN_WORKING_DURATION_BEFORE_ATTENTION_MS);
+    snapshots.set(session.sessionId, createSnapshot(session.sessionId, "attention"));
     await syncKnownSessionActivities(context, [session], true);
     expect(queueCompletionSound).toHaveBeenCalledWith(session.sessionId);
 
     snapshots.set(session.sessionId, createSnapshot(session.sessionId, "working"));
     await syncKnownSessionActivities(context, [session], true);
     expect(cancelPendingCompletionSound).toHaveBeenCalledWith(session.sessionId);
+
+    vi.useRealTimers();
+  });
+
+  test("should suppress attention and completion sound if working lasted under two seconds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const session = createSessionRecord(1, 0);
+    const snapshots = new Map<string, TerminalSessionSnapshot>([
+      [session.sessionId, createSnapshot(session.sessionId, "working")],
+    ]);
+    const lastKnownActivityBySessionId = new Map<string, TerminalSessionSnapshot["agentStatus"]>();
+    const workingStartedAtBySessionId = new Map<string, number>();
+    const queueCompletionSound = vi.fn();
+    const cancelPendingCompletionSound = vi.fn();
+    const context = {
+      cancelPendingCompletionSound,
+      getSessionSnapshot: (sessionId: string) => snapshots.get(sessionId),
+      getT3ActivityState: () => ({ activity: "idle" as const, isRunning: false }),
+      lastKnownActivityBySessionId,
+      queueCompletionSound,
+      workingStartedAtBySessionId,
+      workspaceId: "workspace-1",
+    };
+
+    await syncKnownSessionActivities(context, [session], true);
+    vi.advanceTimersByTime(MIN_WORKING_DURATION_BEFORE_ATTENTION_MS - 1);
+    snapshots.set(session.sessionId, createSnapshot(session.sessionId, "attention"));
+
+    await syncKnownSessionActivities(context, [session], true);
+
+    expect(queueCompletionSound).not.toHaveBeenCalled();
+    expect(lastKnownActivityBySessionId.get(session.sessionId)).toBe("idle");
+    vi.useRealTimers();
   });
 });

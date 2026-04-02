@@ -85,3 +85,78 @@
   background: rgba(30, 35, 46, 0.92);
   border-color: rgba(208, 217, 255, 0.34);
 }
+
+.terminal-pane-search {
+  align-items: center;
+  backdrop-filter: blur(10px);
+  background: rgba(16, 19, 26, 0.92);
+  border: 1px solid rgba(196, 207, 255, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.34);
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  position: absolute;
+  right: 16px;
+  top: 14px;
+  z-index: 30;
+}
+
+.terminal-pane-search-input {
+  background: rgba(8, 10, 15, 0.72);
+  border: 1px solid rgba(196, 207, 255, 0.16);
+  border-radius: 8px;
+  color: rgba(246, 248, 255, 0.96);
+  font: inherit;
+  font-size: 12px;
+  min-width: 220px;
+  outline: none;
+  padding: 7px 10px;
+}
+
+.terminal-pane-search-input::placeholder {
+  color: rgba(196, 205, 232, 0.7);
+}
+
+.terminal-pane-search-input:focus {
+  border-color: rgba(148, 188, 255, 0.5);
+  box-shadow: 0 0 0 1px rgba(148, 188, 255, 0.3);
+}
+
+.terminal-pane-search-status {
+  color: rgba(223, 229, 248, 0.8);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 68px;
+  text-align: center;
+}
+
+.terminal-pane-search-button,
+.terminal-pane-search-close,
+.terminal-pane-search-toggle {
+  background: rgba(26, 31, 43, 0.9);
+  border: 1px solid rgba(196, 207, 255, 0.14);
+  border-radius: 8px;
+  color: rgba(245, 248, 255, 0.94);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  height: 30px;
+  letter-spacing: 0.02em;
+  min-width: 38px;
+  padding: 0 10px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.terminal-pane-search-button:hover,
+.terminal-pane-search-close:hover,
+.terminal-pane-search-toggle:hover {
+  background: rgba(37, 44, 59, 0.96);
+  border-color: rgba(196, 207, 255, 0.28);
+}
+
+.terminal-pane-search-toggle-active {
+  background: rgba(88, 129, 255, 0.24);
+  border-color: rgba(129, 162, 255, 0.48);
+}

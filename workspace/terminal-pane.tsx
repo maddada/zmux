@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { IconArrowDownBar } from "@tabler/icons-react";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { loadFonts } from "@xterm/addon-web-fonts";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -24,13 +26,43 @@ const VISIBLE_REFIT_DELAY_MS = 2_000;
 const POST_RECONNECT_HEIGHT_NUDGE_PX = 100;
 const NUDGE_RESTORE_TIMEOUT_MS = 250;
 const SCROLL_TO_BOTTOM_BUTTON_MARGIN_PX = 200;
+const SOCKET_RECONNECT_BASE_DELAY_MS = 250;
+const SOCKET_RECONNECT_MAX_DELAY_MS = 2_000;
 const SOCKET_ACTIVITY_IDLE_SUMMARY_MS = 1_000;
+const SEARCH_RESULTS_EMPTY = {
+  resultCount: 0,
+  resultIndex: -1,
+};
+const SEARCH_DECORATIONS: NonNullable<ISearchOptions["decorations"]> = {
+  activeMatchBackground: "#ffd166",
+  activeMatchBorder: "#ff9f1c",
+  activeMatchColorOverviewRuler: "#ff9f1c",
+  matchBackground: "#a0c4ff",
+  matchBorder: "#4a7bd1",
+  matchOverviewRuler: "#4a7bd1",
+};
+const GENERIC_FONT_FAMILIES = new Set([
+  "cursive",
+  "emoji",
+  "fangsong",
+  "fantasy",
+  "math",
+  "monospace",
+  "sans-serif",
+  "serif",
+  "system-ui",
+  "ui-monospace",
+  "ui-rounded",
+  "ui-sans-serif",
+  "ui-serif",
+]);
 
 export type TerminalPaneProps = {
   autoFocusRequest?: WorkspacePanelAutoFocusRequest;
   connection: WorkspacePanelConnection;
   debugLog?: (event: string, payload?: Record<string, unknown>) => void;
   debuggingMode: boolean;
+  isFocused: boolean;
   isVisible: boolean;
   onActivate: () => void;
   pane: WorkspacePanelTerminalPane;
@@ -38,11 +70,37 @@ export type TerminalPaneProps = {
   terminalAppearance: WorkspacePanelTerminalAppearance;
 };
 
+type SearchResultsState = {
+  resultCount: number;
+  resultIndex: number;
+};
+
+function getLoadableWebFontFamilies(fontFamily: string | undefined): string[] {
+  if (!fontFamily) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  return fontFamily
+    .match(/"[^"]+"|'[^']+'|[^,]+/g)
+    ?.map((family) => family.trim().replace(/^['"]|['"]$/g, ""))
+    .filter((family) => family.length > 0)
+    .filter((family) => !GENERIC_FONT_FAMILIES.has(family.toLowerCase()))
+    .filter((family) => {
+      if (seen.has(family)) {
+        return false;
+      }
+      seen.add(family);
+      return true;
+    }) ?? [];
+}
+
 export const TerminalPane: React.FC<TerminalPaneProps> = ({
   autoFocusRequest,
   connection,
   debugLog,
   debuggingMode,
+  isFocused,
   isVisible,
   onActivate,
   pane,
@@ -56,10 +114,18 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const handledRefreshRequestIdRef = useRef(refreshRequestId);
   const isVisibleRef = useRef(isVisible);
+  const isTerminalOpenRef = useRef(false);
   const lastMeasuredSizeRef = useRef<{ height: number; width: number } | undefined>(undefined);
   const nudgeTerminalHeightRef = useRef<((afterNudge?: () => void) => void) | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const updateScrollToBottomButtonVisibilityRef = useRef<(() => void) | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchRegex, setSearchRegex] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchResultsState>(SEARCH_RESULTS_EMPTY);
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
 
   useEffect(() => {
@@ -77,6 +143,79 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const reportDebug = (event: string, payload?: Record<string, unknown>) => {
     logWorkspaceDebug(debuggingModeRef.current, event, payload);
     debugLogRef.current?.(event, payload);
+  };
+
+  const ensureWebFontsLoaded = async (
+    fontFamily: string | undefined,
+    reason: "appearance" | "initial",
+  ): Promise<void> => {
+    const families = getLoadableWebFontFamilies(fontFamily);
+    if (families.length === 0) {
+      reportDebug("terminal.webFontsLoadSkipped", {
+        fontFamily,
+        reason,
+        sessionId: pane.sessionId,
+      });
+      return;
+    }
+
+    const startedAt = performance.now();
+    reportDebug("terminal.webFontsLoadStart", {
+      documentFontsStatus: document.fonts?.status,
+      families,
+      fontFamily,
+      reason,
+      sessionId: pane.sessionId,
+    });
+    try {
+      await loadFonts(families);
+      reportDebug("terminal.webFontsLoadSuccess", {
+        documentFontsStatus: document.fonts?.status,
+        durationMs: Math.round(performance.now() - startedAt),
+        families,
+        fontFamily,
+        reason,
+        sessionId: pane.sessionId,
+      });
+    } catch (error) {
+      reportDebug("terminal.webFontsLoadError", {
+        documentFontsStatus: document.fonts?.status,
+        durationMs: Math.round(performance.now() - startedAt),
+        families,
+        fontFamily,
+        message: error instanceof Error ? error.message : String(error),
+        reason,
+        sessionId: pane.sessionId,
+      });
+    }
+  };
+
+  const getSearchOptions = (incremental: boolean): ISearchOptions => ({
+    caseSensitive: searchCaseSensitive,
+    decorations: SEARCH_DECORATIONS,
+    incremental,
+    regex: searchRegex,
+  });
+
+  const focusSearchInput = () => {
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+  };
+
+  const openSearch = () => {
+    setIsSearchOpen(true);
+    focusSearchInput();
+  };
+
+  const closeSearch = () => {
+    setIsSearchOpen(false);
+    searchAddonRef.current?.clearDecorations();
+    setSearchResults(SEARCH_RESULTS_EMPTY);
+    requestAnimationFrame(() => {
+      terminalRef.current?.focus();
+    });
   };
 
   useEffect(() => {
@@ -97,42 +236,17 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     const fit = new FitAddon();
     fitRef.current = fit;
     terminal.loadAddon(fit);
-    terminal.open(containerRef.current);
+    const searchAddon = new SearchAddon({
+      highlightLimit: 1_000,
+    });
+    searchAddonRef.current = searchAddon;
+    terminal.loadAddon(searchAddon);
 
     const unicode11 = new Unicode11Addon();
     terminal.loadAddon(unicode11);
     terminal.unicode.activeVersion = "11";
 
     let rendererMode: "fallback" | "unknown" | "webgl" = "unknown";
-
-    try {
-      const webgl = new WebglAddon();
-      rendererMode = "webgl";
-      reportDebug("terminal.rendererReady", {
-        rendererMode,
-        sessionId: pane.sessionId,
-      });
-      webgl.onContextLoss(() => {
-        rendererMode = "fallback";
-        reportDebug("terminal.rendererContextLoss", {
-          sessionId: pane.sessionId,
-        });
-        webgl.dispose();
-      });
-      terminal.loadAddon(webgl);
-    } catch (error) {
-      rendererMode = "fallback";
-      reportDebug("terminal.rendererReady", {
-        message: error instanceof Error ? error.message : String(error),
-        rendererMode,
-        sessionId: pane.sessionId,
-      });
-      // Fall back to xterm's default renderer when WebGL is unavailable.
-    }
-
-    if (document.hasFocus()) {
-      terminal.focus();
-    }
 
     const onWindowFocus = () => {
       terminal.focus();
@@ -149,6 +263,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     let pendingSocketMessages: string[] = [];
     let pendingReconnectRefitAfterData = false;
     let reconnectRefitTimeoutId: number | undefined;
+    let reconnectSocketTimeoutId: number | undefined;
+    let reconnectSocketAttempt = 0;
     let suppressPasteEvent = false;
     let socketConnectionSequence = 0;
     let socketConnectionId = 0;
@@ -161,10 +277,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     let socketIdleSummaryTimeoutId: number | undefined;
     let socketLargestFlushBytes = 0;
     let socketResizeCount = 0;
+    const searchResultsDisposable = searchAddon.onDidChangeResults((event) => {
+      setSearchResults({
+        resultCount: event.resultCount,
+        resultIndex: event.resultIndex,
+      });
+    });
 
     const updateScrollToBottomButtonVisibility = () => {
       const container = containerRef.current;
-      if (!container || !isVisibleRef.current || terminal.rows <= 0) {
+      if (!container || !isTerminalOpenRef.current || !isVisibleRef.current || terminal.rows <= 0) {
         setShowScrollToBottomButton(false);
         return;
       }
@@ -226,6 +348,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     };
 
     const refitTerminal = () => {
+      if (!isTerminalOpenRef.current) {
+        return;
+      }
+
       const container = containerRef.current;
       if (!container) {
         return;
@@ -255,6 +381,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       if (socketIdleSummaryTimeoutId !== undefined) {
         window.clearTimeout(socketIdleSummaryTimeoutId);
         socketIdleSummaryTimeoutId = undefined;
+      }
+    };
+
+    const clearSocketReconnectTimeout = () => {
+      if (reconnectSocketTimeoutId !== undefined) {
+        window.clearTimeout(reconnectSocketTimeoutId);
+        reconnectSocketTimeoutId = undefined;
       }
     };
 
@@ -427,9 +560,17 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       socketUrl.searchParams.set("cols", String(terminal.cols));
       socketUrl.searchParams.set("rows", String(terminal.rows));
 
-      websocket = new WebSocket(socketUrl.toString());
-      websocket.binaryType = "arraybuffer";
-      websocket.onmessage = (event) => {
+      firstData = true;
+      dataBuffer = [];
+      if (flushTimer !== undefined) {
+        window.clearTimeout(flushTimer);
+        flushTimer = undefined;
+      }
+
+      const sessionSocket = new WebSocket(socketUrl.toString());
+      websocket = sessionSocket;
+      sessionSocket.binaryType = "arraybuffer";
+      sessionSocket.onmessage = (event) => {
         if (typeof event.data === "string") {
           return;
         }
@@ -455,9 +596,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           });
         }
       };
-      websocket.onopen = () => {
+      sessionSocket.onopen = () => {
         socketConnectionSequence += 1;
         socketConnectionId = socketConnectionSequence;
+        reconnectSocketAttempt = 0;
+        clearSocketReconnectTimeout();
         resetSocketConnectionMetrics();
         socketOpenedAtMs = performance.now();
         reportDebug("terminal.socketOpen", {
@@ -473,47 +616,113 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         pendingSocketMessages = [];
         pendingReconnectRefitAfterData = true;
       };
-      websocket.onclose = () => {
+      const scheduleSocketReconnect = (reason: "close" | "error") => {
+        if (didDispose || connection.mock || reconnectSocketTimeoutId !== undefined) {
+          return;
+        }
+
+        const delayMs = Math.min(
+          SOCKET_RECONNECT_MAX_DELAY_MS,
+          SOCKET_RECONNECT_BASE_DELAY_MS * 2 ** reconnectSocketAttempt,
+        );
+        reconnectSocketAttempt += 1;
+        reportDebug("terminal.socketReconnectScheduled", {
+          attempt: reconnectSocketAttempt,
+          delayMs,
+          reason,
+          sessionId: pane.sessionId,
+        });
+        reconnectSocketTimeoutId = window.setTimeout(() => {
+          reconnectSocketTimeoutId = undefined;
+          connectWebsocket();
+        }, delayMs);
+      };
+
+      sessionSocket.onclose = () => {
         logSocketConnectionSummary("close");
         reportDebug("terminal.socketClose", {
           connectionId: socketConnectionId,
           sessionId: pane.sessionId,
         });
-        pendingSocketMessages = [];
         pendingReconnectRefitAfterData = false;
         if (reconnectRefitTimeoutId !== undefined) {
           window.clearTimeout(reconnectRefitTimeoutId);
           reconnectRefitTimeoutId = undefined;
         }
+        if (websocket === sessionSocket) {
+          websocket = undefined;
+        }
+        scheduleSocketReconnect("close");
       };
-      websocket.onerror = () => {
+      sessionSocket.onerror = () => {
         logSocketConnectionSummary("error");
         reportDebug("terminal.socketError", {
           connectionId: socketConnectionId,
           sessionId: pane.sessionId,
         });
-        pendingSocketMessages = [];
         pendingReconnectRefitAfterData = false;
         if (reconnectRefitTimeoutId !== undefined) {
           window.clearTimeout(reconnectRefitTimeoutId);
           reconnectRefitTimeoutId = undefined;
         }
+        if (websocket === sessionSocket) {
+          websocket = undefined;
+        }
+        scheduleSocketReconnect("error");
       };
     };
 
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (didDispose) {
-          return;
-        }
+    void ensureWebFontsLoaded(terminalAppearance.fontFamily, "initial").finally(() => {
+      if (didDispose || !containerRef.current) {
+        return;
+      }
 
-        reportDebug("terminal.initialFit", {
-          cols: terminal.cols,
+      terminal.open(containerRef.current);
+      isTerminalOpenRef.current = true;
+
+      try {
+        const webgl = new WebglAddon();
+        rendererMode = "webgl";
+        reportDebug("terminal.rendererReady", {
+          rendererMode,
           sessionId: pane.sessionId,
         });
-        refitTerminal();
-        updateScrollToBottomButtonVisibility();
-        connectWebsocket();
+        webgl.onContextLoss(() => {
+          rendererMode = "fallback";
+          reportDebug("terminal.rendererContextLoss", {
+            sessionId: pane.sessionId,
+          });
+          webgl.dispose();
+        });
+        terminal.loadAddon(webgl);
+      } catch (error) {
+        rendererMode = "fallback";
+        reportDebug("terminal.rendererReady", {
+          message: error instanceof Error ? error.message : String(error),
+          rendererMode,
+          sessionId: pane.sessionId,
+        });
+        // Fall back to xterm's default renderer when WebGL is unavailable.
+      }
+
+      if (document.hasFocus()) {
+        terminal.focus();
+      }
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (didDispose) {
+            return;
+          }
+
+          reportDebug("terminal.initialFit", {
+            cols: terminal.cols,
+            sessionId: pane.sessionId,
+          });
+          refitTerminal();
+          updateScrollToBottomButtonVisibility();
+          connectWebsocket();
+        });
       });
     });
 
@@ -566,6 +775,17 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           sendSocketMessage("\x1b[13;2u");
         }
         return false;
+      }
+
+      if (IS_MAC && event.type === "keydown" && event.metaKey) {
+        if (event.key === "ArrowLeft") {
+          sendSocketMessage("\x01");
+          return false;
+        }
+        if (event.key === "ArrowRight") {
+          sendSocketMessage("\x05");
+          return false;
+        }
       }
 
       const primaryModifier = IS_MAC ? event.metaKey : event.ctrlKey;
@@ -670,6 +890,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         };
         const previousMeasuredSize = lastMeasuredSizeRef.current;
         if (
+          !isTerminalOpenRef.current ||
           previousMeasuredSize &&
           previousMeasuredSize.width === nextMeasuredSize.width &&
           previousMeasuredSize.height === nextMeasuredSize.height
@@ -719,17 +940,21 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       }
       clearPendingNudgeRestore();
       clearSocketIdleSummaryTimeout();
+      clearSocketReconnectTimeout();
       cancelAnimationFrame(rafId);
       window.removeEventListener("focus", onWindowFocus);
       resizeObserver.disconnect();
       themeObserver.disconnect();
       scrollDisposable.dispose();
+      searchResultsDisposable.dispose();
       containerRef.current?.removeEventListener("copy", handleCopy, true);
       containerRef.current?.removeEventListener("paste", handlePaste, true);
       websocket?.close();
       terminal.dispose();
+      isTerminalOpenRef.current = false;
       lastMeasuredSizeRef.current = undefined;
       nudgeTerminalHeightRef.current = null;
+      searchAddonRef.current = null;
       terminalRef.current = null;
       fitRef.current = null;
       updateScrollToBottomButtonVisibilityRef.current = null;
@@ -739,16 +964,27 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
   useEffect(() => {
     const terminal = terminalRef.current;
-    if (!terminal) {
+    if (!terminal || !isTerminalOpenRef.current) {
       return;
     }
 
-    terminal.options = getTerminalAppearanceOptions(terminalAppearance);
-    fitRef.current?.fit();
-    terminal.refresh(0, terminal.rows - 1);
-    requestAnimationFrame(() => {
-      updateScrollToBottomButtonVisibilityRef.current?.();
+    let didCancel = false;
+    void ensureWebFontsLoaded(terminalAppearance.fontFamily, "appearance").finally(() => {
+      if (didCancel || !terminalRef.current || !isTerminalOpenRef.current) {
+        return;
+      }
+
+      terminal.options = getTerminalAppearanceOptions(terminalAppearance);
+      fitRef.current?.fit();
+      terminal.refresh(0, terminal.rows - 1);
+      requestAnimationFrame(() => {
+        updateScrollToBottomButtonVisibilityRef.current?.();
+      });
     });
+
+    return () => {
+      didCancel = true;
+    };
   }, [
     terminalAppearance.cursorBlink,
     terminalAppearance.cursorStyle,
@@ -825,10 +1061,50 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         };
         fitRef.current?.fit();
         terminal.refresh(0, terminal.rows - 1);
-        updateScrollToBottomButtonVisibilityRef.current?.();
+        nudgeTerminalHeightRef.current?.(() => {
+          updateScrollToBottomButtonVisibilityRef.current?.();
+        });
       });
     });
   }, [isVisible, refreshRequestId]);
+
+  useEffect(() => {
+    if (isFocused || !isSearchOpen) {
+      return;
+    }
+
+    closeSearch();
+  }, [isFocused, isSearchOpen]);
+
+  useEffect(() => {
+    if (!isSearchOpen) {
+      return;
+    }
+
+    focusSearchInput();
+  }, [isSearchOpen]);
+
+  useEffect(() => {
+    if (!isSearchOpen) {
+      return;
+    }
+
+    const searchAddon = searchAddonRef.current;
+    if (!searchAddon) {
+      return;
+    }
+
+    if (searchQuery.length === 0) {
+      searchAddon.clearDecorations();
+      setSearchResults(SEARCH_RESULTS_EMPTY);
+      return;
+    }
+
+    const didFindResult = searchAddon.findNext(searchQuery, getSearchOptions(true));
+    if (!didFindResult) {
+      setSearchResults(SEARCH_RESULTS_EMPTY);
+    }
+  }, [isSearchOpen, searchCaseSensitive, searchQuery, searchRegex]);
 
   useEffect(() => {
     if (
@@ -858,6 +1134,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   return (
     <div
       className={`terminal-pane-root ${isVisible ? "" : "terminal-pane-root-hidden"}`.trim()}
+      onKeyDownCapture={(event) => {
+        const primaryModifier = IS_MAC ? event.metaKey : event.ctrlKey;
+        if (!primaryModifier || event.key.toLowerCase() !== "f") {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        openSearch();
+      }}
       onMouseDown={(event) => {
         event.stopPropagation();
         reportDebug("terminal.mouseActivate", {
@@ -868,6 +1154,120 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       }}
     >
       <div className="terminal-pane-canvas terminal-tab" ref={containerRef} />
+      {isSearchOpen ? (
+        <div
+          className="terminal-pane-search"
+          onMouseDown={(event) => {
+            event.stopPropagation();
+          }}
+        >
+          <input
+            aria-label="Search terminal output"
+            className="terminal-pane-search-input"
+            onChange={(event) => {
+              setSearchQuery(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                closeSearch();
+                return;
+              }
+
+              if (event.key !== "Enter") {
+                return;
+              }
+
+              event.preventDefault();
+              event.stopPropagation();
+              if (searchQuery.length === 0) {
+                return;
+              }
+
+              const searchAddon = searchAddonRef.current;
+              if (!searchAddon) {
+                return;
+              }
+
+              if (event.shiftKey) {
+                searchAddon.findPrevious(searchQuery, getSearchOptions(false));
+                return;
+              }
+
+              searchAddon.findNext(searchQuery, getSearchOptions(false));
+            }}
+            placeholder="Find in terminal"
+            ref={searchInputRef}
+            spellCheck={false}
+            type="text"
+            value={searchQuery}
+          />
+          <div className="terminal-pane-search-status">
+            {getTerminalSearchStatusLabel(searchQuery, searchResults)}
+          </div>
+          <button
+            aria-label="Toggle case-sensitive search"
+            aria-pressed={searchCaseSensitive}
+            className={`terminal-pane-search-toggle ${searchCaseSensitive ? "terminal-pane-search-toggle-active" : ""}`.trim()}
+            onClick={(event) => {
+              event.stopPropagation();
+              setSearchCaseSensitive((currentValue) => !currentValue);
+            }}
+            type="button"
+          >
+            Aa
+          </button>
+          <button
+            aria-label="Toggle regex search"
+            aria-pressed={searchRegex}
+            className={`terminal-pane-search-toggle ${searchRegex ? "terminal-pane-search-toggle-active" : ""}`.trim()}
+            onClick={(event) => {
+              event.stopPropagation();
+              setSearchRegex((currentValue) => !currentValue);
+            }}
+            type="button"
+          >
+            .*
+          </button>
+          <button
+            className="terminal-pane-search-button"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (searchQuery.length === 0) {
+                return;
+              }
+              searchAddonRef.current?.findPrevious(searchQuery, getSearchOptions(false));
+            }}
+            type="button"
+          >
+            Prev
+          </button>
+          <button
+            className="terminal-pane-search-button"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (searchQuery.length === 0) {
+                return;
+              }
+              searchAddonRef.current?.findNext(searchQuery, getSearchOptions(false));
+            }}
+            type="button"
+          >
+            Next
+          </button>
+          <button
+            className="terminal-pane-search-close"
+            onClick={(event) => {
+              event.stopPropagation();
+              closeSearch();
+            }}
+            type="button"
+          >
+            Close
+          </button>
+        </div>
+      ) : null}
       {isVisible && showScrollToBottomButton ? (
         <button
           aria-label="Scroll terminal to bottom"
@@ -891,3 +1291,18 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     </div>
   );
 };
+
+function getTerminalSearchStatusLabel(
+  query: string,
+  searchResults: SearchResultsState,
+): string {
+  if (query.length === 0) {
+    return "Type to search";
+  }
+
+  if (searchResults.resultCount === 0 || searchResults.resultIndex < 0) {
+    return "No matches";
+  }
+
+  return `${String(searchResults.resultIndex + 1)} / ${String(searchResults.resultCount)}`;
+}

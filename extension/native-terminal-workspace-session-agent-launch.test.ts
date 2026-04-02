@@ -46,6 +46,20 @@ describe("buildResumeAgentCommand", () => {
       ),
     ).toBe("codex resume 'Bob'\"'\"'s bug'");
   });
+
+  test("should prefer the terminal title over the user session title", () => {
+    expect(
+      buildResumeAgentCommand(
+        {
+          agentId: "codex",
+          command: "codex",
+        },
+        "codex",
+        "Pinned session",
+        "Bug Fix",
+      ),
+    ).toBe("codex resume 'Bug Fix'");
+  });
 });
 
 describe("buildCopyResumeCommandText", () => {
@@ -86,6 +100,34 @@ describe("buildCopyResumeCommandText", () => {
         "Bug Fixing",
       ),
     ).toBe("x --profile fast resume 'Bug Fixing'");
+  });
+
+  test("should use the terminal title for resume copy text when the session title is default", () => {
+    expect(
+      buildCopyResumeCommandText(
+        {
+          agentId: "codex",
+          command: "x",
+        },
+        "codex",
+        "Session 34",
+        "Terminal bugfix",
+      ),
+    ).toBe("x resume 'Terminal bugfix'");
+  });
+
+  test("should fall back to the user session title when the terminal title is not resumable", () => {
+    expect(
+      buildCopyResumeCommandText(
+        {
+          agentId: "codex",
+          command: "codex",
+        },
+        "codex",
+        "Bug Fixing",
+        "/Users/madda/dev/_active/agent-tiler",
+      ),
+    ).toBe("codex resume 'Bug Fixing'");
   });
 
   test("should copy gemini guidance text", () => {
@@ -147,6 +189,23 @@ describe("buildDetachedResumeAction", () => {
     ).toEqual({
       shouldExecute: true,
       text: "claude -r 'Bug Fixing'",
+    });
+  });
+
+  test("should execute detached resume using the terminal title when available", () => {
+    expect(
+      buildDetachedResumeAction(
+        {
+          agentId: "codex",
+          command: "x",
+        },
+        "codex",
+        "Pinned session",
+        "Terminal bugfix",
+      ),
+    ).toEqual({
+      shouldExecute: true,
+      text: "x resume 'Terminal bugfix'",
     });
   });
 

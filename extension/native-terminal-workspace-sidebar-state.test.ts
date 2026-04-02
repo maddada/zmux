@@ -5,7 +5,10 @@ import {
   type SidebarHydrateMessage,
   type SidebarSessionStateMessage,
 } from "../shared/session-grid-contract";
-import { buildSidebarMessage } from "./native-terminal-workspace-sidebar-state";
+import {
+  buildSidebarMessage,
+  createPreviousSessionEntry,
+} from "./native-terminal-workspace-sidebar-state";
 
 vi.mock("vscode", () => ({
   workspace: {
@@ -146,6 +149,57 @@ describe("buildSidebarMessage", () => {
         terminalTitle: "Claude Code",
       }),
     );
+  });
+});
+
+describe("createPreviousSessionEntry", () => {
+  test("should preserve the derived agent icon in previous session history", () => {
+    const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
+    const group = workspaceSnapshot.groups[0];
+    const sessionRecord = createSessionRecord(1, 0);
+    group.snapshot.sessions = [sessionRecord];
+    group.snapshot.focusedSessionId = sessionRecord.sessionId;
+    group.snapshot.visibleSessionIds = [sessionRecord.sessionId];
+
+    const previousSession = createPreviousSessionEntry({
+      browserHasLiveProjection: () => false,
+      debuggingMode: false,
+      getEffectiveSessionActivity: () => ({
+        activity: "idle",
+        agentName: "codex",
+      }),
+      getSessionAgentLaunch: () => undefined,
+      getSessionSnapshot: () => ({
+        agentName: "codex",
+        agentStatus: "idle",
+        cols: 120,
+        cwd: "/workspace",
+        isAttached: true,
+        restoreState: "live",
+        rows: 34,
+        sessionId: sessionRecord.sessionId,
+        shell: "/bin/zsh",
+        startedAt: "2026-04-02T00:00:00.000Z",
+        status: "running",
+        title: "Codex",
+        workspaceId: "workspace-1",
+      }),
+      getSidebarAgentIcon: (_sessionId, snapshotAgentName) =>
+        snapshotAgentName === "codex" ? "codex" : undefined,
+      getT3ActivityState: () => ({
+        activity: "idle",
+        isRunning: false,
+      }),
+      getTerminalTitle: () => "Codex",
+      group,
+      platform: "default",
+      sessionRecord,
+      terminalHasLiveProjection: () => false,
+      workspaceId: "workspace-1",
+    });
+
+    expect(previousSession?.agentIcon).toBe("codex");
+    expect(previousSession?.sidebarItem.agentIcon).toBe("codex");
   });
 });
 

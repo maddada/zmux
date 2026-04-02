@@ -1,5 +1,8 @@
 import * as vscode from "vscode";
-import { getVisiblePrimaryTitle } from "../shared/session-grid-contract";
+import {
+  getVisiblePrimaryTitle,
+  getVisibleTerminalTitle,
+} from "../shared/session-grid-contract";
 import {
   getDefaultSidebarAgentByIcon,
   getDefaultSidebarAgentById,
@@ -23,6 +26,7 @@ export function buildResumeAgentCommand(
   agentLaunch: StoredSessionAgentLaunch | undefined,
   agentIconId: SidebarAgentIcon | undefined,
   sessionTitle: string | undefined,
+  terminalTitle?: string,
 ): string | undefined {
   const agentId = resolveBuiltInAgentId(agentLaunch, agentIconId);
   const agentCommand = resolveAgentCommand(agentLaunch, agentIconId);
@@ -32,9 +36,9 @@ export function buildResumeAgentCommand(
 
   switch (agentId) {
     case "codex":
-      return appendResumeTarget(`${agentCommand} resume`, sessionTitle);
+      return appendResumeTarget(`${agentCommand} resume`, sessionTitle, terminalTitle);
     case "claude":
-      return appendResumeTarget(`${agentCommand} -r`, sessionTitle);
+      return appendResumeTarget(`${agentCommand} -r`, sessionTitle, terminalTitle);
     default:
       return undefined;
   }
@@ -44,6 +48,7 @@ export function buildCopyResumeCommandText(
   agentLaunch: StoredSessionAgentLaunch | undefined,
   agentIconId: SidebarAgentIcon | undefined,
   sessionTitle: string | undefined,
+  terminalTitle?: string,
 ): string | undefined {
   const agentId = resolveBuiltInAgentId(agentLaunch, agentIconId);
   const agentCommand = resolveAgentCommand(agentLaunch, agentIconId);
@@ -53,9 +58,9 @@ export function buildCopyResumeCommandText(
 
   switch (agentId) {
     case "codex":
-      return appendResumeTarget(`${agentCommand} resume`, sessionTitle);
+      return appendResumeTarget(`${agentCommand} resume`, sessionTitle, terminalTitle);
     case "claude":
-      return appendResumeTarget(`${agentCommand} -r`, sessionTitle);
+      return appendResumeTarget(`${agentCommand} -r`, sessionTitle, terminalTitle);
     case "gemini":
       return `${agentCommand} --list-sessions && echo 'Enter ${agentCommand} -r id' to resume a session`;
     case "opencode":
@@ -69,6 +74,7 @@ export function buildDetachedResumeAction(
   agentLaunch: StoredSessionAgentLaunch | undefined,
   agentIconId: SidebarAgentIcon | undefined,
   sessionTitle: string | undefined,
+  terminalTitle?: string,
 ): DetachedResumeAction | undefined {
   const agentCommand = resolveAgentCommand(agentLaunch, agentIconId);
   if (!agentCommand) {
@@ -87,12 +93,12 @@ export function buildDetachedResumeAction(
     case "codex":
       return {
         shouldExecute: true,
-        text: appendResumeTarget(`${agentCommand} resume`, sessionTitle),
+        text: appendResumeTarget(`${agentCommand} resume`, sessionTitle, terminalTitle),
       };
     case "claude":
       return {
         shouldExecute: true,
-        text: appendResumeTarget(`${agentCommand} -r`, sessionTitle),
+        text: appendResumeTarget(`${agentCommand} -r`, sessionTitle, terminalTitle),
       };
     case "gemini":
       return {
@@ -179,9 +185,25 @@ function quoteForSingleShellArgument(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function appendResumeTarget(commandPrefix: string, sessionTitle: string | undefined): string {
-  const customTitle = getVisiblePrimaryTitle(sessionTitle?.trim() ?? "");
-  return customTitle ? `${commandPrefix} ${quoteForSingleShellArgument(customTitle)}` : commandPrefix;
+function appendResumeTarget(
+  commandPrefix: string,
+  sessionTitle: string | undefined,
+  terminalTitle?: string,
+): string {
+  const resumeTitle = resolveResumeTitle(sessionTitle, terminalTitle);
+  return resumeTitle ? `${commandPrefix} ${quoteForSingleShellArgument(resumeTitle)}` : commandPrefix;
+}
+
+function resolveResumeTitle(
+  sessionTitle: string | undefined,
+  terminalTitle: string | undefined,
+): string | undefined {
+  const visibleTerminalTitle = getVisibleTerminalTitle(terminalTitle);
+  if (visibleTerminalTitle) {
+    return visibleTerminalTitle;
+  }
+
+  return getVisiblePrimaryTitle(sessionTitle?.trim() ?? "");
 }
 
 function resolveAgentCommand(

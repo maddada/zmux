@@ -86,6 +86,7 @@ import {
   normalizeSidebarBrowserUrl,
 } from "../live-browser-tabs";
 import { dispatchSidebarMessage } from "./sidebar-message-dispatch";
+import { finalizeRestoredPreviousSession } from "./restore-previous-session";
 import {
   buildCopyResumeCommandText,
   buildDetachedResumeAction,
@@ -168,6 +169,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
   >();
   private readonly lastKnownActivityBySessionId = new Map<string, "idle" | "working" | "attention">();
+  private readonly workingStartedAtBySessionId = new Map<string, number>();
   private readonly pendingCompletionSoundTimeoutBySessionId = new Map<string, NodeJS.Timeout>();
   private readonly loggedTitleSymbolKeys = new Set<string>();
   private readonly pendingT3SessionIds = new Set<string>();
@@ -245,7 +247,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       }),
       this.backend.onDidChangeSessionPresentation(({ sessionId, title }) => {
         const snapshot = this.backend.getSessionSnapshot(sessionId);
-        this.syncCompletionSoundForSession(sessionId, snapshot?.agentStatus ?? "idle");
+        this.syncCompletionSoundForSession(sessionId);
         this.logSessionTitleSymbols(sessionId, title ?? snapshot?.title, snapshot?.agentName);
         logVSmuxDebug("controller.sessionPresentationChanged", {
           agentName: snapshot?.agentName,
@@ -618,6 +620,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       this.sessionAgentLaunchBySessionId.get(sessionId),
       this.getSidebarAgentIconForSession(sessionId),
       sessionRecord.title,
+      this.terminalTitleBySessionId.get(sessionId),
     );
     if (!commandText) {
       void vscode.window.showInformationMessage("No resume command is available for this session.");
@@ -930,11 +933,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     const nextSessionRecord = this.store.getSession(restoredSession.sessionId) ?? restoredSession;
-    await this.createSurfaceIfNeeded(nextSessionRecord);
-    await this.persistSessionAgentLaunchState();
-    await this.previousSessionHistory.remove(historyId);
-    await this.afterStateChange();
-    await this.resumeDetachedTerminalSession(nextSessionRecord);
+    await finalizeRestoredPreviousSession({
+      afterStateChange: async () => this.afterStateChange(),
+      createSurfaceIfNeeded: async () => this.createSurfaceIfNeeded(nextSessionRecord),
+      persistSessionAgentLaunchState: async () => this.persistSessionAgentLaunchState(),
+      removePreviousSession: async () => this.previousSessionHistory.remove(historyId),
+      resumeDetachedTerminalSession: async () =>
+        this.resumeDetachedTerminalSession(nextSessionRecord),
+    });
   }
 
   public async deletePreviousSession(historyId?: string): Promise<void> {
@@ -1771,6 +1777,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     this.sessionAgentLaunchBySessionId.delete(sessionId);
     this.terminalTitleBySessionId.delete(sessionId);
     this.lastKnownActivityBySessionId.delete(sessionId);
+    this.workingStartedAtBySessionId.delete(sessionId);
     this.clearPendingCompletionSound(sessionId);
   }
 
@@ -1826,6 +1833,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       }),
       lastKnownActivityBySessionId: this.lastKnownActivityBySessionId,
       queueCompletionSound: (sessionId) => this.queueCompletionSound(sessionId),
+      workingStartedAtBySessionId: this.workingStartedAtBySessionId,
       workspaceId: this.workspaceId,
     };
   }
@@ -1840,8 +1848,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private syncCompletionSoundForSession(
     sessionId: string,
-    nextActivity: "idle" | "working" | "attention",
   ): void {
+    const sessionRecord = this.store.getSession(sessionId);
+    const sessionSnapshot = this.backend.getSessionSnapshot(sessionId);
+    const nextActivity =
+      sessionRecord && sessionSnapshot
+        ? getEffectiveSessionActivity(this.createSessionActivityContext(), sessionRecord, sessionSnapshot)
+            .activity
+        : "idle";
     const previousActivity = this.lastKnownActivityBySessionId.get(sessionId);
     if (nextActivity === "attention") {
       if (previousActivity !== undefined && previousActivity !== "attention") {
@@ -1915,6 +1929,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       this.sessionAgentLaunchBySessionId.get(sessionRecord.sessionId),
       this.getSidebarAgentIconForSession(sessionRecord.sessionId),
       sessionRecord.title,
+      this.terminalTitleBySessionId.get(sessionRecord.sessionId),
     );
     if (!action) {
       return;

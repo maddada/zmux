@@ -566,6 +566,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
             connection={connection}
             debugLog={debugLog}
             debuggingMode={debuggingMode}
+            isFocused={isFocused}
             isVisible={pane.isVisible}
             onActivate={() => {
               onLocalFocus();
