@@ -195,6 +195,10 @@ export type SidebarToExtensionMessage =
       type: 'toggleCompletionBell';
     }
   | {
+      delta: -1 | 1;
+      type: 'adjustTerminalFontSize';
+    }
+  | {
       type: 'refreshDaemonSessions';
     }
   | {

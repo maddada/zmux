@@ -536,11 +536,38 @@ function updateSessionLiveTitle(session: ManagedSession, chunk: string): boolean
   );
   applySessionTitleActivity(session);
   scheduleTitleActivityRefresh(session);
+  void persistSessionLiveTitle(session, title);
   session.snapshot = {
     ...session.snapshot,
     title,
   };
   return true;
+}
+
+async function persistSessionLiveTitle(session: ManagedSession, title: string): Promise<void> {
+  if (title === session.lastKnownPersistedTitle) {
+    return;
+  }
+
+  const persistedState = await updatePersistedSessionStateFile(
+    session.sessionStateFilePath,
+    (currentState) => {
+      if (currentState.title === title) {
+        return currentState;
+      }
+
+      return {
+        ...currentState,
+        title,
+      };
+    },
+  ).catch(() => undefined);
+
+  if (!persistedState) {
+    return;
+  }
+
+  session.lastKnownPersistedTitle = persistedState.title;
 }
 
 function scheduleTitleActivityRefresh(session: ManagedSession): void {

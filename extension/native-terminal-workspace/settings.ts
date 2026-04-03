@@ -37,6 +37,8 @@ export const TERMINAL_LINE_HEIGHT_SETTING = 'terminalLineHeight';
 export const TERMINAL_LETTER_SPACING_SETTING = 'terminalLetterSpacing';
 export const TERMINAL_CURSOR_STYLE_SETTING = 'terminalCursorStyle';
 export const TERMINAL_CURSOR_BLINK_SETTING = 'terminalCursorBlink';
+export const MIN_TERMINAL_FONT_SIZE = 8;
+export const MAX_TERMINAL_FONT_SIZE = 32;
 export const WORKSPACE_PANE_GAP_SETTING = 'workspacePaneGap';
 export const WORKSPACE_ACTIVE_PANE_BORDER_COLOR_SETTING = 'workspaceActivePaneBorderColor';
 export const COMPLETION_BELL_ENABLED_KEY = 'VSmux.completionBellEnabled';
@@ -215,7 +217,20 @@ export function getTerminalFontFamily(): string {
 
 export function getTerminalFontSize(): number {
   const value = vscode.workspace.getConfiguration(SETTINGS_SECTION).get<number>(TERMINAL_FONT_SIZE_SETTING, 12) ?? 12;
-  return clampNumber(value, 8, 32, 12);
+  return clampTerminalFontSize(value);
+}
+
+export function clampTerminalFontSize(value: number): number {
+  return clampNumber(value, MIN_TERMINAL_FONT_SIZE, MAX_TERMINAL_FONT_SIZE, 12);
+}
+
+export async function setTerminalFontSize(fontSize: number): Promise<void> {
+  const configuration = vscode.workspace.getConfiguration(SETTINGS_SECTION);
+  const inspection = configuration.inspect<number>(TERMINAL_FONT_SIZE_SETTING);
+  const target =
+    inspection?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+
+  await configuration.update(TERMINAL_FONT_SIZE_SETTING, clampTerminalFontSize(fontSize), target);
 }
 
 export function getTerminalLineHeight(): number {

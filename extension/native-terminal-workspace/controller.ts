@@ -121,6 +121,7 @@ import {
   getTerminalFontSize,
   getTerminalLetterSpacing,
   getTerminalLineHeight,
+  setTerminalFontSize,
 } from './settings';
 import { DaemonTerminalWorkspaceBackend } from '../daemon-terminal-workspace-backend';
 import { WorkspacePanelManager } from '../workspace-panel';
@@ -659,6 +660,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.refreshSidebar('hydrate');
   }
 
+  public async adjustTerminalFontSize(delta: -1 | 1): Promise<void> {
+    await setTerminalFontSize(getTerminalFontSize() + delta);
+  }
+
   public async runSidebarCommand(commandId: string): Promise<void> {
     const commandButton = getSidebarCommandButtonById(this.context, commandId);
     if (!commandButton) {
@@ -1134,6 +1139,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     await dispatchSidebarMessage(message, {
+      adjustTerminalFontSize: async (delta) => this.adjustTerminalFontSize(delta),
       cancelSidebarGitCommit: async (requestId) => this.cancelSidebarGitCommit(requestId),
       clearGeneratedPreviousSessions: async () => this.clearGeneratedPreviousSessions(),
       clearStartupSidebarRefreshes: () => {},
@@ -1635,7 +1641,16 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           });
           continue;
         }
+        const hadLiveTerminal =
+          sessionRecord.kind === 'terminal' && this.backend.hasLiveTerminal(sessionRecord.sessionId);
         await this.createSurfaceIfNeeded(sessionRecord);
+        if (this.shouldAutoResumeVisibleTerminalSession(sessionRecord, hadLiveTerminal)) {
+          await this.resumeDetachedTerminalSession(sessionRecord);
+          logVSmuxDebug('controller.reconcile.autoResumeVisibleTerminal', {
+            sessionId: sessionRecord.sessionId,
+            version: requestVersion,
+          });
+        }
       }
 
       if (this.isReconcileCancelled(requestVersion)) {
@@ -1747,6 +1762,17 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     await this.backend.deletePersistedSessionState(sessionRecord.sessionId);
+  }
+
+  private shouldAutoResumeVisibleTerminalSession(
+    sessionRecord: SessionRecord,
+    hadLiveTerminal: boolean,
+  ): boolean {
+    return (
+      sessionRecord.kind === "terminal" &&
+      !hadLiveTerminal &&
+      this.sessionAgentLaunchBySessionId.has(sessionRecord.sessionId)
+    );
   }
 
   private createArchivedSessionEntry(sessionRecord: SessionRecord): PreviousSessionHistoryEntry | undefined {

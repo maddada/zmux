@@ -189,6 +189,8 @@ function isSidebarMessage(candidate: unknown): candidate is SidebarToExtensionMe
     case 'createSession':
     case 'openBrowser':
       return true;
+    case 'adjustTerminalFontSize':
+      return message.delta === -1 || message.delta === 1;
     case 'killDaemonSession':
       return (
         typeof message.sessionId === 'string' &&

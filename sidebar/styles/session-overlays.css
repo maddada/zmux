@@ -40,6 +40,12 @@
   opacity: 0.42;
 }
 
+.session-context-menu-divider {
+  height: 1px;
+  margin: 6px 2px;
+  background: color-mix(in srgb, var(--app-border) 70%, transparent);
+}
+
 .session-context-menu-item-danger {
   color: #ff7b72;
 }

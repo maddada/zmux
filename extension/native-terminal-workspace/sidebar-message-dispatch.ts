@@ -9,6 +9,7 @@ import type { SidebarAgentIcon } from '../../shared/sidebar-agents';
 import type { SidebarGitAction } from '../../shared/sidebar-git';
 
 export type SidebarMessageHandlers = {
+  adjustTerminalFontSize: (delta: -1 | 1) => Promise<void>;
   clearStartupSidebarRefreshes: () => void;
   clearGeneratedPreviousSessions: () => Promise<void>;
   closeGroup: (groupId: string) => Promise<void>;
@@ -102,6 +103,9 @@ export async function dispatchSidebarMessage(
       return;
     case 'toggleCompletionBell':
       await handlers.toggleCompletionBell();
+      return;
+    case 'adjustTerminalFontSize':
+      await handlers.adjustTerminalFontSize(message.delta);
       return;
     case 'refreshDaemonSessions':
       await handlers.refreshDaemonSessions();

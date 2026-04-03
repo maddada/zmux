@@ -7,6 +7,7 @@ import {
   IconBellOff,
   IconHistory,
   IconLayoutSidebar,
+  IconMinus,
   IconPencil,
   IconPlus,
   IconSettings,
@@ -558,6 +559,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     vscode.postMessage({ type: 'openSettings' });
   };
 
+  const adjustTerminalFontSize = (delta: -1 | 1) => {
+    vscode.postMessage({ delta, type: 'adjustTerminalFontSize' });
+  };
+
   const toggleCompletionBell = () => {
     setIsOverflowMenuOpen(false);
     vscode.postMessage({ type: 'toggleCompletionBell' });
@@ -584,6 +589,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     isScratchPadOpen,
     onAddAction: openAddActionModal,
     onAddAgent: openAddAgentModal,
+    onAdjustTerminalFontSize: adjustTerminalFontSize,
     onMoveSidebar: moveSidebar,
     onOpenSettings: openSidebarSettings,
     onShowRunning: openRunningSessions,
@@ -927,6 +933,7 @@ type RenderSidebarTopControlsOptions = {
   isScratchPadOpen: boolean;
   onAddAction: () => void;
   onAddAgent: () => void;
+  onAdjustTerminalFontSize: (delta: -1 | 1) => void;
   onMoveSidebar: () => void;
   onOpenSettings: () => void;
   onShowRunning: () => void;
@@ -947,6 +954,7 @@ function renderSidebarTopControls({
   isScratchPadOpen,
   onAddAction,
   onAddAgent,
+  onAdjustTerminalFontSize,
   onMoveSidebar,
   onOpenSettings,
   onShowRunning,
@@ -1060,6 +1068,25 @@ function renderSidebarTopControls({
                   <button className='session-context-menu-item' onClick={onOpenSettings} role='menuitem' type='button'>
                     <IconSettings aria-hidden='true' className='session-context-menu-icon' size={14} stroke={1.8} />
                     VSmux Settings
+                  </button>
+                  <div aria-hidden='true' className='session-context-menu-divider' />
+                  <button
+                    className='session-context-menu-item'
+                    onClick={() => onAdjustTerminalFontSize(-1)}
+                    role='menuitem'
+                    type='button'
+                  >
+                    <IconMinus aria-hidden='true' className='session-context-menu-icon' size={14} stroke={1.8} />
+                    Zoom Out Terminals
+                  </button>
+                  <button
+                    className='session-context-menu-item'
+                    onClick={() => onAdjustTerminalFontSize(1)}
+                    role='menuitem'
+                    type='button'
+                  >
+                    <IconPlus aria-hidden='true' className='session-context-menu-icon' size={14} />
+                    Zoom In Terminals
                   </button>
                 </div>,
                 document.body

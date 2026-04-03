@@ -81,8 +81,21 @@ export const ToolbarActions: Story = {
     await step("open sidebar settings", async () => {
       resetSidebarStoryMessages();
       await userEvent.click(canvas.getByRole("button", { name: "Open sidebar menu" }));
-      await userEvent.click(await body.findByRole("menuitem", { name: "Sidebar Settings" }));
+      await userEvent.click(await body.findByRole("menuitem", { name: "VSmux Settings" }));
       await expectMessage({ type: "openSettings" });
+    });
+
+    await step("zoom terminals without closing the sidebar menu", async () => {
+      resetSidebarStoryMessages();
+      await userEvent.click(canvas.getByRole("button", { name: "Open sidebar menu" }));
+      await userEvent.click(await body.findByRole("menuitem", { name: "Zoom Out Terminals" }));
+      await expectMessage({ delta: -1, type: "adjustTerminalFontSize" });
+      await expect(body.getByRole("menuitem", { name: "Zoom In Terminals" })).toBeVisible();
+
+      resetSidebarStoryMessages();
+      await userEvent.click(body.getByRole("menuitem", { name: "Zoom In Terminals" }));
+      await expectMessage({ delta: 1, type: "adjustTerminalFontSize" });
+      await expect(body.getByRole("menuitem", { name: "Zoom Out Terminals" })).toBeVisible();
     });
   },
 };
