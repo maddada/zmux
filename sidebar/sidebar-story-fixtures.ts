@@ -25,6 +25,7 @@ export type SidebarStoryFixture =
   | 'three-groups-stress';
 
 export type SidebarStoryArgs = {
+  debuggingMode: boolean;
   fixture: SidebarStoryFixture;
   highlightedVisibleCount: VisibleSessionCount;
   isFocusModeActive: boolean;
@@ -57,7 +58,7 @@ export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrat
     completionBellEnabled: false,
     completionSound: DEFAULT_COMPLETION_SOUND,
     completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),
-    debuggingMode: false,
+    debuggingMode: args.debuggingMode,
     focusedSessionTitle: getFocusedSessionTitle(groups),
     git: createDefaultSidebarGitState(),
     highlightedVisibleCount: args.highlightedVisibleCount,

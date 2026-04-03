@@ -33,6 +33,10 @@ export function SidebarStoryHarness({ message }: SidebarStoryHarnessProps) {
     postMessage(nextMessage) {
       sidebarStoryMessages.push(nextMessage);
 
+      if (nextMessage.type === "sidebarDebugLog") {
+        console.debug(`[storybook sidebarDebug] ${nextMessage.event}`, nextMessage.details);
+      }
+
       const nextWorkspace = reduceSidebarStoryWorkspace(workspaceRef.current, nextMessage);
       if (!nextWorkspace) {
         return;

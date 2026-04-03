@@ -5,6 +5,7 @@ import { useSortable } from "@dnd-kit/react/sortable";
 import { createPortal } from "react-dom";
 import {
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -100,15 +101,17 @@ export function SortableSessionCard({
   const [contextMenuPosition, setContextMenuPosition] = useState<ContextMenuPosition>();
   const menuRef = useRef<HTMLDivElement>(null);
   const aliasHeadingRef = useRef<HTMLDivElement>(null);
+  const debugInstanceIdRef = useRef(createSidebarDebugInstanceId());
   const isBrowserSession = session?.kind === "browser";
   const canCopyResumeCommand = session ? !isBrowserSession && supportsResumeCommandCopy(session) : false;
-  const postSessionDragDebugLog = (event: string, details: Record<string, unknown>) => {
+  const postSessionDragDebugLog = useEffectEvent((event: string, details: Record<string, unknown>) => {
     if (!showDebugSessionNumbers) {
       return;
     }
 
     vscode.postMessage({
       details: {
+        debugInstanceId: debugInstanceIdRef.current,
         groupId,
         index,
         sessionId,
@@ -117,7 +120,7 @@ export function SortableSessionCard({
       event,
       type: "sidebarDebugLog",
     });
-  };
+  });
   const sortable = useSortable({
     accept: "session",
     data: createSessionDragData(groupId, session.sessionId),
@@ -138,6 +141,28 @@ export function SortableSessionCard({
   useEffect(() => {
     setContextMenuPosition(undefined);
   }, [session.alias, session.sessionId]);
+
+  useEffect(() => {
+    postSessionDragDebugLog("session.cardMounted", {
+      dropPosition,
+      isBrowserSession,
+    });
+
+    return () => {
+      postSessionDragDebugLog("session.cardUnmounted", {
+        dropPosition,
+        isBrowserSession,
+      });
+    };
+  }, [isBrowserSession, postSessionDragDebugLog]);
+
+  useEffect(() => {
+    postSessionDragDebugLog("session.dropPositionChanged", {
+      dropPosition,
+      isDragging: sortable.isDragging,
+      isDropTarget: sortable.isDropTarget,
+    });
+  }, [dropPosition, postSessionDragDebugLog, sortable.isDragging, sortable.isDropTarget]);
 
   useEffect(() => {
     if (!contextMenuPosition) {
@@ -435,4 +460,11 @@ function supportsResumeCommandCopy(session: SidebarSessionItem): boolean {
     session.agentIcon === "gemini" ||
     session.agentIcon === "opencode"
   );
+}
+
+let sidebarDebugInstanceCounter = 0;
+
+function createSidebarDebugInstanceId(): number {
+  sidebarDebugInstanceCounter += 1;
+  return sidebarDebugInstanceCounter;
 }

@@ -298,18 +298,9 @@ button:disabled {
 
 .sidebar-titlebar-controls {
   display: inline-flex;
-  gap: 6px;
+  gap: 4px;
   position: relative;
   z-index: 10;
-}
-
-.sidebar-titlebar-controls[data-menu-open='true'] {
-  z-index: 30;
-}
-
-.sidebar-titlebar-controls[data-menu-open='true'] button.section-titlebar-action-button {
-  opacity: 0;
-  pointer-events: none;
 }
 
 .card {

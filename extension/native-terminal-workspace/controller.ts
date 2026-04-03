@@ -112,7 +112,6 @@ import {
   getShowSidebarBrowsers,
   getShowSidebarGitButton,
   getShowHotkeysOnSessionCards,
-  getSidebarThemeConfigurationKey,
   getSidebarThemeVariant,
   getWorkspaceActivePaneBorderColor,
   getWorkspacePaneGap,
@@ -652,8 +651,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async openSettings(): Promise<void> {
-    const settingsQuery = getSidebarThemeConfigurationKey();
-    await vscode.commands.executeCommand('workbench.action.openSettings', settingsQuery);
+    await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:maddada.VSmux');
   }
 
   public async toggleCompletionBell(): Promise<void> {

@@ -20,6 +20,7 @@ const CONTEXT_MENU_HEIGHT_PX = 110;
 type CommandsPanelProps = {
   createRequestId: number;
   isCollapsed: boolean;
+  isVisible: boolean;
   onToggleCollapsed: (collapsed: boolean) => void;
   showGitButton: boolean;
   titlebarActions?: ReactNode;
@@ -82,6 +83,7 @@ function getCommandDragData(candidate: unknown): CommandDragData | undefined {
 export function CommandsPanel({
   createRequestId,
   isCollapsed,
+  isVisible,
   onToggleCollapsed,
   showGitButton,
   titlebarActions,
@@ -202,7 +204,7 @@ export function CommandsPanel({
       .map((commandId) => commandById.get(commandId))
       .filter((command): command is SidebarCommandButton => command !== undefined);
   }, [commands, draftCommandIds]);
-  const shouldRenderSection = showGitButton || orderedCommands.length > 0;
+  const shouldRenderSection = isVisible && (showGitButton || orderedCommands.length > 0);
 
   const handleDragEnd = ((event) => {
     if (event.canceled) {

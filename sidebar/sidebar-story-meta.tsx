@@ -4,6 +4,7 @@ import { SidebarStoryHarness } from "./sidebar-story-harness";
 import { createSidebarStoryMessage, type SidebarStoryArgs } from "./sidebar-story-fixtures";
 
 export const DEFAULT_SIDEBAR_STORY_ARGS: SidebarStoryArgs = {
+  debuggingMode: false,
   fixture: "default",
   highlightedVisibleCount: 1,
   isFocusModeActive: false,
@@ -15,6 +16,9 @@ export const DEFAULT_SIDEBAR_STORY_ARGS: SidebarStoryArgs = {
 };
 
 export const SIDEBAR_STORY_ARG_TYPES: NonNullable<Meta<SidebarStoryArgs>["argTypes"]> = {
+  debuggingMode: {
+    control: "boolean",
+  },
   fixture: {
     control: "select",
     options: [

@@ -20,6 +20,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { MAX_GROUP_COUNT, type ExtensionToSidebarMessage } from '../shared/session-grid-contract';
 import { playCompletionSound, prepareCompletionSoundPlayback } from './completion-sound-player';
@@ -49,6 +50,10 @@ export type SidebarAppProps = {
 };
 
 type SessionIdsByGroup = Record<string, string[]>;
+type FloatingMenuPosition = {
+  left: number;
+  top: number;
+};
 
 const SIDEBAR_EMPTY_SPACE_BLOCKER_SELECTOR = [
   'button',
@@ -88,9 +93,12 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   const [isScratchPadOpen, setIsScratchPadOpen] = useState(false);
   const [isSessionsCollapsed, setIsSessionsCollapsed] = useState(false);
   const [sessionDragIndicator, setSessionDragIndicator] = useState<SidebarSessionDropTarget>();
+  const [overflowMenuPosition, setOverflowMenuPosition] = useState<FloatingMenuPosition>();
   const pendingCreateGroupRef = useRef(false);
   const didResetStoreRef = useRef(false);
   const overflowControlsRef = useRef<HTMLDivElement>(null);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
+  const overflowMenuTriggerRef = useRef<HTMLDivElement>(null);
   const sessionGroupsPanelRef = useRef<HTMLElement>(null);
   const groupIdsRef = useRef<string[]>([]);
   const sessionIdsByGroupRef = useRef<SessionIdsByGroup>({});
@@ -115,7 +123,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     debuggingMode,
     groupOrder,
     sectionVisibility,
-    structureRevision,
     theme,
     workspaceGroupIds,
   } = useSidebarStore(
@@ -128,7 +135,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       debuggingMode: state.hud.debuggingMode,
       groupOrder: state.groupOrder,
       sectionVisibility: state.hud.sectionVisibility,
-      structureRevision: state.revision,
       theme: state.hud.theme,
       workspaceGroupIds: state.workspaceGroupIds,
     }))
@@ -270,6 +276,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
         return;
       }
 
+      if (overflowMenuRef.current?.contains(target)) {
+        return;
+      }
+
       setIsOverflowMenuOpen(false);
     };
 
@@ -288,6 +298,34 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     };
   }, [isOverflowMenuOpen]);
 
+  useEffect(() => {
+    if (!isOverflowMenuOpen) {
+      setOverflowMenuPosition(undefined);
+      return;
+    }
+
+    const updateOverflowMenuPosition = () => {
+      const triggerBounds = overflowMenuTriggerRef.current?.getBoundingClientRect();
+      if (!triggerBounds) {
+        return;
+      }
+
+      setOverflowMenuPosition({
+        left: triggerBounds.right,
+        top: triggerBounds.bottom + 6,
+      });
+    };
+
+    updateOverflowMenuPosition();
+    window.addEventListener('resize', updateOverflowMenuPosition);
+    window.addEventListener('scroll', updateOverflowMenuPosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updateOverflowMenuPosition);
+      window.removeEventListener('scroll', updateOverflowMenuPosition, true);
+    };
+  }, [isOverflowMenuOpen]);
+
   const effectiveGroupIds = workspaceGroupIds;
   const visibleBrowserGroupIds = sectionVisibility.browsers ? browserGroupIds : [];
   const shouldShowActionsPanel = sectionVisibility.actions && (sectionVisibility.git || commandCount > 0);
@@ -296,6 +334,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   const effectiveSessionIdsByGroup = useMemo(
     () => createWorkspaceSessionIdsByGroup(workspaceGroupIds, authoritativeSessionIdsByGroup),
     [authoritativeSessionIdsByGroup, workspaceGroupIds]
+  );
+  const dragStructureKey = useMemo(
+    () => createDragStructureKey(effectiveGroupIds, effectiveSessionIdsByGroup),
+    [effectiveGroupIds, effectiveSessionIdsByGroup]
   );
 
   useEffect(() => {
@@ -311,6 +353,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       return;
     }
 
+    console.debug(`[sidebarDebug] ${event}`, details);
     vscode.postMessage({
       details,
       event,
@@ -340,6 +383,12 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       window.removeEventListener('keydown', handleKeyDown, true);
     };
   }, [unlockCompletionSoundPlayback]);
+
+  useEffect(() => {
+    postSidebarDebugLog('session.dragIndicatorChanged', {
+      indicator: sessionDragIndicator,
+    });
+  }, [postSidebarDebugLog, sessionDragIndicator]);
 
   const updateSessionDragIndicator = useEffectEvent(
     (
@@ -542,6 +591,9 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     onToggleMenu: () => setIsOverflowMenuOpen((previous) => !previous),
     onToggleScratchPad: openScratchPad,
     overflowControlsRef,
+    overflowMenuPosition,
+    overflowMenuRef,
+    overflowMenuTriggerRef,
   } satisfies Omit<RenderSidebarTopControlsOptions, 'showScratchPad'>;
 
   return (
@@ -563,6 +615,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
               : undefined
           }
           isCollapsed={collapsedSections.actions}
+          isVisible={shouldShowActionsPanel}
           onToggleCollapsed={(collapsed) => {
             setSectionCollapsed('actions', collapsed);
             vscode.postMessage({
@@ -627,7 +680,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
             isCollapsed={isSessionsCollapsed}
             isCollapsible
             onToggleCollapsed={() => setIsSessionsCollapsed((previous) => !previous)}
-            title='Sessions'
+            title='Active'
           />
           {!isSessionsCollapsed ? (
             <>
@@ -647,7 +700,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
                 </div>
               ) : null}
               <DragDropProvider
-                key={`drag-structure-${structureRevision}`}
+                key={dragStructureKey}
                 onDragEnd={handleDragEnd}
                 onDragMove={handleDragMove}
                 onDragOver={handleDragOver}
@@ -833,6 +886,10 @@ function createWorkspaceSessionIdsByGroup(
   return Object.fromEntries(workspaceGroupIds.map((groupId) => [groupId, sessionIdsByGroup[groupId] ?? []]));
 }
 
+function createDragStructureKey(groupIds: readonly string[], sessionIdsByGroup: SessionIdsByGroup): string {
+  return groupIds.map((groupId) => `${groupId}:${(sessionIdsByGroup[groupId] ?? []).join(',')}`).join('|');
+}
+
 function findSessionGroupId(sessionIdsByGroup: SessionIdsByGroup, sessionId: string): string | undefined {
   return Object.entries(sessionIdsByGroup).find(([, sessionIds]) => sessionIds.includes(sessionId))?.[0];
 }
@@ -877,6 +934,9 @@ type RenderSidebarTopControlsOptions = {
   onToggleMenu: () => void;
   onToggleScratchPad: () => void;
   overflowControlsRef: RefObject<HTMLDivElement | null>;
+  overflowMenuPosition?: FloatingMenuPosition;
+  overflowMenuRef: RefObject<HTMLDivElement | null>;
+  overflowMenuTriggerRef: RefObject<HTMLDivElement | null>;
   showMenu?: boolean;
   showScratchPad: boolean;
 };
@@ -894,6 +954,9 @@ function renderSidebarTopControls({
   onToggleMenu,
   onToggleScratchPad,
   overflowControlsRef,
+  overflowMenuPosition,
+  overflowMenuRef,
+  overflowMenuTriggerRef,
   showMenu = true,
   showScratchPad,
 }: RenderSidebarTopControlsOptions) {
@@ -935,61 +998,73 @@ function renderSidebarTopControls({
       ) : null}
       {showMenu ? (
         <>
-          <ToolbarIconButton
-            ariaControls='sidebar-overflow-menu'
-            ariaExpanded={isOverflowMenuOpen}
-            ariaHasPopup='menu'
-            ariaLabel='Open sidebar menu'
-            className='floating-toolbar-button section-titlebar-action-button'
-            isSelected={isOverflowMenuOpen}
-            onClick={onToggleMenu}
-            tooltip='More'
-          >
-            <OverflowIcon />
-          </ToolbarIconButton>
-          {isOverflowMenuOpen ? (
-            <div
-              aria-label='Sidebar actions'
-              className='session-context-menu sidebar-floating-menu'
-              data-empty-space-blocking='true'
-              id='sidebar-overflow-menu'
-              role='menu'
+          <div ref={overflowMenuTriggerRef}>
+            <ToolbarIconButton
+              ariaControls='sidebar-overflow-menu'
+              ariaExpanded={isOverflowMenuOpen}
+              ariaHasPopup='menu'
+              ariaLabel='Open sidebar menu'
+              className='floating-toolbar-button section-titlebar-action-button'
+              isSelected={isOverflowMenuOpen}
+              onClick={onToggleMenu}
+              tooltip='More'
             >
-              <button className='session-context-menu-item' onClick={onAddAgent} role='menuitem' type='button'>
-                <IconPlus aria-hidden='true' className='session-context-menu-icon' size={14} />
-                Add Agent
-              </button>
-              <button className='session-context-menu-item' onClick={onAddAction} role='menuitem' type='button'>
-                <IconPlus aria-hidden='true' className='session-context-menu-icon' size={14} />
-                Add Action
-              </button>
-              <button className='session-context-menu-item' onClick={onShowRunning} role='menuitem' type='button'>
-                <IconHistory aria-hidden='true' className='session-context-menu-icon' size={14} />
-                Running
-              </button>
-              <button className='session-context-menu-item' onClick={onToggleBell} role='menuitem' type='button'>
-                {completionBellEnabled ? (
-                  <IconBellOff aria-hidden='true' className='session-context-menu-icon' size={14} />
-                ) : (
-                  <IconBell aria-hidden='true' className='session-context-menu-icon' size={14} />
-                )}
-                {getCompletionBellMenuLabel(completionBellEnabled)}
-              </button>
-              <button className='session-context-menu-item' onClick={onMoveSidebar} role='menuitem' type='button'>
-                <IconLayoutSidebar aria-hidden='true' className='session-context-menu-icon' size={14} stroke={1.8} />
-                Change Sidebar
-              </button>
-              <a
-                className='session-context-menu-item'
-                href='command:VSmux.openSettings'
-                onClick={() => setIsOverflowMenuOpen(false)}
-                role='menuitem'
-              >
-                <IconSettings aria-hidden='true' className='session-context-menu-icon' size={14} stroke={1.8} />
-                VSmux Settings
-              </a>
-            </div>
-          ) : null}
+              <OverflowIcon />
+            </ToolbarIconButton>
+          </div>
+          {isOverflowMenuOpen && overflowMenuPosition
+            ? createPortal(
+                <div
+                  aria-label='Sidebar actions'
+                  className='session-context-menu'
+                  data-empty-space-blocking='true'
+                  id='sidebar-overflow-menu'
+                  ref={overflowMenuRef}
+                  role='menu'
+                  style={{
+                    left: overflowMenuPosition.left,
+                    top: overflowMenuPosition.top,
+                    transform: 'translateX(-100%)',
+                    zIndex: 250,
+                  }}
+                >
+                  <button className='session-context-menu-item' onClick={onAddAgent} role='menuitem' type='button'>
+                    <IconPlus aria-hidden='true' className='session-context-menu-icon' size={14} />
+                    Add Agent
+                  </button>
+                  <button className='session-context-menu-item' onClick={onAddAction} role='menuitem' type='button'>
+                    <IconPlus aria-hidden='true' className='session-context-menu-icon' size={14} />
+                    Add Action
+                  </button>
+                  <button className='session-context-menu-item' onClick={onShowRunning} role='menuitem' type='button'>
+                    <IconHistory aria-hidden='true' className='session-context-menu-icon' size={14} />
+                    Running
+                  </button>
+                  <button className='session-context-menu-item' onClick={onToggleBell} role='menuitem' type='button'>
+                    {completionBellEnabled ? (
+                      <IconBellOff aria-hidden='true' className='session-context-menu-icon' size={14} />
+                    ) : (
+                      <IconBell aria-hidden='true' className='session-context-menu-icon' size={14} />
+                    )}
+                    {getCompletionBellMenuLabel(completionBellEnabled)}
+                  </button>
+                  <button className='session-context-menu-item' onClick={onMoveSidebar} role='menuitem' type='button'>
+                    <IconLayoutSidebar
+                      aria-hidden='true'
+                      className='session-context-menu-icon'
+                      size={14}
+                      stroke={1.8}
+                    />
+                    Change Sidebar
+                  </button>
+                  <button className='session-context-menu-item' onClick={onOpenSettings} role='menuitem' type='button'>
+                    <IconSettings aria-hidden='true' className='session-context-menu-icon' size={14} stroke={1.8} />
+                    VSmux Settings
+                  </button>
+                </div>,
+                document.body
+              )
+            : null}
         </>
       ) : null}
     </div>

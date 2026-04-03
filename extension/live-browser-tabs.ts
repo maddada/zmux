@@ -15,6 +15,7 @@ const SIMPLE_BROWSER_VIEW_TYPE = "simpleBrowser.view";
 const VSMUX_LABEL = "vsmux";
 const VSMUX_VIEW_TYPE_PREFIX = "vsmux.";
 const VSCODE_WELCOME_LABEL = "welcome";
+const VSCODE_IGNORED_LABELS = new Set(["Settings", "Keyboard Shortcuts"]);
 const WORKING_TREE_LABEL_FRAGMENT = "(Working Tree)";
 const INDEX_LABEL_FRAGMENT = '(Index)';
 
@@ -126,6 +127,10 @@ function getLiveBrowserTabMetadata(tab: vscode.Tab):
       viewType?: string;
     }
   | undefined {
+  if (VSCODE_IGNORED_LABELS.has(tab.label.trim())) {
+    return undefined;
+  }
+
   if (tab.label.includes(WORKING_TREE_LABEL_FRAGMENT) || tab.label.includes(INDEX_LABEL_FRAGMENT)) {
     return undefined;
   }

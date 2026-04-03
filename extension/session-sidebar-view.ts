@@ -56,7 +56,6 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
     const extensionUri = getExtensionUri();
     this.view = webviewView;
     webviewView.webview.options = {
-      enableCommandUris: true,
       enableScripts: true,
       localResourceRoots: extensionUri
         ? [vscode.Uri.joinPath(extensionUri, 'media', 'sounds'), vscode.Uri.joinPath(extensionUri, 'out', 'sidebar')]

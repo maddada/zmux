@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import {
   startTransition,
   useEffect,
+  useEffectEvent,
   useState,
   useRef,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -99,8 +100,25 @@ export function SessionGroupSection({
   const menuRef = useRef<HTMLDivElement>(null);
   const controlMenuRef = useRef<HTMLDivElement>(null);
   const visibleCountButtonRef = useRef<HTMLButtonElement>(null);
+  const debugInstanceIdRef = useRef(createSessionGroupDebugInstanceId());
   const isBrowserGroup = group?.kind === "browser";
   const isSessionDropTargetGroup = sessionDragIndicator?.groupId === groupId;
+  const debuggingMode = useSidebarStore((state) => state.hud.debuggingMode);
+  const postGroupDebugLog = useEffectEvent((event: string, details: Record<string, unknown>) => {
+    if (!debuggingMode) {
+      return;
+    }
+
+    vscode.postMessage({
+      details: {
+        debugInstanceId: debugInstanceIdRef.current,
+        groupId,
+        ...details,
+      },
+      event,
+      type: "sidebarDebugLog",
+    });
+  });
   const sortable = useSortable({
     accept: ["group", "session"],
     collisionPriority: CollisionPriority.Low,
@@ -118,6 +136,36 @@ export function SessionGroupSection({
 
   const isGroupDropTarget = sortable.isDropTarget || isSessionDropTargetGroup;
   const groupDropPosition = getGroupDropPosition(group.groupId, orderedSessionIds, sessionDragIndicator);
+
+  useEffect(() => {
+    postGroupDebugLog("group.sectionMounted", {
+      isBrowserGroup,
+      orderedSessionIds,
+    });
+
+    return () => {
+      postGroupDebugLog("group.sectionUnmounted", {
+        isBrowserGroup,
+      });
+    };
+  }, [isBrowserGroup, postGroupDebugLog]);
+
+  useEffect(() => {
+    postGroupDebugLog("group.dropStateChanged", {
+      groupDropPosition,
+      isGroupDropTarget,
+      orderedSessionIds,
+      sessionDragIndicator,
+      sortableIsDropTarget: sortable.isDropTarget,
+    });
+  }, [
+    groupDropPosition,
+    isGroupDropTarget,
+    orderedSessionIds,
+    postGroupDebugLog,
+    sessionDragIndicator,
+    sortable.isDropTarget,
+  ]);
 
   useEffect(() => {
     if (isEditing) {
@@ -606,4 +654,11 @@ function getPortalMenuStyle(button: HTMLButtonElement | null) {
     top: `${position.y}px`,
     transform: "translateX(-50%)",
   };
+}
+
+let sessionGroupDebugInstanceCounter = 0;
+
+function createSessionGroupDebugInstanceId(): number {
+  sessionGroupDebugInstanceCounter += 1;
+  return sessionGroupDebugInstanceCounter;
 }

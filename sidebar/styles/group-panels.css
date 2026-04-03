@@ -65,7 +65,7 @@
 .section-titlebar-actions {
   align-items: center;
   display: inline-flex;
-  gap: calc(8px * var(--sidebar-density-scale));
+  gap: calc(6px * var(--sidebar-density-scale));
   margin-left: auto;
   min-width: 0;
 }

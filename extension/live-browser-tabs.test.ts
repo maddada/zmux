@@ -152,6 +152,42 @@ describe("getLiveBrowserTabs", () => {
     expect(browserTabs).toEqual([]);
   });
 
+  test("should ignore the VS Code Settings tab", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("workbench.editor.settings"),
+            isActive: true,
+            label: "Settings",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toEqual([]);
+  });
+
+  test("should ignore the VS Code Keyboard Shortcuts tab", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("workbench.editor.keybindings"),
+            isActive: true,
+            label: "Keyboard Shortcuts",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toEqual([]);
+  });
+
   test("should ignore the VS Code Welcome tab", () => {
     const browserTabs = getLiveBrowserTabs([
       {
