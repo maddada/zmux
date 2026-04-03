@@ -1695,7 +1695,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private async ensureT3Ready(sessionRecord: T3SessionRecord): Promise<void> {
     const runtime = this.t3Runtime ?? new T3RuntimeManager(this.context);
     this.t3Runtime = runtime;
-    await runtime.ensureRunning(sessionRecord.t3.workspaceRoot);
+    const nextMetadata = await runtime.ensureThreadSession(sessionRecord.t3, sessionRecord.title);
+    if (!haveSameT3SessionMetadata(sessionRecord.t3, nextMetadata)) {
+      await this.store.setT3SessionMetadata(sessionRecord.sessionId, nextMetadata);
+      await this.afterStateChange();
+    }
   }
 
   private async createT3Session(startupCommand: string): Promise<void> {
@@ -2394,6 +2398,15 @@ function createPendingT3Metadata(serverOrigin: string) {
 
 function isPendingT3Metadata(metadata: T3SessionRecord['t3']): boolean {
   return metadata.projectId.startsWith('pending-') && metadata.threadId.startsWith('pending-');
+}
+
+function haveSameT3SessionMetadata(left: T3SessionRecord["t3"], right: T3SessionRecord["t3"]): boolean {
+  return (
+    left.projectId === right.projectId &&
+    left.serverOrigin === right.serverOrigin &&
+    left.threadId === right.threadId &&
+    left.workspaceRoot === right.workspaceRoot
+  );
 }
 
 function cloneWorkspaceSnapshot(snapshot: GroupedSessionWorkspaceSnapshot): GroupedSessionWorkspaceSnapshot {

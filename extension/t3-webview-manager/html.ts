@@ -167,5 +167,5 @@ function escapeHtmlText(value: string): string {
 }
 
 function toWebSocketOrigin(serverOrigin: string): string {
-  return serverOrigin.replace(/^http/i, "ws");
+  return `${serverOrigin.replace(/^http/i, "ws").replace(/\/$/, "")}/ws`;
 }

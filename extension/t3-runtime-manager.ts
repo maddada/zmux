@@ -5,17 +5,37 @@ import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import * as vscode from "vscode";
 import type { T3SessionMetadata } from "../shared/session-grid-contract";
+import {
+  createT3RpcPongMessage,
+  createT3RpcRequestMessage,
+  createT3RpcRequestId,
+  formatT3RpcDefect,
+  formatT3RpcFailure,
+  parseT3RpcIncomingMessage,
+} from "./t3-rpc-protocol";
 import { getDefaultShell, getDefaultWorkspaceCwd } from "./terminal-workspace-helpers";
 
 const DEFAULT_MODEL = "gpt-5-codex";
-const DEFAULT_T3_COMMAND = "npx --yes t3";
+const LEGACY_T3_COMMAND = "npx --yes t3";
+const DEFAULT_T3_COMMAND = LEGACY_T3_COMMAND;
+const DEFAULT_MANAGED_T3_REPO_ROOT = "/Users/madda/dev/_active/agent-tiler";
+const MANAGED_T3_ENTRYPOINT_SEGMENTS = [
+  "forks",
+  "t3code-embed",
+  "upstream",
+  "apps",
+  "server",
+  "src",
+  "bin.ts",
+] as const;
 const T3_HOST = "127.0.0.1";
-const T3_PORT = 3773;
+const T3_PORT = 3774;
 const START_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const LEASE_HEARTBEAT_MS = 30_000;
 const LEASE_GRACE_MS = 180_000;
 const RUNTIME_STORAGE_DIR_NAME = "t3-runtime";
+const MANAGED_T3_HOME_DIR_NAME = "managed-home";
 const LEASES_DIR_NAME = "leases";
 const SUPERVISOR_STATE_FILE = "supervisor.json";
 const SUPERVISOR_LAUNCH_LOCK_FILE = "supervisor-launch.lock";
@@ -141,6 +161,68 @@ export class T3RuntimeManager implements vscode.Disposable {
     };
   }
 
+  public async ensureThreadSession(
+    metadata: T3SessionMetadata,
+    title = "T3 Code",
+    startupCommand = DEFAULT_T3_COMMAND,
+  ): Promise<T3SessionMetadata> {
+    await this.ensureRunning(metadata.workspaceRoot, startupCommand);
+    const snapshot = await this.getSnapshot();
+    const project =
+      snapshot.projects.find(
+        (candidate) =>
+          candidate.deletedAt === null &&
+          candidate.id === metadata.projectId &&
+          candidate.workspaceRoot === metadata.workspaceRoot,
+      ) ??
+      snapshot.projects.find(
+        (candidate) => candidate.deletedAt === null && candidate.workspaceRoot === metadata.workspaceRoot,
+      ) ??
+      (await this.createProject(metadata.workspaceRoot));
+    const existingThread = snapshot.threads.find(
+      (candidate) =>
+        candidate.deletedAt === null &&
+        candidate.id === metadata.threadId &&
+        candidate.projectId === project.id,
+    );
+    const serverOrigin = this.getServerOrigin();
+
+    if (metadata.serverOrigin === serverOrigin && existingThread) {
+      return {
+        ...metadata,
+        projectId: project.id,
+        serverOrigin,
+      };
+    }
+
+    const threadId = existingThread?.id ?? randomUUID();
+    if (!existingThread) {
+      await this.dispatchCommand({
+        branch: null,
+        commandId: randomUUID(),
+        createdAt: new Date().toISOString(),
+        interactionMode: "default",
+        modelSelection: project.defaultModelSelection ?? {
+          model: DEFAULT_MODEL,
+          provider: "codex",
+        },
+        projectId: project.id,
+        runtimeMode: "full-access",
+        threadId,
+        title,
+        type: "thread.create",
+        worktreePath: null,
+      });
+    }
+
+    return {
+      projectId: project.id,
+      serverOrigin,
+      threadId,
+      workspaceRoot: metadata.workspaceRoot,
+    };
+  }
+
   public async ensureRunning(
     workspaceRoot = getDefaultWorkspaceCwd(),
     startupCommand = DEFAULT_T3_COMMAND,
@@ -159,6 +241,7 @@ export class T3RuntimeManager implements vscode.Disposable {
   ): Promise<string> {
     const origin = getT3Origin();
     await this.ensureRuntimeStorage();
+    await this.ensureManagedRuntimeEntrypoint();
     const hasManagedSupervisor = await this.hasActiveManagedSupervisor();
     if (await isOriginResponsive(origin)) {
       if (hasManagedSupervisor) {
@@ -180,7 +263,7 @@ export class T3RuntimeManager implements vscode.Disposable {
       await delay(250);
     }
 
-    throw new Error("Timed out waiting for T3 Code to start on http://127.0.0.1:3773.");
+    throw new Error(`Timed out waiting for managed T3 Code to start on ${origin}.`);
   }
 
   private async createProject(workspaceRoot: string): Promise<T3Project> {
@@ -219,16 +302,13 @@ export class T3RuntimeManager implements vscode.Disposable {
   }
 
   private async dispatchCommand(command: Record<string, unknown>): Promise<unknown> {
-    return this.request("orchestration.dispatchCommand", { command });
+    return this.request("orchestration.dispatchCommand", command);
   }
 
   private async request<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
     const socket = await this.connect();
-    const id = randomUUID();
-    const payload = JSON.stringify({
-      body: params ? { ...params, _tag: method } : { _tag: method },
-      id,
-    });
+    const id = createT3RpcRequestId();
+    const payload = JSON.stringify(createT3RpcRequestMessage(id, method, params ?? {}));
 
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -262,7 +342,7 @@ export class T3RuntimeManager implements vscode.Disposable {
     }
 
     this.connectPromise ??= new Promise<WebSocket>((resolve, reject) => {
-      const socket = new WebSocket(getT3WebSocketUrl());
+      const socket = new WebSocket(this.getWebSocketUrl());
       const handleMessage = (event: MessageEvent) => {
         this.handleMessage(event.data);
       };
@@ -296,35 +376,49 @@ export class T3RuntimeManager implements vscode.Disposable {
   }
 
   private handleMessage(raw: string | ArrayBuffer | Blob): void {
-    if (typeof raw !== "string") {
+    const message = parseT3RpcIncomingMessage(raw);
+    if (!message) {
       return;
     }
 
-    const serialized = raw;
-    let message: { error?: { message?: string }; id?: string; result?: unknown; type?: string };
-    try {
-      message = JSON.parse(serialized) as typeof message;
-    } catch {
+    if (message._tag === "Ping") {
+      this.socket?.send(JSON.stringify(createT3RpcPongMessage()));
       return;
     }
 
-    if (message.type === "push" || !message.id) {
+    if (message._tag === "Defect") {
+      const error = new Error(
+        formatT3RpcDefect(message.defect, "The T3 runtime reported an unexpected websocket defect."),
+      );
+      for (const pending of this.pendingRequests.values()) {
+        clearTimeout(pending.timeout);
+        pending.reject(error);
+      }
+      this.pendingRequests.clear();
       return;
     }
 
-    const pending = this.pendingRequests.get(message.id);
+    if (message._tag !== "Exit") {
+      return;
+    }
+
+    const pending = this.pendingRequests.get(message.requestId);
     if (!pending) {
       return;
     }
 
     clearTimeout(pending.timeout);
-    this.pendingRequests.delete(message.id);
-    if (message.error?.message) {
-      pending.reject(new Error(message.error.message));
+    this.pendingRequests.delete(message.requestId);
+    if (message.exit._tag === "Failure") {
+      pending.reject(
+        new Error(
+          formatT3RpcFailure(message.exit, "The T3 runtime rejected the websocket request."),
+        ),
+      );
       return;
     }
 
-    pending.resolve(message.result);
+    pending.resolve(message.exit.value);
   }
 
   private async startSupervisorIfNeeded(
@@ -345,6 +439,7 @@ export class T3RuntimeManager implements vscode.Disposable {
         return;
       }
 
+      const resolvedStartupCommand = this.resolveStartupCommand(startupCommand);
       const supervisorScriptPath = join(__dirname, "t3-runtime-supervisor.js");
       const shellPath = getDefaultShell();
       const nodeRuntimePath = getNodeRuntimePath();
@@ -353,7 +448,7 @@ export class T3RuntimeManager implements vscode.Disposable {
         [
           supervisorScriptPath,
           "--command",
-          startupCommand,
+          resolvedStartupCommand,
           "--cwd",
           workspaceRoot,
           "--grace-ms",
@@ -371,6 +466,10 @@ export class T3RuntimeManager implements vscode.Disposable {
         ],
         {
           detached: true,
+          env: {
+            ...process.env,
+            T3CODE_HOME: this.getManagedT3HomePath(),
+          },
           stdio: "ignore",
         },
       );
@@ -425,8 +524,25 @@ export class T3RuntimeManager implements vscode.Disposable {
     await mkdir(this.getLeaseDirectoryPath(), { recursive: true });
   }
 
+  private async ensureManagedRuntimeEntrypoint(): Promise<void> {
+    const entrypoint = getManagedT3EntrypointPath();
+    await stat(entrypoint).catch(() => {
+      throw new Error(
+        [
+          "The updated T3 runtime source is missing from the main repo checkout.",
+          `Expected: ${entrypoint}`,
+          "Sync forks/t3code-embed/upstream in /Users/madda/dev/_active/agent-tiler and reinstall the main-branch VSIX.",
+        ].join(" "),
+      );
+    });
+  }
+
   private getRuntimeStoragePath(): string {
     return join(this.context.globalStorageUri.fsPath, RUNTIME_STORAGE_DIR_NAME);
+  }
+
+  private getManagedT3HomePath(): string {
+    return join(this.getRuntimeStoragePath(), MANAGED_T3_HOME_DIR_NAME);
   }
 
   private getLeaseDirectoryPath(): string {
@@ -500,10 +616,25 @@ export class T3RuntimeManager implements vscode.Disposable {
       await rm(lockPath, { force: true });
     };
   }
+
+  private resolveStartupCommand(startupCommand: string): string {
+    const trimmedCommand = startupCommand.trim();
+    if (trimmedCommand.length > 0 && trimmedCommand !== LEGACY_T3_COMMAND) {
+      return trimmedCommand;
+    }
+
+    return createManagedStartupCommand();
+  }
 }
 
 function getT3Origin(): string {
   return `http://${T3_HOST}:${String(T3_PORT)}`;
+}
+
+function createManagedStartupCommand(): string {
+  const bunPath = shellQuote(getBunRuntimePath());
+  const entrypoint = shellQuote(getManagedT3EntrypointPath());
+  return `${bunPath} ${entrypoint} --mode desktop --host ${T3_HOST} --port ${String(T3_PORT)} --no-browser`;
 }
 
 function getNodeRuntimePath(): string {
@@ -530,7 +661,36 @@ function getNodeRuntimePath(): string {
 }
 
 function getT3WebSocketUrl(): string {
-  return `ws://${T3_HOST}:${String(T3_PORT)}`;
+  return `ws://${T3_HOST}:${String(T3_PORT)}/ws`;
+}
+
+function getBunRuntimePath(): string {
+  if (process.platform === "win32") {
+    const result = spawnSync("where.exe", ["bun"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const firstResolvedPath = result.stdout
+      ?.split(/\r?\n/u)
+      .map((value) => value.trim())
+      .find((value) => value.length > 0);
+    if (firstResolvedPath) {
+      return firstResolvedPath;
+    }
+
+    return "bun.exe";
+  }
+
+  const result = spawnSync("which", ["bun"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const resolvedPath = result.stdout?.trim();
+  if (resolvedPath) {
+    return resolvedPath;
+  }
+
+  return "bun";
 }
 
 async function isOriginResponsive(origin: string): Promise<boolean> {
@@ -562,4 +722,13 @@ function isProcessAlive(pid: number): boolean {
 
 function isNodeErrorWithCode(error: unknown, code: string): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function getManagedT3EntrypointPath(): string {
+  const repoRoot = process.env.VSMUX_T3_REPO_ROOT?.trim() || DEFAULT_MANAGED_T3_REPO_ROOT;
+  return join(repoRoot, ...MANAGED_T3_ENTRYPOINT_SEGMENTS);
 }
