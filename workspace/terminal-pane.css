@@ -13,6 +13,17 @@
   width: 100%;
 }
 
+.terminal-pane-canvas > .pane {
+  height: 100%;
+  width: 100%;
+}
+
+.terminal-pane-canvas .pane-canvas {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
 .terminal-pane-canvas .xterm-viewport {
   overflow-y: scroll;
   scrollbar-color: transparent transparent;
