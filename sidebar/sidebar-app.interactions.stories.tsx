@@ -97,14 +97,20 @@ export const ToolbarActions: Story = {
     await step("zoom terminals without closing the sidebar menu", async () => {
       resetSidebarStoryMessages();
       await userEvent.click(canvas.getByRole("button", { name: "Open sidebar menu" }));
-      await userEvent.click(await body.findByRole("menuitem", { name: "Zoom Out Terminals" }));
+      await userEvent.click(await body.findByRole("menuitem", { name: "Zoom Out" }));
       await expectMessage({ delta: -1, type: "adjustTerminalFontSize" });
-      await expect(body.getByRole("menuitem", { name: "Zoom In Terminals" })).toBeVisible();
+      await expect(body.getByRole("menuitem", { name: "Zoom In" })).toBeVisible();
 
       resetSidebarStoryMessages();
-      await userEvent.click(body.getByRole("menuitem", { name: "Zoom In Terminals" }));
+      await userEvent.click(body.getByRole("menuitem", { name: "Zoom In" }));
       await expectMessage({ delta: 1, type: "adjustTerminalFontSize" });
-      await expect(body.getByRole("menuitem", { name: "Zoom Out Terminals" })).toBeVisible();
+      await expect(body.getByRole("menuitem", { name: "Zoom Out" })).toBeVisible();
+    });
+
+    await step("still create a session in a group after menu interactions", async () => {
+      resetSidebarStoryMessages();
+      await userEvent.click(canvas.getByRole("button", { name: "Create a session in Group 4" }));
+      await expectMessage({ groupId: "group-4", type: "createSessionInGroup" });
     });
   },
 };

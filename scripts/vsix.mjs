@@ -89,6 +89,12 @@ function commandExists(command) {
   return result.status === 0;
 }
 
+function findFirstAvailableCommand(candidates) {
+  return candidates.find((candidate) =>
+    candidate.includes("/") ? existsSync(candidate) : commandExists(candidate),
+  );
+}
+
 function resolveVsixPath(installerDir, extensionName, extensionVersion, mode) {
   const baseName = `${extensionName}-${extensionVersion}`;
   if (mode === "install") {
@@ -117,6 +123,22 @@ function resolveCodeCli() {
     return override;
   }
 
+  const pathCandidates =
+    process.platform === "darwin"
+      ? [
+          "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+          "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code",
+          "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+          "/Applications/Cursor.app/Contents/Resources/app/bin/code",
+          "/Applications/VSCodium.app/Contents/Resources/app/bin/codium",
+          `${process.env.HOME}/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code`,
+          `${process.env.HOME}/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code`,
+          `${process.env.HOME}/Applications/Cursor.app/Contents/Resources/app/bin/cursor`,
+          `${process.env.HOME}/Applications/Cursor.app/Contents/Resources/app/bin/code`,
+          `${process.env.HOME}/Applications/VSCodium.app/Contents/Resources/app/bin/codium`,
+        ]
+      : [];
+
   const candidates =
     process.platform === "win32"
       ? [
@@ -142,7 +164,7 @@ function resolveCodeCli() {
           "windsurf",
         ];
 
-  return candidates.find(commandExists);
+  return findFirstAvailableCommand([...candidates, ...pathCandidates]);
 }
 
 function listInstalledExtensions(vscodeCli) {
@@ -219,7 +241,7 @@ const vscodeCli = resolveCodeCli();
 
 if (!vscodeCli) {
   fail(
-    "Could not find an editor CLI. Install the 'code' or 'cursor' command, or set VSMUX_CODE_CLI.",
+    "Could not find an editor CLI. Install the 'code' or 'cursor' command, or set VSMUX_CODE_CLI to the editor binary path.",
   );
 }
 
