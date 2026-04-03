@@ -48,6 +48,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const debuggingModeRef = useRef(debuggingMode);
   const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const handledRefreshRequestIdRef = useRef(refreshRequestId);
+  const appearanceRequestIdRef = useRef(0);
+  const appliedFontSourcesSignatureRef = useRef("");
   const activePaneRef = useRef<ReturnType<Restty["activePane"]>>(null);
   const resttyRef = useRef<Restty | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -94,19 +96,88 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     });
   };
 
-  const applyAppearance = () => {
+  const applyAppearance = (sourceLabel = "vscode") => {
     const restty = resttyRef.current;
     const activePane = activePaneRef.current;
     if (!restty || !activePane) {
       return;
     }
 
-    activePane.setFontSize(terminalAppearance.fontSize);
-    void restty.setFontSources(getResttyFontSources(terminalAppearance.fontFamily));
+    const requestId = appearanceRequestIdRef.current + 1;
+    appearanceRequestIdRef.current = requestId;
+    const fontSources = getResttyFontSources(terminalAppearance.fontFamily);
+    const fontSourcesSignature = JSON.stringify(fontSources);
     const theme = getResttyTheme();
-    if (theme) {
-      activePane.applyTheme(theme, "vscode");
+
+    const applyResolvedTheme = (phase: string) => {
+      if (
+        appearanceRequestIdRef.current !== requestId ||
+        resttyRef.current !== restty ||
+        activePaneRef.current !== activePane
+      ) {
+        return;
+      }
+
+      if (theme) {
+        activePane.applyTheme(theme, `${sourceLabel}:${phase}`);
+      }
+    };
+
+    activePane.setFontSize(terminalAppearance.fontSize);
+
+    const finishAppearanceApply = () => {
+      if (
+        appearanceRequestIdRef.current !== requestId ||
+        resttyRef.current !== restty ||
+        activePaneRef.current !== activePane
+      ) {
+        return;
+      }
+
+      activePane.setFontSize(terminalAppearance.fontSize);
+      applyResolvedTheme("applied");
+      requestAnimationFrame(() => {
+        if (appearanceRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        applyResolvedTheme("raf-1");
+        requestAnimationFrame(() => {
+          if (appearanceRequestIdRef.current !== requestId) {
+            return;
+          }
+
+          applyResolvedTheme("raf-2");
+        });
+      });
+      window.setTimeout(() => {
+        if (appearanceRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        applyResolvedTheme("timeout");
+      }, 120);
+    };
+
+    if (appliedFontSourcesSignatureRef.current === fontSourcesSignature) {
+      finishAppearanceApply();
+      return;
     }
+
+    void restty.setFontSources(fontSources).then(() => {
+      if (appearanceRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      appliedFontSourcesSignatureRef.current = fontSourcesSignature;
+      finishAppearanceApply();
+    }).catch(() => {
+      if (appearanceRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      finishAppearanceApply();
+    });
   };
 
   const updateTerminalSize = () => {
@@ -208,7 +279,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
     resttyRef.current = restty;
     activePaneRef.current = activePane;
-    applyAppearance();
+    applyAppearance("mount-setup");
 
     const onWindowFocus = () => {
       focusTerminal();
@@ -216,7 +287,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     window.addEventListener("focus", onWindowFocus);
 
     const onThemeChange = () => {
-      applyAppearance();
+      applyAppearance("theme-change");
     };
     const themeObserver = new MutationObserver(() => {
       onThemeChange();
@@ -239,6 +310,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         }
 
         updateTerminalSize();
+        applyAppearance("mount-visible");
         if (document.hasFocus()) {
           focusTerminal();
         }
@@ -257,6 +329,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
     return () => {
       didDispose = true;
+      appearanceRequestIdRef.current += 1;
       window.removeEventListener("focus", onWindowFocus);
       themeObserver.disconnect();
       restty.destroy();
@@ -269,7 +342,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   }, [connection.baseUrl, connection.mock, connection.token, connection.workspaceId, pane.sessionId]);
 
   useEffect(() => {
-    applyAppearance();
+    applyAppearance("appearance-change");
   }, [
     terminalAppearance.cursorBlink,
     terminalAppearance.cursorStyle,
@@ -288,6 +361,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           updateTerminalSize();
+          applyAppearance("visible");
         });
       });
     }, VISIBLE_RESIZE_DELAY_MS);
@@ -386,17 +460,31 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           return;
         }
 
-        if (IS_MAC && event.metaKey && event.key === "ArrowLeft") {
+        if (IS_MAC && event.metaKey && !event.altKey && event.key === "ArrowLeft") {
           event.preventDefault();
           event.stopPropagation();
           sendRawTerminalInput("\x01");
           return;
         }
 
-        if (IS_MAC && event.metaKey && event.key === "ArrowRight") {
+        if (IS_MAC && event.metaKey && !event.altKey && event.key === "ArrowRight") {
           event.preventDefault();
           event.stopPropagation();
           sendRawTerminalInput("\x05");
+          return;
+        }
+
+        if (IS_MAC && event.altKey && !event.metaKey && event.key === "ArrowLeft") {
+          event.preventDefault();
+          event.stopPropagation();
+          sendRawTerminalInput("\x1bb");
+          return;
+        }
+
+        if (IS_MAC && event.altKey && !event.metaKey && event.key === "ArrowRight") {
+          event.preventDefault();
+          event.stopPropagation();
+          sendRawTerminalInput("\x1bf");
           return;
         }
 
