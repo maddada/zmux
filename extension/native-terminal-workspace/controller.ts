@@ -750,8 +750,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           confirmLabel: primaryAction.label,
           description:
             preparedCommit.scope === 'stagedOnly'
-              ? 'Review the suggested commit title. Only staged changes will be committed.'
-              : 'Review the suggested commit title before continuing with all current working tree changes.',
+              ? 'Only staged changes will be committed.'
+              : 'Review the suggested commit title.',
           requestId,
           suggestedSubject: preparedCommit.subject,
           type: 'promptGitCommit',

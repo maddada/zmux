@@ -16,6 +16,9 @@ const AGENT_SECONDARY_LABELS: Record<SidebarAgentIcon, readonly string[]> = {
   t3: ["t3", "t3 code"],
 };
 
+let activeOverflowTooltipId: symbol | undefined;
+let activeOverflowTooltipClose: (() => void) | undefined;
+
 export type SessionCardContentProps = {
   aliasHeadingRef?: RefObject<HTMLDivElement | null>;
   onClose?: () => void;
@@ -46,9 +49,12 @@ export function SessionCardContent({
   const debugSessionNumberTooltip = showDebugSessionNumber
     ? `Session number: ${session.sessionNumber}`
     : undefined;
-  const titleTooltip = [headingText, secondaryText, debugSessionNumberTooltip]
-    .filter(Boolean)
-    .join("\n");
+  const titleTooltip = buildSessionTitleTooltip({
+    debugSessionNumberTooltip,
+    headingText,
+    secondaryText,
+  });
+  const hasTooltipMetadata = titleTooltip !== headingText;
   const showMeta = showHotkeys;
 
   return (
@@ -58,8 +64,8 @@ export function SessionCardContent({
           className="session-alias-heading"
           textRef={aliasHeadingRef}
           text={headingText}
-          tooltip={titleTooltip}
-          tooltipWhen={secondaryText || debugSessionNumberTooltip ? "always" : "overflow"}
+          tooltip={hasTooltipMetadata ? titleTooltip : undefined}
+          tooltipWhen={hasTooltipMetadata ? "always" : "overflow"}
         />
         <div className="session-head-actions">
           <div className="session-meta" data-visible={String(showMeta)}>
@@ -99,6 +105,30 @@ export function SessionCardContent({
       ) : null}
     </>
   );
+}
+
+export function buildSessionTitleTooltip({
+  debugSessionNumberTooltip,
+  headingText,
+  secondaryText,
+}: {
+  debugSessionNumberTooltip?: string;
+  headingText: string;
+  secondaryText?: string;
+}): string {
+  const uniqueLines = [headingText, secondaryText, debugSessionNumberTooltip].reduce<string[]>(
+    (lines, line) => {
+      const normalizedLine = line?.trim();
+      if (!normalizedLine || lines.includes(normalizedLine)) {
+        return lines;
+      }
+
+      return [...lines, normalizedLine];
+    },
+    [],
+  );
+
+  return uniqueLines.join("\n");
 }
 
 type SessionAgentIconProps = {
@@ -180,6 +210,7 @@ function OverflowTooltipText({
 }: OverflowTooltipTextProps) {
   const [isOpen, setIsOpen] = useState(false);
   const openTimeoutIdRef = useRef<number | undefined>(undefined);
+  const tooltipIdRef = useRef(Symbol("overflowTooltip"));
 
   const clearOpenTimeout = () => {
     if (openTimeoutIdRef.current === undefined) {
@@ -192,6 +223,10 @@ function OverflowTooltipText({
 
   const closeTooltip = () => {
     clearOpenTimeout();
+    if (activeOverflowTooltipId === tooltipIdRef.current) {
+      activeOverflowTooltipId = undefined;
+      activeOverflowTooltipClose = undefined;
+    }
     setIsOpen(false);
   };
 
@@ -217,6 +252,12 @@ function OverflowTooltipText({
     }
 
     openTimeoutIdRef.current = window.setTimeout(() => {
+      if (activeOverflowTooltipId !== tooltipIdRef.current) {
+        activeOverflowTooltipClose?.();
+      }
+
+      activeOverflowTooltipId = tooltipIdRef.current;
+      activeOverflowTooltipClose = closeTooltip;
       setIsOpen(true);
       openTimeoutIdRef.current = undefined;
     }, TOOLTIP_DELAY_MS);

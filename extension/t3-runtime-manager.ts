@@ -240,18 +240,24 @@ export class T3RuntimeManager implements vscode.Disposable {
     startupCommand: string,
   ): Promise<string> {
     const origin = getT3Origin();
+    const resolvedStartupCommand = this.resolveStartupCommand(startupCommand);
     await this.ensureRuntimeStorage();
     await this.ensureManagedRuntimeEntrypoint();
-    const hasManagedSupervisor = await this.hasActiveManagedSupervisor();
+    const hasManagedSupervisor = await this.hasActiveManagedSupervisor(resolvedStartupCommand);
     if (await isOriginResponsive(origin)) {
       if (hasManagedSupervisor) {
         await this.startLeaseHeartbeat();
+        return origin;
       }
-      return origin;
+      if (isManagedStartupCommand(resolvedStartupCommand)) {
+        await this.stopStaleManagedRuntime();
+      } else {
+        return origin;
+      }
     }
 
     await this.startLeaseHeartbeat();
-    if (!hasManagedSupervisor) {
+    if (!(await this.hasActiveManagedSupervisor(resolvedStartupCommand))) {
       await this.startSupervisorIfNeeded(workspaceRoot, startupCommand);
     }
 
@@ -561,9 +567,14 @@ export class T3RuntimeManager implements vscode.Disposable {
     return join(this.getRuntimeStoragePath(), SUPERVISOR_LAUNCH_LOCK_FILE);
   }
 
-  private async hasActiveManagedSupervisor(): Promise<boolean> {
+  private async hasActiveManagedSupervisor(expectedCommand?: string): Promise<boolean> {
     const state = await this.readSupervisorState();
     if (!state) {
+      return false;
+    }
+
+    if (expectedCommand && state.command !== expectedCommand) {
+      await rm(this.getSupervisorStatePath(), { force: true });
       return false;
     }
 
@@ -615,6 +626,18 @@ export class T3RuntimeManager implements vscode.Disposable {
     return async () => {
       await rm(lockPath, { force: true });
     };
+  }
+
+  private async stopStaleManagedRuntime(): Promise<void> {
+    const pid = getListeningProcessId(T3_PORT);
+    if (pid !== undefined && isProcessAlive(pid)) {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // Best-effort cleanup only.
+      }
+    }
+    await rm(this.getSupervisorStatePath(), { force: true });
   }
 
   private resolveStartupCommand(startupCommand: string): string {
@@ -695,11 +718,11 @@ function getBunRuntimePath(): string {
 
 async function isOriginResponsive(origin: string): Promise<boolean> {
   try {
-    const response = await fetch(origin, {
+    await fetch(origin, {
       method: "GET",
       signal: AbortSignal.timeout(1_500),
     });
-    return response.ok;
+    return true;
   } catch {
     return false;
   }
@@ -731,4 +754,29 @@ function shellQuote(value: string): string {
 function getManagedT3EntrypointPath(): string {
   const repoRoot = process.env.VSMUX_T3_REPO_ROOT?.trim() || DEFAULT_MANAGED_T3_REPO_ROOT;
   return join(repoRoot, ...MANAGED_T3_ENTRYPOINT_SEGMENTS);
+}
+
+function isManagedStartupCommand(command: string): boolean {
+  return command === createManagedStartupCommand();
+}
+
+function getListeningProcessId(port: number): number | undefined {
+  if (process.platform === "win32") {
+    return undefined;
+  }
+
+  const result = spawnSync("lsof", ["-nP", `-iTCP:${String(port)}`, "-sTCP:LISTEN", "-t"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const pid = result.stdout
+    ?.split(/\r?\n/u)
+    .map((value) => value.trim())
+    .find((value) => value.length > 0);
+  if (!pid) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(pid, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

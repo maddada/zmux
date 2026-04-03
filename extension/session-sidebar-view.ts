@@ -74,7 +74,14 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
           return;
         }
 
-        this.messageQueue = this.messageQueue.catch(() => undefined).then(() => this.options.onMessage(message));
+        if (shouldBypassSidebarMessageQueue(message)) {
+          void Promise.resolve(this.options.onMessage(message)).catch(() => undefined);
+          return;
+        }
+
+        this.messageQueue = this.messageQueue
+          .catch(() => undefined)
+          .then(() => this.options.onMessage(message));
       })
     );
 
@@ -83,6 +90,19 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
     if (this.latestMessage) {
       void webviewView.webview.postMessage(this.latestMessage);
     }
+  }
+}
+
+function shouldBypassSidebarMessageQueue(message: SidebarToExtensionMessage): boolean {
+  switch (message.type) {
+    case 'runSidebarGitAction':
+    case 'confirmSidebarGitCommit':
+    case 'cancelSidebarGitCommit':
+    case 'refreshGitState':
+    case 'openSettings':
+      return true;
+    default:
+      return false;
   }
 }
 

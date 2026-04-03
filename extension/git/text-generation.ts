@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { GitTextGenerationSettings } from "../../shared/git-text-generation-provider";
+import { logVSmuxDebug } from "../vsmux-debug-log";
 import { runShellCommand } from "./process";
 import {
   buildGitTextGenerationShellCommand,
@@ -41,6 +42,14 @@ export async function generateCommitMessage(
     stagedPatch: input.stagedPatch,
     stagedSummary: input.stagedSummary,
   });
+  logVSmuxDebug("git.textGeneration.generateCommitMessage.promptBuilt", {
+    branch: input.branch,
+    patchLength: input.stagedPatch.length,
+    promptLength: prompt.length,
+    provider: input.settings.provider,
+    stagedSummaryLength: input.stagedSummary.length,
+    summaryPreview: truncateDebugPreview(input.stagedSummary),
+  });
   const generated = await runGitTextGenerationText({
     cwd: input.cwd,
     outputFileName: "commitmessage.txt",
@@ -56,6 +65,13 @@ export async function generatePrContent(
   input: PrContentGenerationInput,
 ): Promise<PrContentGenerationResult> {
   const prompt = buildPrContentPrompt(input);
+  logVSmuxDebug("git.textGeneration.generatePrContent.promptBuilt", {
+    commitSummaryLength: input.commitSummary.length,
+    diffPatchLength: input.diffPatch.length,
+    diffSummaryLength: input.diffSummary.length,
+    promptLength: prompt.length,
+    provider: input.settings.provider,
+  });
   const generated = await runGitTextGenerationText({
     cwd: input.cwd,
     outputFileName: "prcontent.txt",
@@ -83,22 +99,41 @@ async function runGitTextGenerationText(input: {
     input.targetLabel,
   );
   const usesPromptStdin = input.settings.provider === "codex";
+  const command = buildGitTextGenerationShellCommand(input.settings, prompt, outputFilePath);
+
+  logVSmuxDebug("git.textGeneration.run.start", {
+    commandPreview: truncateDebugPreview(command),
+    outputFilePath,
+    promptLength: prompt.length,
+    provider: input.settings.provider,
+    targetLabel: input.targetLabel,
+    usesPromptStdin,
+  });
 
   try {
-    const result = await runShellCommand(
-      buildGitTextGenerationShellCommand(input.settings, prompt, outputFilePath),
-      {
-        cwd: input.cwd,
-        interactiveShell: true,
-        stdin: usesPromptStdin ? prompt : undefined,
-        timeoutMs: GIT_TEXT_GENERATION_TIMEOUT_MS,
-      },
-    );
+    const result = await runShellCommand(command, {
+      cwd: input.cwd,
+      interactiveShell: !usesPromptStdin,
+      stdin: usesPromptStdin ? prompt : undefined,
+      timeoutMs: GIT_TEXT_GENERATION_TIMEOUT_MS,
+    });
+    logVSmuxDebug("git.textGeneration.run.completed", {
+      exitCode: result.exitCode,
+      stderrPreview: truncateDebugPreview(result.stderr),
+      stdoutPreview: truncateDebugPreview(result.stdout),
+      targetLabel: input.targetLabel,
+    });
     if (result.exitCode !== 0) {
       throw createGitTextGenerationCommandError(input.settings, result, input.targetLabel);
     }
 
     const content = await readGeneratedOutput(outputFilePath, result.stdout);
+    logVSmuxDebug("git.textGeneration.run.outputResolved", {
+      contentPreview: truncateDebugPreview(content),
+      outputFilePath,
+      readFromFile: await fileExists(outputFilePath),
+      targetLabel: input.targetLabel,
+    });
     if (!content.trim()) {
       throw new Error(`Git text generation returned an empty ${input.targetLabel}.`);
     }
@@ -114,6 +149,9 @@ function buildCommitMessagePrompt(input: {
   stagedPatch: string;
   stagedSummary: string;
 }): string {
+  const prioritizedSummary = formatCommitSummaryForPrompt(input.stagedSummary);
+  const prioritizedPatch = buildCommitPatchSampleForPrompt(input.stagedPatch, input.stagedSummary);
+
   return [
     "Write a Git commit message for the staged changes.",
     "Return plain text only.",
@@ -144,10 +182,10 @@ function buildCommitMessagePrompt(input: {
     `Current branch: ${input.branch ?? "(detached)"}`,
     "",
     "Staged files:",
-    limitSection(input.stagedSummary, 6_000),
+    prioritizedSummary,
     "",
-    "Staged patch:",
-    limitSection(input.stagedPatch, 40_000),
+    "Representative staged patch:",
+    prioritizedPatch,
   ].join("\n");
 }
 
@@ -214,6 +252,153 @@ function appendOutputHandlingInstructions(
   ].join("\n");
 }
 
+function formatCommitSummaryForPrompt(stagedSummary: string): string {
+  const entries = parseCommitSummaryEntries(stagedSummary);
+  if (entries.length === 0) {
+    return limitSection(stagedSummary, 6_000);
+  }
+
+  const orderedEntries = sortCommitSummaryEntries(entries);
+  return orderedEntries
+    .slice(0, 120)
+    .map((entry) => `${entry.status}\t${entry.path}`)
+    .join("\n");
+}
+
+function buildCommitPatchSampleForPrompt(stagedPatch: string, stagedSummary: string): string {
+  const sections = splitGitPatchSections(stagedPatch);
+  if (sections.length === 0) {
+    return limitSection(stagedPatch, 40_000);
+  }
+
+  const entryByPath = new Map(
+    parseCommitSummaryEntries(stagedSummary).map((entry) => [entry.path, entry] as const),
+  );
+  const orderedSections = sections
+    .map((section, index) => {
+      const entry = entryByPath.get(section.path);
+      const priority = getCommitEntryPriority(entry?.status);
+      return {
+        index,
+        priority,
+        section,
+      };
+    })
+    .sort((left, right) => {
+      if (left.priority !== right.priority) {
+        return left.priority - right.priority;
+      }
+
+      return left.index - right.index;
+    });
+
+  const selectedSections: string[] = [];
+  let totalLength = 0;
+  for (const { section } of orderedSections) {
+    const trimmedSection = limitSection(section.content, 6_000);
+    if (!trimmedSection.trim()) {
+      continue;
+    }
+
+    if (selectedSections.length >= 12 || totalLength + trimmedSection.length > 40_000) {
+      break;
+    }
+
+    selectedSections.push(trimmedSection);
+    totalLength += trimmedSection.length;
+  }
+
+  if (selectedSections.length === 0) {
+    return limitSection(stagedPatch, 40_000);
+  }
+
+  return selectedSections.join("\n\n");
+}
+
+function parseCommitSummaryEntries(
+  stagedSummary: string,
+): Array<{ path: string; status: string }> {
+  return stagedSummary
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [statusPart, ...pathParts] = line.split("\t");
+      const path = pathParts.join("\t").trim();
+      return {
+        path,
+        status: statusPart?.trim() ?? "",
+      };
+    })
+    .filter((entry) => entry.path.length > 0 && entry.status.length > 0);
+}
+
+function sortCommitSummaryEntries(
+  entries: Array<{ path: string; status: string }>,
+): Array<{ path: string; status: string }> {
+  return [...entries].sort((left, right) => {
+    const leftPriority = getCommitEntryPriority(left.status);
+    const rightPriority = getCommitEntryPriority(right.status);
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    return left.path.localeCompare(right.path);
+  });
+}
+
+function getCommitEntryPriority(status: string | undefined): number {
+  const normalizedStatus = status?.trim().toUpperCase() ?? "";
+  if (normalizedStatus.startsWith("M")) {
+    return 0;
+  }
+
+  if (normalizedStatus.startsWith("A")) {
+    return 1;
+  }
+
+  if (normalizedStatus.startsWith("R")) {
+    return 2;
+  }
+
+  if (normalizedStatus.startsWith("C")) {
+    return 3;
+  }
+
+  if (normalizedStatus.startsWith("T")) {
+    return 4;
+  }
+
+  if (normalizedStatus.startsWith("D")) {
+    return 9;
+  }
+
+  return 5;
+}
+
+function splitGitPatchSections(stagedPatch: string): Array<{ content: string; path: string }> {
+  const parts = stagedPatch.split(/^diff --git /m);
+  const sections: Array<{ content: string; path: string }> = [];
+
+  for (const part of parts) {
+    const trimmedPart = part.trim();
+    if (!trimmedPart) {
+      continue;
+    }
+
+    const sectionContent = `diff --git ${trimmedPart}`;
+    const headerLine = sectionContent.split(/\r?\n/g)[0] ?? "";
+    const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(headerLine);
+    const path = match?.[2] ?? match?.[1] ?? headerLine;
+    sections.push({
+      content: sectionContent,
+      path,
+    });
+  }
+
+  return sections;
+}
+
 async function readGeneratedOutput(outputFilePath: string, stdout: string): Promise<string> {
   if (await fileExists(outputFilePath)) {
     return readFile(outputFilePath, "utf8");
@@ -257,4 +442,13 @@ function describeGitTextGenerationSettings(settings: GitTextGenerationSettings):
   return settings.provider === "claude"
     ? "Claude Haiku (high effort)"
     : "Codex gpt-5.4-mini (high effort)";
+}
+
+function truncateDebugPreview(value: string, maxLength = 400): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength)}...`;
 }

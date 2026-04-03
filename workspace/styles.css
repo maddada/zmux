@@ -128,6 +128,19 @@ body {
   align-items: center;
   display: inline-flex;
   gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.workspace-pane:hover .workspace-pane-header-actions,
+.workspace-pane:focus-within .workspace-pane-header-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .workspace-pane-close-control {

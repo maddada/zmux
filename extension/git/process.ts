@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { quoteShellLiteral } from "../agent-shell-integration-utils";
 import { getDefaultShell } from "../terminal-workspace-environment";
+import { logVSmuxDebug } from "../vsmux-debug-log";
 
 export type ShellCommandResult = {
   exitCode: number;
@@ -23,8 +24,47 @@ export async function runShellCommand(
 ): Promise<ShellCommandResult> {
   const shellPath = getDefaultShell();
 
+  return runChildProcess(
+    shellPath,
+    getShellCommandArgs(shellPath, command, options.interactiveShell),
+    command,
+    options,
+  );
+}
+
+export async function runGitCommand(
+  cwd: string,
+  args: readonly string[],
+  timeoutMs = 60_000,
+  env?: NodeJS.ProcessEnv,
+): Promise<ShellCommandResult> {
+  logVSmuxDebug("git.process.runGitCommand", {
+    args,
+    clearedGitEnvKeys: GIT_ENV_KEYS_TO_CLEAR,
+    cwd,
+    overrideGitEnvKeys: Object.keys(env ?? {}).filter((key) => key.startsWith("GIT_")),
+  });
+  const result = await runChildProcess("git", args, buildCommandLine("git", args), {
+    cwd,
+    env: createGitCommandEnv(env),
+    timeoutMs,
+  });
+
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || "Git command failed.");
+  }
+
+  return result;
+}
+
+async function runChildProcess(
+  command: string,
+  args: readonly string[],
+  displayCommand: string,
+  options: RunShellCommandOptions,
+): Promise<ShellCommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(shellPath, getShellCommandArgs(shellPath, command, options.interactiveShell), {
+    const child = spawn(command, [...args], {
       cwd: options.cwd,
       env: options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -53,7 +93,7 @@ export async function runShellCommand(
     child.on("close", (exitCode) => {
       clearTimeout(timer);
       if (didTimeOut) {
-        reject(new Error(`Command timed out: ${command}`));
+        reject(new Error(`Command timed out: ${displayCommand}`));
         return;
       }
 
@@ -71,23 +111,39 @@ export async function runShellCommand(
   });
 }
 
-export async function runGitCommand(
-  cwd: string,
-  args: readonly string[],
-  timeoutMs = 60_000,
-  env?: NodeJS.ProcessEnv,
-): Promise<ShellCommandResult> {
-  const result = await runShellCommand(buildCommandLine("git", args), {
-    cwd,
-    env,
-    timeoutMs,
-  });
+const GIT_ENV_KEYS_TO_CLEAR = [
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_COMMON_DIR",
+  "GIT_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_PREFIX",
+  "GIT_WORK_TREE",
+] as const;
 
-  if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || "Git command failed.");
+function createGitCommandEnv(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const nextEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+  };
+
+  for (const key of GIT_ENV_KEYS_TO_CLEAR) {
+    delete nextEnv[key];
   }
 
-  return result;
+  if (!overrides) {
+    return nextEnv;
+  }
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) {
+      delete nextEnv[key];
+      continue;
+    }
+
+    nextEnv[key] = value;
+  }
+
+  return nextEnv;
 }
 
 export async function runGitStdout(

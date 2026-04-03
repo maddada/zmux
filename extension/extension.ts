@@ -31,6 +31,10 @@ export function activate(context: vscode.ExtensionContext): void {
     registerSlotFocusCommand("VSmux.focusSessionSlot", workspace),
     registerVisibleCountCommand("VSmux.showOne", workspace, 1),
     registerVisibleCountCommand("VSmux.showTwo", workspace, 2),
+    registerVisibleCountCommand("VSmux.showThree", workspace, 3),
+    registerVisibleCountCommand("VSmux.showFour", workspace, 4),
+    registerVisibleCountCommand("VSmux.showSix", workspace, 6),
+    registerVisibleCountCommand("VSmux.showNine", workspace, 9),
     registerCommand("VSmux.toggleFullscreenSession", async () => {
       await workspace.toggleFullscreenSession();
       await workspace.revealSidebar();

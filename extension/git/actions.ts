@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { GitTextGenerationSettings } from "../../shared/git-text-generation-provider";
 import { getSidebarGitDisabledReason, type SidebarGitAction } from "../../shared/sidebar-git";
+import { logVSmuxDebug } from "../vsmux-debug-log";
 import { generateCommitMessage, generatePrContent } from "./text-generation";
 import {
   getGitStatusDetails,
@@ -58,6 +59,7 @@ export async function prepareSidebarGitCommit(
   if (!commitContext) {
     throw new Error("No changes available to commit.");
   }
+  logGitCommitContext("prepareSidebarGitCommit", commitContext);
 
   input.onProgress?.("Generating commit message...");
   const generated = await generateCommitMessage({
@@ -164,6 +166,7 @@ async function commitWorkingTree(
     if (!commitContext) {
       throw new Error("No working tree changes to commit.");
     }
+    logGitCommitContext("commitWorkingTree", commitContext);
 
     onProgress?.("Generating commit message...");
     const commitMessage = await generateCommitMessage({
@@ -292,6 +295,34 @@ async function loadCommitContextFromIndex(
     stagedPatch,
     stagedSummary,
   };
+}
+
+function logGitCommitContext(
+  event: string,
+  context: { scope: SidebarGitCommitScope; stagedPatch: string; stagedSummary: string },
+): void {
+  const stagedFiles = context.stagedSummary
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+
+  logVSmuxDebug(`git.commitContext.${event}`, {
+    patchLength: context.stagedPatch.length,
+    patchPreview: truncateDebugPreview(context.stagedPatch),
+    scope: context.scope,
+    stagedFiles,
+    stagedSummaryLength: context.stagedSummary.length,
+  });
+}
+
+function truncateDebugPreview(value: string, maxLength = 400): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength)}...`;
 }
 
 async function loadCommitContextFromTemporaryIndex(

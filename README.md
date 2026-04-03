@@ -74,7 +74,7 @@ VSmux works great with my other tool that shows all running agent sessions in a 
 1. Open the Command Palette.
 2. Run `VSmux: Open Workspace`.
 3. Create your first session.
-4. Use the sidebar and hotkeys to change the number of visible sessions and switch layouts.
+4. Use the sidebar and hotkeys to change the visible split count and jump between sessions and groups.
 
 ## Settings
 
@@ -104,7 +104,7 @@ That document is the current source of truth for:
 
 ### Session Management
 
-- **Create, rename, restart, and close** terminal sessions from the sidebar
+- **Create, rename, and close** terminal sessions from the sidebar
 - **Session groups** — organize sessions into up to 4 named groups, rename groups, and drag sessions between them
 - **Drag-and-drop reordering** — reorder sessions within and across groups, reorder command buttons
 - **Session aliases** — each session gets an auto-generated word alias (Atlas, Beacon, Comet, etc.)
@@ -112,12 +112,11 @@ That document is the current source of truth for:
 
 ### Layout & Views
 
-- **Three view modes** — Horizontal, Vertical, and Grid layouts (Cmd+Alt+H/V/G)
 - **Configurable visible count** — show 1, 2, 3, 4, 6, or 9 sessions at once
-- **Fullscreen / focus mode** — toggle a single session to fill the entire view (Cmd+Alt+F)
 - **Session slot hotkeys** — jump to any session slot with Cmd+Alt+1–9
-- **Group focus hotkeys** — switch between groups with Ctrl+Alt+Shift+1–4
-- **Directional focus navigation** — move focus up/right/down/left across sessions
+- **Group focus hotkeys** — switch between groups with Cmd/Ctrl+Alt+Shift+1–4
+- **Directional focus navigation** — move focus up/right/down/left across sessions with Cmd/Ctrl+Alt+Shift+Arrow keys
+- **Split count hotkeys** — set 1, 2, 3, 4, 6, or 9 visible splits with the Cmd/Ctrl+Alt+S chord
 
 ### Agent Launchers
 
@@ -158,14 +157,13 @@ That document is the current source of truth for:
 | Action                 | macOS              | Windows/Linux      |
 | ---------------------- | ------------------ | ------------------ |
 | Focus session slot 1–9 | Cmd+Alt+1–9        | Ctrl+Alt+1–9       |
-| Focus group 1–4        | Ctrl+Alt+Shift+1–4 | Ctrl+Alt+Shift+1–4 |
-| Horizontal view        | Cmd+Alt+H          | Ctrl+Alt+H         |
-| Vertical view          | Cmd+Alt+V          | Ctrl+Alt+V         |
-| Grid view              | Cmd+Alt+G          | Ctrl+Alt+G         |
-| Fullscreen toggle      | Cmd+Alt+F          | Ctrl+Alt+F         |
+| New session            | Cmd+Alt+N          | Ctrl+Alt+N         |
+| Open settings          | Cmd+Alt+,          | Ctrl+Alt+,         |
+| Change sidebar         | Cmd+Alt+B          | Ctrl+Alt+B         |
+| Focus group 1–4        | Cmd+Alt+Shift+1–4  | Ctrl+Alt+Shift+1–4 |
+| Focus up/right/down/left | Cmd+Alt+Shift+Arrow | Ctrl+Alt+Shift+Arrow |
 | Rename active session  | Cmd+Alt+R          | Ctrl+Alt+R         |
-| Show 6 terminals       | Cmd+Alt+Shift+6    | Ctrl+Alt+Shift+6   |
-| Show 9 terminals       | Cmd+Alt+Shift+9    | Ctrl+Alt+Shift+9   |
+| Show 1/2/3/4/6/9 splits | Cmd+Alt+S, then 1/2/3/4/6/9 | Ctrl+Alt+S, then 1/2/3/4/6/9 |
 
 ### Other
 

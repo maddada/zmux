@@ -26,6 +26,10 @@ export const T3Pane: React.FC<T3PaneProps> = ({
     iframeRef.current?.contentWindow?.postMessage({ type: "focusComposer" }, "*");
   };
 
+  const postToFrame = (message: Record<string, unknown>) => {
+    iframeRef.current?.contentWindow?.postMessage(message, "*");
+  };
+
   useEffect(() => {
     const blob = new Blob([pane.html], { type: "text/html" });
     const blobUrl = URL.createObjectURL(blob);
@@ -64,9 +68,48 @@ export const T3Pane: React.FC<T3PaneProps> = ({
     requestComposerFocus();
   }, [autoFocusRequest, isFocused]);
 
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow || typeof event.data?.type !== "string") {
+        return;
+      }
+
+      if (event.data.type === "vsmuxT3ClipboardWrite") {
+        const text = typeof event.data.text === "string" ? event.data.text : "";
+        void navigator.clipboard.writeText(text).catch(() => {});
+        return;
+      }
+
+      if (event.data.type === "vsmuxT3ClipboardReadRequest") {
+        const requestId =
+          typeof event.data.requestId === "number" ? event.data.requestId : undefined;
+        if (requestId === undefined) {
+          return;
+        }
+
+        void navigator.clipboard
+          .readText()
+          .catch(() => "")
+          .then((text) => {
+            postToFrame({
+              requestId,
+              text,
+              type: "vsmuxT3ClipboardReadResult",
+            });
+          });
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
+  }, []);
+
   return (
     <div className="t3-pane-root" onMouseDown={onFocus}>
       <iframe
+        allow="clipboard-read; clipboard-write"
         className="t3-pane-frame"
         onLoad={() => {
           if (!isFocused) {

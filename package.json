@@ -167,6 +167,26 @@
         "category": "VSmux"
       },
       {
+        "command": "VSmux.showThree",
+        "title": "Show 3 Terminals",
+        "category": "VSmux"
+      },
+      {
+        "command": "VSmux.showFour",
+        "title": "Show 4 Terminals",
+        "category": "VSmux"
+      },
+      {
+        "command": "VSmux.showSix",
+        "title": "Show 6 Terminals",
+        "category": "VSmux"
+      },
+      {
+        "command": "VSmux.showNine",
+        "title": "Show 9 Terminals",
+        "category": "VSmux"
+      },
+      {
         "command": "VSmux.toggleFullscreenSession",
         "title": "Toggle Fullscreen Session",
         "category": "VSmux"
@@ -519,6 +539,24 @@
     },
     "keybindings": [
       {
+        "command": "VSmux.createSession",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "VSmux.openSettings",
+        "key": "ctrl+alt+,",
+        "mac": "cmd+alt+,",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "VSmux.moveToSecondarySidebar",
+        "key": "ctrl+alt+b",
+        "mac": "cmd+alt+b",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
         "command": "VSmux.focusGroup1",
         "key": "ctrl+alt+shift+1",
         "mac": "cmd+alt+shift+1",
@@ -612,22 +650,64 @@
         "when": "!inputFocus || terminalFocus"
       },
       {
-        "command": "VSmux.toggleFullscreenSession",
-        "key": "ctrl+alt+f",
-        "mac": "cmd+alt+f",
+        "command": "VSmux.focusUp",
+        "key": "ctrl+alt+shift+up",
+        "mac": "cmd+alt+shift+up",
         "when": "terminalFocus"
       },
       {
-        "command": "workbench.action.toggleMaximizedPanel",
-        "key": "ctrl+alt+f",
-        "mac": "cmd+alt+f",
-        "when": "panelFocus && !terminalFocus"
+        "command": "VSmux.focusRight",
+        "key": "ctrl+alt+shift+right",
+        "mac": "cmd+alt+shift+right",
+        "when": "terminalFocus"
       },
       {
-        "command": "workbench.action.toggleMaximizeEditorGroup",
-        "key": "ctrl+alt+f",
-        "mac": "cmd+alt+f",
-        "when": "!panelFocus && !terminalFocus"
+        "command": "VSmux.focusDown",
+        "key": "ctrl+alt+shift+down",
+        "mac": "cmd+alt+shift+down",
+        "when": "terminalFocus"
+      },
+      {
+        "command": "VSmux.focusLeft",
+        "key": "ctrl+alt+shift+left",
+        "mac": "cmd+alt+shift+left",
+        "when": "terminalFocus"
+      },
+      {
+        "command": "VSmux.showOne",
+        "key": "ctrl+alt+s 1",
+        "mac": "cmd+alt+s 1",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "VSmux.showTwo",
+        "key": "ctrl+alt+s 2",
+        "mac": "cmd+alt+s 2",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "VSmux.showThree",
+        "key": "ctrl+alt+s 3",
+        "mac": "cmd+alt+s 3",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "VSmux.showFour",
+        "key": "ctrl+alt+s 4",
+        "mac": "cmd+alt+s 4",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "VSmux.showSix",
+        "key": "ctrl+alt+s 6",
+        "mac": "cmd+alt+s 6",
+        "when": "!inputFocus || terminalFocus"
+      },
+      {
+        "command": "VSmux.showNine",
+        "key": "ctrl+alt+s 9",
+        "mac": "cmd+alt+s 9",
+        "when": "!inputFocus || terminalFocus"
       }
     ]
   },
