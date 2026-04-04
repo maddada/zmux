@@ -143,6 +143,21 @@ describe("buildCopyResumeCommandText", () => {
     ).toBe("gemini -y --list-sessions && echo 'Enter gemini -y -r id' to resume a session");
   });
 
+  test("should copy copilot guidance text", () => {
+    expect(
+      buildCopyResumeCommandText(
+        {
+          agentId: "copilot",
+          command: "copilot",
+        },
+        "copilot",
+        "Session 06",
+      ),
+    ).toBe(
+      "copilot --continue && echo 'Or use copilot --resume to pick a session, or copilot --resume SESSION-ID if you know it'",
+    );
+  });
+
   test("should copy opencode guidance text", () => {
     expect(
       buildCopyResumeCommandText(
@@ -229,6 +244,22 @@ describe("buildDetachedResumeAction", () => {
     ).toEqual({
       shouldExecute: false,
       text: "gemini -y -r ",
+    });
+  });
+
+  test("should prefill copilot resume text without executing", () => {
+    expect(
+      buildDetachedResumeAction(
+        {
+          agentId: "copilot",
+          command: "copilot",
+        },
+        "copilot",
+        "Session 09",
+      ),
+    ).toEqual({
+      shouldExecute: false,
+      text: "copilot --resume ",
     });
   });
 

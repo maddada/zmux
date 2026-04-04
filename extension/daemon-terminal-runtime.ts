@@ -11,6 +11,7 @@ import type {
   TerminalHostListSessionsRequest,
   TerminalHostRequest,
   TerminalHostResponse,
+  TerminalHostSyncSessionLeasesRequest,
   TerminalHostWriteRequest,
   TerminalHostResizeRequest,
   TerminalHostKillRequest,
@@ -78,7 +79,10 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
 
   public readonly onDidChangeSessionState = this.onDidChangeSessionStateEmitter.event;
 
-  public constructor(private readonly context: vscode.ExtensionContext) {}
+  public constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly workspaceId: string,
+  ) {}
 
   public dispose(): void {
     this.controlSocket?.close();
@@ -124,6 +128,22 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
       idleShutdownTimeoutMs,
       requestId: this.nextRequestId(),
       type: "configure",
+    };
+    await this.sendRequest(request);
+  }
+
+  public async syncSessionLeases(
+    workspaceId: string,
+    sessionIds: string[],
+    leaseDurationMs: number | null,
+  ): Promise<void> {
+    await this.ensureReady();
+    const request: TerminalHostSyncSessionLeasesRequest = {
+      leaseDurationMs,
+      requestId: this.nextRequestId(),
+      sessionIds,
+      type: "syncSessionLeases",
+      workspaceId,
     };
     await this.sendRequest(request);
   }
@@ -471,7 +491,10 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   }
 
   private getDaemonStateDir(): string {
-    return path.join(this.context.globalStorageUri.fsPath, DAEMON_STATE_DIR_NAME);
+    return path.join(
+      this.context.globalStorageUri.fsPath,
+      `${DAEMON_STATE_DIR_NAME}-${this.workspaceId}`,
+    );
   }
 
   private async tryAcquireLaunchLock(

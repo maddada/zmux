@@ -62,6 +62,8 @@ export function buildCopyResumeCommandText(
       return `${agentCommand} --list-sessions && echo 'Enter ${agentCommand} -r id' to resume a session`;
     case "opencode":
       return `${agentCommand} list && echo 'Enter ${agentCommand} -s id' to resume a session`;
+    case "copilot":
+      return `${agentCommand} --continue && echo 'Or use ${agentCommand} --resume to pick a session, or ${agentCommand} --resume SESSION-ID if you know it'`;
     default:
       return undefined;
   }
@@ -106,6 +108,11 @@ export function buildDetachedResumeAction(
       return {
         shouldExecute: false,
         text: `${agentCommand} -s `,
+      };
+    case "copilot":
+      return {
+        shouldExecute: false,
+        text: `${agentCommand} --resume `,
       };
     default:
       return undefined;
@@ -215,7 +222,7 @@ function resolveAgentCommand(
 function resolveBuiltInAgentId(
   agentLaunch: StoredSessionAgentLaunch | undefined,
   agentIconId: SidebarAgentIcon | undefined,
-): "codex" | "claude" | "gemini" | "opencode" | undefined {
+): "codex" | "claude" | "copilot" | "gemini" | "opencode" | undefined {
   const storedAgentId = normalizeStoredAgentId(agentLaunch?.agentId);
   if (storedAgentId) {
     return storedAgentId;
@@ -225,6 +232,7 @@ function resolveBuiltInAgentId(
   if (
     sidebarAgent?.agentId === "codex" ||
     sidebarAgent?.agentId === "claude" ||
+    sidebarAgent?.agentId === "copilot" ||
     sidebarAgent?.agentId === "gemini" ||
     sidebarAgent?.agentId === "opencode"
   ) {
@@ -236,12 +244,13 @@ function resolveBuiltInAgentId(
 
 function normalizeStoredAgentId(
   agentId: string | undefined,
-): "codex" | "claude" | "gemini" | "opencode" | undefined {
+): "codex" | "claude" | "copilot" | "gemini" | "opencode" | undefined {
   const normalizedAgentId = agentId?.trim().toLowerCase();
   const sidebarAgent = getDefaultSidebarAgentById(normalizedAgentId);
   if (
     sidebarAgent?.agentId === "codex" ||
     sidebarAgent?.agentId === "claude" ||
+    sidebarAgent?.agentId === "copilot" ||
     sidebarAgent?.agentId === "gemini" ||
     sidebarAgent?.agentId === "opencode"
   ) {

@@ -200,7 +200,7 @@ function isWorkspaceMessage(candidate: unknown): candidate is WorkspacePanelToEx
   if (message.type === "focusSession" || message.type === "closeSession") {
     return typeof message.sessionId === "string" && message.sessionId.length > 0;
   }
-  if (message.type === "syncSessionOrder") {
+  if (message.type === "syncPaneOrder" || message.type === "syncSessionOrder") {
     return (
       typeof message.groupId === "string" &&
       message.groupId.length > 0 &&

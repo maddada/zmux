@@ -2,11 +2,11 @@ import type {
   SidebarCollapsibleSection,
   VisibleSessionCount,
   SidebarToExtensionMessage,
-} from '../../shared/session-grid-contract';
-import type { TerminalViewMode } from '../../shared/session-grid-contract';
-import type { SidebarActionType } from '../../shared/sidebar-commands';
-import type { SidebarAgentIcon } from '../../shared/sidebar-agents';
-import type { SidebarGitAction } from '../../shared/sidebar-git';
+} from "../../shared/session-grid-contract";
+import type { TerminalViewMode } from "../../shared/session-grid-contract";
+import type { SidebarActionType } from "../../shared/sidebar-commands";
+import type { SidebarAgentIcon } from "../../shared/sidebar-agents";
+import type { SidebarGitAction } from "../../shared/sidebar-git";
 
 export type SidebarMessageHandlers = {
   adjustTerminalFontSize: (delta: -1 | 1) => Promise<void>;
@@ -16,6 +16,7 @@ export type SidebarMessageHandlers = {
   closeSession: (sessionId: string) => Promise<void>;
   confirmSidebarGitCommit: (requestId: string, subject: string) => Promise<void>;
   copyResumeCommand: (sessionId: string) => Promise<void>;
+  fullReloadSession: (sessionId: string) => Promise<void>;
   cancelSidebarGitCommit: (requestId: string) => Promise<void>;
   createGroup: () => Promise<void>;
   createGroupFromSession: (sessionId: string) => Promise<void>;
@@ -26,8 +27,8 @@ export type SidebarMessageHandlers = {
   killTerminalDaemon: () => Promise<void>;
   deleteSidebarAgent: (agentId: string) => Promise<void>;
   deleteSidebarCommand: (commandId: string) => Promise<void>;
-  focusGroup: (groupId: string, source?: 'sidebar') => Promise<void>;
-  focusSession: (sessionId: string, source?: 'sidebar' | 'workspace') => Promise<void>;
+  focusGroup: (groupId: string, source?: "sidebar") => Promise<void>;
+  focusSession: (sessionId: string, source?: "sidebar" | "workspace") => Promise<void>;
   moveSessionToGroup: (sessionId: string, groupId: string, targetIndex?: number) => Promise<void>;
   moveSidebarToOtherSide: () => Promise<void>;
   openBrowser: () => Promise<void>;
@@ -45,12 +46,15 @@ export type SidebarMessageHandlers = {
   runSidebarGitAction: (action: SidebarGitAction) => Promise<void>;
   setSidebarGitCommitConfirmationEnabled: (enabled: boolean) => Promise<void>;
   saveScratchPad: (content: string) => Promise<void>;
-  setSidebarSectionCollapsed: (section: SidebarCollapsibleSection, collapsed: boolean) => Promise<void>;
+  setSidebarSectionCollapsed: (
+    section: SidebarCollapsibleSection,
+    collapsed: boolean,
+  ) => Promise<void>;
   saveSidebarAgent: (
     agentId: string | undefined,
     name: string,
     command: string,
-    icon?: SidebarAgentIcon
+    icon?: SidebarAgentIcon,
   ) => Promise<void>;
   saveSidebarCommand: (
     commandId: string | undefined,
@@ -58,7 +62,7 @@ export type SidebarMessageHandlers = {
     actionType: SidebarActionType,
     closeTerminalOnExit?: boolean,
     command?: string,
-    url?: string
+    url?: string,
   ) => Promise<void>;
   syncSidebarAgentOrder: (agentIds: readonly string[]) => Promise<void>;
   setSidebarGitPrimaryAction: (action: SidebarGitAction) => Promise<void>;
@@ -73,175 +77,180 @@ export type SidebarMessageHandlers = {
 
 export async function dispatchSidebarMessage(
   message: SidebarToExtensionMessage,
-  handlers: SidebarMessageHandlers
+  handlers: SidebarMessageHandlers,
 ): Promise<void> {
-  if (message.type !== 'ready') {
+  if (message.type !== "ready") {
     handlers.clearStartupSidebarRefreshes();
   }
 
   switch (message.type) {
-    case 'ready':
+    case "ready":
       await handlers.refreshSidebarHydrate();
       return;
-    case 'createSession':
+    case "createSession":
       await handlers.createSession();
       return;
-    case 'openBrowser':
+    case "openBrowser":
       await handlers.openBrowser();
       return;
-    case 'createSessionInGroup':
+    case "createSessionInGroup":
       await handlers.createSessionInGroup(message.groupId);
       return;
-    case 'focusGroup':
-      await handlers.focusGroup(message.groupId, 'sidebar');
+    case "focusGroup":
+      await handlers.focusGroup(message.groupId, "sidebar");
       return;
-    case 'toggleFullscreenSession':
+    case "toggleFullscreenSession":
       await handlers.toggleFullscreenSession();
       return;
-    case 'openSettings':
+    case "openSettings":
       await handlers.openSettings();
       return;
-    case 'toggleCompletionBell':
+    case "toggleCompletionBell":
       await handlers.toggleCompletionBell();
       return;
-    case 'adjustTerminalFontSize':
+    case "adjustTerminalFontSize":
       await handlers.adjustTerminalFontSize(message.delta);
       return;
-    case 'refreshDaemonSessions':
+    case "refreshDaemonSessions":
       await handlers.refreshDaemonSessions();
       return;
-    case 'killTerminalDaemon':
+    case "killTerminalDaemon":
       await handlers.killTerminalDaemon();
       return;
-    case 'killDaemonSession':
+    case "killDaemonSession":
       await handlers.killDaemonSession(message.workspaceId, message.sessionId);
       return;
-    case 'moveSidebarToOtherSide':
+    case "moveSidebarToOtherSide":
       await handlers.moveSidebarToOtherSide();
       return;
-    case 'runSidebarAgent':
+    case "runSidebarAgent":
       await handlers.runSidebarAgent(message.agentId);
       return;
-    case 'runSidebarCommand':
+    case "runSidebarCommand":
       await handlers.runSidebarCommand(message.commandId);
       return;
-    case 'runSidebarGitAction':
+    case "runSidebarGitAction":
       await handlers.runSidebarGitAction(message.action);
       return;
-    case 'setSidebarGitPrimaryAction':
+    case "setSidebarGitPrimaryAction":
       await handlers.setSidebarGitPrimaryAction(message.action);
       return;
-    case 'refreshGitState':
+    case "refreshGitState":
       await handlers.refreshGitState();
       return;
-    case 'setSidebarGitCommitConfirmationEnabled':
+    case "setSidebarGitCommitConfirmationEnabled":
       await handlers.setSidebarGitCommitConfirmationEnabled(message.enabled);
       return;
-    case 'confirmSidebarGitCommit':
+    case "confirmSidebarGitCommit":
       await handlers.confirmSidebarGitCommit(message.requestId, message.subject);
       return;
-    case 'cancelSidebarGitCommit':
+    case "cancelSidebarGitCommit":
       await handlers.cancelSidebarGitCommit(message.requestId);
       return;
-    case 'saveSidebarAgent':
+    case "saveSidebarAgent":
       await handlers.saveSidebarAgent(message.agentId, message.name, message.command, message.icon);
       return;
-    case 'saveSidebarCommand':
+    case "saveSidebarCommand":
       await handlers.saveSidebarCommand(
         message.commandId,
         message.name,
         message.actionType,
         message.closeTerminalOnExit,
         message.command,
-        message.url
+        message.url,
       );
       return;
-    case 'deleteSidebarAgent':
+    case "deleteSidebarAgent":
       await handlers.deleteSidebarAgent(message.agentId);
       return;
-    case 'syncSidebarAgentOrder':
+    case "syncSidebarAgentOrder":
       await handlers.syncSidebarAgentOrder(message.agentIds);
       return;
-    case 'deleteSidebarCommand':
+    case "deleteSidebarCommand":
       await handlers.deleteSidebarCommand(message.commandId);
       return;
-    case 'syncSidebarCommandOrder':
+    case "syncSidebarCommandOrder":
       await handlers.syncSidebarCommandOrder(message.commandIds);
       return;
-    case 'focusSession':
+    case "focusSession":
       if (message.sessionId) {
-        await handlers.focusSession(message.sessionId, 'sidebar');
+        await handlers.focusSession(message.sessionId, "sidebar");
       }
       return;
-    case 'promptRenameSession':
+    case "promptRenameSession":
       if (message.sessionId) {
         await handlers.promptRenameSession(message.sessionId);
       }
       return;
-    case 'restartSession':
+    case "restartSession":
       if (message.sessionId) {
         await handlers.restartSession(message.sessionId);
       }
       return;
-    case 'renameSession':
+    case "renameSession":
       if (message.sessionId) {
         await handlers.renameSession(message.sessionId, message.title);
       }
       return;
-    case 'renameGroup':
+    case "renameGroup":
       await handlers.renameGroup(message.groupId, message.title);
       return;
-    case 'closeGroup':
+    case "closeGroup":
       await handlers.closeGroup(message.groupId);
       return;
-    case 'closeSession':
+    case "closeSession":
       if (message.sessionId) {
         await handlers.closeSession(message.sessionId);
       }
       return;
-    case 'copyResumeCommand':
+    case "copyResumeCommand":
       if (message.sessionId) {
         await handlers.copyResumeCommand(message.sessionId);
       }
       return;
-    case 'restorePreviousSession':
+    case "fullReloadSession":
+      if (message.sessionId) {
+        await handlers.fullReloadSession(message.sessionId);
+      }
+      return;
+    case "restorePreviousSession":
       await handlers.restorePreviousSession(message.historyId);
       return;
-    case 'deletePreviousSession':
+    case "deletePreviousSession":
       await handlers.deletePreviousSession(message.historyId);
       return;
-    case 'clearGeneratedPreviousSessions':
+    case "clearGeneratedPreviousSessions":
       await handlers.clearGeneratedPreviousSessions();
       return;
-    case 'saveScratchPad':
+    case "saveScratchPad":
       await handlers.saveScratchPad(message.content);
       return;
-    case 'setSidebarSectionCollapsed':
+    case "setSidebarSectionCollapsed":
       await handlers.setSidebarSectionCollapsed(message.section, message.collapsed);
       return;
-    case 'createGroup':
+    case "createGroup":
       await handlers.createGroup();
       return;
-    case 'moveSessionToGroup':
+    case "moveSessionToGroup":
       await handlers.moveSessionToGroup(message.sessionId, message.groupId, message.targetIndex);
       return;
-    case 'createGroupFromSession':
+    case "createGroupFromSession":
       await handlers.createGroupFromSession(message.sessionId);
       return;
-    case 'setVisibleCount':
+    case "setVisibleCount":
       if (message.visibleCount) {
         await handlers.setVisibleCount(message.visibleCount);
       }
       return;
-    case 'setViewMode':
+    case "setViewMode":
       if (message.viewMode) {
         await handlers.setViewMode(message.viewMode);
       }
       return;
-    case 'syncSessionOrder':
+    case "syncSessionOrder":
       await handlers.syncSessionOrder(message.groupId, message.sessionIds);
       return;
-    case 'syncGroupOrder':
+    case "syncGroupOrder":
       await handlers.syncGroupOrder(message.groupIds);
       return;
   }

@@ -6,7 +6,7 @@
 }
 
 .terminal-pane-root-hidden {
-  display: none;
+  visibility: hidden;
 }
 
 .terminal-pane-canvas {

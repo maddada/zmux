@@ -62,7 +62,9 @@ export const ToolbarActions: Story = {
 
     await step("keep the split menu available on right click", async () => {
       resetSidebarStoryMessages();
-      const splitModeButton = canvas.getByRole("button", { name: "Select split count for Group 4" });
+      const splitModeButton = canvas.getByRole("button", {
+        name: "Select split count for Group 4",
+      });
       await openContextMenu(splitModeButton);
       await body.findByRole("menuitem", { name: "Show 3 splits" });
       await body.findByRole("menuitem", { name: "Show 4 splits" });
@@ -163,6 +165,16 @@ export const SessionCardActions: Story = {
       await userEvent.click(await body.findByRole("menuitem", { name: "Copy resume" }));
 
       await expectMessage({ sessionId: "session-3", type: "copyResumeCommand" });
+    });
+
+    await step("full reload through the session context menu", async () => {
+      resetSidebarStoryMessages();
+
+      const sessionCard = await findSessionCard();
+      await openContextMenu(sessionCard);
+      await userEvent.click(await body.findByRole("menuitem", { name: "Full reload" }));
+
+      await expectMessage({ sessionId: "session-3", type: "fullReloadSession" });
     });
 
     await step("terminate through the session context menu", async () => {

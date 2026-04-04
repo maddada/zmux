@@ -76,11 +76,21 @@ body {
 }
 
 .workspace-pane-hidden {
-  display: none;
+  height: 100vh;
+  left: -200vw;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  visibility: hidden;
+  width: 100vw;
+  z-index: -1;
+}
+
+.workspace-pane-active {
+  border-color: var(--workspace-active-pane-border-color, rgba(90, 134, 255, 0.95));
 }
 
 .workspace-pane-focused {
-  border-color: var(--workspace-active-pane-border-color, rgba(90, 134, 255, 0.95));
   box-shadow:
     0 0 0 1px var(--workspace-active-pane-border-color, rgba(90, 134, 255, 0.95)),
     0 18px 32px rgba(0, 0, 0, 0.28);
@@ -109,17 +119,24 @@ body {
 
 .workspace-pane-header-draggable {
   cursor: grab;
+  touch-action: none;
   user-select: none;
+  -webkit-user-drag: none;
 }
 
 .workspace-pane-header-draggable:active {
   cursor: grabbing;
 }
 
+.workspace-pane-header-draggable * {
+  -webkit-user-drag: none;
+}
+
 .workspace-pane-title {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  pointer-events: none;
 }
 
 .workspace-pane-header-actions {

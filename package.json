@@ -335,6 +335,12 @@
           "default": true,
           "description": "Whether the VSmux terminal cursor blinks."
         },
+        "VSmux.terminalScrollToBottomWhenTyping": {
+          "title": "Scroll To Bottom When Typing",
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, typing more than 3 characters in very quick succession automatically scrolls the active VSmux terminal to the bottom."
+        },
         "VSmux.workspacePaneGap": {
           "title": "Workspace Pane Gap",
           "type": "number",

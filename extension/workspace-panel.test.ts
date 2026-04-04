@@ -119,7 +119,34 @@ describe("WorkspacePanelManager", () => {
     manager.dispose();
   });
 
-  test("should forward session reorder messages from the workspace webview", async () => {
+  test("should forward pane reorder messages from the workspace webview", async () => {
+    const onMessage = vi.fn();
+    const manager = new WorkspacePanelManager({
+      context: createMockContext(),
+      onMessage,
+    });
+
+    await manager.reveal();
+
+    const panel = createdPanels[0];
+    expect(panel).toBeDefined();
+
+    panel.webview.messageListeners[0]?.({
+      groupId: "group-1",
+      sessionIds: ["session-2", "session-1"],
+      type: "syncPaneOrder",
+    });
+
+    expect(onMessage).toHaveBeenCalledWith({
+      groupId: "group-1",
+      sessionIds: ["session-2", "session-1"],
+      type: "syncPaneOrder",
+    });
+
+    manager.dispose();
+  });
+
+  test("should keep accepting legacy session reorder messages from the workspace webview", async () => {
     const onMessage = vi.fn();
     const manager = new WorkspacePanelManager({
       context: createMockContext(),
@@ -183,6 +210,7 @@ describe("WorkspacePanelManager", () => {
         fontSize: 12,
         letterSpacing: 0,
         lineHeight: 1,
+        scrollToBottomWhenTyping: false,
       },
       type: "sessionState",
       viewMode: "grid",

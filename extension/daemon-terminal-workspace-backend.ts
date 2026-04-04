@@ -50,6 +50,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   private readonly changeSessionTitleEmitter =
     new vscode.EventEmitter<TerminalWorkspaceBackendTitleChange>();
   private readonly runtime: DaemonTerminalRuntime;
+  private leaseRenewalTimer: NodeJS.Timeout | undefined;
   private pollTimer: NodeJS.Timeout | undefined;
   private readonly sessionRecordBySessionId = new Map<string, TerminalSessionRecord>();
   private readonly sessionTitleBySessionId = new Map<string, string>();
@@ -60,13 +61,15 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   public readonly onDidChangeSessions = this.changeSessionsEmitter.event;
 
   public constructor(private readonly options: DaemonTerminalWorkspaceBackendOptions) {
-    this.runtime = new DaemonTerminalRuntime(options.context);
+    this.runtime = new DaemonTerminalRuntime(options.context, options.workspaceId);
   }
 
   public async initialize(sessionRecords: readonly SessionRecord[]): Promise<void> {
     this.syncSessions(sessionRecords);
     await this.runtime.ensureReady();
     await this.runtime.configure(this.getIdleShutdownTimeoutMs());
+    await this.syncManagedSessionLeases();
+    this.restartLeaseRenewalTimer();
     this.runtime.onDidChangeSessionState((snapshot) => {
       if (snapshot.workspaceId !== this.options.workspaceId) {
         return;
@@ -119,6 +122,10 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   }
 
   public dispose(): void {
+    if (this.leaseRenewalTimer) {
+      clearInterval(this.leaseRenewalTimer);
+      this.leaseRenewalTimer = undefined;
+    }
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = undefined;
@@ -251,10 +258,14 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         this.sessionTitleBySessionId.delete(sessionId);
       }
     }
+
+    void this.syncManagedSessionLeases();
   }
 
   public async syncConfiguration(): Promise<void> {
     await this.runtime.configure(this.getIdleShutdownTimeoutMs());
+    await this.syncManagedSessionLeases();
+    this.restartLeaseRenewalTimer();
   }
 
   public async writeText(sessionId: string, data: string, shouldExecute = true): Promise<void> {
@@ -321,7 +332,6 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     for (const [sessionId, sessionRecord] of this.sessionRecordBySessionId) {
       const nextSnapshot =
         nextSnapshotsBySessionId.get(sessionId) ??
-        this.sessions.get(sessionId) ??
         (await this.createPersistedDisconnectedSnapshot(
           sessionRecord.sessionId,
           this.options.workspaceId,
@@ -366,6 +376,42 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     }
 
     return Math.max(0, Math.round(timeoutMinutes * 60_000));
+  }
+
+  private getManagedTerminalSessionIds(): string[] {
+    return [...this.sessionRecordBySessionId.keys()].sort();
+  }
+
+  private async syncManagedSessionLeases(): Promise<void> {
+    try {
+      await this.runtime.syncSessionLeases(
+        this.options.workspaceId,
+        this.getManagedTerminalSessionIds(),
+        this.getIdleShutdownTimeoutMs(),
+      );
+    } catch (error) {
+      logVSmuxDebug("backend.daemon.syncSessionLeases.failed", {
+        error: error instanceof Error ? error.message : String(error),
+        sessionCount: this.sessionRecordBySessionId.size,
+        workspaceId: this.options.workspaceId,
+      });
+    }
+  }
+
+  private restartLeaseRenewalTimer(): void {
+    if (this.leaseRenewalTimer) {
+      clearInterval(this.leaseRenewalTimer);
+      this.leaseRenewalTimer = undefined;
+    }
+
+    const leaseDurationMs = this.getIdleShutdownTimeoutMs();
+    const intervalMs =
+      leaseDurationMs === null
+        ? 60_000
+        : Math.max(5_000, Math.min(60_000, Math.floor(leaseDurationMs / 3)));
+    this.leaseRenewalTimer = setInterval(() => {
+      void this.syncManagedSessionLeases();
+    }, intervalMs);
   }
 
   private getSessionAgentStateFilePath(sessionId: string): string {

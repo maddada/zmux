@@ -15,6 +15,7 @@ import {
   readPersistedSessionStateFromFile,
   updatePersistedSessionStateFile,
 } from "./session-state-file";
+import { resolvePersistedSessionPresentationState } from "./terminal-daemon-session-state";
 import {
   getTitleActivityWindowMs,
   acknowledgeTitleDerivedSessionActivity,
@@ -34,6 +35,7 @@ import type {
   TerminalHostRequest,
   TerminalHostResponse,
   TerminalHostSessionStateEvent,
+  TerminalHostSyncSessionLeasesRequest,
   TerminalHostWriteRequest,
   TerminalHostResizeRequest,
   TerminalInputMessage,
@@ -69,6 +71,7 @@ type ManagedSession = {
   shell: string;
   snapshot: TerminalSessionSnapshot;
   workspaceId: string;
+  leaseExpiresAt?: number | null;
 };
 
 type ControlClient = {
@@ -100,7 +103,7 @@ const pendingSessionAttachmentSockets = new Set<WebSocket>();
 const sessionSocketsBySessionKey = new Map<string, WebSocket>();
 
 let idleShutdownTimeoutMs: number | null = DEFAULT_IDLE_SHUTDOWN_TIMEOUT_MS;
-let idleShutdownTimer: NodeJS.Timeout | undefined;
+let lifecycleTimer: NodeJS.Timeout | undefined;
 let daemonInfo: DaemonInfo | undefined;
 
 const server = createServer();
@@ -176,7 +179,7 @@ process.on("SIGINT", () => {
 });
 
 function attachControlSocket(socket: WebSocket): void {
-  clearIdleShutdownTimer();
+  clearLifecycleTimer();
   const client = { socket };
   controlClients.add(client);
   socket.send(JSON.stringify({ type: "authenticated" }));
@@ -186,11 +189,11 @@ function attachControlSocket(socket: WebSocket): void {
   });
   socket.on("close", () => {
     controlClients.delete(client);
-    scheduleIdleShutdownIfNeeded();
+    scheduleDaemonLifecycleCheckIfNeeded();
   });
   socket.on("error", () => {
     controlClients.delete(client);
-    scheduleIdleShutdownIfNeeded();
+    scheduleDaemonLifecycleCheckIfNeeded();
   });
 }
 
@@ -212,7 +215,7 @@ function attachSessionSocket(
     return;
   }
 
-  clearIdleShutdownTimer();
+  clearLifecycleTimer();
   const initialCols = parsePositiveNumber(searchParams.get("cols"));
   const initialRows = parsePositiveNumber(searchParams.get("rows"));
   void attachSessionSocketWithReplay(session, sessionKey, socket, initialCols, initialRows);
@@ -232,6 +235,9 @@ async function handleControlMessage(client: ControlClient, rawMessage: string): 
       return;
     case "configure":
       await handleConfigureRequest(client.socket, request);
+      return;
+    case "syncSessionLeases":
+      await handleSyncSessionLeasesRequest(client.socket, request);
       return;
     case "createOrAttach":
       await handleCreateOrAttachRequest(client.socket, request);
@@ -261,8 +267,29 @@ async function handleConfigureRequest(
   request: TerminalHostConfigureRequest,
 ): Promise<void> {
   idleShutdownTimeoutMs = request.idleShutdownTimeoutMs;
-  clearIdleShutdownTimer();
-  scheduleIdleShutdownIfNeeded();
+  clearLifecycleTimer();
+  scheduleDaemonLifecycleCheckIfNeeded();
+  socket.send(JSON.stringify(okResponse(request.requestId)));
+}
+
+async function handleSyncSessionLeasesRequest(
+  socket: WebSocket,
+  request: TerminalHostSyncSessionLeasesRequest,
+): Promise<void> {
+  const leasedSessionIds = new Set(request.sessionIds);
+  const leasedUntil =
+    request.leaseDurationMs === null ? null : Date.now() + Math.max(0, request.leaseDurationMs);
+
+  for (const session of sessions.values()) {
+    if (session.workspaceId !== request.workspaceId) {
+      continue;
+    }
+
+    session.leaseExpiresAt = leasedSessionIds.has(session.sessionId) ? leasedUntil : undefined;
+  }
+
+  clearLifecycleTimer();
+  scheduleDaemonLifecycleCheckIfNeeded();
   socket.send(JSON.stringify(okResponse(request.requestId)));
 }
 
@@ -406,6 +433,7 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
     },
     titleCarryover: "",
     workspaceId: request.workspaceId,
+    leaseExpiresAt: undefined,
   };
 
   spawnedPty.onData((data: string) => {
@@ -626,27 +654,26 @@ async function persistSessionLiveTitle(session: ManagedSession, title: string): 
 }
 
 async function persistSessionPresentationState(session: ManagedSession): Promise<void> {
-  const nextAgentName = session.titleActivity?.agentName;
-  const nextAgentStatus = session.titleActivity?.activity ?? "idle";
-  const nextTitle = session.liveTitle ?? session.lastKnownPersistedTitle;
-
   const persistedState = await updatePersistedSessionStateFile(
     session.sessionStateFilePath,
     (currentState) => {
+      const nextState = resolvePersistedSessionPresentationState(currentState, {
+        lastKnownPersistedTitle: session.lastKnownPersistedTitle,
+        liveTitle: session.liveTitle,
+        snapshotAgentName: session.snapshot.agentName,
+        snapshotAgentStatus: session.snapshot.agentStatus,
+        titleActivityAgentName: session.titleActivity?.agentName,
+        titleActivityStatus: session.titleActivity?.activity,
+      });
       if (
-        currentState.agentName === nextAgentName &&
-        currentState.agentStatus === nextAgentStatus &&
-        currentState.title === nextTitle
+        currentState.agentName === nextState.agentName &&
+        currentState.agentStatus === nextState.agentStatus &&
+        currentState.title === nextState.title
       ) {
         return currentState;
       }
 
-      return {
-        ...currentState,
-        agentName: nextAgentName,
-        agentStatus: nextAgentStatus,
-        title: nextTitle,
-      };
+      return nextState;
     },
   ).catch(() => undefined);
 
@@ -712,23 +739,36 @@ function applySessionTitleActivity(session: ManagedSession): void {
   void persistSessionPresentationState(session);
 }
 
-function scheduleIdleShutdownIfNeeded(): void {
+function scheduleDaemonLifecycleCheckIfNeeded(): void {
   if (getConnectedClientCount() > 0) {
     return;
   }
+
+  const remainingLeaseDelayMs = getRemainingLeaseDelayMs();
+  if (remainingLeaseDelayMs === Infinity) {
+    return;
+  }
+
+  clearLifecycleTimer();
+  if (remainingLeaseDelayMs !== undefined) {
+    lifecycleTimer = setTimeout(() => {
+      void expireLeasedSessionsAndMaybeShutdown();
+    }, remainingLeaseDelayMs);
+    return;
+  }
+
   if (idleShutdownTimeoutMs === null || idleShutdownTimeoutMs <= 0) {
     return;
   }
-  clearIdleShutdownTimer();
-  idleShutdownTimer = setTimeout(() => {
+  lifecycleTimer = setTimeout(() => {
     void shutdown("idle-timeout");
   }, idleShutdownTimeoutMs);
 }
 
-function clearIdleShutdownTimer(): void {
-  if (idleShutdownTimer) {
-    clearTimeout(idleShutdownTimer);
-    idleShutdownTimer = undefined;
+function clearLifecycleTimer(): void {
+  if (lifecycleTimer) {
+    clearTimeout(lifecycleTimer);
+    lifecycleTimer = undefined;
   }
 }
 
@@ -739,7 +779,7 @@ function getConnectedClientCount(): number {
 }
 
 async function shutdown(reason = "unknown"): Promise<void> {
-  clearIdleShutdownTimer();
+  clearLifecycleTimer();
   void logDaemonDebug("daemon.shutdown", {
     pid: process.pid,
     reason,
@@ -757,6 +797,80 @@ async function shutdown(reason = "unknown"): Promise<void> {
     server.close(() => resolve());
   });
   process.exit(0);
+}
+
+function getRemainingLeaseDelayMs(): number | undefined {
+  let earliestLeaseExpiryAt: number | undefined;
+
+  for (const session of sessions.values()) {
+    if (session.leaseExpiresAt === undefined) {
+      continue;
+    }
+    if (session.leaseExpiresAt === null) {
+      return Infinity;
+    }
+    earliestLeaseExpiryAt =
+      earliestLeaseExpiryAt === undefined
+        ? session.leaseExpiresAt
+        : Math.min(earliestLeaseExpiryAt, session.leaseExpiresAt);
+  }
+
+  if (earliestLeaseExpiryAt === undefined) {
+    return undefined;
+  }
+
+  return Math.max(0, earliestLeaseExpiryAt - Date.now());
+}
+
+async function expireLeasedSessionsAndMaybeShutdown(): Promise<void> {
+  clearLifecycleTimer();
+  if (getConnectedClientCount() > 0) {
+    return;
+  }
+
+  const now = Date.now();
+  for (const [sessionKey, session] of sessions) {
+    if (
+      session.leaseExpiresAt !== undefined &&
+      session.leaseExpiresAt !== null &&
+      session.leaseExpiresAt <= now
+    ) {
+      void logDaemonDebug("daemon.sessionLeaseExpired", {
+        sessionId: session.sessionId,
+        sessionKey,
+        workspaceId: session.workspaceId,
+      });
+      try {
+        session.pty.kill();
+      } catch {
+        // Ignore process shutdown races when expiring leased sessions.
+      }
+      sessions.delete(sessionKey);
+    }
+  }
+
+  const remainingLeaseDelayMs = getRemainingLeaseDelayMs();
+  if (remainingLeaseDelayMs === Infinity) {
+    return;
+  }
+  if (remainingLeaseDelayMs !== undefined) {
+    lifecycleTimer = setTimeout(() => {
+      void expireLeasedSessionsAndMaybeShutdown();
+    }, remainingLeaseDelayMs);
+    return;
+  }
+
+  if (sessions.size === 0) {
+    await shutdown("lease-expired");
+    return;
+  }
+
+  if (idleShutdownTimeoutMs === null || idleShutdownTimeoutMs <= 0) {
+    return;
+  }
+  lifecycleTimer = setTimeout(() => {
+    void shutdown("idle-timeout");
+  }, idleShutdownTimeoutMs);
 }
 
 async function logDaemonDebug(event: string, details?: unknown): Promise<void> {
@@ -1027,7 +1141,7 @@ function handleSessionSocketEnd(
       broadcastControlSessionState(snapshot);
     });
   }
-  scheduleIdleShutdownIfNeeded();
+  scheduleDaemonLifecycleCheckIfNeeded();
 }
 
 function clearPendingSessionAttachmentTimeout(attachment: PendingSessionAttachment): void {

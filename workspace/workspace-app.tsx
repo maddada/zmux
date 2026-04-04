@@ -4,21 +4,18 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createEditorLayoutPlan } from "../shared/editor-layout";
 import type {
   ExtensionToWorkspacePanelMessage,
-  WorkspacePanelPane,
   WorkspacePanelAutoFocusRequest,
   WorkspacePanelHydrateMessage,
+  WorkspacePanelPane,
   WorkspacePanelSessionStateMessage,
 } from "../shared/workspace-panel-contract";
-import {
-  getOrderedSessions,
-  getVisiblePrimaryTitle,
-  getVisibleTerminalTitle,
-} from "../shared/session-grid-contract";
+import { getVisiblePrimaryTitle, getVisibleTerminalTitle } from "../shared/session-grid-contract";
 import { logWorkspaceDebug } from "./workspace-debug";
 import { WorkspacePaneCloseButton } from "./workspace-pane-close-button";
 import { WorkspacePaneRefreshButton } from "./workspace-pane-refresh-button";
@@ -47,10 +44,19 @@ type WorkspaceShellStyle = CSSProperties & {
 type WorkspacePanePointerDragState = {
   isDragging: boolean;
   pointerId: number;
+  pointerTarget: HTMLElement;
   sourcePaneId: string;
   startX: number;
   startY: number;
 };
+
+type WorkspaceAutoFocusGuard = {
+  expiresAt: number;
+  requestId: number;
+  sessionId: string;
+};
+
+const AUTO_FOCUS_ACTIVATION_GUARD_MS = 400;
 
 export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = window, vscode }) => {
   const [isWorkspaceFocused, setIsWorkspaceFocused] = useState(
@@ -66,6 +72,8 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const [dropTargetPaneId, setDropTargetPaneId] = useState<string | undefined>();
   const [terminalRefreshRequestId, setTerminalRefreshRequestId] = useState(0);
   const focusRequestSequenceRef = useRef(0);
+  const debuggingModeRef = useRef<boolean | undefined>(undefined);
+  const autoFocusGuardRef = useRef<WorkspaceAutoFocusGuard | undefined>(undefined);
   const pointerDragStateRef = useRef<WorkspacePanePointerDragState | undefined>(undefined);
   const pendingFocusRequestRef = useRef<
     | {
@@ -85,6 +93,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     serverState && (serverState.type === "hydrate" || serverState.type === "sessionState")
       ? serverState
       : undefined;
+  debuggingModeRef.current = workspaceState?.debuggingMode;
 
   const postWorkspaceDebugLog = (
     enabled: boolean | undefined,
@@ -153,6 +162,19 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           durationMs: Math.round(performance.now() - pendingFocusRequestRef.current.startedAt),
           requestId: pendingFocusRequestRef.current.requestId,
           sessionId: pendingFocusRequestRef.current.sessionId,
+        });
+      }
+      if (message.autoFocusRequest) {
+        autoFocusGuardRef.current = {
+          expiresAt: performance.now() + AUTO_FOCUS_ACTIVATION_GUARD_MS,
+          requestId: message.autoFocusRequest.requestId,
+          sessionId: message.autoFocusRequest.sessionId,
+        };
+        postWorkspaceDebugLog(message.debuggingMode, "focus.autoFocusGuardArmed", {
+          expiresAt: Math.round(autoFocusGuardRef.current.expiresAt),
+          requestId: message.autoFocusRequest.requestId,
+          sessionId: message.autoFocusRequest.sessionId,
+          source: message.autoFocusRequest.source,
         });
       }
       setServerState(message);
@@ -229,7 +251,41 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     () => (localPaneOrder ? sortPanesBySessionIds(panes, localPaneOrder) : panes),
     [localPaneOrder, panes],
   );
-  const visiblePanes = useMemo(() => orderedPanes.filter((pane) => pane.isVisible), [orderedPanes]);
+  const activeGroupVisibleSessionIds = useMemo(() => {
+    if (!workspaceState) {
+      return [];
+    }
+
+    return (
+      workspaceState.workspaceSnapshot.groups.find(
+        (group) => group.groupId === workspaceState.activeGroupId,
+      )?.snapshot.visibleSessionIds ?? []
+    );
+  }, [workspaceState]);
+  const visiblePaneOrderIds = useMemo(() => {
+    if (!localPaneOrder || activeGroupVisibleSessionIds.length === 0) {
+      return activeGroupVisibleSessionIds;
+    }
+
+    const activeVisibleSessionIdSet = new Set(activeGroupVisibleSessionIds);
+    const reorderedVisiblePaneIds = localPaneOrder.filter((sessionId) =>
+      activeVisibleSessionIdSet.has(sessionId),
+    );
+    return reorderedVisiblePaneIds.length === activeGroupVisibleSessionIds.length
+      ? reorderedVisiblePaneIds
+      : activeGroupVisibleSessionIds;
+  }, [activeGroupVisibleSessionIds, localPaneOrder]);
+  const visiblePanes = useMemo(() => {
+    if (visiblePaneOrderIds.length === 0) {
+      return orderedPanes.filter((pane) => pane.isVisible);
+    }
+
+    const visiblePaneIdSet = new Set(visiblePaneOrderIds);
+    return sortPanesBySessionIds(
+      panes.filter((pane) => pane.isVisible && visiblePaneIdSet.has(pane.sessionId)),
+      visiblePaneOrderIds,
+    );
+  }, [orderedPanes, panes, visiblePaneOrderIds]);
   const visiblePaneLayoutBySessionId = useMemo(() => {
     const resolvedViewMode = workspaceState?.viewMode ?? "grid";
     const rowLengths = createEditorLayoutPlan(
@@ -342,15 +398,31 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     });
   };
 
-  const requestPaneReorder = (sourcePaneId: string, targetPaneId: string) => {
-    if (!workspaceState) {
-      return;
+  const shouldIgnorePaneActivation = (sessionId: string): boolean => {
+    const autoFocusGuard = autoFocusGuardRef.current;
+    if (!autoFocusGuard) {
+      return false;
     }
 
-    const activeGroup = workspaceState.workspaceSnapshot.groups.find(
-      (group) => group.groupId === workspaceState.activeGroupId,
-    );
-    if (!activeGroup) {
+    if (performance.now() > autoFocusGuard.expiresAt) {
+      autoFocusGuardRef.current = undefined;
+      return false;
+    }
+
+    if (autoFocusGuard.sessionId === sessionId) {
+      return false;
+    }
+
+    postWorkspaceDebugLog(workspaceState?.debuggingMode, "focus.activationIgnoredDuringAutoFocus", {
+      guardedRequestId: autoFocusGuard.requestId,
+      guardedSessionId: autoFocusGuard.sessionId,
+      sessionId,
+    });
+    return true;
+  };
+
+  const requestPaneReorder = (sourcePaneId: string, targetPaneId: string) => {
+    if (!workspaceState) {
       return;
     }
 
@@ -364,25 +436,36 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       return;
     }
 
-    const nextSessionOrder = buildFullSessionOrderFromVisiblePaneOrder(
-      getOrderedSessions(activeGroup.snapshot).map((session) => session.sessionId),
+    const nextPaneOrder = buildFullSessionOrderFromVisiblePaneOrder(
+      panes.map((pane) => pane.sessionId),
       nextVisiblePaneOrder,
     );
-    if (!nextSessionOrder) {
+    if (!nextPaneOrder) {
       return;
     }
 
     setLocalPaneOrder(nextVisiblePaneOrder);
+    postWorkspaceDebugLog(workspaceState.debuggingMode, "drag.reorderRequested", {
+      groupId: workspaceState.activeGroupId,
+      nextPaneOrder,
+      nextVisiblePaneOrder,
+      sourcePaneId,
+      targetPaneId,
+    });
     vscode.postMessage({
       groupId: workspaceState.activeGroupId,
-      sessionIds: nextSessionOrder,
-      type: "syncSessionOrder",
+      sessionIds: nextPaneOrder,
+      type: "syncPaneOrder",
     });
   };
   requestPaneReorderRef.current = requestPaneReorder;
   reorderablePaneIdsRef.current = reorderablePaneIds;
 
   const clearDragState = () => {
+    const pointerDragState = pointerDragStateRef.current;
+    if (pointerDragState?.pointerTarget.hasPointerCapture(pointerDragState.pointerId)) {
+      pointerDragState.pointerTarget.releasePointerCapture(pointerDragState.pointerId);
+    }
     pointerDragStateRef.current = undefined;
     setDraggedPaneId(undefined);
     dropTargetPaneIdRef.current = undefined;
@@ -416,17 +499,30 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       if (!pointerDragState.isDragging) {
         pointerDragState.isDragging = true;
         setDraggedPaneId(pointerDragState.sourcePaneId);
+        postWorkspaceDebugLog(debuggingModeRef.current, "drag.thresholdPassed", {
+          pointerId: pointerDragState.pointerId,
+          sourcePaneId: pointerDragState.sourcePaneId,
+          startX: Math.round(pointerDragState.startX),
+          startY: Math.round(pointerDragState.startY),
+        });
       }
 
       event.preventDefault();
-      setCurrentDropTargetPaneId(
-        getWorkspacePaneDropTargetIdAtPoint(
-          event.clientX,
-          event.clientY,
-          pointerDragState.sourcePaneId,
-          reorderablePaneIdsRef.current,
-        ),
+      const nextDropTargetPaneId = getWorkspacePaneDropTargetIdAtPoint(
+        event.clientX,
+        event.clientY,
+        pointerDragState.sourcePaneId,
+        reorderablePaneIdsRef.current,
       );
+      if (dropTargetPaneIdRef.current !== nextDropTargetPaneId) {
+        postWorkspaceDebugLog(debuggingModeRef.current, "drag.dropTargetChanged", {
+          clientX: Math.round(event.clientX),
+          clientY: Math.round(event.clientY),
+          sourcePaneId: pointerDragState.sourcePaneId,
+          targetPaneId: nextDropTargetPaneId,
+        });
+      }
+      setCurrentDropTargetPaneId(nextDropTargetPaneId);
     };
 
     const handlePointerFinish = (event: PointerEvent) => {
@@ -446,6 +542,14 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           ))
         : undefined;
 
+      postWorkspaceDebugLog(debuggingModeRef.current, "drag.pointerFinish", {
+        clientX: Math.round(event.clientX),
+        clientY: Math.round(event.clientY),
+        didReorder: pointerDragState.isDragging && targetPaneId !== undefined,
+        isDragging: pointerDragState.isDragging,
+        sourcePaneId,
+        targetPaneId,
+      });
       clearDragState();
       if (!pointerDragState.isDragging || !targetPaneId) {
         return;
@@ -489,7 +593,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           debuggingMode={workspaceState.debuggingMode}
           isFocused={presentedFocusedSessionId === pane.sessionId}
           isWorkspaceFocused={isWorkspaceFocused}
-          key={pane.sessionId}
+          key={pane.kind === "terminal" ? `${pane.sessionId}:${pane.renderNonce}` : pane.sessionId}
           layoutStyle={visiblePaneLayoutBySessionId.get(pane.sessionId)}
           onLocalFocus={() => {
             postWorkspaceDebugLog(workspaceState.debuggingMode, "focus.localFocusVisual", {
@@ -515,14 +619,30 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           }
           isDragging={draggedPaneId === pane.sessionId}
           isDropTarget={dropTargetPaneId === pane.sessionId && draggedPaneId !== pane.sessionId}
+          onHeaderNativeDragStart={(event) => {
+            postWorkspaceDebugLog(workspaceState.debuggingMode, "drag.nativeDragPrevented", {
+              sourcePaneId: pane.sessionId,
+            });
+            preventWorkspacePaneNativeDrag(event);
+          }}
           onHeaderPointerDown={(event) => {
             if (pane.kind !== "terminal" || !pane.isVisible || event.button !== 0) {
               return;
             }
 
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            postWorkspaceDebugLog(workspaceState.debuggingMode, "drag.pointerDown", {
+              clientX: Math.round(event.clientX),
+              clientY: Math.round(event.clientY),
+              pointerId: event.pointerId,
+              pointerType: event.pointerType,
+              sourcePaneId: pane.sessionId,
+            });
             pointerDragStateRef.current = {
               isDragging: false,
               pointerId: event.pointerId,
+              pointerTarget: event.currentTarget,
               sourcePaneId: pane.sessionId,
               startX: event.clientX,
               startY: event.clientY,
@@ -557,6 +677,7 @@ type WorkspacePaneViewProps = {
   onFocus: () => void;
   onClose: () => void;
   onHeaderPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
+  onHeaderNativeDragStart: (event: ReactDragEvent<HTMLElement>) => void;
   onRefreshAllTerminals: () => void;
   pane: WorkspacePanelPane;
   refreshRequestId: number;
@@ -578,6 +699,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
   onFocus,
   onClose,
   onHeaderPointerDown,
+  onHeaderNativeDragStart,
   onRefreshAllTerminals,
   pane,
   refreshRequestId,
@@ -589,6 +711,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
     <section
       className={[
         "workspace-pane",
+        isFocused ? "workspace-pane-active" : "",
         isFocused && isWorkspaceFocused ? "workspace-pane-focused" : "",
         canDrag ? "workspace-pane-reorderable" : "",
         isDragging ? "workspace-pane-dragging" : "",
@@ -611,7 +734,9 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
     >
       <header
         className={`workspace-pane-header ${canDrag ? "workspace-pane-header-draggable" : ""}`}
-        onPointerDown={canDrag ? onHeaderPointerDown : undefined}
+        draggable={false}
+        onDragStart={canDrag ? onHeaderNativeDragStart : undefined}
+        onPointerDownCapture={canDrag ? onHeaderPointerDown : undefined}
       >
         <div className="workspace-pane-title">{primaryTitle}</div>
         {pane.kind === "terminal" ? (
@@ -631,6 +756,10 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
             isFocused={isFocused}
             isVisible={pane.isVisible}
             onActivate={() => {
+              if (shouldIgnorePaneActivation(pane.sessionId)) {
+                return;
+              }
+
               onLocalFocus();
               if (!isFocused) {
                 onFocus();
@@ -667,6 +796,10 @@ function getWorkspacePanePrimaryTitle(pane: WorkspacePanelPane): string {
   }
 
   return pane.sessionRecord.alias;
+}
+
+function preventWorkspacePaneNativeDrag(event: ReactDragEvent<HTMLElement>): void {
+  event.preventDefault();
 }
 
 function safeSerializeWorkspaceDebugDetails(details: Record<string, unknown>): string {

@@ -17,6 +17,8 @@ import "./terminal-pane.css";
 
 const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 const RESTTY_STARTUP_BACKGROUND = "#121212";
+const TYPING_AUTO_SCROLL_BURST_WINDOW_MS = 450;
+const TYPING_AUTO_SCROLL_TRIGGER_COUNT = 4;
 const SCROLL_TO_BOTTOM_THRESHOLD_PX = 200;
 const SCROLL_TO_BOTTOM_HIDE_THRESHOLD_PX = 40;
 const SEARCH_RESULTS_EMPTY = {
@@ -54,6 +56,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   refreshRequestId,
   terminalAppearance,
 }) => {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const debugLogRef = useRef(debugLog);
   const debuggingModeRef = useRef(debuggingMode);
@@ -68,6 +71,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const connectPtyStartedRef = useRef(false);
   const maintenanceProbeIdRef = useRef(0);
   const latestTermSizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  const rapidTypingCountRef = useRef(0);
+  const rapidTypingWindowStartedAtRef = useRef(0);
   const rendererModeRef = useRef<string | null>(null);
   const resttyRef = useRef<Restty | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -367,6 +372,43 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     });
   };
 
+  const noteRapidTypingAndMaybeScrollToBottom = (event: KeyboardEvent | React.KeyboardEvent) => {
+    if (!terminalAppearance.scrollToBottomWhenTyping || !isVisible) {
+      rapidTypingCountRef.current = 0;
+      rapidTypingWindowStartedAtRef.current = 0;
+      return;
+    }
+
+    if (
+      event.defaultPrevented ||
+      event.isComposing ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      event.key.length !== 1
+    ) {
+      rapidTypingCountRef.current = 0;
+      rapidTypingWindowStartedAtRef.current = 0;
+      return;
+    }
+
+    const now = performance.now();
+    if (now - rapidTypingWindowStartedAtRef.current > TYPING_AUTO_SCROLL_BURST_WINDOW_MS) {
+      rapidTypingWindowStartedAtRef.current = now;
+      rapidTypingCountRef.current = 1;
+      return;
+    }
+
+    rapidTypingCountRef.current += 1;
+    if (rapidTypingCountRef.current < TYPING_AUTO_SCROLL_TRIGGER_COUNT) {
+      return;
+    }
+
+    rapidTypingCountRef.current = 0;
+    rapidTypingWindowStartedAtRef.current = 0;
+    scrollTerminalToBottom();
+  };
+
   const sendRawTerminalInput = (data: string) => {
     if (!data) {
       return false;
@@ -533,7 +575,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   };
 
   const connectTerminalWhenReady = async (sourceLabel: string) => {
-    if (connection.mock || connectPtyStartedRef.current || !isVisible) {
+    if (connection.mock || connectPtyStartedRef.current) {
       return;
     }
 
@@ -714,6 +756,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       connectPtyStartedRef.current = false;
       maintenanceProbeIdRef.current += 1;
       latestTermSizeRef.current = null;
+      rapidTypingCountRef.current = 0;
+      rapidTypingWindowStartedAtRef.current = 0;
       rendererModeRef.current = null;
       setShowScrollToBottom(false);
       setSearchResults(SEARCH_RESULTS_EMPTY);
@@ -757,16 +801,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   }, [isVisible, refreshRequestId]);
 
   useEffect(() => {
-    if (!isVisible) {
-      setShowScrollToBottom(false);
-      return;
-    }
-
-    runVisibleMaintenance("visible-effect");
     const container = containerRef.current;
     if (!container) {
       return;
     }
+
+    if (!isVisible) {
+      setShowScrollToBottom(false);
+    }
+
+    runVisibleMaintenance("visible-effect");
 
     const handleCapturedScroll = () => {
       updateScrollToBottomVisibility();
@@ -857,9 +901,46 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     });
   }, [autoFocusRequest, isVisible, pane.sessionId]);
 
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+
+    const handleFocusIn = () => {
+      requestAnimationFrame(() => {
+        if (!root.matches(":focus-within")) {
+          return;
+        }
+
+        reportDebug("terminal.focusActivate", {
+          sessionId: pane.sessionId,
+        });
+        onActivate();
+      });
+    };
+
+    root.addEventListener("focusin", handleFocusIn);
+    return () => {
+      root.removeEventListener("focusin", handleFocusIn);
+    };
+  }, [onActivate, pane.sessionId]);
+
   return (
     <div
       className={`terminal-pane-root ${isVisible ? "" : "terminal-pane-root-hidden"}`.trim()}
+      ref={rootRef}
+      onPointerDownCapture={(event) => {
+        if (event.button !== 0 && event.button !== -1) {
+          return;
+        }
+
+        reportDebug("terminal.pointerActivate", {
+          pointerType: event.pointerType,
+          sessionId: pane.sessionId,
+        });
+        onActivate();
+      }}
       onKeyDownCapture={(event) => {
         const primaryModifier = IS_MAC ? event.metaKey : event.ctrlKey;
         const lowerKey = event.key.toLowerCase();
@@ -924,14 +1005,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           event.preventDefault();
           event.stopPropagation();
           void pasteClipboardText();
+          return;
         }
+
+        noteRapidTypingAndMaybeScrollToBottom(event);
       }}
       onMouseDown={(event) => {
         event.stopPropagation();
-        reportDebug("terminal.mouseActivate", {
+        reportDebug("terminal.mouseFocusRequest", {
           sessionId: pane.sessionId,
         });
-        onActivate();
         focusTerminal();
       }}
     >

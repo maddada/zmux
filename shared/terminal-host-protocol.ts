@@ -1,4 +1,4 @@
-export const TERMINAL_HOST_PROTOCOL_VERSION = 19;
+export const TERMINAL_HOST_PROTOCOL_VERSION = 20;
 
 export type TerminalSessionStatus = "starting" | "running" | "exited" | "error" | "disconnected";
 
@@ -85,6 +85,14 @@ export type TerminalHostConfigureRequest = {
   idleShutdownTimeoutMs: number | null;
 };
 
+export type TerminalHostSyncSessionLeasesRequest = {
+  type: "syncSessionLeases";
+  requestId: string;
+  workspaceId: string;
+  sessionIds: string[];
+  leaseDurationMs: number | null;
+};
+
 export type TerminalHostRequest =
   | TerminalHostAuthenticateRequest
   | TerminalHostCreateOrAttachRequest
@@ -93,7 +101,8 @@ export type TerminalHostRequest =
   | TerminalHostKillRequest
   | TerminalHostAcknowledgeAttentionRequest
   | TerminalHostListSessionsRequest
-  | TerminalHostConfigureRequest;
+  | TerminalHostConfigureRequest
+  | TerminalHostSyncSessionLeasesRequest;
 
 export type TerminalHostAuthenticatedEvent = {
   type: "authenticated";

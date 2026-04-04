@@ -154,6 +154,7 @@ function createWorkspaceStoryMessage(
     .map<WorkspacePanelTerminalPane>((session) => ({
       isVisible: true,
       kind: "terminal",
+      renderNonce: 0,
       sessionId: session.sessionId,
       sessionRecord: {
         alias: session.alias,
@@ -187,6 +188,7 @@ function createWorkspaceStoryMessage(
       fontSize: 12,
       letterSpacing: 0,
       lineHeight: 1,
+      scrollToBottomWhenTyping: false,
     },
     type: "hydrate",
     viewMode: activeGroup?.viewMode ?? "grid",

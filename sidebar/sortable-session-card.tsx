@@ -1,4 +1,4 @@
-import { IconCopy, IconPencil, IconX } from "@tabler/icons-react";
+import { IconCopy, IconPencil, IconRefresh, IconX } from "@tabler/icons-react";
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useSortable } from "@dnd-kit/react/sortable";
@@ -103,24 +103,29 @@ export function SortableSessionCard({
   const aliasHeadingRef = useRef<HTMLDivElement>(null);
   const debugInstanceIdRef = useRef(createSidebarDebugInstanceId());
   const isBrowserSession = session?.kind === "browser";
-  const canCopyResumeCommand = session ? !isBrowserSession && supportsResumeCommandCopy(session) : false;
-  const postSessionDragDebugLog = useEffectEvent((event: string, details: Record<string, unknown>) => {
-    if (!showDebugSessionNumbers) {
-      return;
-    }
+  const canCopyResumeCommand = session
+    ? !isBrowserSession && supportsResumeCommandCopy(session)
+    : false;
+  const canFullReloadSession = session ? !isBrowserSession && supportsFullReload(session) : false;
+  const postSessionDragDebugLog = useEffectEvent(
+    (event: string, details: Record<string, unknown>) => {
+      if (!showDebugSessionNumbers) {
+        return;
+      }
 
-    vscode.postMessage({
-      details: {
-        debugInstanceId: debugInstanceIdRef.current,
-        groupId,
-        index,
-        sessionId,
-        ...details,
-      },
-      event,
-      type: "sidebarDebugLog",
-    });
-  });
+      vscode.postMessage({
+        details: {
+          debugInstanceId: debugInstanceIdRef.current,
+          groupId,
+          index,
+          sessionId,
+          ...details,
+        },
+        event,
+        type: "sidebarDebugLog",
+      });
+    },
+  );
   const sortable = useSortable({
     accept: "session",
     data: createSessionDragData(groupId, session.sessionId),
@@ -217,7 +222,7 @@ export function SortableSessionCard({
       clampContextMenuPosition(
         clientX,
         clientY,
-        isBrowserSession ? 1 : canCopyResumeCommand ? 3 : 2,
+        isBrowserSession ? 1 : 2 + Number(canCopyResumeCommand) + Number(canFullReloadSession),
       ),
     );
   };
@@ -247,6 +252,14 @@ export function SortableSessionCard({
     vscode.postMessage({
       sessionId: session.sessionId,
       type: "copyResumeCommand",
+    });
+  };
+
+  const requestFullReloadSession = () => {
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      sessionId: session.sessionId,
+      type: "fullReloadSession",
     });
   };
 
@@ -431,6 +444,22 @@ export function SortableSessionCard({
                   Copy resume
                 </button>
               ) : null}
+              {canFullReloadSession ? (
+                <button
+                  className="session-context-menu-item"
+                  onClick={requestFullReloadSession}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconRefresh
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={16}
+                    stroke={1.8}
+                  />
+                  Full reload
+                </button>
+              ) : null}
               <button
                 className="session-context-menu-item session-context-menu-item-danger"
                 onClick={requestClose}
@@ -457,9 +486,14 @@ function supportsResumeCommandCopy(session: SidebarSessionItem): boolean {
   return (
     session.agentIcon === "codex" ||
     session.agentIcon === "claude" ||
+    session.agentIcon === "copilot" ||
     session.agentIcon === "gemini" ||
     session.agentIcon === "opencode"
   );
+}
+
+function supportsFullReload(session: SidebarSessionItem): boolean {
+  return session.agentIcon === "codex" || session.agentIcon === "claude";
 }
 
 let sidebarDebugInstanceCounter = 0;

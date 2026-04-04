@@ -22,6 +22,7 @@ export type WorkspacePanelTerminalAppearance = {
   fontSize: number;
   letterSpacing: number;
   lineHeight: number;
+  scrollToBottomWhenTyping: boolean;
 };
 
 export type WorkspacePanelLayoutAppearance = {
@@ -38,6 +39,7 @@ export type WorkspacePanelAutoFocusRequest = {
 export type WorkspacePanelTerminalPane = {
   kind: "terminal";
   isVisible: boolean;
+  renderNonce: number;
   sessionId: string;
   sessionRecord: TerminalSessionRecord;
   snapshot?: TerminalSessionSnapshot;
@@ -105,6 +107,12 @@ export type WorkspacePanelSyncSessionOrderMessage = {
   sessionIds: string[];
 };
 
+export type WorkspacePanelSyncPaneOrderMessage = {
+  type: "syncPaneOrder";
+  groupId: string;
+  sessionIds: string[];
+};
+
 export type WorkspacePanelDebugLogMessage = {
   details?: string;
   event: string;
@@ -115,6 +123,7 @@ export type WorkspacePanelToExtensionMessage =
   | WorkspacePanelReadyMessage
   | WorkspacePanelFocusSessionMessage
   | WorkspacePanelCloseSessionMessage
+  | WorkspacePanelSyncPaneOrderMessage
   | WorkspacePanelSyncSessionOrderMessage
   | WorkspacePanelDebugLogMessage;
 

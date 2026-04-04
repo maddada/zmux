@@ -37,6 +37,7 @@ export const TERMINAL_LINE_HEIGHT_SETTING = "terminalLineHeight";
 export const TERMINAL_LETTER_SPACING_SETTING = "terminalLetterSpacing";
 export const TERMINAL_CURSOR_STYLE_SETTING = "terminalCursorStyle";
 export const TERMINAL_CURSOR_BLINK_SETTING = "terminalCursorBlink";
+export const TERMINAL_SCROLL_TO_BOTTOM_WHEN_TYPING_SETTING = "terminalScrollToBottomWhenTyping";
 export const MIN_TERMINAL_FONT_SIZE = 8;
 export const MAX_TERMINAL_FONT_SIZE = 32;
 export const WORKSPACE_PANE_GAP_SETTING = "workspacePaneGap";
@@ -279,6 +280,14 @@ export function getTerminalCursorBlink(): boolean {
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
       .get<boolean>(TERMINAL_CURSOR_BLINK_SETTING, true) ?? true
+  );
+}
+
+export function getTerminalScrollToBottomWhenTyping(): boolean {
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<boolean>(TERMINAL_SCROLL_TO_BOTTOM_WHEN_TYPING_SETTING, false) ?? false
   );
 }
 

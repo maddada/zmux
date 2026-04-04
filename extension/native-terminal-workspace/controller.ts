@@ -91,8 +91,18 @@ import {
 import { dispatchSidebarMessage } from "./sidebar-message-dispatch";
 import { finalizeRestoredPreviousSession } from "./restore-previous-session";
 import {
+  getWorkspacePaneSessionRecords,
+  sortWorkspacePaneSessionRecords,
+} from "./workspace-pane-session-projection";
+import {
+  deleteWorkspacePaneOrderPreference,
+  getWorkspacePaneOrderPreference,
+  syncWorkspacePaneOrderPreference,
+} from "./workspace-pane-order-preferences";
+import {
   buildCopyResumeCommandText,
   buildDetachedResumeAction,
+  buildResumeAgentCommand,
   loadStoredSessionAgentLaunches,
   persistSessionAgentLaunches,
   type StoredSessionAgentLaunch,
@@ -128,6 +138,7 @@ import {
   getWorkspaceActivePaneBorderColor,
   getWorkspacePaneGap,
   getTerminalCursorBlink,
+  getTerminalScrollToBottomWhenTyping,
   getTerminalCursorStyle,
   getTerminalFontFamily,
   getTerminalFontSize,
@@ -172,6 +183,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private readonly sessionAgentLaunchBySessionId: Map<string, StoredSessionAgentLaunch>;
   private readonly store: SessionGridStore;
   private readonly terminalTitleBySessionId = new Map<string, string>();
+  private readonly terminalPaneRenderNonceBySessionId = new Map<string, number>();
   private readonly lastPostedSidebarPresentationBySessionId = new Map<
     string,
     {
@@ -241,8 +253,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           return;
         }
 
-        if (message.type === "syncSessionOrder") {
-          await this.syncSessionOrder(message.groupId, message.sessionIds);
+        if (message.type === "syncPaneOrder" || message.type === "syncSessionOrder") {
+          await this.syncWorkspacePaneOrder(message.groupId, message.sessionIds);
         }
       },
     });
@@ -691,6 +703,35 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await vscode.env.clipboard.writeText(commandText);
   }
 
+  public async fullReloadSession(sessionId?: string): Promise<void> {
+    if (!sessionId) {
+      return;
+    }
+
+    const sessionRecord = this.store.getSession(sessionId);
+    if (!sessionRecord || sessionRecord.kind !== "terminal") {
+      return;
+    }
+
+    const resumeCommand = buildResumeAgentCommand(
+      this.sessionAgentLaunchBySessionId.get(sessionId),
+      this.getSidebarAgentIconForSession(sessionId),
+      sessionRecord.title,
+      this.terminalTitleBySessionId.get(sessionId),
+    );
+    if (!resumeCommand) {
+      void vscode.window.showInformationMessage(
+        "Full reload is only available for Codex and Claude sessions.",
+      );
+      return;
+    }
+
+    this.bumpTerminalPaneRenderNonce(sessionId);
+    await this.backend.restartSession(sessionRecord);
+    await this.backend.writeText(sessionId, resumeCommand, true);
+    await this.afterStateChange();
+  }
+
   public async setVisibleCount(visibleCount: VisibleSessionCount): Promise<void> {
     await this.store.setVisibleCount(visibleCount);
     await this.afterStateChange();
@@ -1121,6 +1162,26 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
   }
 
+  public async syncWorkspacePaneOrder(
+    groupId: string,
+    sessionIds: readonly string[],
+  ): Promise<void> {
+    const changed = await syncWorkspacePaneOrderPreference(
+      this.context,
+      this.workspaceId,
+      groupId,
+      sessionIds,
+    );
+    logVSmuxDebug("controller.syncWorkspacePaneOrder", {
+      changed,
+      groupId,
+      requestedSessionIds: [...sessionIds],
+    });
+    if (changed) {
+      await this.refreshWorkspacePanel();
+    }
+  }
+
   public async syncGroupOrder(groupIds: readonly string[]): Promise<void> {
     const changed = await this.store.syncGroupOrder(groupIds);
     if (changed) {
@@ -1168,6 +1229,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       .map((sessionRecord) => this.createArchivedSessionEntry(sessionRecord))
       .filter((entry): entry is PreviousSessionHistoryEntry => entry !== undefined);
     await this.store.removeGroup(groupId);
+    await deleteWorkspacePaneOrderPreference(this.context, this.workspaceId, groupId);
     await this.refreshSidebarFromCurrentState();
     for (const sessionRecord of group.snapshot.sessions) {
       await this.disposeSurface(sessionRecord);
@@ -1223,6 +1285,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       confirmSidebarGitCommit: async (requestId, subject) =>
         this.confirmSidebarGitCommit(requestId, subject),
       copyResumeCommand: async (sessionId) => this.copyResumeCommand(sessionId),
+      fullReloadSession: async (sessionId) => this.fullReloadSession(sessionId),
       createGroup: async () => this.createGroup(),
       createGroupFromSession: async (sessionId) => this.createGroupFromSession(sessionId),
       createSession: async () => this.createSession(),
@@ -1903,6 +1966,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     this.pendingT3SessionIds.delete(sessionId);
     this.sidebarAgentIconBySessionId.delete(sessionId);
     this.sessionAgentLaunchBySessionId.delete(sessionId);
+    this.terminalPaneRenderNonceBySessionId.delete(sessionId);
     this.terminalTitleBySessionId.delete(sessionId);
     this.lastKnownActivityBySessionId.delete(sessionId);
     this.workingStartedAtBySessionId.delete(sessionId);
@@ -2431,16 +2495,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   ): Promise<ExtensionToWorkspacePanelMessage> {
     const workspaceSnapshot = this.store.getSnapshot();
     const activeSnapshot = this.getActiveSnapshot();
-    const activeGroup = workspaceSnapshot.groups.find(
-      (group) => group.groupId === workspaceSnapshot.activeGroupId,
-    );
-    const activeGroupSessions = (activeGroup?.snapshot.sessions ?? []).filter(
-      (sessionRecord): sessionRecord is SessionRecord => sessionRecord !== undefined,
-    );
-    const allTerminalSessions = workspaceSnapshot.groups.flatMap((group) =>
-      group.snapshot.sessions.filter(
-        (sessionRecord): sessionRecord is SessionRecord =>
-          sessionRecord !== undefined && sessionRecord.kind === "terminal",
+    const activeGroupSessions = sortWorkspacePaneSessionRecords(
+      getWorkspacePaneSessionRecords(workspaceSnapshot),
+      getWorkspacePaneOrderPreference(
+        this.context,
+        this.workspaceId,
+        workspaceSnapshot.activeGroupId,
       ),
     );
     const visibleSessionIdSet = new Set(activeSnapshot.visibleSessionIds);
@@ -2451,14 +2511,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     const autoFocusRequest = this.consumeWorkspaceAutoFocusRequest();
     const panes = (
       await Promise.all(
-        [
-          ...allTerminalSessions,
-          ...activeGroupSessions.filter((sessionRecord) => sessionRecord.kind !== "terminal"),
-        ].map(async (sessionRecord) => {
+        activeGroupSessions.map(async (sessionRecord) => {
           if (sessionRecord.kind === "terminal") {
             return {
               kind: "terminal" as const,
               isVisible: visibleSessionIdSet.has(sessionRecord.sessionId),
+              renderNonce: this.getTerminalPaneRenderNonce(sessionRecord.sessionId),
               sessionId: sessionRecord.sessionId,
               sessionRecord,
               snapshot: this.backend.getSessionSnapshot(sessionRecord.sessionId),
@@ -2530,7 +2588,19 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       fontSize: getTerminalFontSize(),
       letterSpacing: getTerminalLetterSpacing(),
       lineHeight: getTerminalLineHeight(),
+      scrollToBottomWhenTyping: getTerminalScrollToBottomWhenTyping(),
     };
+  }
+
+  private getTerminalPaneRenderNonce(sessionId: string): number {
+    return this.terminalPaneRenderNonceBySessionId.get(sessionId) ?? 0;
+  }
+
+  private bumpTerminalPaneRenderNonce(sessionId: string): void {
+    this.terminalPaneRenderNonceBySessionId.set(
+      sessionId,
+      this.getTerminalPaneRenderNonce(sessionId) + 1,
+    );
   }
 
   private getWorkspaceLayoutAppearance() {

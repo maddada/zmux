@@ -286,6 +286,7 @@ function createWorkspaceMessage(
     .map<WorkspacePanelTerminalPane>((sessionRecord) => ({
       isVisible: true,
       kind: "terminal",
+      renderNonce: 0,
       sessionId: sessionRecord.sessionId,
       sessionRecord,
       terminalTitle:
@@ -310,6 +311,7 @@ function createWorkspaceMessage(
       fontSize: 12,
       letterSpacing: 0,
       lineHeight: 1,
+      scrollToBottomWhenTyping: false,
     },
     type: "hydrate",
     viewMode: activeGroup?.snapshot.viewMode ?? "vertical",

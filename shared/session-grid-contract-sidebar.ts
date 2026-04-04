@@ -1,10 +1,14 @@
-import type { CompletionSoundSetting } from './completion-sound';
-import type { SidebarAgentButton, SidebarAgentIcon } from './sidebar-agents';
-import type { SidebarActionType, SidebarCommandButton } from './sidebar-commands';
-import type { SidebarGitAction, SidebarGitState } from './sidebar-git';
-import type { SessionGridSnapshot, TerminalViewMode, VisibleSessionCount } from './session-grid-contract-core';
+import type { CompletionSoundSetting } from "./completion-sound";
+import type { SidebarAgentButton, SidebarAgentIcon } from "./sidebar-agents";
+import type { SidebarActionType, SidebarCommandButton } from "./sidebar-commands";
+import type { SidebarGitAction, SidebarGitState } from "./sidebar-git";
+import type {
+  SessionGridSnapshot,
+  TerminalViewMode,
+  VisibleSessionCount,
+} from "./session-grid-contract-core";
 
-export type SidebarCollapsibleSection = 'actions' | 'agents';
+export type SidebarCollapsibleSection = "actions" | "agents";
 
 export type SidebarSectionVisibility = {
   actions: boolean;
@@ -35,8 +39,8 @@ export function createDefaultSidebarSectionCollapseState(): SidebarSectionCollap
 }
 
 export type SidebarSessionItem = {
-  kind?: 'browser' | 'workspace';
-  activity: 'idle' | 'working' | 'attention';
+  kind?: "browser" | "workspace";
+  activity: "idle" | "working" | "attention";
   activityLabel?: string;
   agentIcon?: SidebarAgentIcon;
   sessionId: string;
@@ -61,7 +65,7 @@ export type SidebarPreviousSessionItem = SidebarSessionItem & {
 };
 
 export type SidebarSessionGroup = {
-  kind?: 'browser' | 'workspace';
+  kind?: "browser" | "workspace";
   groupId: string;
   isActive: boolean;
   isFocusModeActive: boolean;
@@ -89,17 +93,17 @@ export type SidebarHudState = {
   showCloseButtonOnSessionCards: boolean;
   showHotkeysOnSessionCards: boolean;
   theme:
-    | 'plain-dark'
-    | 'plain-light'
-    | 'dark-green'
-    | 'dark-blue'
-    | 'dark-red'
-    | 'dark-pink'
-    | 'dark-orange'
-    | 'light-blue'
-    | 'light-green'
-    | 'light-pink'
-    | 'light-orange';
+    | "plain-dark"
+    | "plain-light"
+    | "dark-green"
+    | "dark-blue"
+    | "dark-red"
+    | "dark-pink"
+    | "dark-orange"
+    | "light-blue"
+    | "light-green"
+    | "light-pink"
+    | "light-orange";
   highlightedVisibleCount: VisibleSessionCount;
   visibleCount: VisibleSessionCount;
   visibleSlotLabels: string[];
@@ -111,7 +115,7 @@ export type SidebarHydrateMessage = {
   previousSessions: SidebarPreviousSessionItem[];
   revision: number;
   scratchPadContent: string;
-  type: 'hydrate';
+  type: "hydrate";
   hud: SidebarHudState;
 };
 
@@ -120,18 +124,18 @@ export type SidebarSessionStateMessage = {
   previousSessions: SidebarPreviousSessionItem[];
   revision: number;
   scratchPadContent: string;
-  type: 'sessionState';
+  type: "sessionState";
   hud: SidebarHudState;
 };
 
 export type SidebarSessionPresentationChangedMessage = {
   session: SidebarSessionItem;
-  type: 'sessionPresentationChanged';
+  type: "sessionPresentationChanged";
 };
 
 export type SidebarPlayCompletionSoundMessage = {
   sound: CompletionSoundSetting;
-  type: 'playCompletionSound';
+  type: "playCompletionSound";
 };
 
 export type SidebarDaemonInfo = {
@@ -143,19 +147,19 @@ export type SidebarDaemonInfo = {
 
 export type SidebarDaemonSessionItem = {
   agentName?: string;
-  agentStatus: 'idle' | 'working' | 'attention';
+  agentStatus: "idle" | "working" | "attention";
   cols: number;
   cwd: string;
   endedAt?: string;
   errorMessage?: string;
   exitCode?: number;
   isCurrentWorkspace: boolean;
-  restoreState: 'live' | 'replayed';
+  restoreState: "live" | "replayed";
   rows: number;
   sessionId: string;
   shell: string;
   startedAt: string;
-  status: 'starting' | 'running' | 'exited' | 'error' | 'disconnected';
+  status: "starting" | "running" | "exited" | "error" | "disconnected";
   title?: string;
   workspaceId: string;
 };
@@ -164,7 +168,7 @@ export type SidebarDaemonSessionsStateMessage = {
   daemon?: SidebarDaemonInfo;
   errorMessage?: string;
   sessions: SidebarDaemonSessionItem[];
-  type: 'daemonSessionsState';
+  type: "daemonSessionsState";
 };
 
 export type SidebarPromptGitCommitMessage = {
@@ -173,7 +177,7 @@ export type SidebarPromptGitCommitMessage = {
   description: string;
   requestId: string;
   suggestedSubject: string;
-  type: 'promptGitCommit';
+  type: "promptGitCommit";
 };
 
 export type ExtensionToSidebarMessage =
@@ -186,168 +190,172 @@ export type ExtensionToSidebarMessage =
 
 export type SidebarToExtensionMessage =
   | {
-      type: 'ready';
+      type: "ready";
     }
   | {
-      type: 'openSettings';
+      type: "openSettings";
     }
   | {
-      type: 'toggleCompletionBell';
+      type: "toggleCompletionBell";
     }
   | {
       delta: -1 | 1;
-      type: 'adjustTerminalFontSize';
+      type: "adjustTerminalFontSize";
     }
   | {
-      type: 'refreshDaemonSessions';
+      type: "refreshDaemonSessions";
     }
   | {
-      type: 'killTerminalDaemon';
+      type: "killTerminalDaemon";
     }
   | {
-      type: 'killDaemonSession';
+      type: "killDaemonSession";
       sessionId: string;
       workspaceId: string;
     }
   | {
-      type: 'moveSidebarToOtherSide';
+      type: "moveSidebarToOtherSide";
     }
   | {
-      type: 'createSession';
+      type: "createSession";
     }
   | {
-      type: 'openBrowser';
+      type: "openBrowser";
     }
   | {
-      type: 'createSessionInGroup';
+      type: "createSessionInGroup";
       groupId: string;
     }
   | {
-      type: 'focusGroup';
+      type: "focusGroup";
       groupId: string;
     }
   | {
-      type: 'toggleFullscreenSession';
+      type: "toggleFullscreenSession";
     }
   | {
-      type: 'focusSession';
+      type: "focusSession";
       sessionId: string;
     }
   | {
-      type: 'promptRenameSession';
+      type: "promptRenameSession";
       sessionId: string;
     }
   | {
-      type: 'restartSession';
+      type: "restartSession";
       sessionId: string;
     }
   | {
-      type: 'renameSession';
+      type: "renameSession";
       sessionId: string;
       title: string;
     }
   | {
-      type: 'renameGroup';
+      type: "renameGroup";
       groupId: string;
       title: string;
     }
   | {
-      type: 'closeGroup';
+      type: "closeGroup";
       groupId: string;
     }
   | {
-      type: 'closeSession';
+      type: "closeSession";
       sessionId: string;
     }
   | {
-      type: 'copyResumeCommand';
+      type: "copyResumeCommand";
+      sessionId: string;
+    }
+  | {
+      type: "fullReloadSession";
       sessionId: string;
     }
   | {
       historyId: string;
-      type: 'restorePreviousSession';
+      type: "restorePreviousSession";
     }
   | {
       historyId: string;
-      type: 'deletePreviousSession';
+      type: "deletePreviousSession";
     }
   | {
-      type: 'clearGeneratedPreviousSessions';
+      type: "clearGeneratedPreviousSessions";
     }
   | {
       content: string;
-      type: 'saveScratchPad';
+      type: "saveScratchPad";
     }
   | {
       collapsed: boolean;
       section: SidebarCollapsibleSection;
-      type: 'setSidebarSectionCollapsed';
+      type: "setSidebarSectionCollapsed";
     }
   | {
-      type: 'moveSessionToGroup';
+      type: "moveSessionToGroup";
       groupId: string;
       sessionId: string;
       targetIndex?: number;
     }
   | {
-      type: 'sidebarDebugLog';
+      type: "sidebarDebugLog";
       event: string;
       details?: unknown;
     }
   | {
-      type: 'createGroupFromSession';
+      type: "createGroupFromSession";
       sessionId: string;
     }
   | {
-      type: 'createGroup';
+      type: "createGroup";
     }
   | {
-      type: 'setVisibleCount';
+      type: "setVisibleCount";
       visibleCount: VisibleSessionCount;
     }
   | {
-      type: 'setViewMode';
+      type: "setViewMode";
       viewMode: TerminalViewMode;
     }
   | {
-      type: 'syncSessionOrder';
+      type: "syncSessionOrder";
       groupId: string;
       sessionIds: string[];
     }
   | {
-      type: 'syncGroupOrder';
+      type: "syncGroupOrder";
       groupIds: string[];
     }
   | {
-      type: 'runSidebarCommand';
+      type: "runSidebarCommand";
       commandId: string;
     }
   | {
       action: SidebarGitAction;
-      type: 'runSidebarGitAction';
+      type: "runSidebarGitAction";
     }
   | {
       action: SidebarGitAction;
-      type: 'setSidebarGitPrimaryAction';
+      type: "setSidebarGitPrimaryAction";
     }
   | {
-      type: 'refreshGitState';
+      type: "refreshGitState";
     }
   | {
       enabled: boolean;
-      type: 'setSidebarGitCommitConfirmationEnabled';
+      type: "setSidebarGitCommitConfirmationEnabled";
     }
   | {
       requestId: string;
       subject: string;
-      type: 'confirmSidebarGitCommit';
+      type: "confirmSidebarGitCommit";
     }
   | {
       requestId: string;
-      type: 'cancelSidebarGitCommit';
+      type: "cancelSidebarGitCommit";
     }
   | {
-      type: 'saveSidebarCommand';
+      type: "saveSidebarCommand";
       actionType: SidebarActionType;
       closeTerminalOnExit: boolean;
       commandId?: string;
@@ -356,34 +364,39 @@ export type SidebarToExtensionMessage =
       url?: string;
     }
   | {
-      type: 'deleteSidebarCommand';
+      type: "deleteSidebarCommand";
       commandId: string;
     }
   | {
-      type: 'syncSidebarCommandOrder';
+      type: "syncSidebarCommandOrder";
       commandIds: string[];
     }
   | {
-      type: 'runSidebarAgent';
+      type: "runSidebarAgent";
       agentId: string;
     }
   | {
-      type: 'saveSidebarAgent';
+      type: "saveSidebarAgent";
       agentId?: string;
       command: string;
       icon?: SidebarAgentIcon;
       name: string;
     }
   | {
-      type: 'deleteSidebarAgent';
+      type: "deleteSidebarAgent";
       agentId: string;
     }
   | {
-      type: 'syncSidebarAgentOrder';
+      type: "syncSidebarAgentOrder";
       agentIds: string[];
     };
 
 export type SidebarHudSnapshot = Pick<
   SessionGridSnapshot,
-  'focusedSessionId' | 'fullscreenRestoreVisibleCount' | 'sessions' | 'visibleCount' | 'visibleSessionIds' | 'viewMode'
+  | "focusedSessionId"
+  | "fullscreenRestoreVisibleCount"
+  | "sessions"
+  | "visibleCount"
+  | "visibleSessionIds"
+  | "viewMode"
 >;
