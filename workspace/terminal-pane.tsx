@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { IconArrowDownBar } from "@tabler/icons-react";
 import { Restty } from "restty";
 import type { WorkspacePanelAutoFocusRequest, WorkspacePanelConnection, WorkspacePanelTerminalAppearance, WorkspacePanelTerminalPane } from "../shared/workspace-panel-contract";
 import { logWorkspaceDebug } from "./workspace-debug";
@@ -7,6 +8,7 @@ import { createWorkspaceResttyTransport, type WorkspaceResttyTransportController
 import "./terminal-pane.css";
 
 const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+const SCROLL_TO_BOTTOM_THRESHOLD_PX = 200;
 const VISIBLE_RESIZE_DELAY_MS = 2_000;
 const SEARCH_RESULTS_EMPTY = {
   resultCount: 0,
@@ -48,6 +50,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const debuggingModeRef = useRef(debuggingMode);
   const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const handledRefreshRequestIdRef = useRef(refreshRequestId);
+  const boundScrollHostRef = useRef<HTMLElement | null>(null);
   const appearanceRequestIdRef = useRef(0);
   const appliedFontSourcesSignatureRef = useRef("");
   const activePaneRef = useRef<ReturnType<Restty["activePane"]>>(null);
@@ -55,6 +58,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const transportRef = useRef<WorkspaceResttyTransportController | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultsState>(SEARCH_RESULTS_EMPTY);
 
@@ -196,6 +200,50 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     return true;
   };
 
+  const getScrollHost = () =>
+    containerRef.current?.querySelector<HTMLElement>(".restty-native-scroll-host") ?? null;
+
+  const updateScrollToBottomVisibility = () => {
+    const scrollHost = getScrollHost();
+    if (!scrollHost || !isVisible) {
+      setShowScrollToBottom(false);
+      return;
+    }
+
+    const distanceFromBottom =
+      scrollHost.scrollHeight - scrollHost.clientHeight - scrollHost.scrollTop;
+    setShowScrollToBottom(distanceFromBottom > SCROLL_TO_BOTTOM_THRESHOLD_PX);
+  };
+
+  const ensureScrollHostListener = () => {
+    const scrollHost = getScrollHost();
+    if (boundScrollHostRef.current === scrollHost) {
+      return;
+    }
+
+    if (boundScrollHostRef.current) {
+      boundScrollHostRef.current.removeEventListener("scroll", updateScrollToBottomVisibility);
+    }
+
+    boundScrollHostRef.current = scrollHost;
+    scrollHost?.addEventListener("scroll", updateScrollToBottomVisibility, { passive: true });
+    updateScrollToBottomVisibility();
+  };
+
+  const scrollTerminalToBottom = () => {
+    const scrollHost = getScrollHost();
+    if (!scrollHost) {
+      return;
+    }
+
+    scrollHost.scrollTop = scrollHost.scrollHeight;
+    requestAnimationFrame(() => {
+      scrollHost.scrollTop = scrollHost.scrollHeight;
+      updateTerminalSize();
+      updateScrollToBottomVisibility();
+    });
+  };
+
   const sendRawTerminalInput = (data: string) => {
     if (!data) {
       return false;
@@ -280,6 +328,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     resttyRef.current = restty;
     activePaneRef.current = activePane;
     applyAppearance("mount-setup");
+    ensureScrollHostListener();
 
     const onWindowFocus = () => {
       focusTerminal();
@@ -311,6 +360,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
         updateTerminalSize();
         applyAppearance("mount-visible");
+        ensureScrollHostListener();
+        updateScrollToBottomVisibility();
         if (document.hasFocus()) {
           focusTerminal();
         }
@@ -332,11 +383,14 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       appearanceRequestIdRef.current += 1;
       window.removeEventListener("focus", onWindowFocus);
       themeObserver.disconnect();
+      boundScrollHostRef.current?.removeEventListener("scroll", updateScrollToBottomVisibility);
       restty.destroy();
       transportController?.transport.destroy?.();
+      boundScrollHostRef.current = null;
       activePaneRef.current = null;
       resttyRef.current = null;
       transportRef.current = null;
+      setShowScrollToBottom(false);
       setSearchResults(SEARCH_RESULTS_EMPTY);
     };
   }, [connection.baseUrl, connection.mock, connection.token, connection.workspaceId, pane.sessionId]);
@@ -362,6 +416,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         requestAnimationFrame(() => {
           updateTerminalSize();
           applyAppearance("visible");
+          ensureScrollHostListener();
+          updateScrollToBottomVisibility();
         });
       });
     }, VISIBLE_RESIZE_DELAY_MS);
@@ -384,9 +440,28 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         updateTerminalSize();
+        updateScrollToBottomVisibility();
       });
     });
   }, [isVisible, refreshRequestId]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      setShowScrollToBottom(false);
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      ensureScrollHostListener();
+      updateScrollToBottomVisibility();
+    }, 250);
+
+    ensureScrollHostListener();
+    updateScrollToBottomVisibility();
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isVisible]);
 
   useEffect(() => {
     if (isFocused || !isSearchOpen) {
@@ -518,6 +593,20 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       }}
     >
       <div className="terminal-pane-canvas terminal-tab" ref={containerRef} />
+      {showScrollToBottom ? (
+        <button
+          aria-label="Scroll terminal to bottom"
+          className="terminal-pane-scroll-to-bottom"
+          onClick={(event) => {
+            event.stopPropagation();
+            scrollTerminalToBottom();
+            focusTerminal();
+          }}
+          type="button"
+        >
+          <IconArrowDownBar size={16} stroke={2} />
+        </button>
+      ) : null}
       {isSearchOpen ? (
         <div
           className="terminal-pane-search"

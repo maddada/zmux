@@ -13,7 +13,7 @@ All notable user-facing changes are documented in this file.
 
 - Workspace terminals now support in-pane search, including next and previous match navigation plus case-sensitive and regex search options.
 - Session restore behavior is more reliable now, with cleaner recovery of previous sessions and smoother terminal state handling while sessions come back.
-- The terminal runtime is more capable and more stable under the hood thanks to updated xterm addon integration, and VSmux should install more broadly across VS Code forks such as Windsurf, Cursor, and similar editors.
+- The terminal runtime is more capable and more stable under the hood thanks to updated terminal renderer integration, and VSmux should install more broadly across VS Code forks such as Windsurf, Cursor, and similar editors.
 
 ## 2.1.0 - 2026-03-31
 

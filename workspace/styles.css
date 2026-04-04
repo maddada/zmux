@@ -60,11 +60,6 @@ body {
   text-align: center;
 }
 
-.terminal.xterm,
-.xterm-screen {
-  height: 100% !important;
-}
-
 .workspace-pane {
   background: rgba(0, 0, 0, 0.94);
   border: 1px solid transparent;
