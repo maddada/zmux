@@ -21,12 +21,14 @@
 html,
 body,
 #root {
+  background: #121212;
   height: 100%;
   margin: 0;
   padding: 0 !important;
 }
 
 body {
+  background: #121212;
   /* background:
     radial-gradient(circle at top left, rgba(70, 105, 166, 0.24), transparent 28%),
     radial-gradient(circle at bottom right, rgba(28, 129, 111, 0.2), transparent 30%),
@@ -35,6 +37,7 @@ body {
 }
 
 .workspace-shell {
+  background: #121212;
   box-sizing: border-box;
   display: grid;
   gap: var(--workspace-pane-gap, 12px);

@@ -1,4 +1,5 @@
 .terminal-pane-root {
+  background: #121212;
   height: 100%;
   position: relative;
   width: 100%;
@@ -9,16 +10,19 @@
 }
 
 .terminal-pane-canvas {
+  background: #121212;
   height: 100%;
   width: 100%;
 }
 
 .terminal-pane-canvas > .pane {
+  background: #121212;
   height: 100%;
   width: 100%;
 }
 
 .terminal-pane-canvas .pane-canvas {
+  background: #121212;
   display: block;
   height: 100%;
   width: 100%;
@@ -44,7 +48,9 @@
   position: absolute;
   right: 17px;
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.32);
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
   width: 30px;
   z-index: 20;
 }
@@ -114,7 +120,9 @@
   letter-spacing: 0.02em;
   min-width: 38px;
   padding: 0 10px;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
 }
 
 .terminal-pane-search-button:hover,

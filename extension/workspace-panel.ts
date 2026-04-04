@@ -163,6 +163,15 @@ function getWorkspaceHtml(webview: vscode.Webview, extensionUri: vscode.Uri): st
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${WORKSPACE_PANEL_TITLE}</title>
+    <style>
+      html,
+      body,
+      #root {
+        background: #121212;
+        height: 100%;
+        margin: 0;
+      }
+    </style>
     <link href="${styleUri}" rel="stylesheet" />
   </head>
   <body>
