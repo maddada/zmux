@@ -60,4 +60,21 @@ describe("TerminalDaemonRingBuffer", () => {
     expect(buffer.bytesWritten).toBe(8);
     expect(buffer.snapshot().toString("utf8")).toBe("efgh");
   });
+
+  test("should expose a safe replay offset after a wrapped utf8 prefix", () => {
+    const buffer = new TerminalDaemonRingBuffer(4);
+
+    buffer.write(Buffer.from("A🙂B", "utf8"));
+
+    expect(buffer.getSafeReplayOffset()).toBe(buffer.bytesWritten - 1);
+    expect(buffer.snapshotRange(buffer.getSafeReplayOffset()).toString("utf8")).toBe("B");
+  });
+
+  test("should expose a safe replay offset after a wrapped OSC sequence", () => {
+    const buffer = new TerminalDaemonRingBuffer(6);
+
+    buffer.write(Buffer.from("\u001b]0;title\u0007ok", "utf8"));
+
+    expect(buffer.snapshotRange(buffer.getSafeReplayOffset()).toString("utf8")).toBe("ok");
+  });
 });

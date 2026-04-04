@@ -1,0 +1,47 @@
+import { TerminalDaemonRingBuffer } from "./terminal-daemon-ring-buffer";
+
+export type PendingAttachQueue = {
+  chunks: Buffer[];
+  replayCursor: number;
+};
+
+export function createPendingAttachQueue(replayCursor: number): PendingAttachQueue {
+  return {
+    chunks: [],
+    replayCursor,
+  };
+}
+
+export function queuePendingAttachChunk(
+  pendingAttachQueue: PendingAttachQueue,
+  chunk: Buffer,
+  chunkStartCursor: number,
+  chunkEndCursor: number,
+): void {
+  if (chunkEndCursor <= pendingAttachQueue.replayCursor) {
+    return;
+  }
+
+  if (chunkStartCursor >= pendingAttachQueue.replayCursor) {
+    pendingAttachQueue.chunks.push(chunk);
+    return;
+  }
+
+  const replayStartIndex = pendingAttachQueue.replayCursor - chunkStartCursor;
+  pendingAttachQueue.chunks.push(chunk.subarray(replayStartIndex));
+}
+
+export function createTerminalReplaySnapshot(
+  historyBuffer: TerminalDaemonRingBuffer,
+  replayCursor = historyBuffer.bytesWritten,
+): Buffer {
+  const replayStartOffset = historyBuffer.getSafeReplayOffset(replayCursor);
+  return historyBuffer.snapshotRange(replayStartOffset, replayCursor);
+}
+
+export function serializeTerminalReplayHistory(
+  historyBuffer: TerminalDaemonRingBuffer,
+  replayCursor = historyBuffer.bytesWritten,
+): string {
+  return createTerminalReplaySnapshot(historyBuffer, replayCursor).toString("utf8");
+}
