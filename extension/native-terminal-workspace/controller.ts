@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import {
   createSidebarHudState,
+  getPreferredSessionTitle,
   getOrderedSessions,
   isT3Session,
   isTerminalSession,
@@ -607,7 +608,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     const nextTitle = await vscode.window.showInputBox({
       prompt: "Rename session",
-      value: sessionRecord.title,
+      value:
+        getPreferredSessionTitle(
+          sessionRecord.title,
+          this.terminalTitleBySessionId.get(sessionId),
+        ) ?? sessionRecord.title,
     });
     if (nextTitle) {
       await this.renameSession(sessionId, nextTitle);

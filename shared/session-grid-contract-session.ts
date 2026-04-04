@@ -323,6 +323,18 @@ export function getVisibleTerminalTitle(title: string | undefined): string | und
   return sanitizedTitle;
 }
 
+export function getPreferredSessionTitle(
+  sessionTitle: string | undefined,
+  terminalTitle: string | undefined,
+): string | undefined {
+  const visibleTerminalTitle = getVisibleTerminalTitle(terminalTitle);
+  if (visibleTerminalTitle) {
+    return visibleTerminalTitle;
+  }
+
+  return sessionTitle ? getVisiblePrimaryTitle(sessionTitle) : undefined;
+}
+
 export function getOrderedSessions(snapshot: SessionGridSnapshot): SessionRecord[] {
   return [...snapshot.sessions].sort((left, right) => left.slotIndex - right.slotIndex);
 }

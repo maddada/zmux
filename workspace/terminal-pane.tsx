@@ -60,6 +60,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const handledRefreshRequestIdRef = useRef(refreshRequestId);
   const boundScrollHostRef = useRef<HTMLElement | null>(null);
+  const canvasVisibleRef = useRef(false);
   const appearanceRequestIdRef = useRef(0);
   const appliedFontSourcesSignatureRef = useRef("");
   const activePaneRef = useRef<ReturnType<Restty["activePane"]>>(null);
@@ -237,6 +238,54 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     }
   };
 
+  const setResttyCanvasVisibility = (visible: boolean) => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    canvasVisibleRef.current = visible;
+    const opacity = visible ? "1" : "0";
+    for (const element of container.querySelectorAll<HTMLElement>(
+      ".pane-canvas, .restty-native-scroll-canvas, canvas",
+    )) {
+      element.style.opacity = opacity;
+    }
+  };
+
+  const maybeRevealResttyCanvas = (sourceLabel: string) => {
+    const container = containerRef.current;
+    if (!container) {
+      return false;
+    }
+
+    const canvas = container.querySelector<HTMLCanvasElement>(
+      ".restty-native-scroll-canvas, .pane-canvas, canvas",
+    );
+    if (!canvas) {
+      return false;
+    }
+
+    const hasRealBackingSize = canvas.width > 1 && canvas.height > 1;
+    const bounds = canvas.getBoundingClientRect();
+    const hasRealLayoutSize = bounds.width > 2 && bounds.height > 2;
+    if (!hasRealBackingSize || !hasRealLayoutSize) {
+      return false;
+    }
+
+    if (!canvasVisibleRef.current) {
+      setResttyCanvasVisibility(true);
+      reportDebug("terminal.canvasRevealed", {
+        canvasHeight: canvas.height,
+        canvasWidth: canvas.width,
+        sessionId: pane.sessionId,
+        source: sourceLabel,
+      });
+    }
+
+    return true;
+  };
+
   const getScrollHost = () =>
     containerRef.current?.querySelector<HTMLElement>(".restty-native-scroll-host") ?? null;
 
@@ -308,6 +357,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
     container.style.backgroundColor = RESTTY_STARTUP_BACKGROUND;
     let didDispose = false;
+    setResttyCanvasVisibility(false);
     const transportController = connection.mock
       ? null
       : createWorkspaceResttyTransport({
@@ -369,6 +419,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     resttyRef.current = restty;
     activePaneRef.current = activePane;
     seedResttyBackgroundSurfaces();
+    setResttyCanvasVisibility(false);
     applyAppearance("mount-setup");
     ensureScrollHostListener();
 
@@ -403,6 +454,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         updateTerminalSize();
         applyAppearance("mount-visible");
         seedResttyBackgroundSurfaces();
+        maybeRevealResttyCanvas("mount-visible");
         ensureScrollHostListener();
         updateScrollToBottomVisibility();
         if (document.hasFocus()) {
@@ -414,12 +466,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
             activePane.sendInput(pane.snapshot.history, "pty");
           }
           seedResttyBackgroundSurfaces();
+          maybeRevealResttyCanvas("mock-history");
           return;
         }
 
         const socketUrl = buildSessionSocketUrl(connection, pane.sessionId);
         activePane.connectPty(socketUrl);
         seedResttyBackgroundSurfaces();
+        window.setTimeout(() => {
+          maybeRevealResttyCanvas("post-connect");
+        }, 0);
       });
     });
 
@@ -435,6 +491,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       activePaneRef.current = null;
       resttyRef.current = null;
       transportRef.current = null;
+      canvasVisibleRef.current = false;
       setShowScrollToBottom(false);
       setSearchResults(SEARCH_RESULTS_EMPTY);
     };
@@ -468,6 +525,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           updateTerminalSize();
           applyAppearance("visible");
           seedResttyBackgroundSurfaces();
+          maybeRevealResttyCanvas("visible");
           ensureScrollHostListener();
           updateScrollToBottomVisibility();
         });
@@ -493,6 +551,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       requestAnimationFrame(() => {
         updateTerminalSize();
         seedResttyBackgroundSurfaces();
+        maybeRevealResttyCanvas("refresh");
         updateScrollToBottomVisibility();
       });
     });
@@ -506,11 +565,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
     const intervalId = window.setInterval(() => {
       seedResttyBackgroundSurfaces();
+      maybeRevealResttyCanvas("visibility-poll");
       ensureScrollHostListener();
       updateScrollToBottomVisibility();
     }, 250);
 
     seedResttyBackgroundSurfaces();
+    maybeRevealResttyCanvas("visible-effect");
     ensureScrollHostListener();
     updateScrollToBottomVisibility();
     return () => {

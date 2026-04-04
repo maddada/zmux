@@ -1,8 +1,5 @@
 import * as vscode from "vscode";
-import {
-  getVisiblePrimaryTitle,
-  getVisibleTerminalTitle,
-} from "../shared/session-grid-contract";
+import { getPreferredSessionTitle } from "../shared/session-grid-contract";
 import {
   getDefaultSidebarAgentByIcon,
   getDefaultSidebarAgentById,
@@ -191,19 +188,16 @@ function appendResumeTarget(
   terminalTitle?: string,
 ): string {
   const resumeTitle = resolveResumeTitle(sessionTitle, terminalTitle);
-  return resumeTitle ? `${commandPrefix} ${quoteForSingleShellArgument(resumeTitle)}` : commandPrefix;
+  return resumeTitle
+    ? `${commandPrefix} ${quoteForSingleShellArgument(resumeTitle)}`
+    : commandPrefix;
 }
 
 function resolveResumeTitle(
   sessionTitle: string | undefined,
   terminalTitle: string | undefined,
 ): string | undefined {
-  const visibleTerminalTitle = getVisibleTerminalTitle(terminalTitle);
-  if (visibleTerminalTitle) {
-    return visibleTerminalTitle;
-  }
-
-  return getVisiblePrimaryTitle(sessionTitle?.trim() ?? "");
+  return getPreferredSessionTitle(sessionTitle, terminalTitle);
 }
 
 function resolveAgentCommand(
