@@ -82,10 +82,16 @@ export type WorkspacePanelTerminalPresentationChangedMessage = {
   type: "terminalPresentationChanged";
 };
 
+export type WorkspacePanelDestroyTerminalRuntimeMessage = {
+  sessionId: string;
+  type: "destroyTerminalRuntime";
+};
+
 export type ExtensionToWorkspacePanelMessage =
   | WorkspacePanelHydrateMessage
   | WorkspacePanelSessionStateMessage
-  | WorkspacePanelTerminalPresentationChangedMessage;
+  | WorkspacePanelTerminalPresentationChangedMessage
+  | WorkspacePanelDestroyTerminalRuntimeMessage;
 
 export type WorkspacePanelReadyMessage = {
   type: "ready";
@@ -136,7 +142,11 @@ export type WorkspacePanelToExtensionMessage =
 export function stripWorkspacePanelTransientFields(
   message: ExtensionToWorkspacePanelMessage,
 ): ExtensionToWorkspacePanelMessage {
-  if (message.type === "terminalPresentationChanged" || !message.autoFocusRequest) {
+  if (
+    message.type === "terminalPresentationChanged" ||
+    message.type === "destroyTerminalRuntime" ||
+    !message.autoFocusRequest
+  ) {
     return message;
   }
 

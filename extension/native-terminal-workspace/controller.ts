@@ -592,6 +592,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     for (const sessionRecord of this.getAllSessionRecords()) {
       await this.disposeSurface(sessionRecord);
+      if (sessionRecord.kind === "terminal") {
+        this.retireTerminalPaneRuntimeGeneration(sessionRecord.sessionId);
+      }
+      await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord);
       await this.deletePersistedSessionStateIfNeeded(sessionRecord);
       this.clearSessionPresentationState(sessionRecord.sessionId);
     }
@@ -691,6 +695,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
     await this.refreshSidebarFromCurrentState();
     await this.disposeSurface(sessionRecord);
+    if (sessionRecord.kind === "terminal") {
+      this.retireTerminalPaneRuntimeGeneration(sessionId);
+    }
+    await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord);
     await this.deletePersistedSessionStateIfNeeded(sessionRecord);
     this.clearSessionPresentationState(sessionId);
     if (archivedSession) {
@@ -1254,6 +1262,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.refreshSidebarFromCurrentState();
     for (const sessionRecord of group.snapshot.sessions) {
       await this.disposeSurface(sessionRecord);
+      if (sessionRecord.kind === "terminal") {
+        this.retireTerminalPaneRuntimeGeneration(sessionRecord.sessionId);
+      }
+      await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord);
       await this.deletePersistedSessionStateIfNeeded(sessionRecord);
       this.clearSessionPresentationState(sessionRecord.sessionId);
     }
@@ -2010,11 +2022,27 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     this.pendingT3SessionIds.delete(sessionId);
     this.sidebarAgentIconBySessionId.delete(sessionId);
     this.sessionAgentLaunchBySessionId.delete(sessionId);
-    this.terminalPaneRenderNonceBySessionId.delete(sessionId);
     this.terminalTitleBySessionId.delete(sessionId);
     this.lastKnownActivityBySessionId.delete(sessionId);
     this.workingStartedAtBySessionId.delete(sessionId);
     this.clearPendingCompletionSound(sessionId);
+  }
+
+  private retireTerminalPaneRuntimeGeneration(sessionId: string): void {
+    this.bumpTerminalPaneRenderNonce(sessionId);
+  }
+
+  private async destroyWorkspaceTerminalRuntimeIfNeeded(
+    sessionRecord: SessionRecord,
+  ): Promise<void> {
+    if (sessionRecord.kind !== "terminal") {
+      return;
+    }
+
+    await this.workspacePanel.postMessage({
+      sessionId: sessionRecord.sessionId,
+      type: "destroyTerminalRuntime",
+    });
   }
 
   private async deletePersistedSessionStateIfNeeded(sessionRecord: SessionRecord): Promise<void> {

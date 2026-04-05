@@ -24,6 +24,7 @@ import {
   buildVisiblePaneOrderForDrop,
   sortPanesBySessionIds,
 } from "./workspace-pane-reorder";
+import { destroyCachedTerminalRuntime, getTerminalRuntimeCacheKey } from "./terminal-runtime-cache";
 import { TerminalPane } from "./terminal-pane";
 import { T3Pane } from "./t3-pane";
 
@@ -238,6 +239,11 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
             ),
           };
         });
+        return;
+      }
+
+      if (nextMessage.type === "destroyTerminalRuntime") {
+        destroyCachedTerminalRuntime(getTerminalRuntimeCacheKey(nextMessage.sessionId));
         return;
       }
 
