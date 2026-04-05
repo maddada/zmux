@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const validModes = new Set(["package", "install"]);
+const profileBuildFlag = "--profile-build";
 
 function fail(message) {
   console.error(message);
@@ -134,9 +135,10 @@ function resolveCodeCli() {
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(scriptDir);
 const mode = process.argv[2];
+const profileBuild = process.argv.includes(profileBuildFlag);
 
 if (!validModes.has(mode)) {
-  fail("Usage: node ./scripts/vsix.mjs <package|install>");
+  fail(`Usage: node ./scripts/vsix.mjs <package|install> [${profileBuildFlag}]`);
 }
 
 const packageJson = await import(new URL("../package.json", import.meta.url), {
@@ -153,7 +155,12 @@ if (!existsSync(installerDir)) {
 
 const vsixPath = resolveVsixPath(installerDir, extensionName, extensionVersion, mode);
 
-run("pnpm", ["run", "compile"]);
+run("pnpm", ["run", "compile"], {
+  env: {
+    ...process.env,
+    ...(profileBuild ? { VSMUX_PROFILE_BUILD: "1" } : {}),
+  },
+});
 
 run(
   "vp",
@@ -176,6 +183,10 @@ run(
 );
 
 console.log(`Packaged VSIX: ${vsixPath}`);
+
+if (profileBuild) {
+  console.log("Profiling build enabled: webview bundles are unminified with source maps.");
+}
 
 if (mode === "package") {
   process.exit(0);

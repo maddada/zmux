@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite-plus";
+import { profileBuildOverrides } from "./vite.profile-build";
 
 const DND_KIT_PACKAGES = [
   "@dnd-kit/abstract",
@@ -19,6 +20,7 @@ export default defineConfig({
     cssCodeSplit: false,
     emptyOutDir: true,
     outDir: resolve(__dirname, "out", "sidebar"),
+    ...profileBuildOverrides,
     rollupOptions: {
       input: resolve(__dirname, "sidebar", "index.html"),
       output: {

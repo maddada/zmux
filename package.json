@@ -40,7 +40,9 @@
     "check": "vp check",
     "prepare": "vp config",
     "vsix:package": "node ./scripts/vsix.mjs package",
+    "vsix:package:profile": "node ./scripts/vsix.mjs package --profile-build",
     "install": "node ./scripts/vsix.mjs install",
+    "install:profile": "node ./scripts/vsix.mjs install --profile-build",
     "vsix:publish": "node ./scripts/publish-extension.mjs"
   },
   "dependencies": {

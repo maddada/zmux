@@ -252,9 +252,50 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     () => (localPaneOrder ? sortPanesBySessionIds(panes, localPaneOrder) : panes),
     [localPaneOrder, panes],
   );
+  const activeGroupVisibleSessionIds = useMemo(() => {
+    const activeGroup = workspaceState?.workspaceSnapshot.groups.find(
+      (group) => group.groupId === workspaceState.activeGroupId,
+    );
+    if (!activeGroup) {
+      return panes.filter((pane) => pane.isVisible).map((pane) => pane.sessionId);
+    }
+
+    const visiblePaneIdSet = new Set(
+      panes.filter((pane) => pane.isVisible).map((pane) => pane.sessionId),
+    );
+    const snapshotVisibleSessionIds = activeGroup.snapshot.visibleSessionIds.filter((sessionId) =>
+      visiblePaneIdSet.has(sessionId),
+    );
+    const missingVisibleSessionIds = panes
+      .filter((pane) => pane.isVisible && !snapshotVisibleSessionIds.includes(pane.sessionId))
+      .map((pane) => pane.sessionId);
+    return snapshotVisibleSessionIds.concat(missingVisibleSessionIds);
+  }, [panes, workspaceState?.activeGroupId, workspaceState?.workspaceSnapshot.groups]);
+  const visiblePaneOrderIds = useMemo(() => {
+    if (activeGroupVisibleSessionIds.length === 0) {
+      return activeGroupVisibleSessionIds;
+    }
+
+    if (!localPaneOrder) {
+      return activeGroupVisibleSessionIds;
+    }
+
+    const activeVisibleSessionIdSet = new Set(activeGroupVisibleSessionIds);
+    const locallyOrderedVisibleSessionIds = localPaneOrder.filter((sessionId) =>
+      activeVisibleSessionIdSet.has(sessionId),
+    );
+    return activeGroupVisibleSessionIds.every((sessionId) =>
+      locallyOrderedVisibleSessionIds.includes(sessionId),
+    )
+      ? locallyOrderedVisibleSessionIds
+      : activeGroupVisibleSessionIds;
+  }, [activeGroupVisibleSessionIds, localPaneOrder]);
   const visiblePanes = useMemo(() => {
-    return orderedPanes.filter((pane) => pane.isVisible);
-  }, [orderedPanes]);
+    return sortPanesBySessionIds(
+      panes.filter((pane) => pane.isVisible),
+      visiblePaneOrderIds,
+    );
+  }, [panes, visiblePaneOrderIds]);
   const visiblePaneLayoutBySessionId = useMemo(() => {
     const resolvedViewMode = workspaceState?.viewMode ?? "grid";
     const rowLengths = createEditorLayoutPlan(

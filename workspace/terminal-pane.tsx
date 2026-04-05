@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { IconArrowDownBar } from "@tabler/icons-react";
+import { IconArrowBigDownFilled } from "@tabler/icons-react";
 import { Restty } from "restty";
 import type {
   WorkspacePanelAutoFocusRequest,
@@ -68,6 +68,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const handledRefreshRequestIdRef = useRef(refreshRequestId);
   const boundScrollHostRef = useRef<HTMLElement | null>(null);
+  const scrollHostListenerRef = useRef<EventListener>(() => {
+    scrollVisibilityUpdaterRef.current();
+  });
+  const scrollVisibilityUpdaterRef = useRef<() => void>(() => {});
   const canvasVisibleRef = useRef(false);
   const appearanceRequestIdRef = useRef(0);
   const appearancePromiseRef = useRef<Promise<void>>(Promise.resolve());
@@ -371,7 +375,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
   const updateScrollToBottomVisibility = () => {
     const scrollHost = getScrollHost();
-    if (!scrollHost || !isVisible) {
+    if (!scrollHost || !isVisibleRef.current) {
       setShowScrollToBottom(false);
       return;
     }
@@ -387,19 +391,22 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     });
   };
 
+  scrollVisibilityUpdaterRef.current = updateScrollToBottomVisibility;
+
   const ensureScrollHostListener = () => {
     const scrollHost = getScrollHost();
     if (boundScrollHostRef.current === scrollHost) {
+      scrollVisibilityUpdaterRef.current();
       return;
     }
 
     if (boundScrollHostRef.current) {
-      boundScrollHostRef.current.removeEventListener("scroll", updateScrollToBottomVisibility);
+      boundScrollHostRef.current.removeEventListener("scroll", scrollHostListenerRef.current);
     }
 
     boundScrollHostRef.current = scrollHost;
-    scrollHost?.addEventListener("scroll", updateScrollToBottomVisibility, { passive: true });
-    updateScrollToBottomVisibility();
+    scrollHost?.addEventListener("scroll", scrollHostListenerRef.current, { passive: true });
+    scrollVisibilityUpdaterRef.current();
   };
 
   const scrollTerminalToBottom = () => {
@@ -771,7 +778,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       appearanceRequestIdRef.current += 1;
       window.removeEventListener("focus", onWindowFocus);
       themeObserver.disconnect();
-      boundScrollHostRef.current?.removeEventListener("scroll", updateScrollToBottomVisibility);
+      boundScrollHostRef.current?.removeEventListener("scroll", scrollHostListenerRef.current);
       syncRuntimeFromRefs();
       runtime.callbacks = {};
       if (runtime.host.parentElement === container) {
@@ -1081,7 +1088,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           }}
           type="button"
         >
-          <IconArrowDownBar size={16} stroke={2} />
+          <IconArrowBigDownFilled size={16} stroke={2} />
         </button>
       ) : null}
       {isSearchOpen ? (
