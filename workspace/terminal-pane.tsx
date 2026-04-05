@@ -24,6 +24,8 @@ const TYPING_AUTO_SCROLL_BURST_WINDOW_MS = 450;
 const TYPING_AUTO_SCROLL_TRIGGER_COUNT = 4;
 const SCROLL_TO_BOTTOM_THRESHOLD_PX = 200;
 const SCROLL_TO_BOTTOM_HIDE_THRESHOLD_PX = 40;
+const LAG_NOTICE_OVERSHOOT_THRESHOLD_MS = 1_000;
+const LAG_NOTICE_MONITOR_WINDOW_MS = 10_000;
 const SCHEDULER_PROBE_INTERVAL_MS = 50;
 const SCHEDULER_PROBE_WINDOW_MS = 5_000;
 const SCHEDULER_OVERSHOOT_WARN_MS = 250;
@@ -39,6 +41,11 @@ export type TerminalPaneProps = {
   debuggingMode: boolean;
   isFocused: boolean;
   isVisible: boolean;
+  onLagDetected?: (payload: {
+    overshootMs: number;
+    sessionId: string;
+    visibilityState: DocumentVisibilityState;
+  }) => void;
   onActivate: (source: "focusin" | "pointer") => void;
   pane: WorkspacePanelTerminalPane;
   refreshRequestId: number;
@@ -57,6 +64,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   debuggingMode,
   isFocused,
   isVisible,
+  onLagDetected,
   onActivate,
   pane,
   refreshRequestId,
@@ -67,7 +75,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const runtimeRef = useRef<CachedTerminalRuntime | null>(null);
   const debugLogRef = useRef(debugLog);
   const debuggingModeRef = useRef(debuggingMode);
+  const isFocusedRef = useRef(isFocused);
   const isVisibleRef = useRef(isVisible);
+  const lagDetectedRef = useRef(false);
+  const lagDetectedHandlerRef = useRef(onLagDetected);
   const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const handledRefreshRequestIdRef = useRef(refreshRequestId);
   const boundScrollHostRef = useRef<HTMLElement | null>(null);
@@ -104,8 +115,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   }, [debuggingMode]);
 
   useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
+
+  useEffect(() => {
     isVisibleRef.current = isVisible;
   }, [isVisible]);
+
+  useEffect(() => {
+    lagDetectedHandlerRef.current = onLagDetected;
+  }, [onLagDetected]);
 
   const reportDebug = (event: string, payload?: Record<string, unknown>) => {
     logWorkspaceDebug(debuggingModeRef.current, event, payload);
@@ -713,6 +732,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     }
 
     let didDispose = false;
+    const monitorStartedAt = performance.now();
     let timerId: number | undefined;
     let rafId = 0;
     let flushTimeoutId: number | undefined;
@@ -732,26 +752,64 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
     const flushWindow = (source: string) => {
       const now = performance.now();
+      const visibilityState = document.visibilityState;
+      const documentHasFocus = document.hasFocus();
+      const isVisible = isVisibleRef.current;
+      const timerOvershootAvgMs =
+        timerTickCount > 0 ? Math.round(timerOvershootTotalMs / timerTickCount) : 0;
+      const windowDurationMs = Math.round(now - startedAt);
       reportDebug("terminal.schedulerWindow", {
         ...collectViewportMetrics(),
         ...collectCanvasMetrics(),
-        documentHasFocus: document.hasFocus(),
+        documentHasFocus,
         hidden: document.hidden,
-        isVisible: isVisibleRef.current,
+        isVisible,
         rafFrameCount,
         rafGapAvgMs: rafFrameCount > 0 ? Math.round(rafGapTotalMs / rafFrameCount) : 0,
         rafGapMaxMs: Math.round(rafGapMaxMs),
         rendererMode: rendererModeRef.current,
         sessionId: pane.sessionId,
         source,
-        timerOvershootAvgMs:
-          timerTickCount > 0 ? Math.round(timerOvershootTotalMs / timerTickCount) : 0,
+        timerOvershootAvgMs,
         timerOvershootMaxMs: Math.round(timerOvershootMaxMs),
         timerOvershootWarnCount,
         timerTickCount,
-        visibilityState: document.visibilityState,
-        windowDurationMs: Math.round(now - startedAt),
+        visibilityState,
+        windowDurationMs,
       });
+
+      const elapsedMs = Math.round(now - monitorStartedAt);
+      const shouldTreatSchedulerWindowAsLaggy =
+        !lagDetectedRef.current &&
+        elapsedMs <= LAG_NOTICE_MONITOR_WINDOW_MS &&
+        isVisible &&
+        visibilityState === "visible" &&
+        documentHasFocus &&
+        timerOvershootAvgMs >= LAG_NOTICE_OVERSHOOT_THRESHOLD_MS;
+
+      if (shouldTreatSchedulerWindowAsLaggy) {
+        reportDebug("terminal.schedulerLagDetected", {
+          documentHasFocus,
+          elapsedMs,
+          hidden: document.hidden,
+          isFocused: isFocusedRef.current,
+          isVisible,
+          sessionId: pane.sessionId,
+          timerOvershootAvgMs,
+          timerOvershootMaxMs: Math.round(timerOvershootMaxMs),
+          timerOvershootWarnCount,
+          timerTickCount,
+          visibilityState,
+          windowDurationMs,
+        });
+        lagDetectedRef.current = true;
+        lagDetectedHandlerRef.current?.({
+          overshootMs: timerOvershootAvgMs,
+          sessionId: pane.sessionId,
+          visibilityState,
+        });
+      }
+
       startedAt = now;
       timerTickCount = 0;
       timerOvershootTotalMs = 0;

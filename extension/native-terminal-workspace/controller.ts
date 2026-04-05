@@ -249,6 +249,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           return;
         }
 
+        if (message.type === "reloadWorkspacePanel") {
+          await this.reloadWorkspacePanel("webview-lag-notice", message.sessionId);
+          return;
+        }
+
         if (message.type === "focusSession") {
           await this.focusSession(message.sessionId, "workspace");
           return;
@@ -2569,6 +2574,26 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     logVSmuxDebug("controller.refreshWorkspacePanel.postMessageComplete", {
       durationMs: Date.now() - startedAt,
       focusedSessionId: message.focusedSessionId,
+    });
+  }
+
+  private async reloadWorkspacePanel(reason: string, preferredSessionId?: string): Promise<void> {
+    const autoFocusSessionId = preferredSessionId ?? this.getActiveSnapshot().focusedSessionId;
+    if (autoFocusSessionId) {
+      this.enqueueWorkspaceAutoFocus(autoFocusSessionId, "reload");
+    }
+    logVSmuxDebug("controller.reloadWorkspacePanel.start", {
+      autoFocusSessionId,
+      reason,
+      snapshot: this.describeActiveSnapshot(),
+    });
+    this.workspacePanel.hide();
+    await this.refreshWorkspacePanel();
+    await this.workspacePanel.reveal();
+    logVSmuxDebug("controller.reloadWorkspacePanel.complete", {
+      autoFocusSessionId,
+      reason,
+      snapshot: this.describeActiveSnapshot(),
     });
   }
 

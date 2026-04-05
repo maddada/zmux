@@ -15,6 +15,7 @@ import type {
   WorkspacePanelPane,
   WorkspacePanelSessionStateMessage,
 } from "../shared/workspace-panel-contract";
+import { stripWorkspacePanelTransientFields } from "../shared/workspace-panel-contract";
 import { getVisiblePrimaryTitle, getVisibleTerminalTitle } from "../shared/session-grid-contract";
 import { logWorkspaceDebug } from "./workspace-debug";
 import { WorkspacePaneCloseButton } from "./workspace-pane-close-button";
@@ -59,7 +60,15 @@ type WorkspaceAutoFocusGuard = {
   sessionId: string;
 };
 
+type WorkspaceLagNoticeState = {
+  detectedAt: number;
+  overshootMs: number;
+  sessionId: string;
+};
+
 const AUTO_FOCUS_ACTIVATION_GUARD_MS = 400;
+const AUTO_RELOAD_ON_LAG = true;
+let nextWorkspaceBootId = 0;
 
 const describeActiveElement = () => {
   const activeElement = document.activeElement;
@@ -76,6 +85,7 @@ const describeActiveElement = () => {
 };
 
 export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = window, vscode }) => {
+  const workspaceBootIdRef = useRef(++nextWorkspaceBootId);
   const [isWorkspaceFocused, setIsWorkspaceFocused] = useState(
     () =>
       typeof document !== "undefined" &&
@@ -87,9 +97,13 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const [localPaneOrder, setLocalPaneOrder] = useState<string[] | undefined>();
   const [draggedPaneId, setDraggedPaneId] = useState<string | undefined>();
   const [dropTargetPaneId, setDropTargetPaneId] = useState<string | undefined>();
+  const [lagNotice, setLagNotice] = useState<WorkspaceLagNoticeState | undefined>();
   const focusRequestSequenceRef = useRef(0);
   const debuggingModeRef = useRef<boolean | undefined>(undefined);
+  const lagAutoReloadRequestedRef = useRef(false);
   const autoFocusGuardRef = useRef<WorkspaceAutoFocusGuard | undefined>(undefined);
+  const lastAppliedWorkspaceMessageSignatureRef = useRef<string | undefined>(undefined);
+  const lastAppliedAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const pointerDragStateRef = useRef<WorkspacePanePointerDragState | undefined>(undefined);
   const pendingFocusRequestRef = useRef<
     | {
@@ -129,11 +143,30 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   };
 
   useEffect(() => {
+    postWorkspaceDebugLog(true, "workspace.instanceMounted", {
+      bootId: workspaceBootIdRef.current,
+      documentHasFocus: document.hasFocus(),
+      hidden: document.hidden,
+      visibilityState: document.visibilityState,
+    });
+
+    return () => {
+      postWorkspaceDebugLog(true, "workspace.instanceUnmounted", {
+        bootId: workspaceBootIdRef.current,
+        documentHasFocus: document.hasFocus(),
+        hidden: document.hidden,
+        visibilityState: document.visibilityState,
+      });
+    };
+  }, []);
+
+  useEffect(() => {
     const syncWorkspaceFocusState = (source: string) => {
       const nextIsWorkspaceFocused = document.visibilityState === "visible" && document.hasFocus();
       setIsWorkspaceFocused(nextIsWorkspaceFocused);
       postWorkspaceDebugLog(debuggingModeRef.current, "workspace.focusStateSync", {
         activeElement: describeActiveElement(),
+        bootId: workspaceBootIdRef.current,
         documentHasFocus: document.hasFocus(),
         hidden: document.hidden,
         isWorkspaceFocused: nextIsWorkspaceFocused,
@@ -168,8 +201,27 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     const applyWorkspaceStateMessage = (
       message: WorkspacePanelHydrateMessage | WorkspacePanelSessionStateMessage,
     ) => {
+      const stableMessageSignature = JSON.stringify(stripWorkspacePanelTransientFields(message));
+      const isDuplicateStableState =
+        lastAppliedWorkspaceMessageSignatureRef.current === stableMessageSignature;
+      const shouldApplyAutoFocusRequest =
+        !!message.autoFocusRequest &&
+        lastAppliedAutoFocusRequestIdRef.current !== message.autoFocusRequest.requestId;
+
+      if (isDuplicateStableState && !shouldApplyAutoFocusRequest) {
+        postWorkspaceDebugLog(message.debuggingMode, "message.ignoredDuplicate", {
+          activeGroupId: message.activeGroupId,
+          bootId: workspaceBootIdRef.current,
+          focusedSessionId: message.focusedSessionId,
+          paneIds: message.panes.map((pane) => pane.sessionId),
+          type: message.type,
+        });
+        return;
+      }
+
       postWorkspaceDebugLog(message.debuggingMode, "message.received", {
         activeGroupId: message.activeGroupId,
+        bootId: workspaceBootIdRef.current,
         focusedSessionId: message.focusedSessionId,
         paneIds: message.panes.map((pane) => pane.sessionId),
         pendingFocusRequest:
@@ -190,6 +242,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         message.focusedSessionId === pendingFocusRequestRef.current.sessionId
       ) {
         postWorkspaceDebugLog(message.debuggingMode, "focus.messageMatchedPendingRequest", {
+          bootId: workspaceBootIdRef.current,
           durationMs: Math.round(performance.now() - pendingFocusRequestRef.current.startedAt),
           requestId: pendingFocusRequestRef.current.requestId,
           sessionId: pendingFocusRequestRef.current.sessionId,
@@ -202,12 +255,15 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           sessionId: message.autoFocusRequest.sessionId,
         };
         postWorkspaceDebugLog(message.debuggingMode, "focus.autoFocusGuardArmed", {
+          bootId: workspaceBootIdRef.current,
           expiresAt: Math.round(autoFocusGuardRef.current.expiresAt),
           requestId: message.autoFocusRequest.requestId,
           sessionId: message.autoFocusRequest.sessionId,
           source: message.autoFocusRequest.source,
         });
+        lastAppliedAutoFocusRequestIdRef.current = message.autoFocusRequest.requestId;
       }
+      lastAppliedWorkspaceMessageSignatureRef.current = stableMessageSignature;
       setServerState(message);
     };
 
@@ -556,6 +612,45 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   requestPaneReorderRef.current = requestPaneReorder;
   reorderablePaneIdsRef.current = reorderablePaneIds;
 
+  const handleTerminalLagDetected = (payload: {
+    overshootMs: number;
+    sessionId: string;
+    visibilityState: DocumentVisibilityState;
+  }) => {
+    if (payload.visibilityState !== "visible") {
+      return;
+    }
+
+    if (!AUTO_RELOAD_ON_LAG || lagAutoReloadRequestedRef.current) {
+      setLagNotice((previousState) => {
+        if (AUTO_RELOAD_ON_LAG || previousState) {
+          return previousState;
+        }
+
+        postWorkspaceDebugLog(workspaceState?.debuggingMode, "workspace.lagNoticeShown", {
+          bootId: workspaceBootIdRef.current,
+          overshootMs: payload.overshootMs,
+          sessionId: payload.sessionId,
+        });
+        return {
+          detectedAt: Date.now(),
+          overshootMs: payload.overshootMs,
+          sessionId: payload.sessionId,
+        };
+      });
+      return;
+    }
+
+    lagAutoReloadRequestedRef.current = true;
+    postWorkspaceDebugLog(true, "workspace.lagAutoReload", {
+      bootId: workspaceBootIdRef.current,
+      debuggingMode: workspaceState?.debuggingMode ?? false,
+      overshootMs: payload.overshootMs,
+      sessionId: payload.sessionId,
+    });
+    vscode.postMessage({ sessionId: payload.sessionId, type: "reloadWorkspacePanel" });
+  };
+
   const clearDragState = () => {
     const pointerDragState = pointerDragStateRef.current;
     if (pointerDragState?.pointerTarget.hasPointerCapture(pointerDragState.pointerId)) {
@@ -679,6 +774,55 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       }
       style={workspaceShellStyle}
     >
+      {lagNotice ? (
+        <div className="workspace-lag-notice" role="status">
+          <div className="workspace-lag-notice-copy">
+            <strong>Terminal responsiveness looks degraded.</strong>
+            <span>
+              The workarea detected delayed page timers. Reloading the workarea usually clears it.
+            </span>
+          </div>
+          <div className="workspace-lag-notice-actions">
+            <button
+              className="workspace-lag-notice-button"
+              onClick={() => {
+                postWorkspaceDebugLog(workspaceState?.debuggingMode, "workspace.lagNoticeReload", {
+                  bootId: workspaceBootIdRef.current,
+                  detectedAt: lagNotice.detectedAt,
+                  overshootMs: lagNotice.overshootMs,
+                  sessionId: lagNotice.sessionId,
+                });
+                vscode.postMessage({
+                  sessionId: lagNotice.sessionId,
+                  type: "reloadWorkspacePanel",
+                });
+              }}
+              type="button"
+            >
+              Reload Workarea
+            </button>
+            <button
+              className="workspace-lag-notice-dismiss"
+              onClick={() => {
+                postWorkspaceDebugLog(
+                  workspaceState?.debuggingMode,
+                  "workspace.lagNoticeDismissed",
+                  {
+                    bootId: workspaceBootIdRef.current,
+                    detectedAt: lagNotice.detectedAt,
+                    overshootMs: lagNotice.overshootMs,
+                    sessionId: lagNotice.sessionId,
+                  },
+                );
+                setLagNotice(undefined);
+              }}
+              type="button"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
       {orderedPanes.map((pane) => (
         <WorkspacePaneView
           connection={workspaceState.connection}
@@ -695,6 +839,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           key={pane.kind === "terminal" ? `${pane.sessionId}:${pane.renderNonce}` : pane.sessionId}
           layoutStyle={visiblePaneLayoutBySessionId.get(pane.sessionId)}
           onLocalFocus={() => applyLocalFocusVisual(pane.sessionId)}
+          onLagDetected={handleTerminalLagDetected}
           onFocus={() => requestFocusSession(pane.sessionId)}
           onTerminalActivate={handleTerminalActivate}
           onClose={() =>
@@ -783,6 +928,11 @@ type WorkspacePaneViewProps = {
   isDragging: boolean;
   isDropTarget: boolean;
   layoutStyle?: CSSProperties;
+  onLagDetected: (payload: {
+    overshootMs: number;
+    sessionId: string;
+    visibilityState: DocumentVisibilityState;
+  }) => void;
   onLocalFocus: () => void;
   onFocus: () => void;
   onClose: () => void;
@@ -807,6 +957,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
   isDragging,
   isDropTarget,
   layoutStyle,
+  onLagDetected,
   onLocalFocus,
   onFocus,
   onClose,
@@ -868,6 +1019,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
             debuggingMode={debuggingMode}
             isFocused={isFocused}
             isVisible={pane.isVisible}
+            onLagDetected={onLagDetected}
             onActivate={(source) => onTerminalActivate(pane.sessionId, source)}
             pane={pane}
             refreshRequestId={refreshRequestId}

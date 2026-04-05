@@ -8,4 +8,5 @@ forks/ghostty-web/dist/
 forks/t3code-embed/
 installer/
 .collaborator
-docs/
+docs/*
+!docs/workarea-lag-recovery.md

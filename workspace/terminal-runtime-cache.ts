@@ -11,7 +11,7 @@ import {
 
 const TERMINAL_RUNTIME_HOST_CLASS_NAME = "terminal-pane-runtime-host";
 const TERMINAL_STARTUP_BACKGROUND = "#121212";
-const TERMINAL_PREFERRED_RENDERER = "webgl2";
+const TERMINAL_PREFERRED_RENDERER = "auto";
 
 export type CachedTerminalRuntimeCallbacks = {
   onFirstData?: (connectionId: number) => void;

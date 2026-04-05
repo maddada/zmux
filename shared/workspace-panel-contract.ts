@@ -33,7 +33,7 @@ export type WorkspacePanelLayoutAppearance = {
 export type WorkspacePanelAutoFocusRequest = {
   requestId: number;
   sessionId: string;
-  source: "sidebar";
+  source: "sidebar" | "reload";
 };
 
 export type WorkspacePanelTerminalPane = {
@@ -130,6 +130,11 @@ export type WorkspacePanelDebugLogMessage = {
   type: "workspaceDebugLog";
 };
 
+export type WorkspacePanelReloadMessage = {
+  sessionId?: string;
+  type: "reloadWorkspacePanel";
+};
+
 export type WorkspacePanelToExtensionMessage =
   | WorkspacePanelReadyMessage
   | WorkspacePanelFocusSessionMessage
@@ -137,7 +142,8 @@ export type WorkspacePanelToExtensionMessage =
   | WorkspacePanelFullReloadSessionMessage
   | WorkspacePanelSyncPaneOrderMessage
   | WorkspacePanelSyncSessionOrderMessage
-  | WorkspacePanelDebugLogMessage;
+  | WorkspacePanelDebugLogMessage
+  | WorkspacePanelReloadMessage;
 
 export function stripWorkspacePanelTransientFields(
   message: ExtensionToWorkspacePanelMessage,

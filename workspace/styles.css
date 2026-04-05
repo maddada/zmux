@@ -43,7 +43,94 @@ body {
   gap: var(--workspace-pane-gap, 12px);
   grid-auto-rows: minmax(0, 1fr);
   height: 100%;
+  position: relative;
   padding: var(--workspace-pane-gap, 12px);
+}
+
+.workspace-lag-notice {
+  align-items: center;
+  backdrop-filter: blur(12px);
+  background: rgba(31, 22, 7, 0.94);
+  border: 1px solid rgba(236, 187, 92, 0.42);
+  border-radius: 14px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.32);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  left: 50%;
+  max-width: min(720px, calc(100% - 32px));
+  padding: 12px 14px;
+  position: absolute;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 20;
+}
+
+.workspace-lag-notice-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workspace-lag-notice-copy strong {
+  color: #fff2cb;
+  font-size: 13px;
+}
+
+.workspace-lag-notice-copy span {
+  color: rgba(255, 243, 214, 0.82);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workspace-lag-notice-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+}
+
+.workspace-lag-notice-button,
+.workspace-lag-notice-dismiss {
+  appearance: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 9px 12px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.workspace-lag-notice-button {
+  background: #efb85c;
+  border: 1px solid transparent;
+  color: #241300;
+}
+
+.workspace-lag-notice-button:hover,
+.workspace-lag-notice-button:focus-visible {
+  background: #f6c877;
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.workspace-lag-notice-dismiss {
+  background: transparent;
+  border: 1px solid rgba(255, 234, 196, 0.18);
+  color: rgba(255, 243, 214, 0.86);
+}
+
+.workspace-lag-notice-dismiss:hover,
+.workspace-lag-notice-dismiss:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 234, 196, 0.3);
+  outline: none;
 }
 
 .workspace-shell-empty {

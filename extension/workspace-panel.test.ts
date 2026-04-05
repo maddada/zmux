@@ -20,6 +20,7 @@ type MockWebviewPanel = {
   active: boolean;
   dispose: ReturnType<typeof vi.fn>;
   iconPath?: unknown;
+  onDidChangeViewState: ReturnType<typeof vi.fn>;
   onDidDispose: ReturnType<typeof vi.fn>;
   reveal: ReturnType<typeof vi.fn>;
   title: string;
@@ -171,6 +172,29 @@ describe("WorkspacePanelManager", () => {
     manager.dispose();
   });
 
+  test("should forward reload workspace messages from the workspace webview", async () => {
+    const onMessage = vi.fn();
+    const manager = new WorkspacePanelManager({
+      context: createMockContext(),
+      onMessage,
+    });
+
+    await manager.reveal();
+
+    const panel = createdPanels[0];
+    expect(panel).toBeDefined();
+
+    panel.webview.messageListeners[0]?.({
+      type: "reloadWorkspacePanel",
+    });
+
+    expect(onMessage).toHaveBeenCalledWith({
+      type: "reloadWorkspacePanel",
+    });
+
+    manager.dispose();
+  });
+
   test("should keep accepting legacy session reorder messages from the workspace webview", async () => {
     const onMessage = vi.fn();
     const manager = new WorkspacePanelManager({
@@ -294,6 +318,7 @@ function createMockPanel({
         dispose();
       }
     }),
+    onDidChangeViewState: vi.fn(() => createDisposable()),
     onDidDispose: vi.fn((listener: () => void) => {
       disposables.push(listener);
       return createDisposable();
