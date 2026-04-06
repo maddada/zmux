@@ -546,13 +546,7 @@ export function SessionGroupSection({
               />
             ))
           ) : isBrowserGroup ? (
-            <div
-              className="group-empty-drop-target"
-              data-drop-position={groupDropPosition}
-              data-drop-target={String(isGroupDropTarget)}
-            >
-              <div className="group-empty-state">No browsers</div>
-            </div>
+            <>{/* We may want to restore the empty browser placeholder later. */}</>
           ) : (
             <div
               className="group-empty-drop-target"

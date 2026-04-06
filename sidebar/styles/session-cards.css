@@ -322,7 +322,7 @@
   min-width: 0;
   overflow: hidden;
   position: relative;
-  text-align: left;
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
   z-index: 1;
