@@ -750,7 +750,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     }
 
     let didDispose = false;
-    const monitorStartedAt = performance.now();
     let timerId: number | undefined;
     let rafId = 0;
     let flushTimeoutId: number | undefined;
@@ -796,19 +795,20 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         windowDurationMs,
       });
 
-      const elapsedMs = Math.round(now - monitorStartedAt);
       const shouldTreatSchedulerWindowAsLaggy =
         !lagDetectedRef.current &&
-        elapsedMs <= LAG_NOTICE_MONITOR_WINDOW_MS &&
+        now - monitorStartedAt <= LAG_NOTICE_MONITOR_WINDOW_MS &&
         isVisible &&
+        isFocusedRef.current &&
         visibilityState === "visible" &&
+        !document.hidden &&
         documentHasFocus &&
         timerOvershootAvgMs >= LAG_NOTICE_OVERSHOOT_THRESHOLD_MS;
 
       if (shouldTreatSchedulerWindowAsLaggy) {
         reportDebug("terminal.schedulerLagDetected", {
           documentHasFocus,
-          elapsedMs,
+          elapsedMs: Math.round(now - monitorStartedAt),
           hidden: document.hidden,
           isFocused: isFocusedRef.current,
           isVisible,

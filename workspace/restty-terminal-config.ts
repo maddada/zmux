@@ -17,6 +17,15 @@ const GENERIC_FONT_FAMILIES = new Set([
   "ui-serif",
 ]);
 
+const DEFAULT_TERMINAL_FONT_FAMILIES = [
+  "MesloLGL Nerd Font Mono",
+  "Menlo",
+  "Monaco",
+  "Courier New",
+] as const;
+
+const DEFAULT_LOCAL_FONT_MATCHERS = ["MesloLGL Nerd Font Mono", "MesloLGL Nerd Font"] as const;
+
 const fallbackTheme = {
   background: "#080808",
   black: "#000000",
@@ -42,19 +51,26 @@ const fallbackTheme = {
 };
 
 export function getResttyFontSources(fontFamily: string | undefined): ResttyFontSource[] {
-  const matchers = getConfiguredFontMatchers(fontFamily);
-  return [
-    {
-      label: "Configured font",
-      matchers,
-      required: false,
-      type: "local",
-    },
+  const fallbackSources: ResttyFontSource[] = [
     {
       label: "Meslo fallback",
       type: "url",
       url: mesloRegularUrl,
     },
+  ];
+
+  if (usesBundledDefaultFontStack(fontFamily)) {
+    return fallbackSources;
+  }
+
+  return [
+    {
+      label: "Configured font",
+      matchers: getConfiguredFontMatchers(fontFamily),
+      required: false,
+      type: "local",
+    },
+    ...fallbackSources,
   ];
 }
 
@@ -88,22 +104,45 @@ export function getResttyTheme(): GhosttyTheme | undefined {
 }
 
 function getConfiguredFontMatchers(fontFamily: string | undefined): string[] {
+  const families = getConfiguredFontFamilies(fontFamily);
+  return families.length > 0 ? families : [...DEFAULT_LOCAL_FONT_MATCHERS];
+}
+
+function usesBundledDefaultFontStack(fontFamily: string | undefined): boolean {
+  const families = getConfiguredFontFamilies(fontFamily);
+  if (families.length === 0) {
+    return true;
+  }
+
+  return familiesMatch(families, DEFAULT_TERMINAL_FONT_FAMILIES);
+}
+
+function getConfiguredFontFamilies(fontFamily: string | undefined): string[] {
   const seen = new Set<string>();
-  const families =
+  return (
     fontFamily
       ?.match(/"[^"]+"|'[^']+'|[^,]+/g)
       ?.map((family) => family.trim().replace(/^['"]|['"]$/g, ""))
       .filter((family) => family.length > 0)
       .filter((family) => !GENERIC_FONT_FAMILIES.has(family.toLowerCase()))
       .filter((family) => {
-        if (seen.has(family)) {
+        const normalizedFamily = family.toLowerCase();
+        if (seen.has(normalizedFamily)) {
           return false;
         }
-        seen.add(family);
-        return true;
-      }) ?? [];
 
-  return families.length > 0 ? families : ["MesloLGL Nerd Font Mono", "MesloLGL Nerd Font"];
+        seen.add(normalizedFamily);
+        return true;
+      }) ?? []
+  );
+}
+
+function familiesMatch(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((family, index) => family.toLowerCase() === right[index]?.toLowerCase());
 }
 
 function getCssColor(

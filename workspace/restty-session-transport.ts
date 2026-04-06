@@ -339,16 +339,31 @@ export function createWorkspaceResttyTransport(
       cleanupSocket(nextSocket);
       options.reportDebug?.(reason === "close" ? "terminal.socketClose" : "terminal.socketError", {
         connectionId: connectId,
+        explicitDisconnect,
         sessionId: options.sessionId,
       });
       callbacks?.onDisconnect?.();
       scheduleReconnect();
     };
 
-    nextSocket.addEventListener("close", () => {
+    nextSocket.addEventListener("close", (event) => {
+      options.reportDebug?.("terminal.socketCloseDetails", {
+        code: event.code,
+        connectionId: connectId,
+        explicitDisconnect,
+        reason: event.reason,
+        sessionId: options.sessionId,
+        wasClean: event.wasClean,
+      });
       handleDisconnect("close");
     });
     nextSocket.addEventListener("error", () => {
+      options.reportDebug?.("terminal.socketErrorDetails", {
+        connectionId: connectId,
+        explicitDisconnect,
+        readyState: nextSocket.readyState,
+        sessionId: options.sessionId,
+      });
       handleDisconnect("error");
     });
   };
@@ -399,6 +414,10 @@ export function createWorkspaceResttyTransport(
         clearReconnectTimeout();
         pendingMessages = [];
         clearConnectionSummaryTimeout();
+        options.reportDebug?.("terminal.socketDestroyRequested", {
+          activeConnectId,
+          sessionId: options.sessionId,
+        });
         const activeSocket = socket;
         socket = null;
         if (activeSocket) {
@@ -409,6 +428,10 @@ export function createWorkspaceResttyTransport(
       disconnect: () => {
         explicitDisconnect = true;
         clearReconnectTimeout();
+        options.reportDebug?.("terminal.socketDisconnectRequested", {
+          activeConnectId,
+          sessionId: options.sessionId,
+        });
         const activeSocket = socket;
         socket = null;
         clearConnectionSummaryTimeout();

@@ -62,12 +62,6 @@ type WorkspaceAutoFocusGuard = {
   sessionId: string;
 };
 
-type WorkspaceLagNoticeState = {
-  detectedAt: number;
-  overshootMs: number;
-  sessionId: string;
-};
-
 const AUTO_FOCUS_ACTIVATION_GUARD_MS = 400;
 const AUTO_RELOAD_ON_LAG = true;
 let nextWorkspaceBootId = 0;
@@ -109,7 +103,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const [localPaneOrder, setLocalPaneOrder] = useState<string[] | undefined>();
   const [draggedPaneId, setDraggedPaneId] = useState<string | undefined>();
   const [dropTargetPaneId, setDropTargetPaneId] = useState<string | undefined>();
-  const [lagNotice, setLagNotice] = useState<WorkspaceLagNoticeState | undefined>();
   const focusRequestSequenceRef = useRef(0);
   const debuggingModeRef = useRef<boolean | undefined>(undefined);
   const lagAutoReloadRequestedRef = useRef(false);
@@ -703,27 +696,11 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     sessionId: string;
     visibilityState: DocumentVisibilityState;
   }) => {
-    if (payload.visibilityState !== "visible") {
+    if (payload.visibilityState !== "visible" || !AUTO_RELOAD_ON_LAG) {
       return;
     }
 
-    if (!AUTO_RELOAD_ON_LAG || lagAutoReloadRequestedRef.current) {
-      setLagNotice((previousState) => {
-        if (AUTO_RELOAD_ON_LAG || previousState) {
-          return previousState;
-        }
-
-        postWorkspaceDebugLog(workspaceState?.debuggingMode, "workspace.lagNoticeShown", {
-          bootId: workspaceBootIdRef.current,
-          overshootMs: payload.overshootMs,
-          sessionId: payload.sessionId,
-        });
-        return {
-          detectedAt: Date.now(),
-          overshootMs: payload.overshootMs,
-          sessionId: payload.sessionId,
-        };
-      });
+    if (lagAutoReloadRequestedRef.current) {
       return;
     }
 
@@ -856,55 +833,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       }
       style={workspaceShellStyle}
     >
-      {lagNotice ? (
-        <div className="workspace-lag-notice" role="status">
-          <div className="workspace-lag-notice-copy">
-            <strong>Terminal responsiveness looks degraded.</strong>
-            <span>
-              The workarea detected delayed page timers. Reloading the workarea usually clears it.
-            </span>
-          </div>
-          <div className="workspace-lag-notice-actions">
-            <button
-              className="workspace-lag-notice-button"
-              onClick={() => {
-                postWorkspaceDebugLog(workspaceState?.debuggingMode, "workspace.lagNoticeReload", {
-                  bootId: workspaceBootIdRef.current,
-                  detectedAt: lagNotice.detectedAt,
-                  overshootMs: lagNotice.overshootMs,
-                  sessionId: lagNotice.sessionId,
-                });
-                vscode.postMessage({
-                  sessionId: lagNotice.sessionId,
-                  type: "reloadWorkspacePanel",
-                });
-              }}
-              type="button"
-            >
-              Reload Workarea
-            </button>
-            <button
-              className="workspace-lag-notice-dismiss"
-              onClick={() => {
-                postWorkspaceDebugLog(
-                  workspaceState?.debuggingMode,
-                  "workspace.lagNoticeDismissed",
-                  {
-                    bootId: workspaceBootIdRef.current,
-                    detectedAt: lagNotice.detectedAt,
-                    overshootMs: lagNotice.overshootMs,
-                    sessionId: lagNotice.sessionId,
-                  },
-                );
-                setLagNotice(undefined);
-              }}
-              type="button"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {/* Lag notice UI intentionally disabled. Startup lag is handled by automatic workarea reload. */}
       {orderedPanes.map((pane) => (
         <WorkspacePaneView
           connection={workspaceState.connection}
