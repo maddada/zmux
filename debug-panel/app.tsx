@@ -44,6 +44,7 @@ const EMPTY_STATE: NativeTerminalDebugPanelState = {
   sidebar: {
     groups: [],
     hud: {
+      activeSessionsSortMode: "manual",
       agentManagerZoomPercent: 100,
       agents: [],
       commands: [],

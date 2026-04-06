@@ -514,6 +514,7 @@ function createBuildSidebarMessageOptions(
 
 function createSidebarHudState(): SidebarHydrateMessage["hud"] {
   return {
+    activeSessionsSortMode: "manual",
     agentManagerZoomPercent: 100,
     agents: [],
     collapsedSections: {

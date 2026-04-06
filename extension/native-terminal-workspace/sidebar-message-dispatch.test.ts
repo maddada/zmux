@@ -49,6 +49,7 @@ function createHandlers(): SidebarMessageHandlers {
     setGroupSleeping: vi.fn(async () => undefined),
     setSessionSleeping: vi.fn(async () => undefined),
     setT3SessionThreadId: vi.fn(async () => undefined),
+    toggleActiveSessionsSortMode: vi.fn(async () => undefined),
     setViewMode: vi.fn(async () => undefined),
     setVisibleCount: vi.fn(async () => undefined),
     syncGroupOrder: vi.fn(async () => undefined),
@@ -121,5 +122,19 @@ describe("dispatchSidebarMessage", () => {
 
     expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.setGroupSleeping).toHaveBeenCalledWith("group-2", true);
+  });
+
+  test("should route toggleActiveSessionsSortMode to the matching handler", async () => {
+    const handlers = createHandlers();
+
+    await dispatchSidebarMessage(
+      {
+        type: "toggleActiveSessionsSortMode",
+      },
+      handlers,
+    );
+
+    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
+    expect(handlers.toggleActiveSessionsSortMode).toHaveBeenCalledTimes(1);
   });
 });

@@ -325,6 +325,9 @@ export function isSidebarMessage(candidate: unknown): candidate is SidebarToExte
         ["horizontal", "vertical", "grid"].includes(message.viewMode)
       );
 
+    case "toggleActiveSessionsSortMode":
+      return true;
+
     case "moveSessionToGroup":
       return (
         typeof message.sessionId === "string" &&

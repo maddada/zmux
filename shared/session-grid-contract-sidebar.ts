@@ -22,6 +22,8 @@ export type SidebarSectionCollapseState = {
   agents: boolean;
 };
 
+export type SidebarActiveSessionsSortMode = "manual" | "lastActivity";
+
 export function createDefaultSidebarSectionVisibility(): SidebarSectionVisibility {
   return {
     actions: true,
@@ -80,6 +82,7 @@ export type SidebarSessionGroup = {
 };
 
 export type SidebarHudState = {
+  activeSessionsSortMode: SidebarActiveSessionsSortMode;
   agentManagerZoomPercent: number;
   agents: SidebarAgentButton[];
   collapsedSections: SidebarSectionCollapseState;
@@ -339,6 +342,9 @@ export type SidebarToExtensionMessage =
   | {
       type: "setViewMode";
       viewMode: TerminalViewMode;
+    }
+  | {
+      type: "toggleActiveSessionsSortMode";
     }
   | {
       type: "syncSessionOrder";

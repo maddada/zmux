@@ -134,6 +134,7 @@ function createT3WorkspaceMessage(): SidebarHydrateMessage {
       },
     ],
     hud: {
+      activeSessionsSortMode: "manual",
       agentManagerZoomPercent: 100,
       agents: [],
       collapsedSections: {

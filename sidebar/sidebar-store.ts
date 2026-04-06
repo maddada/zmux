@@ -57,6 +57,7 @@ export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
     groupOrder: [],
     groupsById: {},
     hud: {
+      activeSessionsSortMode: "manual",
       agentManagerZoomPercent: 100,
       agents: createDefaultSidebarAgentButtons(),
       collapsedSections: createDefaultSidebarSectionCollapseState(),

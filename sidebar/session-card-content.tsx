@@ -4,8 +4,9 @@ import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 
 import type { SidebarSessionItem } from "../shared/session-grid-contract";
 import { getSidebarAgentNameByIcon, type SidebarAgentIcon } from "../shared/sidebar-agents";
 import { AGENT_LOGOS } from "./agent-logos";
-import { formatRelativeTimeLabel } from "./relative-time";
+import { formatRelativeTimeLabel, getRelativeTimeColor } from "./relative-time";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
+import { useRelativeTimeTick } from "./use-relative-time-tick";
 
 const AGENT_SECONDARY_LABELS: Record<SidebarAgentIcon, readonly string[]> = {
   browser: ["browser"],
@@ -65,9 +66,15 @@ export function SessionCardContent({
     titleTooltip,
   });
   const showMeta = showHotkeys;
+  const hasLastInteractionTime = showLastInteractionTime && Boolean(session.lastInteractionAt);
+  useRelativeTimeTick(hasLastInteractionTime);
   const lastInteractionLabel =
-    showLastInteractionTime && session.lastInteractionAt
+    hasLastInteractionTime && session.lastInteractionAt
       ? formatRelativeTimeLabel(session.lastInteractionAt)
+      : undefined;
+  const lastInteractionStyle =
+    hasLastInteractionTime && session.lastInteractionAt
+      ? { color: getRelativeTimeColor(session.lastInteractionAt) }
       : undefined;
 
   return (
@@ -103,7 +110,9 @@ export function SessionCardContent({
         </div>
       </div>
       {lastInteractionLabel ? (
-        <div className="session-last-interaction-time">{lastInteractionLabel}</div>
+        <div className="session-last-interaction-time" style={lastInteractionStyle}>
+          {lastInteractionLabel}
+        </div>
       ) : null}
       {onRename ? (
         <button

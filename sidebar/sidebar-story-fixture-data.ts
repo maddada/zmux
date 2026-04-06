@@ -1,6 +1,14 @@
 import type { SidebarStoryFixture } from "./sidebar-story-fixtures";
 import { createStorySession, type SidebarStoryGroup } from "./sidebar-story-fixture-helpers";
 
+function minutesAgo(minutes: number): string {
+  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+}
+
+function secondsAgo(seconds: number): string {
+  return new Date(Date.now() - seconds * 1000).toISOString();
+}
+
 const DEFAULT_GROUPS: SidebarStoryGroup[] = [
   {
     groupId: "group-1",
@@ -10,6 +18,7 @@ const DEFAULT_GROUPS: SidebarStoryGroup[] = [
         alias: "show title in 2nd row",
         agentIcon: "codex",
         detail: "OpenAI Codex",
+        lastInteractionAt: secondsAgo(30),
         sessionId: "session-1",
         shortcutLabel: "⌘⌥1",
       }),
@@ -17,6 +26,7 @@ const DEFAULT_GROUPS: SidebarStoryGroup[] = [
         alias: "layout drift fix",
         agentIcon: "codex",
         detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(7),
         sessionId: "session-2",
         shortcutLabel: "⌘⌥2",
       }),
@@ -24,6 +34,7 @@ const DEFAULT_GROUPS: SidebarStoryGroup[] = [
         alias: "Harbor Vale",
         agentIcon: "codex",
         detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(18),
         sessionId: "session-3",
         shortcutLabel: "⌘⌥3",
       }),
@@ -38,12 +49,14 @@ const DEFAULT_GROUPS: SidebarStoryGroup[] = [
         activity: "attention",
         alias: "tooltip & show an indicator on the active card",
         detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(3),
         sessionId: "session-4",
         shortcutLabel: "⌘⌥4",
       }),
       createStorySession({
         alias: "Indigo Grove",
         detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(11),
         sessionId: "session-5",
         shortcutLabel: "⌘⌥5",
       }),
@@ -78,6 +91,7 @@ const SELECTOR_STATE_GROUPS: SidebarStoryGroup[] = [
         detail: "Claude Code",
         isFocused: true,
         isVisible: true,
+        lastInteractionAt: minutesAgo(2),
         sessionId: "session-1",
         shortcutLabel: "⌘⌥1",
       }),
@@ -85,6 +99,7 @@ const SELECTOR_STATE_GROUPS: SidebarStoryGroup[] = [
         alias: "ui hover audit",
         detail: "OpenAI Codex",
         isVisible: true,
+        lastInteractionAt: minutesAgo(6),
         sessionId: "session-2",
         shortcutLabel: "⌘⌥2",
       }),
@@ -93,6 +108,7 @@ const SELECTOR_STATE_GROUPS: SidebarStoryGroup[] = [
         alias: "terminal title indicator",
         detail: "OpenAI Codex",
         isVisible: true,
+        lastInteractionAt: minutesAgo(9),
         sessionId: "session-3",
         shortcutLabel: "⌘⌥3",
       }),
@@ -100,6 +116,7 @@ const SELECTOR_STATE_GROUPS: SidebarStoryGroup[] = [
         alias: "workspace sync",
         detail: "OpenAI Codex",
         isVisible: true,
+        lastInteractionAt: minutesAgo(24),
         sessionId: "session-4",
         shortcutLabel: "⌘⌥4",
       }),
@@ -114,6 +131,7 @@ const SELECTOR_STATE_GROUPS: SidebarStoryGroup[] = [
         alias: "fallback styling pass",
         detail: "OpenAI Codex",
         isRunning: false,
+        lastInteractionAt: minutesAgo(42),
         sessionId: "session-5",
         shortcutLabel: "⌘⌥5",
       }),
@@ -134,6 +152,7 @@ const OVERFLOW_STRESS_GROUPS: SidebarStoryGroup[] = [
         detail: "OpenAI Codex running a sidebar layout regression pass with long secondary text",
         isFocused: true,
         isVisible: true,
+        lastInteractionAt: secondsAgo(45),
         sessionId: "session-1",
         shortcutLabel: "⌘⌥1",
         terminalTitle:
@@ -145,6 +164,7 @@ const OVERFLOW_STRESS_GROUPS: SidebarStoryGroup[] = [
         detail:
           "Claude Code with a surprisingly verbose secondary line to stress wrapping assumptions",
         isVisible: true,
+        lastInteractionAt: minutesAgo(8),
         sessionId: "session-2",
         shortcutLabel: "⌘⌥2",
         terminalTitle: "Claude Code / visual diff / attention state",
@@ -153,6 +173,7 @@ const OVERFLOW_STRESS_GROUPS: SidebarStoryGroup[] = [
         alias: "inactive session with close button",
         detail: "Gemini CLI",
         isRunning: false,
+        lastInteractionAt: minutesAgo(15),
         sessionId: "session-3",
         shortcutLabel: "⌘⌥3",
       }),
@@ -166,12 +187,14 @@ const OVERFLOW_STRESS_GROUPS: SidebarStoryGroup[] = [
       createStorySession({
         alias: "session card spacing audit across themes",
         detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(4),
         sessionId: "session-4",
         shortcutLabel: "⌘⌥4",
       }),
       createStorySession({
         alias: "secondary label overflow with keyboard shortcut visible",
         detail: "OpenAI Codex with another very long provider name for stress testing",
+        lastInteractionAt: minutesAgo(12),
         sessionId: "session-5",
         shortcutLabel: "⌘⌥5",
       }),
@@ -185,6 +208,7 @@ const OVERFLOW_STRESS_GROUPS: SidebarStoryGroup[] = [
       createStorySession({
         alias: "one more card for density",
         detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(26),
         sessionId: "session-6",
         shortcutLabel: "⌘⌥6",
       }),
@@ -203,6 +227,7 @@ const EMPTY_GROUPS: SidebarStoryGroup[] = [
         detail: "OpenAI Codex",
         isFocused: true,
         isVisible: true,
+        lastInteractionAt: minutesAgo(1),
         sessionId: "session-1",
         shortcutLabel: "⌘⌥1",
       }),
@@ -233,6 +258,7 @@ const THREE_GROUPS_STRESS: SidebarStoryGroup[] = [
         detail: "OpenAI Codex",
         isFocused: true,
         isVisible: true,
+        lastInteractionAt: secondsAgo(20),
         sessionId: "session-1",
         shortcutLabel: "⌘⌥1",
       }),
@@ -240,6 +266,7 @@ const THREE_GROUPS_STRESS: SidebarStoryGroup[] = [
         alias: "Beryl Note",
         detail: "OpenAI Codex",
         isVisible: true,
+        lastInteractionAt: minutesAgo(6),
         sessionId: "session-2",
         shortcutLabel: "⌘⌥2",
       }),
@@ -253,6 +280,7 @@ const THREE_GROUPS_STRESS: SidebarStoryGroup[] = [
       createStorySession({
         alias: "Cinder Path",
         detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(13),
         sessionId: "session-3",
         shortcutLabel: "⌘⌥3",
       }),

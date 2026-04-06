@@ -28,6 +28,7 @@ import {
 } from "../shared/grouped-session-workspace-state";
 
 type SidebarStoryWorkspaceOptions = {
+  activeSessionsSortMode: SidebarHydrateMessage["hud"]["activeSessionsSortMode"];
   agentManagerZoomPercent: number;
   agents: SidebarAgentButton[];
   commands: SidebarCommandButton[];
@@ -43,7 +44,7 @@ type SidebarStoryWorkspaceOptions = {
 
 type SidebarSessionDecoration = Pick<
   SidebarSessionItem,
-  "activity" | "activityLabel" | "detail" | "isRunning" | "terminalTitle"
+  "activity" | "activityLabel" | "detail" | "isRunning" | "lastInteractionAt" | "terminalTitle"
 >;
 
 export type SidebarStoryWorkspace = {
@@ -55,6 +56,7 @@ export type SidebarStoryWorkspace = {
 export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): SidebarStoryWorkspace {
   return {
     options: {
+      activeSessionsSortMode: message.hud.activeSessionsSortMode,
       agentManagerZoomPercent: message.hud.agentManagerZoomPercent,
       agents: message.hud.agents,
       commands: message.hud.commands,
@@ -76,6 +78,7 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
             activityLabel: session.activityLabel,
             detail: session.detail,
             isRunning: session.isRunning,
+            lastInteractionAt: session.lastInteractionAt,
             terminalTitle: session.terminalTitle,
           },
         ]),
@@ -108,6 +111,7 @@ export function createSidebarStoryMessage(
       ...workspace.sessionDecorationsById[item.sessionId],
       activity: workspace.sessionDecorationsById[item.sessionId]?.activity ?? "idle",
       isRunning: workspace.sessionDecorationsById[item.sessionId]?.isRunning ?? true,
+      lastInteractionAt: workspace.sessionDecorationsById[item.sessionId]?.lastInteractionAt,
       terminalTitle: workspace.sessionDecorationsById[item.sessionId]?.terminalTitle,
     }));
 
@@ -137,6 +141,11 @@ export function createSidebarStoryMessage(
       workspace.options.completionSound,
       workspace.options.agents,
       workspace.options.commands,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      workspace.options.activeSessionsSortMode,
     ),
     previousSessions: [],
     revision: 1,
@@ -197,6 +206,16 @@ export function reduceSidebarStoryWorkspace(
       return {
         ...workspace,
         snapshot: setViewModeInWorkspace(workspace.snapshot, message.viewMode),
+      };
+
+    case "toggleActiveSessionsSortMode":
+      return {
+        ...workspace,
+        options: {
+          ...workspace.options,
+          activeSessionsSortMode:
+            workspace.options.activeSessionsSortMode === "manual" ? "lastActivity" : "manual",
+        },
       };
 
     case "toggleFullscreenSession":

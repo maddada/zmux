@@ -4,12 +4,27 @@
  *
  * This intentionally mirrors T3 Code's compact sidebar timestamp UX.
  */
-export function formatRelativeTime(isoDate: string): { value: string; suffix: string | null } {
-  const diffMs = Date.now() - new Date(isoDate).getTime();
-  if (diffMs < 0) {
-    return { value: "just now", suffix: null };
-  }
+const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const BRIGHT_GREEN_WEIGHT = 86;
+const MID_GREEN_WEIGHT = 60;
+const FADED_GREEN_WEIGHT = 36;
 
+function getRelativeTimeDiffMs(isoDate: string): number {
+  return Math.max(0, Date.now() - new Date(isoDate).getTime());
+}
+
+function buildForegroundMixedGreen(greenWeight: number): string {
+  return `color-mix(in srgb, #63e58f ${greenWeight}%, var(--app-foreground) ${100 - greenWeight}%)`;
+}
+
+function buildMutedMixedGreen(greenWeight: number): string {
+  return `color-mix(in srgb, #63e58f ${greenWeight}%, var(--app-muted) ${100 - greenWeight}%)`;
+}
+
+export function formatRelativeTime(isoDate: string): { value: string; suffix: string | null } {
+  const diffMs = getRelativeTimeDiffMs(isoDate);
   const seconds = Math.floor(diffMs / 1000);
   if (seconds < 5) {
     return { value: "just now", suffix: null };
@@ -36,4 +51,21 @@ export function formatRelativeTime(isoDate: string): { value: string; suffix: st
 export function formatRelativeTimeLabel(isoDate: string): string {
   const relative = formatRelativeTime(isoDate);
   return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
+}
+
+export function getRelativeTimeColor(isoDate: string): string {
+  const diffMs = getRelativeTimeDiffMs(isoDate);
+  if (diffMs <= FIFTEEN_MINUTES_MS) {
+    return buildForegroundMixedGreen(BRIGHT_GREEN_WEIGHT);
+  }
+
+  if (diffMs <= THIRTY_MINUTES_MS) {
+    return buildForegroundMixedGreen(MID_GREEN_WEIGHT);
+  }
+
+  if (diffMs <= ONE_HOUR_MS) {
+    return buildMutedMixedGreen(FADED_GREEN_WEIGHT);
+  }
+
+  return "var(--app-muted)";
 }

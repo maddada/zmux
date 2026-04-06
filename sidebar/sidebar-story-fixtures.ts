@@ -56,6 +56,7 @@ export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrat
     };
   });
   const hud: SidebarHudState = {
+    activeSessionsSortMode: "manual",
     agentManagerZoomPercent: 100,
     agents: createDefaultSidebarAgentButtons(),
     collapsedSections: createDefaultSidebarSectionCollapseState(),

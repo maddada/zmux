@@ -15,6 +15,7 @@ export function createStorySession({
   isFocused = false,
   isRunning = true,
   isVisible = false,
+  lastInteractionAt,
   primaryTitle,
   sessionId,
   shortcutLabel,
@@ -28,6 +29,7 @@ export function createStorySession({
   isFocused?: boolean;
   isRunning?: boolean;
   isVisible?: boolean;
+  lastInteractionAt?: string;
   primaryTitle?: string;
   sessionId: string;
   shortcutLabel: string;
@@ -43,6 +45,7 @@ export function createStorySession({
     isFocused,
     isRunning,
     isVisible,
+    lastInteractionAt,
     primaryTitle,
     row: 0,
     sessionId,

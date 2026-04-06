@@ -15,6 +15,7 @@ import { createDefaultSidebarGitState, type SidebarGitState } from "./sidebar-gi
 import {
   createDefaultSidebarSectionCollapseState,
   createDefaultSidebarSectionVisibility,
+  type SidebarActiveSessionsSortMode,
   type SidebarHudState,
   type SidebarSectionCollapseState,
   type SidebarSectionVisibility,
@@ -46,6 +47,7 @@ export function createSidebarHudState(
   git: SidebarGitState = createDefaultSidebarGitState(),
   sectionVisibility: SidebarSectionVisibility = createDefaultSidebarSectionVisibility(),
   collapsedSections: SidebarSectionCollapseState = createDefaultSidebarSectionCollapseState(),
+  activeSessionsSortMode: SidebarActiveSessionsSortMode = "manual",
 ): SidebarHudState {
   const sessionById = new Map(snapshot.sessions.map((session) => [session.sessionId, session]));
   const focusedSession = snapshot.focusedSessionId
@@ -53,6 +55,7 @@ export function createSidebarHudState(
     : undefined;
 
   return {
+    activeSessionsSortMode,
     agentManagerZoomPercent,
     agents,
     collapsedSections,

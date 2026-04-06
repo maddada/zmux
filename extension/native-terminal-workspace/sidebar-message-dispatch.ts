@@ -71,6 +71,7 @@ export type SidebarMessageHandlers = {
   ) => Promise<void>;
   syncSidebarAgentOrder: (agentIds: readonly string[]) => Promise<void>;
   setSidebarGitPrimaryAction: (action: SidebarGitAction) => Promise<void>;
+  toggleActiveSessionsSortMode: () => Promise<void>;
   setViewMode: (viewMode: TerminalViewMode) => Promise<void>;
   setVisibleCount: (visibleCount: VisibleSessionCount) => Promise<void>;
   syncGroupOrder: (groupIds: readonly string[]) => Promise<void>;
@@ -272,6 +273,9 @@ export async function dispatchSidebarMessage(
       if (message.viewMode) {
         await handlers.setViewMode(message.viewMode);
       }
+      return;
+    case "toggleActiveSessionsSortMode":
+      await handlers.toggleActiveSessionsSortMode();
       return;
     case "syncSessionOrder":
       await handlers.syncSessionOrder(message.groupId, message.sessionIds);

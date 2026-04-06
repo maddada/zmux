@@ -130,6 +130,10 @@ import {
   saveSidebarSectionCollapsed,
 } from "../sidebar-section-preferences";
 import {
+  getSidebarActiveSessionsSortMode,
+  saveSidebarActiveSessionsSortMode,
+} from "../sidebar-active-sessions-sort-preferences";
+import {
   COMPLETION_BELL_ENABLED_KEY,
   PRIMARY_SESSIONS_CONTAINER_ID,
   SCRATCH_PAD_CONTENT_KEY,
@@ -1677,6 +1681,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       setSidebarGitGenerateCommitBodyEnabled: async (enabled) =>
         this.setSidebarGitGenerateCommitBodyEnabled(enabled),
       setSidebarGitPrimaryAction: async (action) => this.setSidebarGitPrimaryAction(action),
+      toggleActiveSessionsSortMode: async () => this.toggleActiveSessionsSortMode(),
       setViewMode: async (viewMode) => this.setViewMode(viewMode),
       setVisibleCount: async (visibleCount) => this.setVisibleCount(visibleCount),
       syncSidebarAgentOrder: async (agentIds) => this.syncSidebarAgentOrder(agentIds),
@@ -1698,6 +1703,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private async publishAgentManagerXSnapshot(): Promise<void> {
     this.agentManagerXBridge.updateSnapshot(await this.createAgentManagerXWorkspaceSnapshot());
+  }
+
+  private async toggleActiveSessionsSortMode(): Promise<void> {
+    const currentSortMode = getSidebarActiveSessionsSortMode(this.context, this.workspaceId);
+    const nextSortMode = currentSortMode === "manual" ? "lastActivity" : "manual";
+
+    await saveSidebarActiveSessionsSortMode(this.context, this.workspaceId, nextSortMode);
+    await this.refreshSidebar();
   }
 
   private async createAgentManagerXWorkspaceSnapshot(): Promise<AgentManagerXWorkspaceSnapshotMessage> {
@@ -1853,6 +1866,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           git: getShowSidebarGitButton(),
         },
         getSidebarSectionCollapseState(this.context, this.workspaceId),
+        getSidebarActiveSessionsSortMode(this.context, this.workspaceId),
       ),
       platform: SHORTCUT_LABEL_PLATFORM,
       previousSessions: this.previousSessionHistory.getItems(),

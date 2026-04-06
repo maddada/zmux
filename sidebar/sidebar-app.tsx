@@ -5,6 +5,7 @@ import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
 import {
   IconBell,
   IconBellOff,
+  IconArrowsSort,
   IconHistory,
   IconLayoutSidebar,
   IconMinus,
@@ -32,6 +33,7 @@ import { GitCommitModal } from "./git-commit-modal";
 import { PreviousSessionsModal } from "./previous-sessions-modal";
 import { ScratchPadModal } from "./scratch-pad-modal";
 import { SectionHeader } from "./section-header";
+import { logSidebarDebug } from "./sidebar-debug";
 import { resetSidebarStore, useSidebarStore } from "./sidebar-store";
 import {
   getClientPoint,
@@ -44,6 +46,7 @@ import {
 import { SessionGroupSection } from "./session-group-section";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import type { WebviewApi } from "./webview-api";
+import { createDisplaySessionLayout } from "./active-sessions-sort";
 
 export type SidebarAppProps = {
   messageSource?: Pick<Window, "addEventListener" | "removeEventListener">;
@@ -137,6 +140,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   const setGitCommitDraft = useSidebarStore((state) => state.setGitCommitDraft);
   const setSectionCollapsed = useSidebarStore((state) => state.setSectionCollapsed);
   const {
+    activeSessionsSortMode,
     agentManagerZoomPercent,
     browserGroupIds,
     collapsedSections,
@@ -145,10 +149,12 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     debuggingMode,
     groupOrder,
     sectionVisibility,
+    sessionsById,
     theme,
     workspaceGroupIds,
   } = useSidebarStore(
     useShallow((state) => ({
+      activeSessionsSortMode: state.hud.activeSessionsSortMode,
       agentManagerZoomPercent: state.hud.agentManagerZoomPercent,
       browserGroupIds: state.browserGroupIds,
       collapsedSections: state.hud.collapsedSections,
@@ -157,6 +163,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       debuggingMode: state.hud.debuggingMode,
       groupOrder: state.groupOrder,
       sectionVisibility: state.hud.sectionVisibility,
+      sessionsById: state.sessionsById,
       theme: state.hud.theme,
       workspaceGroupIds: state.workspaceGroupIds,
     })),
@@ -373,15 +380,24 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     setIsOverflowMenuOpen((previous) => !previous);
   };
 
-  const effectiveGroupIds = workspaceGroupIds;
+  const isManualActiveSessionsSort = activeSessionsSortMode === "manual";
   const visibleBrowserGroupIds = sectionVisibility.browsers ? browserGroupIds : [];
   const shouldShowActionsPanel =
     sectionVisibility.actions && (sectionVisibility.git || commandCount > 0);
   const shouldShowAgentsPanel = sectionVisibility.agents;
 
-  const effectiveSessionIdsByGroup = useMemo(
-    () => createWorkspaceSessionIdsByGroup(workspaceGroupIds, authoritativeSessionIdsByGroup),
-    [authoritativeSessionIdsByGroup, workspaceGroupIds],
+  const { groupIds: effectiveGroupIds, sessionIdsByGroup: effectiveSessionIdsByGroup } = useMemo(
+    () =>
+      createDisplaySessionLayout({
+        sessionIdsByGroup: createWorkspaceSessionIdsByGroup(
+          workspaceGroupIds,
+          authoritativeSessionIdsByGroup,
+        ),
+        sessionsById,
+        sortMode: activeSessionsSortMode,
+        workspaceGroupIds,
+      }),
+    [activeSessionsSortMode, authoritativeSessionIdsByGroup, sessionsById, workspaceGroupIds],
   );
   const dragStructureKey = useMemo(
     () => createDragStructureKey(effectiveGroupIds, effectiveSessionIdsByGroup),
@@ -401,7 +417,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       return;
     }
 
-    console.debug(`[sidebarDebug] ${event}`, details);
+    logSidebarDebug(debuggingMode, event, details);
     vscode.postMessage({
       details,
       event,
@@ -494,6 +510,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   );
 
   const handleDragStart = ((event) => {
+    if (!isManualActiveSessionsSort) {
+      return;
+    }
+
     const nativeEvent = getDragNativeEvent(event);
     const sourceData = getSidebarDropData(event.operation.source);
     const pointerDownSessionTarget = pointerDownSessionTargetRef.current;
@@ -517,6 +537,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   }) satisfies DragDropEventHandlers["onDragStart"];
 
   const handleDragMove = ((event) => {
+    if (!isManualActiveSessionsSort) {
+      return;
+    }
+
     updateSessionPointerDragState(sessionPointerDragStateRef.current, getDragNativeEvent(event));
     updateSessionDragIndicator(
       getDragNativeEvent(event),
@@ -526,6 +550,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   }) satisfies DragDropEventHandlers["onDragMove"];
 
   const handleDragOver = ((event) => {
+    if (!isManualActiveSessionsSort) {
+      return;
+    }
+
     updateSessionPointerDragState(sessionPointerDragStateRef.current, getDragNativeEvent(event));
     updateSessionDragIndicator(
       getDragNativeEvent(event),
@@ -535,6 +563,12 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   }) satisfies DragDropEventHandlers["onDragOver"];
 
   const handleDragEnd = ((event) => {
+    if (!isManualActiveSessionsSort) {
+      setSessionDragIndicator(undefined);
+      sessionPointerDragStateRef.current = undefined;
+      return;
+    }
+
     setSessionDragIndicator(undefined);
     const currentGroupIds = groupIdsRef.current;
     const currentSessionIdsByGroup = sessionIdsByGroupRef.current;
@@ -770,6 +804,17 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
           <SectionHeader
             actions={
               <>
+                <ToolbarIconButton
+                  ariaLabel={`Switch active sessions sort mode. Current: ${activeSessionsSortMode === "manual" ? "manual sort" : "last activity"}`}
+                  className="floating-toolbar-button section-titlebar-action-button"
+                  isSelected={!isManualActiveSessionsSort}
+                  onClick={() => {
+                    vscode.postMessage({ type: "toggleActiveSessionsSortMode" });
+                  }}
+                  tooltip={activeSessionsSortMode === "manual" ? "Manual Sort" : "Last Activity"}
+                >
+                  <IconArrowsSort aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
+                </ToolbarIconButton>
                 <ToolbarIconButton
                   ariaExpanded={isPreviousSessionsOpen}
                   ariaHasPopup="dialog"

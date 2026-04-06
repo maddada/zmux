@@ -100,6 +100,8 @@ export function SortableSessionCard({
   vscode,
 }: SortableSessionCardProps) {
   const session = useSidebarStore((state) => state.sessionsById[sessionId]);
+  const isManualActiveSessionsSort =
+    useSidebarStore((state) => state.hud.activeSessionsSortMode) === "manual";
   const { showCloseButton, showDebugSessionNumbers, showHotkeys, showLastInteractionTime } =
     useSidebarStore(
       useShallow((state) => ({
@@ -144,7 +146,7 @@ export function SortableSessionCard({
   const sortable = useSortable({
     accept: "session",
     data: createSessionDragData(groupId, session.sessionId),
-    disabled: isBrowserSession || contextMenuPosition !== undefined,
+    disabled: isBrowserSession || contextMenuPosition !== undefined || !isManualActiveSessionsSort,
     feedback: "clone",
     group: groupId,
     id: sessionId,
