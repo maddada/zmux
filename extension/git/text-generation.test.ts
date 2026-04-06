@@ -71,6 +71,17 @@ describe("parseGeneratedCommitMessageText", () => {
     });
   });
 
+  test("should preserve long commit subjects", () => {
+    expect(
+      parseGeneratedCommitMessageText(`feat(changes): Add chat history extension and workspace bridge integration
+
+- Add a bridge between the workspace panel and chat history state.`),
+    ).toEqual({
+      body: "- Add a bridge between the workspace panel and chat history state.",
+      subject: "feat(changes): Add chat history extension and workspace bridge integration",
+    });
+  });
+
   test("should strip markdown fences", () => {
     expect(
       parseGeneratedCommitMessageText(`\`\`\`

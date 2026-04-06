@@ -53,6 +53,7 @@ export async function loadSidebarGitState(
     branch: details.branch,
     confirmSuggestedCommit: false,
     deletions: details.workingTree.deletions,
+    generateCommitBody: true,
     hasGitHubCli: details.hasGitHubCli,
     hasOriginRemote: details.hasOriginRemote,
     hasUpstream: details.hasUpstream,
@@ -142,7 +143,10 @@ export async function getGitStatusDetails(cwd: string): Promise<GitStatusDetails
   }
 
   const fileStatMap = new Map<string, { deletions: number; insertions: number }>();
-  for (const entry of [...parseNumstatEntries(stagedNumstat), ...parseNumstatEntries(unstagedNumstat)]) {
+  for (const entry of [
+    ...parseNumstatEntries(stagedNumstat),
+    ...parseNumstatEntries(unstagedNumstat),
+  ]) {
     const existing = fileStatMap.get(entry.path) ?? { deletions: 0, insertions: 0 };
     existing.insertions += entry.insertions;
     existing.deletions += entry.deletions;
@@ -198,7 +202,9 @@ export async function resolveDefaultBranchName(
 ): Promise<string | null> {
   if (hasOriginRemote !== false) {
     try {
-      const raw = (await runGitStdout(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"])).trim();
+      const raw = (
+        await runGitStdout(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"])
+      ).trim();
       if (raw.includes("/")) {
         return raw.slice(raw.indexOf("/") + 1);
       }
@@ -244,7 +250,9 @@ async function getCurrentPullRequest(cwd: string): Promise<SidebarGitPullRequest
       return null;
     }
 
-    const parsed = JSON.parse(result.stdout) as Partial<SidebarGitPullRequest> & { number?: number };
+    const parsed = JSON.parse(result.stdout) as Partial<SidebarGitPullRequest> & {
+      number?: number;
+    };
     if (!parsed.url || !parsed.title || typeof parsed.state !== "string") {
       return null;
     }

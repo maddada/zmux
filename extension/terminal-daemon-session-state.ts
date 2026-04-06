@@ -1,3 +1,4 @@
+import { normalizeTerminalTitle } from "../shared/session-grid-contract";
 import type { TerminalAgentStatus } from "../shared/terminal-host-protocol";
 import type { PersistedSessionState } from "./session-state-file";
 
@@ -17,6 +18,8 @@ export function resolvePersistedSessionPresentationState(
   return {
     agentName: input.titleActivityAgentName ?? input.snapshotAgentName ?? currentState.agentName,
     agentStatus: input.titleActivityStatus ?? input.snapshotAgentStatus ?? currentState.agentStatus,
-    title: input.liveTitle ?? input.lastKnownPersistedTitle ?? currentState.title,
+    title: normalizeTerminalTitle(
+      input.liveTitle ?? input.lastKnownPersistedTitle ?? currentState.title,
+    ),
   };
 }

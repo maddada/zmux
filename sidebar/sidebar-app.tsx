@@ -890,6 +890,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
               confirmLabel: "Commit",
               description: "",
               requestId: "",
+              suggestedBody: undefined,
               suggestedSubject: "",
             }
           }
@@ -901,11 +902,11 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
               type: "cancelSidebarGitCommit",
             });
           }}
-          onConfirm={(requestId, subject) => {
+          onConfirm={(requestId, message) => {
             setGitCommitDraft(undefined);
             vscode.postMessage({
+              message,
               requestId,
-              subject,
               type: "confirmSidebarGitCommit",
             });
           }}

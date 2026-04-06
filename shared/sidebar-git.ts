@@ -14,6 +14,7 @@ export type SidebarGitState = {
   branch: string | null;
   confirmSuggestedCommit: boolean;
   deletions: number;
+  generateCommitBody: boolean;
   hasGitHubCli: boolean;
   hasOriginRemote: boolean;
   hasUpstream: boolean;
@@ -43,6 +44,7 @@ export const DEFAULT_SIDEBAR_GIT_ACTION: SidebarGitAction = "commit";
 export function createDefaultSidebarGitState(
   primaryAction: SidebarGitAction = DEFAULT_SIDEBAR_GIT_ACTION,
   confirmSuggestedCommit = false,
+  generateCommitBody = true,
 ): SidebarGitState {
   return {
     additions: 0,
@@ -51,6 +53,7 @@ export function createDefaultSidebarGitState(
     branch: null,
     confirmSuggestedCommit,
     deletions: 0,
+    generateCommitBody,
     hasGitHubCli: false,
     hasOriginRemote: false,
     hasUpstream: false,
@@ -62,7 +65,9 @@ export function createDefaultSidebarGitState(
   };
 }
 
-export function hasSidebarGitDiffStat(state: Pick<SidebarGitState, "additions" | "deletions">): boolean {
+export function hasSidebarGitDiffStat(
+  state: Pick<SidebarGitState, "additions" | "deletions">,
+): boolean {
   return state.additions > 0 || state.deletions > 0;
 }
 

@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import {
   isTerminalSession,
+  normalizeTerminalTitle,
   type SessionRecord,
   type TerminalSessionRecord,
 } from "../shared/session-grid-contract";
@@ -534,5 +535,5 @@ function haveSameTerminalSessionSnapshot(
 }
 
 function normalizeTitle(title: string | undefined): string | undefined {
-  return title?.trim() || undefined;
+  return normalizeTerminalTitle(title);
 }

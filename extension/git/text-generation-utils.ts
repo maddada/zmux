@@ -122,7 +122,7 @@ function sanitizeCommitSubject(value: string): string {
     throw new Error("Git text generation returned an empty commit subject.");
   }
 
-  const normalized = sanitized.slice(0, 72).trim();
+  const normalized = sanitized;
   if (/^[a-z]+\([a-z0-9._/-]+\):\s+.+$/i.test(normalized)) {
     return normalized;
   }
@@ -132,7 +132,7 @@ function sanitizeCommitSubject(value: string): string {
     throw new Error("Git text generation returned an empty commit subject.");
   }
 
-  return `feat(changes): ${stripped}`.slice(0, 72).trim();
+  return `feat(changes): ${stripped}`;
 }
 
 function sanitizePrTitle(value: string): string {

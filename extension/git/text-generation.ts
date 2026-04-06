@@ -213,7 +213,7 @@ function buildCommitMessagePrompt(input: {
     "- scope is optional; include it only when it clearly improves precision",
     "- if you use a scope, keep it short, lowercase, and specific",
     "- summary should read like a polished VS Code Copilot commit title: descriptive, specific, and imperative",
-    "- summary can be up to 72 characters when needed",
+    "- do not artificially shorten a good summary just to fit a strict character cap",
     "- body should usually be 5 to 12 bullet points when there are multiple meaningful changes",
     "- each bullet should mention a concrete behavior, file area, refactor, or test change",
     "- prefer detailed, human-readable bullets over compressed shorthand",

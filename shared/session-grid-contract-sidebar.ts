@@ -180,6 +180,7 @@ export type SidebarPromptGitCommitMessage = {
   confirmLabel: string;
   description: string;
   requestId: string;
+  suggestedBody?: string;
   suggestedSubject: string;
   type: "promptGitCommit";
 };
@@ -368,8 +369,12 @@ export type SidebarToExtensionMessage =
       type: "setSidebarGitCommitConfirmationEnabled";
     }
   | {
+      enabled: boolean;
+      type: "setSidebarGitGenerateCommitBodyEnabled";
+    }
+  | {
+      message: string;
       requestId: string;
-      subject: string;
       type: "confirmSidebarGitCommit";
     }
   | {

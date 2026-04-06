@@ -12,6 +12,7 @@ import {
   getTerminalSessionSurfaceTitle,
   getSessionShortcutLabel,
   getVisiblePrimaryTitle,
+  normalizeTerminalTitle,
 } from "./session-grid-contract";
 import { createSessionInSnapshot, normalizeSessionGridSnapshot } from "./session-grid-state";
 
@@ -336,6 +337,15 @@ describe("agent manager zoom settings", () => {
 });
 
 describe("visible primary titles", () => {
+  test("should strip leading progress markers from terminal titles for supported agents", () => {
+    expect(normalizeTerminalTitle("  ⠸ OpenAI Codex  ")).toBe("OpenAI Codex");
+    expect(normalizeTerminalTitle("✳ Claude Code")).toBe("Claude Code");
+    expect(normalizeTerminalTitle("✦ agent-tiler")).toBe("agent-tiler");
+    expect(normalizeTerminalTitle("◇ agent-tiler")).toBe("agent-tiler");
+    expect(normalizeTerminalTitle("🤖 Copilot fix")).toBe("Copilot fix");
+    expect(normalizeTerminalTitle("🔔 Copilot fix")).toBe("Copilot fix");
+  });
+
   test("should hide generated Session N placeholder titles in sidebar items", () => {
     expect(getVisiblePrimaryTitle("Session 1")).toBeUndefined();
     expect(getVisiblePrimaryTitle(" Session 12 ")).toBeUndefined();

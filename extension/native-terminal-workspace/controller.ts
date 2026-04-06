@@ -7,6 +7,7 @@ import {
   getOrderedSessions,
   isT3Session,
   isTerminalSession,
+  normalizeTerminalTitle,
   resolveSidebarTheme,
   type SidebarCollapsibleSection,
   type ExtensionToSidebarMessage,
@@ -119,8 +120,10 @@ import type { ChatHistoryResumeRequest } from "../chat-history-vsmux-bridge";
 import {
   getPrimarySidebarGitAction,
   getSidebarGitConfirmSuggestedCommit,
+  getSidebarGitGenerateCommitBody,
   savePrimarySidebarGitAction,
   saveSidebarGitConfirmSuggestedCommit,
+  saveSidebarGitGenerateCommitBody,
 } from "../sidebar-git-preferences";
 import {
   getSidebarSectionCollapseState,
@@ -680,7 +683,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     const renamedSessionRecord = this.store.getSession(sessionId);
     if (renamedSessionRecord?.kind === "terminal") {
       await this.backend.renameSession(renamedSessionRecord);
-      await this.backend.writeText(sessionId, `/rename ${renamedSessionRecord.title}`, false);
+      const normalizedRenameTitle =
+        normalizeTerminalTitle(renamedSessionRecord.title) ?? renamedSessionRecord.title.trim();
+      await this.backend.writeText(sessionId, `/rename ${normalizedRenameTitle}`, false);
     }
 
     if (renamePlan?.shouldFocusRenamedSession) {
@@ -876,7 +881,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     const terminalTitle = this.terminalTitleBySessionId.get(sessionId);
-    const sourceTitle = getPreferredSessionTitle(sessionRecord.title, terminalTitle)
+    const sourceTitle = normalizeTerminalTitle(
+      getPreferredSessionTitle(sessionRecord.title, terminalTitle),
+    )
       ?.replace(/\s+/g, " ")
       .trim();
     const forkCommand = buildForkAgentCommand(
@@ -1116,7 +1123,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
             }),
         );
 
-        const sidebarGitState = await loadSidebarGitState(cwd, action, false);
+        const sidebarGitState = this.withSidebarGitPreferences(
+          await loadSidebarGitState(cwd, action, false),
+        );
         const primaryAction = resolveSidebarGitPrimaryActionState(sidebarGitState);
         const requestId = randomUUID();
         this.pendingSidebarGitCommitConfirmation = {
@@ -1131,8 +1140,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           description:
             preparedCommit.scope === "stagedOnly"
               ? "Only staged changes will be committed."
-              : "Review the suggested commit title.",
+              : "Review the suggested commit message.",
           requestId,
+          suggestedBody: sidebarGitState.generateCommitBody ? preparedCommit.body : undefined,
           suggestedSubject: preparedCommit.subject,
           type: "promptGitCommit",
         });
@@ -1169,22 +1179,29 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.refreshSidebar();
   }
 
-  public async confirmSidebarGitCommit(requestId: string, subject: string): Promise<void> {
+  public async setSidebarGitGenerateCommitBodyEnabled(enabled: boolean): Promise<void> {
+    await saveSidebarGitGenerateCommitBody(this.context, this.workspaceId, enabled);
+    this.invalidateSidebarGitHudState();
+    await this.refreshSidebar();
+  }
+
+  public async confirmSidebarGitCommit(requestId: string, message: string): Promise<void> {
     const pending = this.pendingSidebarGitCommitConfirmation;
     if (!pending || pending.requestId !== requestId || this.gitActionInProgress) {
       return;
     }
 
-    const trimmedSubject = subject.trim();
-    if (!trimmedSubject) {
-      void vscode.window.showErrorMessage("Commit title cannot be empty.");
+    const parsedCommitMessage = parseSidebarCommitDraft(message);
+    if (!parsedCommitMessage) {
+      void vscode.window.showErrorMessage("Commit message cannot be empty.");
       return;
     }
 
     this.pendingSidebarGitCommitConfirmation = undefined;
     await this.executeSidebarGitAction(pending.action, pending.generator, {
       ...pending.preparedCommit,
-      subject: trimmedSubject,
+      body: parsedCommitMessage.body,
+      subject: parsedCommitMessage.subject,
     });
   }
 
@@ -1657,6 +1674,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         ),
       setSidebarGitCommitConfirmationEnabled: async (enabled) =>
         this.setSidebarGitCommitConfirmationEnabled(enabled),
+      setSidebarGitGenerateCommitBodyEnabled: async (enabled) =>
+        this.setSidebarGitGenerateCommitBodyEnabled(enabled),
       setSidebarGitPrimaryAction: async (action) => this.setSidebarGitPrimaryAction(action),
       setViewMode: async (viewMode) => this.setViewMode(viewMode),
       setVisibleCount: async (visibleCount) => this.setVisibleCount(visibleCount),
@@ -2911,6 +2930,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     return {
       ...state,
       confirmSuggestedCommit: getSidebarGitConfirmSuggestedCommit(this.context, this.workspaceId),
+      generateCommitBody: getSidebarGitGenerateCommitBody(this.context, this.workspaceId),
     };
   }
 
@@ -3248,7 +3268,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private applyT3SessionTitle(sessionId: string, title: string | undefined): boolean {
-    const normalizedTitle = title?.trim();
+    const normalizedTitle = normalizeTerminalTitle(title);
     if (!normalizedTitle) {
       if (this.terminalTitleBySessionId.delete(sessionId)) {
         return true;
@@ -3337,6 +3357,27 @@ function cloneWorkspaceSnapshot(
   snapshot: GroupedSessionWorkspaceSnapshot,
 ): GroupedSessionWorkspaceSnapshot {
   return JSON.parse(JSON.stringify(snapshot)) as GroupedSessionWorkspaceSnapshot;
+}
+
+function parseSidebarCommitDraft(message: string): { body: string; subject: string } | undefined {
+  const lines = message.split(/\r?\n/g).map((line) => line.replace(/\s+$/g, ""));
+  const subjectLineIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (subjectLineIndex < 0) {
+    return undefined;
+  }
+
+  const subject = lines[subjectLineIndex]?.trim();
+  if (!subject) {
+    return undefined;
+  }
+
+  return {
+    body: lines
+      .slice(subjectLineIndex + 1)
+      .join("\n")
+      .trim(),
+    subject,
+  };
 }
 
 function compareSidebarDaemonSessions(

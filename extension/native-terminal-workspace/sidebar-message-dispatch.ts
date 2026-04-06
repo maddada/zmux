@@ -14,7 +14,7 @@ export type SidebarMessageHandlers = {
   clearGeneratedPreviousSessions: () => Promise<void>;
   closeGroup: (groupId: string) => Promise<void>;
   closeSession: (sessionId: string) => Promise<void>;
-  confirmSidebarGitCommit: (requestId: string, subject: string) => Promise<void>;
+  confirmSidebarGitCommit: (requestId: string, message: string) => Promise<void>;
   copyResumeCommand: (sessionId: string) => Promise<void>;
   forkSession: (sessionId: string) => Promise<void>;
   fullReloadSession: (sessionId: string) => Promise<void>;
@@ -49,6 +49,7 @@ export type SidebarMessageHandlers = {
   runSidebarCommand: (commandId: string) => Promise<void>;
   runSidebarGitAction: (action: SidebarGitAction) => Promise<void>;
   setSidebarGitCommitConfirmationEnabled: (enabled: boolean) => Promise<void>;
+  setSidebarGitGenerateCommitBodyEnabled: (enabled: boolean) => Promise<void>;
   saveScratchPad: (content: string) => Promise<void>;
   setSidebarSectionCollapsed: (
     section: SidebarCollapsibleSection,
@@ -145,8 +146,11 @@ export async function dispatchSidebarMessage(
     case "setSidebarGitCommitConfirmationEnabled":
       await handlers.setSidebarGitCommitConfirmationEnabled(message.enabled);
       return;
+    case "setSidebarGitGenerateCommitBodyEnabled":
+      await handlers.setSidebarGitGenerateCommitBodyEnabled(message.enabled);
+      return;
     case "confirmSidebarGitCommit":
-      await handlers.confirmSidebarGitCommit(message.requestId, message.subject);
+      await handlers.confirmSidebarGitCommit(message.requestId, message.message);
       return;
     case "cancelSidebarGitCommit":
       await handlers.cancelSidebarGitCommit(message.requestId);

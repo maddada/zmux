@@ -72,6 +72,13 @@ export function GitActionRow({ git, vscode }: GitActionRowProps) {
     });
   };
 
+  const setGenerateCommitBodyEnabled = (enabled: boolean) => {
+    vscode.postMessage({
+      enabled,
+      type: "setSidebarGitGenerateCommitBodyEnabled",
+    });
+  };
+
   const runAction = (action: SidebarGitAction) => {
     setIsMenuOpen(false);
     vscode.postMessage({
@@ -178,9 +185,37 @@ export function GitActionRow({ git, vscode }: GitActionRowProps) {
             >
               {git.confirmSuggestedCommit ? <IconCheck size={14} /> : null}
             </span>
-            <span className="git-action-menu-item-label">Review Suggested Commit</span>
+            <span className="git-action-menu-item-label">Review Commit Title</span>
             <span className="git-action-menu-toggle-state">
               {git.confirmSuggestedCommit ? "On" : "Off"}
+            </span>
+          </button>
+          <button
+            aria-label={
+              git.generateCommitBody
+                ? "Disable generated commit body in the review modal"
+                : "Enable generated commit body in the review modal"
+            }
+            className="git-action-menu-item git-action-menu-toggle-item"
+            onClick={() => setGenerateCommitBodyEnabled(!git.generateCommitBody)}
+            role="menuitemcheckbox"
+            title={
+              git.generateCommitBody
+                ? "Include generated bullet points in the suggested commit message"
+                : "Only suggest the commit title without generated bullet points"
+            }
+            type="button"
+          >
+            <span
+              aria-hidden="true"
+              className="git-action-menu-toggle-check"
+              data-selected={String(git.generateCommitBody)}
+            >
+              {git.generateCommitBody ? <IconCheck size={14} /> : null}
+            </span>
+            <span className="git-action-menu-item-label">Generate commit body</span>
+            <span className="git-action-menu-toggle-state">
+              {git.generateCommitBody ? "On" : "Off"}
             </span>
           </button>
         </div>

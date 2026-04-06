@@ -43,6 +43,7 @@ function createHandlers(): SidebarMessageHandlers {
     saveSidebarAgent: vi.fn(async () => undefined),
     saveSidebarCommand: vi.fn(async () => undefined),
     setSidebarGitCommitConfirmationEnabled: vi.fn(async () => undefined),
+    setSidebarGitGenerateCommitBodyEnabled: vi.fn(async () => undefined),
     setSidebarGitPrimaryAction: vi.fn(async () => undefined),
     setSidebarSectionCollapsed: vi.fn(async () => undefined),
     setGroupSleeping: vi.fn(async () => undefined),

@@ -42,7 +42,7 @@ describe("resolvePersistedSessionPresentationState", () => {
     ).toEqual({
       agentName: "claude",
       agentStatus: "working",
-      title: "⠦ Auto fix corruption",
+      title: "Auto fix corruption",
     });
   });
 

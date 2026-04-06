@@ -9,13 +9,16 @@ import { getWorkspaceStorageKey } from "./terminal-workspace-environment";
 
 const PRIMARY_SIDEBAR_GIT_ACTION_KEY = "VSmux.primarySidebarGitAction";
 const SIDEBAR_GIT_CONFIRM_SUGGESTED_COMMIT_KEY = "VSmux.sidebarGitConfirmSuggestedCommit";
+const SIDEBAR_GIT_GENERATE_COMMIT_BODY_KEY = "VSmux.sidebarGitGenerateCommitBody";
 
 export function getPrimarySidebarGitAction(
   context: vscode.ExtensionContext,
   workspaceId: string,
 ): SidebarGitAction {
   return normalizeSidebarGitAction(
-    context.workspaceState.get<string>(getWorkspaceStorageKey(PRIMARY_SIDEBAR_GIT_ACTION_KEY, workspaceId)),
+    context.workspaceState.get<string>(
+      getWorkspaceStorageKey(PRIMARY_SIDEBAR_GIT_ACTION_KEY, workspaceId),
+    ),
   );
 }
 
@@ -56,5 +59,26 @@ export async function saveSidebarGitConfirmSuggestedCommit(
   await context.workspaceState.update(
     getWorkspaceStorageKey(SIDEBAR_GIT_CONFIRM_SUGGESTED_COMMIT_KEY, workspaceId),
     shouldConfirm,
+  );
+}
+
+export function getSidebarGitGenerateCommitBody(
+  context: vscode.ExtensionContext,
+  workspaceId: string,
+): boolean {
+  const storedValue = context.workspaceState.get<boolean>(
+    getWorkspaceStorageKey(SIDEBAR_GIT_GENERATE_COMMIT_BODY_KEY, workspaceId),
+  );
+  return typeof storedValue === "boolean" ? storedValue : true;
+}
+
+export async function saveSidebarGitGenerateCommitBody(
+  context: vscode.ExtensionContext,
+  workspaceId: string,
+  enabled: boolean,
+): Promise<void> {
+  await context.workspaceState.update(
+    getWorkspaceStorageKey(SIDEBAR_GIT_GENERATE_COMMIT_BODY_KEY, workspaceId),
+    enabled,
   );
 }

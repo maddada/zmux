@@ -6,6 +6,7 @@ export type GitCommitModalDraft = {
   confirmLabel: string;
   description: string;
   requestId: string;
+  suggestedBody?: string;
   suggestedSubject: string;
 };
 
@@ -13,11 +14,11 @@ export type GitCommitModalProps = {
   draft: GitCommitModalDraft;
   isOpen: boolean;
   onCancel: (requestId: string) => void;
-  onConfirm: (requestId: string, subject: string) => void;
+  onConfirm: (requestId: string, message: string) => void;
 };
 
 export function GitCommitModal({ draft, isOpen, onCancel, onConfirm }: GitCommitModalProps) {
-  const [subject, setSubject] = useState(draft.suggestedSubject);
+  const [message, setMessage] = useState(buildDraftMessage(draft));
   const descriptionId = useId();
   const titleId = useId();
 
@@ -26,7 +27,7 @@ export function GitCommitModal({ draft, isOpen, onCancel, onConfirm }: GitCommit
       return;
     }
 
-    setSubject(draft.suggestedSubject);
+    setMessage(buildDraftMessage(draft));
   }, [draft, isOpen]);
 
   useEffect(() => {
@@ -50,7 +51,7 @@ export function GitCommitModal({ draft, isOpen, onCancel, onConfirm }: GitCommit
     return null;
   }
 
-  const trimmedSubject = subject.trim();
+  const trimmedMessage = message.trim();
 
   return createPortal(
     <div className="confirm-modal-root" role="presentation">
@@ -84,14 +85,14 @@ export function GitCommitModal({ draft, isOpen, onCancel, onConfirm }: GitCommit
         </div>
         <div className="command-config-fields">
           <label className="command-config-field">
-            <span className="command-config-label">Commit Title</span>
+            <span className="command-config-label">Commit Message</span>
             <textarea
               autoFocus
               className="group-title-input command-config-input command-config-textarea"
-              onChange={(event) => setSubject(event.currentTarget.value)}
+              onChange={(event) => setMessage(event.currentTarget.value)}
               placeholder="Describe the change"
-              rows={3}
-              value={subject}
+              rows={draft.suggestedBody ? 10 : 4}
+              value={message}
               wrap="soft"
             />
           </label>
@@ -106,8 +107,8 @@ export function GitCommitModal({ draft, isOpen, onCancel, onConfirm }: GitCommit
           </button>
           <button
             className="primary confirm-modal-button"
-            disabled={trimmedSubject.length === 0}
-            onClick={() => onConfirm(draft.requestId, trimmedSubject)}
+            disabled={trimmedMessage.length === 0}
+            onClick={() => onConfirm(draft.requestId, trimmedMessage)}
             type="button"
           >
             {draft.confirmLabel}
@@ -117,4 +118,10 @@ export function GitCommitModal({ draft, isOpen, onCancel, onConfirm }: GitCommit
     </div>,
     document.body,
   );
+}
+
+function buildDraftMessage(draft: GitCommitModalDraft): string {
+  const subject = draft.suggestedSubject.trim();
+  const body = draft.suggestedBody?.trim();
+  return body ? `${subject}\n\n${body}` : subject;
 }

@@ -225,11 +225,15 @@ export function isSidebarMessage(candidate: unknown): candidate is SidebarToExte
     case "refreshGitState":
       return true;
 
+    case "setSidebarGitCommitConfirmationEnabled":
+    case "setSidebarGitGenerateCommitBodyEnabled":
+      return typeof message.enabled === "boolean";
+
     case "confirmSidebarGitCommit":
       return (
         typeof message.requestId === "string" &&
         message.requestId.length > 0 &&
-        typeof message.subject === "string"
+        typeof message.message === "string"
       );
 
     case "cancelSidebarGitCommit":

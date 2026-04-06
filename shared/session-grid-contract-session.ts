@@ -22,6 +22,8 @@ import {
   type VisibleSessionCount,
 } from "./session-grid-contract-core";
 
+const LEADING_TERMINAL_TITLE_STATUS_MARKER_PATTERN = /^[\s\u2800-\u28ff·•⋅◦✳*✦◇🤖🔔]+/u;
+
 export function clampVisibleSessionCount(value: number): VisibleSessionCount {
   if (value <= 1) {
     return 1;
@@ -305,8 +307,20 @@ export function getVisiblePrimaryTitle(title: string): string | undefined {
   return normalizedTitle;
 }
 
-export function getVisibleTerminalTitle(title: string | undefined): string | undefined {
+export function normalizeTerminalTitle(title: string | undefined): string | undefined {
   const normalizedTitle = title?.trim();
+  if (!normalizedTitle) {
+    return undefined;
+  }
+
+  const sanitizedTitle = normalizedTitle
+    .replace(LEADING_TERMINAL_TITLE_STATUS_MARKER_PATTERN, "")
+    .trim();
+  return sanitizedTitle || undefined;
+}
+
+export function getVisibleTerminalTitle(title: string | undefined): string | undefined {
+  const normalizedTitle = normalizeTerminalTitle(title);
   if (!normalizedTitle) {
     return undefined;
   }
@@ -315,12 +329,7 @@ export function getVisibleTerminalTitle(title: string | undefined): string | und
     return undefined;
   }
 
-  const sanitizedTitle = normalizedTitle.replace(/^[\s\u2800-\u28ff·•⋅◦]+/, "").trim();
-  if (!sanitizedTitle) {
-    return undefined;
-  }
-
-  return sanitizedTitle;
+  return normalizedTitle;
 }
 
 export function getPreferredSessionTitle(
