@@ -9,13 +9,13 @@
     {
       "importance": 75,
       "path": "architecture/terminal_workspace/sidebar_session_card_last_interaction_timestamps.md",
-      "tokens": 895,
+      "tokens": 897,
       "type": "context"
     },
     {
       "importance": 75,
       "path": "facts/project/sidebar_session_card_last_interaction_timestamp_facts.md",
-      "tokens": 550,
+      "tokens": 552,
       "type": "context"
     },
     {
@@ -27,7 +27,7 @@
     {
       "importance": 60,
       "path": "architecture/terminal_workspace/workspace_debug_console_suppression.md",
-      "tokens": 950,
+      "tokens": 953,
       "type": "context"
     },
     {
@@ -55,13 +55,13 @@
       "type": "context"
     }
   ],
-  "generated_at": "2026-04-06T23:17:43.902Z",
+  "generated_at": "2026-04-07T02:47:15.452Z",
   "lane_tokens": {
-    "contexts": 3984,
+    "contexts": 3991,
     "stubs": 0,
     "summaries": 1639
   },
-  "source_fingerprint": "13cefcb33108ccde7cd1b8bba14c3b1c3da9514962626e4014f98e2d79a96e0f",
-  "total_tokens": 5623,
+  "source_fingerprint": "0aaa13df505ba7131efacb35bc74c382e008a3bea27731b7a51c261743e81fd3",
+  "total_tokens": 5630,
   "version": 1
 }

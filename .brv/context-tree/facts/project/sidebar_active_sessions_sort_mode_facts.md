@@ -1,34 +1,35 @@
 ---
 title: Sidebar Active Sessions Sort Mode Facts
 tags: []
+related: [architecture/terminal_workspace/sidebar_active_sessions_sort_mode.md]
 keywords: []
-importance: 50
+importance: 55
 recency: 1
 maturity: draft
+updateCount: 1
 createdAt: "2026-04-06T23:09:55.235Z"
-updatedAt: "2026-04-06T23:09:55.235Z"
+updatedAt: "2026-04-06T23:52:15.816Z"
 ---
 
 ## Raw Concept
 
 **Task:**
-Capture project facts for sidebar active-sessions sort mode
+Capture factual invariants for sidebar Active sessions sort behavior
 
 **Changes:**
 
-- Recorded persistence key and workspace scope
-- Recorded manual versus last-activity behavior
-- Recorded UI toggle and drag constraints
+- Recorded group-order invariants across sort modes
+- Recorded per-group last activity sorting rules
+- Recorded manual-only drag and reorder messaging behavior
 
 **Files:**
 
-- shared/session-grid-contract-sidebar.ts
-- extension/sidebar-active-sessions-sort-preferences.ts
-- sidebar/sidebar-app.tsx
 - sidebar/active-sessions-sort.ts
+- sidebar/sidebar-app.tsx
+- sidebar/session-group-section.tsx
 
 **Flow:**
-feature change -> extract factual statements -> store as project recall facts
+workspaceGroupIds preserved -> per-group sessions either manual or activity sorted -> reorder interactions enabled only in manual mode -> VS Code messages sync manual order changes
 
 **Timestamp:** 2026-04-06
 
@@ -36,22 +37,24 @@ feature change -> extract factual statements -> store as project recall facts
 
 ### Structure
 
-This fact entry stores stable recall details for the active-sessions sort mode feature rather than the full implementation narrative. It captures the enum values, persistence key, workspace scoping, local sort logic, tie-breaking behavior, and drag restrictions that matter for future lookup.
+This fact entry stores the stable operational guarantees for the sidebar Active sessions sorting feature. It covers the source of truth for group ordering, the scope of activity-based sorting, timestamp fallback behavior, and the messages emitted for manual reorder operations.
+
+### Dependencies
+
+These facts rely on the sidebar store, SidebarSessionItem.lastInteractionAt values, and the UI message bridge to VS Code. They also rely on browser groups being treated separately from normal workspace groups during drag setup.
 
 ### Highlights
 
-The most important facts are that the preference is workspace-scoped, the key is VSmux.sidebarActiveSessionsSortMode, manual order is preserved even when last-activity rendering is enabled, and drag interactions are disabled outside manual mode.
+The key invariant is that switching sort modes never changes workspace group order. Activity sorting is constrained to sessions inside each group, and manual drag behavior is disabled whenever the derived activity view is active.
 
 ## Facts
 
-- **sidebar_active_sessions_sort_mode**: Sidebar HUD now includes activeSessionsSortMode with values manual or lastActivity. [project]
-- **active_sessions_sort_persistence_scope**: The extension persists the active sessions sort mode per workspace in workspaceState. [project]
-- **active_sessions_sort_persistence_key**: The persistence key for sidebar active sessions sort mode is VSmux.sidebarActiveSessionsSortMode. [project]
-- **active_sessions_sort_normalization**: Normalization preserves only lastActivity explicitly and normalizes every other stored value to manual. [convention]
-- **manual_sort_behavior**: Manual mode preserves authoritative workspaceGroupIds and per-group session order and keeps drag-and-drop enabled. [project]
-- **last_activity_sort_behavior**: Last-activity mode sorts sessions within each group by descending lastInteractionAt and sorts groups by most recent session activity. [project]
-- **last_activity_tiebreak_and_preservation**: Last-activity sorting falls back to the original manual order for tie-breaking and does not overwrite stored manual order. [project]
-- **last_activity_timestamp_fallback**: Invalid or missing lastInteractionAt timestamps are converted to 0 using Date.parse fallback logic. [project]
-- **sort_mode_drag_constraint**: Group and session dragging are disabled when active sessions sort mode is not manual. [project]
-- **active_sessions_sort_toggle_ui**: The Active section header includes a toggle button next to Previous Sessions that posts toggleActiveSessionsSortMode. [project]
-- **active_sessions_sort_tooltips**: The toggle button tooltip reflects the current mode using Manual Sort or Last Activity. [project]
+- **workspace_group_order**: Workspace groups remain manually ordered in both manual and last-activity sort modes. [project]
+- **active_sessions_sort_scope**: The Active header sort toggle only reorders sessions within each group by lastInteractionAt from newest to oldest. [project]
+- **display_group_ids_source**: createDisplaySessionLayout always returns groupIds copied from workspaceGroupIds. [project]
+- **activity_sort_tiebreaker**: sortSessionIdsByLastActivity falls back to the original manual session order when timestamps are equal. [project]
+- **missing_activity_timestamp_behavior**: getSessionLastActivityTime returns 0 when a session is missing, lastInteractionAt is missing, or the timestamp is invalid. [project]
+- **drag_reorder_mode_gate**: Group and session drag-and-drop reordering are disabled outside manual sort mode. [project]
+- **browser_group_drag_behavior**: Browser groups cannot use manual group drag behavior. [project]
+- **active_sessions_sort_toggle_message**: The sidebar uses a toggleActiveSessionsSortMode message to switch sort modes from the Active header control. [project]
+- **sidebar_reorder_messages**: Manual group reorder posts syncGroupOrder, cross-group session moves post moveSessionToGroup, and same-group session reorder posts syncSessionOrder. [project]
