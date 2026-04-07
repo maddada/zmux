@@ -6,11 +6,11 @@ For VS Code: https://marketplace.visualstudio.com/items?itemName=maddada.VSmux
 
 For Cursor and Others: https://open-vsx.org/extension/maddada/VSmux
 
-## Latest Release: 2.7.0
+## Latest Release: 2.7.5
 
-- VSmux Search is now built in, so you can revisit conversation history and bridge back into workspace flows more easily.
-- Session sorting, timestamps, titles, and reload actions are more polished throughout the sidebar.
-- Terminal focus, T3 clipboard writes, and backend activity tracking are all more reliable across the workspace.
+- Sessions can now be marked as favorites so important work stays easier to find in the sidebar.
+- Drag and drop in the sidebar is safer, with clearer drop targets and fewer accidental moves.
+- Tooltips and session attention behavior are more polished, so the UI feels faster and less noisy.
 
 Full release notes: [CHANGELOG.md](/Users/madda/dev/_active/agent-tiler/CHANGELOG.md)
 

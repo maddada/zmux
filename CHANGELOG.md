@@ -2,6 +2,13 @@
 
 All notable user-facing changes are documented in this file.
 
+## 2.7.5 - 2026-04-08
+
+- You can now mark sessions as favorites in the sidebar, making important sessions easier to keep visible and get back to quickly.
+- Session drag and drop is safer and more predictable now, with explicit drop targets that reduce accidental moves while reorganizing the sidebar.
+- The UI feels a bit snappier, with shorter tooltip delays so session details and controls appear faster.
+- Session attention behavior is calmer and more deliberate now, reducing noisy attention states from very short-lived work.
+
 ## 2.7.0 - 2026-04-07
 
 - VSmux Search is now built in, giving you an integrated conversation viewer with workspace bridges so it is easier to revisit and jump back into past agent work.
