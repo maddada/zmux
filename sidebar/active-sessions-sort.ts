@@ -37,19 +37,9 @@ export function createDisplaySessionLayout({
       sortSessionIdsByLastActivity(manualSessionIdsByGroup[groupId] ?? [], sessionsById),
     ]),
   );
-  const groupIds = [...workspaceGroupIds].sort((leftGroupId, rightGroupId) => {
-    const activityDelta =
-      getGroupLastActivityTime(sortedSessionIdsByGroup[leftGroupId] ?? [], sessionsById) -
-      getGroupLastActivityTime(sortedSessionIdsByGroup[rightGroupId] ?? [], sessionsById);
-    if (activityDelta !== 0) {
-      return activityDelta > 0 ? -1 : 1;
-    }
-
-    return workspaceGroupIds.indexOf(leftGroupId) - workspaceGroupIds.indexOf(rightGroupId);
-  });
 
   return {
-    groupIds,
+    groupIds: [...workspaceGroupIds],
     sessionIdsByGroup: sortedSessionIdsByGroup,
   };
 }
@@ -69,17 +59,6 @@ function sortSessionIdsByLastActivity(
     return sessionIds.indexOf(leftSessionId) - sessionIds.indexOf(rightSessionId);
   });
 }
-
-function getGroupLastActivityTime(
-  sessionIds: readonly string[],
-  sessionsById: Record<string, SidebarSessionItem>,
-): number {
-  return sessionIds.reduce(
-    (latest, sessionId) => Math.max(latest, getSessionLastActivityTime(sessionsById[sessionId])),
-    0,
-  );
-}
-
 function getSessionLastActivityTime(session: SidebarSessionItem | undefined): number {
   if (!session?.lastInteractionAt) {
     return 0;

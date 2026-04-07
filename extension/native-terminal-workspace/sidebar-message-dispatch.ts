@@ -17,6 +17,7 @@ export type SidebarMessageHandlers = {
   confirmSidebarGitCommit: (requestId: string, message: string) => Promise<void>;
   copyResumeCommand: (sessionId: string) => Promise<void>;
   forkSession: (sessionId: string) => Promise<void>;
+  fullReloadGroup: (groupId: string) => Promise<void>;
   fullReloadSession: (sessionId: string) => Promise<void>;
   setGroupSleeping: (groupId: string, sleeping: boolean) => Promise<void>;
   setSessionSleeping: (sessionId: string, sleeping: boolean) => Promise<void>;
@@ -233,6 +234,11 @@ export async function dispatchSidebarMessage(
     case "fullReloadSession":
       if (message.sessionId) {
         await handlers.fullReloadSession(message.sessionId);
+      }
+      return;
+    case "fullReloadGroup":
+      if (message.groupId) {
+        await handlers.fullReloadGroup(message.groupId);
       }
       return;
     case "setT3SessionThreadId":

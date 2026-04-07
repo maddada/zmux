@@ -551,6 +551,7 @@ function createSidebarHudState(): SidebarHydrateMessage["hud"] {
       browsers: true,
       git: true,
     },
+    createSessionOnSidebarDoubleClick: false,
     showCloseButtonOnSessionCards: false,
     showHotkeysOnSessionCards: false,
     showLastInteractionTimeOnSessionCards: true,

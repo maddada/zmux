@@ -247,11 +247,23 @@ export class SessionGridStore {
 
   public async syncSessionOrder(groupId: string, sessionIds: readonly string[]): Promise<boolean> {
     const previousSnapshot = this.snapshot;
+    const currentSessionIds =
+      previousSnapshot.groups
+        .find((group) => group.groupId === groupId)
+        ?.snapshot.sessions.map((session) => session.sessionId) ?? [];
+    const requestedSessionIdSet = new Set(sessionIds);
     const result = syncSessionOrderInSimpleWorkspace(this.snapshot, groupId, sessionIds);
     this.snapshot = result.snapshot;
     logVSmuxDebug("store.syncSessionOrder", {
       changed: result.changed,
       groupId,
+      currentSessionIds,
+      extraRequestedSessionIds: sessionIds.filter(
+        (sessionId) => !currentSessionIds.includes(sessionId),
+      ),
+      missingRequestedSessionIds: currentSessionIds.filter(
+        (sessionId) => !requestedSessionIdSet.has(sessionId),
+      ),
       requestedSessionIds: [...sessionIds],
       next: summarizeWorkspaceSnapshot(this.snapshot),
       previous: summarizeWorkspaceSnapshot(previousSnapshot),
@@ -284,6 +296,11 @@ export class SessionGridStore {
     targetIndex?: number,
   ): Promise<boolean> {
     const previousSnapshot = this.snapshot;
+    const previousGroupIdsBySession = Object.fromEntries(
+      previousSnapshot.groups.flatMap((group) =>
+        group.snapshot.sessions.map((session) => [session.sessionId, group.groupId] as const),
+      ),
+    );
     const result = moveSessionToGroupInSimpleWorkspace(
       this.snapshot,
       sessionId,
@@ -296,6 +313,7 @@ export class SessionGridStore {
       groupId,
       next: summarizeWorkspaceSnapshot(this.snapshot),
       previous: summarizeWorkspaceSnapshot(previousSnapshot),
+      previousGroupId: previousGroupIdsBySession[sessionId],
       sessionId,
       targetIndex,
     });

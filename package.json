@@ -652,6 +652,12 @@
           "type": "boolean",
           "default": true,
           "description": "When renaming a session from the sidebar, also stage `/rename <new name>` in that terminal and focus it without pressing Enter."
+        },
+        "VSmux.createSessionOnSidebarDoubleClick": {
+          "title": "Create Session On Sidebar Double Click",
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, double-clicking empty space in the VSmux sidebar creates a new terminal session."
         }
       }
     },

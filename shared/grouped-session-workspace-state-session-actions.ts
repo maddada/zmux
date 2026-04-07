@@ -14,9 +14,9 @@ import {
   setSessionTitleInSnapshot,
   setViewModeInSnapshot,
   setVisibleCountInSnapshot,
-  syncSessionOrderInSnapshot,
   toggleFullscreenSessionInSnapshot,
 } from "./session-grid-state";
+import { reorderGroupSessions } from "./session-order-reorder";
 import {
   claimNextSessionDisplayId,
   findGroupContainingSession,
@@ -165,7 +165,7 @@ export function syncSessionOrderInWorkspace(
     return { changed: false, snapshot: normalizedSnapshot };
   }
 
-  const result = syncSessionOrderInSnapshot(group.snapshot, sessionIds);
+  const result = reorderGroupSessions(group.snapshot, sessionIds);
   return {
     changed: result.changed,
     snapshot: result.changed

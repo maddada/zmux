@@ -4,6 +4,7 @@ import { SidebarStoryHarness } from "./sidebar-story-harness";
 import { createSidebarStoryMessage, type SidebarStoryArgs } from "./sidebar-story-fixtures";
 
 export const DEFAULT_SIDEBAR_STORY_ARGS: SidebarStoryArgs = {
+  createSessionOnSidebarDoubleClick: false,
   debuggingMode: false,
   fixture: "default",
   highlightedVisibleCount: 1,
@@ -17,6 +18,9 @@ export const DEFAULT_SIDEBAR_STORY_ARGS: SidebarStoryArgs = {
 };
 
 export const SIDEBAR_STORY_ARG_TYPES: NonNullable<Meta<SidebarStoryArgs>["argTypes"]> = {
+  createSessionOnSidebarDoubleClick: {
+    control: "boolean",
+  },
   debuggingMode: {
     control: "boolean",
   },
@@ -24,6 +28,7 @@ export const SIDEBAR_STORY_ARG_TYPES: NonNullable<Meta<SidebarStoryArgs>["argTyp
     control: "select",
     options: [
       "default",
+      "sort-toggle-demo",
       "selector-states",
       "overflow-stress",
       "empty-groups",

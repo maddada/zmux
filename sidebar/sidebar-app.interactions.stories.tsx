@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, waitFor, within } from "storybook/test";
+import { expect, fireEvent, waitFor, within } from "storybook/test";
 import type { SidebarStoryArgs } from "./sidebar-story-fixtures";
 import { resetSidebarStoryMessages } from "./sidebar-story-harness";
 import {
@@ -113,6 +113,108 @@ export const ToolbarActions: Story = {
       resetSidebarStoryMessages();
       await userEvent.click(canvas.getByRole("button", { name: "Create a session in Group 4" }));
       await expectMessage({ groupId: "group-4", type: "createSessionInGroup" });
+    });
+
+    await step("full reload a group from its context menu", async () => {
+      resetSidebarStoryMessages();
+      const group = await findRequiredElement(
+        canvasElement.ownerDocument.body,
+        '[data-sidebar-group-id="group-1"]',
+        "group-1 section",
+      );
+      await openContextMenu(group);
+      await userEvent.click(await body.findByRole("menuitem", { name: "Full reload" }));
+      await expectMessage({ groupId: "group-1", type: "fullReloadGroup" });
+    });
+  },
+};
+
+export const ActiveSortToggle: Story = {
+  args: {
+    fixture: "sort-toggle-demo",
+    highlightedVisibleCount: 2,
+    showCloseButtonOnSessionCards: true,
+    showHotkeysOnSessionCards: true,
+    showLastInteractionTimeOnSessionCards: true,
+    visibleCount: 2,
+  },
+  play: async ({ canvasElement, step, userEvent }) => {
+    const storyRoot = canvasElement.ownerDocument.body;
+
+    await waitForReadyMessage();
+
+    await step("start in manual per-group order", async () => {
+      await expectSessionMembership(storyRoot, "group-1", ["session-1", "session-2", "session-3"]);
+      await expectSessionMembership(storyRoot, "group-2", ["session-4", "session-5"]);
+    });
+
+    await step("sort sessions inside each group by last activity", async () => {
+      resetSidebarStoryMessages();
+      await userEvent.click(
+        await findRequiredElement(
+          storyRoot,
+          'button[aria-label^="Switch active sessions sort mode."]',
+          "active sessions sort toggle",
+        ),
+      );
+
+      await expectMessage({ type: "toggleActiveSessionsSortMode" });
+      await expectSessionMembership(storyRoot, "group-1", ["session-2", "session-3", "session-1"]);
+      await expectSessionMembership(storyRoot, "group-2", ["session-5", "session-4"]);
+    });
+
+    await step("restore the manual order when toggled back", async () => {
+      resetSidebarStoryMessages();
+      await userEvent.click(
+        await findRequiredElement(
+          storyRoot,
+          'button[aria-label^="Switch active sessions sort mode."]',
+          "active sessions sort toggle",
+        ),
+      );
+
+      await expectMessage({ type: "toggleActiveSessionsSortMode" });
+      await expectSessionMembership(storyRoot, "group-1", ["session-1", "session-2", "session-3"]);
+      await expectSessionMembership(storyRoot, "group-2", ["session-4", "session-5"]);
+    });
+  },
+};
+
+export const EmptySidebarDoubleClick: Story = {
+  play: async ({ canvasElement, step }) => {
+    await waitForReadyMessage();
+    resetSidebarStoryMessages();
+
+    await step("ignore empty-sidebar double click by default", async () => {
+      const stack = await findRequiredElement(
+        canvasElement.ownerDocument.body,
+        ".stack",
+        "sidebar stack",
+      );
+
+      await fireEvent.dblClick(stack);
+      await expectNoMessage({ type: "createSession" });
+    });
+  },
+};
+
+export const EmptySidebarDoubleClickEnabled: Story = {
+  args: {
+    createSessionOnSidebarDoubleClick: true,
+  },
+  play: async ({ canvasElement, step }) => {
+    await waitForReadyMessage();
+    resetSidebarStoryMessages();
+
+    await step("create a session when empty-sidebar double click is enabled", async () => {
+      const stack = await findRequiredElement(
+        canvasElement.ownerDocument.body,
+        ".stack",
+        "sidebar stack",
+      );
+
+      await fireEvent.dblClick(stack);
+      await expectMessage({ type: "createSession" });
     });
   },
 };

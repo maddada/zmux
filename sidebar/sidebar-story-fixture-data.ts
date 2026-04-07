@@ -140,6 +140,63 @@ const SELECTOR_STATE_GROUPS: SidebarStoryGroup[] = [
   },
 ];
 
+const SORT_TOGGLE_DEMO_GROUPS: SidebarStoryGroup[] = [
+  {
+    groupId: "group-1",
+    isActive: true,
+    sessions: [
+      createStorySession({
+        alias: "older draft first",
+        detail: "OpenAI Codex",
+        isFocused: true,
+        isVisible: true,
+        lastInteractionAt: minutesAgo(18),
+        sessionId: "session-1",
+        shortcutLabel: "⌘⌥1",
+      }),
+      createStorySession({
+        activity: "working",
+        alias: "most recent follow-up",
+        detail: "OpenAI Codex",
+        isVisible: true,
+        lastInteractionAt: minutesAgo(2),
+        sessionId: "session-2",
+        shortcutLabel: "⌘⌥2",
+      }),
+      createStorySession({
+        alias: "middle checkpoint",
+        detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(9),
+        sessionId: "session-3",
+        shortcutLabel: "⌘⌥3",
+      }),
+    ],
+    title: "Main",
+  },
+  {
+    groupId: "group-2",
+    isActive: false,
+    sessions: [
+      createStorySession({
+        alias: "stale notes",
+        detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(27),
+        sessionId: "session-4",
+        shortcutLabel: "⌘⌥4",
+      }),
+      createStorySession({
+        activity: "attention",
+        alias: "recent interrupt",
+        detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(4),
+        sessionId: "session-5",
+        shortcutLabel: "⌘⌥5",
+      }),
+    ],
+    title: "Review",
+  },
+];
+
 const OVERFLOW_STRESS_GROUPS: SidebarStoryGroup[] = [
   {
     groupId: "group-1",
@@ -319,5 +376,6 @@ export const GROUPS_BY_FIXTURE: Record<SidebarStoryFixture, SidebarStoryGroup[]>
   "empty-groups": EMPTY_GROUPS,
   "overflow-stress": OVERFLOW_STRESS_GROUPS,
   "selector-states": SELECTOR_STATE_GROUPS,
+  "sort-toggle-demo": SORT_TOGGLE_DEMO_GROUPS,
   "three-groups-stress": THREE_GROUPS_STRESS,
 };

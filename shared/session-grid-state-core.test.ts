@@ -296,10 +296,34 @@ describe("sidebar HUD state", () => {
       browsers: true,
       git: true,
     });
+    expect(hud.createSessionOnSidebarDoubleClick).toBe(false);
     expect(hud.showCloseButtonOnSessionCards).toBe(false);
     expect(hud.showHotkeysOnSessionCards).toBe(false);
     expect(hud.showLastInteractionTimeOnSessionCards).toBe(true);
     expect(hud.isFocusModeActive).toBe(false);
+  });
+
+  test("should expose the empty-sidebar double click session setting", () => {
+    const hud = createSidebarHudState(
+      createDefaultSessionGridSnapshot(),
+      "dark-green",
+      100,
+      false,
+      false,
+      true,
+      false,
+      false,
+      "ping",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "manual",
+      true,
+    );
+
+    expect(hud.createSessionOnSidebarDoubleClick).toBe(true);
   });
 
   test("should expose when reversible focus mode is active", () => {

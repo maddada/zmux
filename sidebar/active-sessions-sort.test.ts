@@ -21,7 +21,7 @@ describe("createDisplaySessionLayout", () => {
     });
   });
 
-  test("should sort groups and sessions by last activity while keeping manual ties stable", () => {
+  test("should keep groups manual while sorting sessions in each group by last activity", () => {
     const layout = createDisplaySessionLayout({
       sessionIdsByGroup: {
         "group-1": ["session-1", "session-2"],
@@ -32,7 +32,7 @@ describe("createDisplaySessionLayout", () => {
       workspaceGroupIds: ["group-1", "group-2"],
     });
 
-    expect(layout.groupIds).toEqual(["group-2", "group-1"]);
+    expect(layout.groupIds).toEqual(["group-1", "group-2"]);
     expect(layout.sessionIdsByGroup).toEqual({
       "group-1": ["session-2", "session-1"],
       "group-2": ["session-4", "session-3"],

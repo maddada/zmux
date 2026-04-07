@@ -280,6 +280,9 @@ export function isSidebarMessage(candidate: unknown): candidate is SidebarToExte
         (message.type !== "setSessionSleeping" || typeof message.sleeping === "boolean")
       );
 
+    case "fullReloadGroup":
+      return typeof message.groupId === "string" && message.groupId.length > 0;
+
     case "restorePreviousSession":
     case "deletePreviousSession":
       return typeof message.historyId === "string" && message.historyId.length > 0;

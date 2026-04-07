@@ -48,6 +48,7 @@ export function createSidebarHudState(
   sectionVisibility: SidebarSectionVisibility = createDefaultSidebarSectionVisibility(),
   collapsedSections: SidebarSectionCollapseState = createDefaultSidebarSectionCollapseState(),
   activeSessionsSortMode: SidebarActiveSessionsSortMode = "manual",
+  createSessionOnSidebarDoubleClick = false,
 ): SidebarHudState {
   const sessionById = new Map(snapshot.sessions.map((session) => [session.sessionId, session]));
   const focusedSession = snapshot.focusedSessionId
@@ -70,6 +71,7 @@ export function createSidebarHudState(
     isFocusModeActive: isSessionGridFocusModeActive(snapshot),
     pendingAgentIds,
     sectionVisibility,
+    createSessionOnSidebarDoubleClick,
     showCloseButtonOnSessionCards,
     showHotkeysOnSessionCards,
     showLastInteractionTimeOnSessionCards,

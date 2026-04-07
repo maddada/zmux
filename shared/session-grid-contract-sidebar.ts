@@ -96,6 +96,7 @@ export type SidebarHudState = {
   isFocusModeActive: boolean;
   pendingAgentIds: string[];
   sectionVisibility: SidebarSectionVisibility;
+  createSessionOnSidebarDoubleClick: boolean;
   showCloseButtonOnSessionCards: boolean;
   showHotkeysOnSessionCards: boolean;
   showLastInteractionTimeOnSessionCards: boolean;
@@ -292,6 +293,10 @@ export type SidebarToExtensionMessage =
   | {
       type: "fullReloadSession";
       sessionId: string;
+    }
+  | {
+      type: "fullReloadGroup";
+      groupId: string;
     }
   | {
       type: "setT3SessionThreadId";

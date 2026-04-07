@@ -18,6 +18,7 @@ import {
   setViewModeInWorkspace,
   setVisibleCountInWorkspace,
   syncGroupOrderInWorkspace,
+  syncSessionOrderInWorkspace,
   toggleFullscreenSessionInWorkspace,
 } from "./grouped-session-workspace-state";
 
@@ -245,6 +246,39 @@ describe("moveSessionToGroupInWorkspace", () => {
       result.snapshot.groups[1]?.snapshot.sessions.map((session) => session.sessionId),
     ).toEqual(["session-3", "session-2", "session-4"]);
     expect(result.snapshot.groups[1]?.snapshot.focusedSessionId).toBe("session-2");
+  });
+});
+
+describe("syncSessionOrderInWorkspace", () => {
+  test("should reorder sessions within the same group", () => {
+    const sessions = Array.from({ length: 4 }, (_, index) => createSessionRecord(index + 1, index));
+    const result = syncSessionOrderInWorkspace(
+      createWorkspaceSnapshot({
+        activeGroupId: DEFAULT_MAIN_GROUP_ID,
+        groups: [
+          {
+            groupId: DEFAULT_MAIN_GROUP_ID,
+            snapshot: {
+              focusedSessionId: "session-3",
+              sessions,
+              viewMode: "grid",
+              visibleCount: 1,
+              visibleSessionIds: ["session-3"],
+            },
+            title: "Main",
+          },
+        ],
+        nextGroupNumber: 2,
+        nextSessionNumber: 5,
+      }),
+      DEFAULT_MAIN_GROUP_ID,
+      ["session-1", "session-3", "session-4", "session-2"],
+    );
+
+    expect(result.changed).toBe(true);
+    expect(
+      result.snapshot.groups[0]?.snapshot.sessions.map((session) => session.sessionId),
+    ).toEqual(["session-1", "session-3", "session-4", "session-2"]);
   });
 });
 

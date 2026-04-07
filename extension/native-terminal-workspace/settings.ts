@@ -16,6 +16,7 @@ import { DEFAULT_BROWSER_LAUNCH_URL } from "../../shared/sidebar-commands";
 export const SETTINGS_SECTION = "VSmux";
 export const BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING = "backgroundSessionTimeoutMinutes";
 export const SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING = "sendRenameCommandOnSidebarRename";
+export const CREATE_SESSION_ON_SIDEBAR_DOUBLE_CLICK_SETTING = "createSessionOnSidebarDoubleClick";
 export const SIDEBAR_THEME_SETTING = "sidebarTheme";
 export const AGENT_MANAGER_ZOOM_SETTING = "agentManagerZoom";
 export const SHOW_CLOSE_BUTTON_ON_SESSION_CARDS_SETTING = "showCloseButtonOnSessionCards";
@@ -203,6 +204,14 @@ export function getSendRenameCommandOnSidebarRename(): boolean {
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
       .get<boolean>(SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING, false) ?? false
+  );
+}
+
+export function getCreateSessionOnSidebarDoubleClick(): boolean {
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<boolean>(CREATE_SESSION_ON_SIDEBAR_DOUBLE_CLICK_SETTING, false) ?? false
   );
 }
 

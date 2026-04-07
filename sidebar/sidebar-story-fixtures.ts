@@ -23,12 +23,14 @@ import {
 
 export type SidebarStoryFixture =
   | "default"
+  | "sort-toggle-demo"
   | "selector-states"
   | "overflow-stress"
   | "empty-groups"
   | "three-groups-stress";
 
 export type SidebarStoryArgs = {
+  createSessionOnSidebarDoubleClick: boolean;
   debuggingMode: boolean;
   fixture: SidebarStoryFixture;
   highlightedVisibleCount: VisibleSessionCount;
@@ -71,6 +73,7 @@ export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrat
     isFocusModeActive: args.isFocusModeActive,
     pendingAgentIds: [],
     sectionVisibility: createDefaultSidebarSectionVisibility(),
+    createSessionOnSidebarDoubleClick: args.createSessionOnSidebarDoubleClick,
     showCloseButtonOnSessionCards: args.showCloseButtonOnSessionCards,
     showHotkeysOnSessionCards: args.showHotkeysOnSessionCards,
     showLastInteractionTimeOnSessionCards: args.showLastInteractionTimeOnSessionCards,

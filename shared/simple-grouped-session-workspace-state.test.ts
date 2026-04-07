@@ -388,6 +388,64 @@ describe("syncSessionOrderInSimpleWorkspace", () => {
     ]);
     expect(result.snapshot.groups[0]?.snapshot.focusedSessionId).toBe(sessionIdForDisplay(0));
   });
+
+  test("should preserve every session when reordering a group with more than nine sessions", () => {
+    const sessions = Array.from({ length: 10 }, (_, index) =>
+      createSessionRecord(index + 1, index),
+    );
+    const result = syncSessionOrderInSimpleWorkspace(
+      createWorkspaceSnapshot({
+        activeGroupId: DEFAULT_MAIN_GROUP_ID,
+        groups: [
+          {
+            groupId: DEFAULT_MAIN_GROUP_ID,
+            snapshot: {
+              focusedSessionId: sessionIdForDisplay(2),
+              fullscreenRestoreVisibleCount: undefined,
+              sessions,
+              viewMode: "grid",
+              visibleCount: 1,
+              visibleSessionIds: [sessionIdForDisplay(2)],
+            },
+            title: "Main",
+          },
+        ],
+        nextGroupNumber: 2,
+        nextSessionDisplayId: 10,
+        nextSessionNumber: 11,
+      }),
+      DEFAULT_MAIN_GROUP_ID,
+      [
+        sessionIdForDisplay(0),
+        sessionIdForDisplay(2),
+        sessionIdForDisplay(3),
+        sessionIdForDisplay(1),
+        sessionIdForDisplay(4),
+        sessionIdForDisplay(5),
+        sessionIdForDisplay(6),
+        sessionIdForDisplay(7),
+        sessionIdForDisplay(8),
+        sessionIdForDisplay(9),
+      ],
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.snapshot.groups[0]?.snapshot.sessions).toHaveLength(10);
+    expect(
+      result.snapshot.groups[0]?.snapshot.sessions.map((session) => session.sessionId),
+    ).toEqual([
+      sessionIdForDisplay(0),
+      sessionIdForDisplay(2),
+      sessionIdForDisplay(3),
+      sessionIdForDisplay(1),
+      sessionIdForDisplay(4),
+      sessionIdForDisplay(5),
+      sessionIdForDisplay(6),
+      sessionIdForDisplay(7),
+      sessionIdForDisplay(8),
+      sessionIdForDisplay(9),
+    ]);
+  });
 });
 
 describe("createSessionInSimpleWorkspace", () => {

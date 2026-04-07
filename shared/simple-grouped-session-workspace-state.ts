@@ -22,7 +22,7 @@ import {
   claimNextSessionDisplayId,
   normalizeWorkspaceSessionDisplayIds,
 } from "./grouped-session-workspace-state-helpers";
-import { syncSessionOrderInSnapshot } from "./session-grid-state";
+import { reorderGroupSessions } from "./session-order-reorder";
 
 type WorkspaceMutationResult = {
   changed: boolean;
@@ -536,7 +536,10 @@ export function syncSessionOrderInSimpleWorkspace(
     return { changed: false, snapshot };
   }
 
-  const result = syncSessionOrderInSnapshot(group.snapshot, sessionIds);
+  const result = reorderGroupSessions(group.snapshot, sessionIds);
+  if (!result.changed) {
+    return { changed: false, snapshot };
+  }
 
   const nextSnapshot = updateGroup(snapshot, groupId, (targetGroup) => ({
     ...targetGroup,

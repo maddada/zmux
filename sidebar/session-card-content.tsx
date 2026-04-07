@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 
 import type { SidebarSessionItem } from "../shared/session-grid-contract";
 import { getSidebarAgentNameByIcon, type SidebarAgentIcon } from "../shared/sidebar-agents";
 import { AGENT_LOGOS } from "./agent-logos";
-import { formatRelativeTimeLabel, getRelativeTimeColor } from "./relative-time";
+import { formatRelativeTime, getRelativeTimeColor } from "./relative-time";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import { useRelativeTimeTick } from "./use-relative-time-tick";
 
@@ -70,7 +70,7 @@ export function SessionCardContent({
   useRelativeTimeTick(hasLastInteractionTime);
   const lastInteractionLabel =
     hasLastInteractionTime && session.lastInteractionAt
-      ? formatRelativeTimeLabel(session.lastInteractionAt)
+      ? formatRelativeTime(session.lastInteractionAt).value
       : undefined;
   const lastInteractionStyle =
     hasLastInteractionTime && session.lastInteractionAt
@@ -87,7 +87,12 @@ export function SessionCardContent({
           tooltip={titleTooltipOptions.tooltip}
           tooltipWhen={titleTooltipOptions.tooltipWhen}
         />
-        <div className="session-head-actions">
+        {lastInteractionLabel ? (
+          <div className="session-last-interaction-time" style={lastInteractionStyle}>
+            {lastInteractionLabel}
+          </div>
+        ) : null}
+        {/* <div className="session-head-actions">
           <div className="session-meta" data-visible={String(showMeta)}>
             {showHotkeys ? (
               <span className="session-shortcut-label">{session.shortcutLabel}</span>
@@ -107,13 +112,8 @@ export function SessionCardContent({
               ×
             </button>
           ) : null}
-        </div>
+        </div> */}
       </div>
-      {lastInteractionLabel ? (
-        <div className="session-last-interaction-time" style={lastInteractionStyle}>
-          {lastInteractionLabel}
-        </div>
-      ) : null}
       {onRename ? (
         <button
           aria-label="Rename session"

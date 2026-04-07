@@ -146,6 +146,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     collapsedSections,
     commandCount,
     completionBellEnabled,
+    createSessionOnSidebarDoubleClick,
     debuggingMode,
     groupOrder,
     sectionVisibility,
@@ -160,6 +161,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       collapsedSections: state.hud.collapsedSections,
       commandCount: state.hud.commands.length,
       completionBellEnabled: state.hud.completionBellEnabled,
+      createSessionOnSidebarDoubleClick: state.hud.createSessionOnSidebarDoubleClick,
       debuggingMode: state.hud.debuggingMode,
       groupOrder: state.groupOrder,
       sectionVisibility: state.hud.sectionVisibility,
@@ -182,6 +184,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   };
 
   const handleSidebarDoubleClick = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!createSessionOnSidebarDoubleClick) {
+      return;
+    }
+
     if (!isEmptySidebarDoubleClick(event.target, event.currentTarget)) {
       return;
     }
@@ -652,6 +658,18 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
             resolvedSessionDropTarget,
           )
         : move(currentSessionIdsByGroup, event);
+    const nextListedSessionIds = new Set(Object.values(nextSessionIdsByGroup).flat());
+    const omittedSessionIds = Object.values(currentSessionIdsByGroup)
+      .flat()
+      .filter((sessionId) => !nextListedSessionIds.has(sessionId));
+    postSidebarDebugLog("session.dragComputedOrder", {
+      currentSessionIdsByGroup,
+      nextSessionIdsByGroup,
+      omittedSessionIds,
+      resolvedSessionDropTarget,
+      sourceData,
+      targetData,
+    });
     const previousGroupId = findSessionGroupId(previousSessionIdsByGroup, sourceData.sessionId);
     const nextGroupId = findSessionGroupId(nextSessionIdsByGroup, sourceData.sessionId);
     if (!previousGroupId || !nextGroupId) {
@@ -878,6 +896,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
                       key={groupId}
                       onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
                       onFocusRequested={applyLocalFocus}
+                      orderedSessionIds={effectiveSessionIdsByGroup[groupId] ?? []}
                       sessionDragIndicator={sessionDragIndicator}
                       vscode={vscode}
                     />

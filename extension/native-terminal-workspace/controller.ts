@@ -142,6 +142,7 @@ import {
   getClampedAgentManagerZoomPercent,
   getClampedCompletionSoundSetting,
   getClampedSidebarThemeSetting,
+  getCreateSessionOnSidebarDoubleClick,
   getDefaultBrowserLaunchUrl,
   getDebuggingMode,
   getShowCloseButtonOnSessionCards,
@@ -951,12 +952,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    const resumeCommand = buildResumeAgentCommand(
-      this.sessionAgentLaunchBySessionId.get(sessionId),
-      this.getSidebarAgentIconForSession(sessionId),
-      sessionRecord.title,
-      this.terminalTitleBySessionId.get(sessionId),
-    );
+    const resumeCommand = this.getFullReloadResumeCommand(sessionRecord);
     if (!resumeCommand) {
       void vscode.window.showInformationMessage(
         "Full reload is only available for Codex and Claude sessions.",
@@ -968,6 +964,46 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.backend.restartSession(sessionRecord);
     await this.backend.writeText(sessionId, resumeCommand, true);
     await this.afterStateChange();
+  }
+
+  public async fullReloadGroup(groupId: string): Promise<void> {
+    const group = this.store.getGroup(groupId);
+    if (!group) {
+      return;
+    }
+
+    const terminalSessions = group.snapshot.sessions.filter(
+      (sessionRecord): sessionRecord is SessionRecord => sessionRecord.kind === "terminal",
+    );
+    const fullReloadPlans = terminalSessions.flatMap((sessionRecord) => {
+      const resumeCommand = this.getFullReloadResumeCommand(sessionRecord);
+      if (!resumeCommand) {
+        return [];
+      }
+
+      return [{ resumeCommand, sessionRecord }];
+    });
+    if (fullReloadPlans.length === 0) {
+      void vscode.window.showInformationMessage(
+        "Full reload is only available for Codex and Claude sessions.",
+      );
+      return;
+    }
+
+    for (const plan of fullReloadPlans) {
+      this.bumpTerminalPaneRenderNonce(plan.sessionRecord.sessionId);
+      await this.backend.restartSession(plan.sessionRecord);
+      await this.backend.writeText(plan.sessionRecord.sessionId, plan.resumeCommand, true);
+    }
+
+    await this.afterStateChange();
+
+    const skippedCount = group.snapshot.sessions.length - fullReloadPlans.length;
+    if (skippedCount > 0) {
+      void vscode.window.showInformationMessage(
+        `Reloaded ${String(fullReloadPlans.length)} session${fullReloadPlans.length === 1 ? "" : "s"}. Skipped ${String(skippedCount)} because full reload is only available for Codex and Claude sessions.`,
+      );
+    }
   }
 
   public async promptSetT3SessionThreadId(sessionId: string): Promise<void> {
@@ -1629,6 +1665,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         this.confirmSidebarGitCommit(requestId, subject),
       copyResumeCommand: async (sessionId) => this.copyResumeCommand(sessionId),
       forkSession: async (sessionId) => this.forkSession(sessionId),
+      fullReloadGroup: async (groupId) => this.fullReloadGroup(groupId),
       fullReloadSession: async (sessionId) => this.fullReloadSession(sessionId),
       setGroupSleeping: async (groupId, sleeping) => this.setGroupSleeping(groupId, sleeping),
       setSessionSleeping: async (sessionId, sleeping) =>
@@ -1703,6 +1740,19 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private async publishAgentManagerXSnapshot(): Promise<void> {
     this.agentManagerXBridge.updateSnapshot(await this.createAgentManagerXWorkspaceSnapshot());
+  }
+
+  private getFullReloadResumeCommand(sessionRecord: SessionRecord): string | undefined {
+    if (sessionRecord.kind !== "terminal") {
+      return undefined;
+    }
+
+    return buildResumeAgentCommand(
+      this.sessionAgentLaunchBySessionId.get(sessionRecord.sessionId),
+      this.getSidebarAgentIconForSession(sessionRecord.sessionId),
+      sessionRecord.title,
+      this.terminalTitleBySessionId.get(sessionRecord.sessionId),
+    );
   }
 
   private async toggleActiveSessionsSortMode(): Promise<void> {
@@ -1867,6 +1917,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         },
         getSidebarSectionCollapseState(this.context, this.workspaceId),
         getSidebarActiveSessionsSortMode(this.context, this.workspaceId),
+        getCreateSessionOnSidebarDoubleClick(),
       ),
       platform: SHORTCUT_LABEL_PLATFORM,
       previousSessions: this.previousSessionHistory.getItems(),

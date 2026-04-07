@@ -72,6 +72,7 @@ export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
       isFocusModeActive: false,
       pendingAgentIds: [],
       sectionVisibility: createDefaultSidebarSectionVisibility(),
+      createSessionOnSidebarDoubleClick: false,
       showCloseButtonOnSessionCards: false,
       showHotkeysOnSessionCards: false,
       showLastInteractionTimeOnSessionCards: true,

@@ -227,7 +227,7 @@
 
 .session-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: calc(8px * var(--sidebar-density-scale));
   min-width: 0;
@@ -318,7 +318,6 @@
   font-weight: 500;
   letter-spacing: 0.01em;
   line-height: 1.25;
-  margin-top: calc(2px * var(--sidebar-density-scale));
   min-width: 0;
   overflow: hidden;
   position: relative;

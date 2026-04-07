@@ -1,4 +1,11 @@
-import { IconMoon, IconPencil, IconPlayerPlay, IconPlus, IconX } from "@tabler/icons-react";
+import {
+  IconMoon,
+  IconPencil,
+  IconPlayerPlay,
+  IconPlus,
+  IconRefresh,
+  IconX,
+} from "@tabler/icons-react";
 import { CollisionPriority } from "@dnd-kit/abstract";
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useSortable } from "@dnd-kit/react/sortable";
@@ -40,6 +47,7 @@ export type SessionGroupSectionProps = {
   index: number;
   onAutoEditHandled: () => void;
   onFocusRequested?: (groupId: string, sessionId: string) => void;
+  orderedSessionIds?: readonly string[];
   sessionDragIndicator?: SidebarSessionDropTarget;
   vscode: WebviewApi;
 };
@@ -91,11 +99,14 @@ export function SessionGroupSection({
   index,
   onAutoEditHandled,
   onFocusRequested,
+  orderedSessionIds: orderedSessionIdsProp,
   sessionDragIndicator,
   vscode,
 }: SessionGroupSectionProps) {
   const group = useSidebarStore((state) => state.groupsById[groupId]);
-  const orderedSessionIds = useSidebarStore((state) => state.sessionIdsByGroup[groupId] ?? []);
+  const storedSessionIds = useSidebarStore((state) => state.sessionIdsByGroup[groupId] ?? []);
+  const sessionsById = useSidebarStore((state) => state.sessionsById);
+  const orderedSessionIds = orderedSessionIdsProp ?? storedSessionIds;
   const [contextMenuPosition, setContextMenuPosition] = useState<ContextMenuPosition>();
   const [draftTitle, setDraftTitle] = useState(group?.title ?? "");
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -140,9 +151,12 @@ export function SessionGroupSection({
     return null;
   }
 
-  const groupSessions = group.sessions ?? [];
+  const groupSessions = orderedSessionIds
+    .map((sessionId) => sessionsById[sessionId])
+    .filter((session): session is NonNullable<typeof session> => session !== undefined);
   const allSessionsSleeping =
     groupSessions.length > 0 && groupSessions.every((session) => session.isSleeping);
+  const canFullReloadGroup = groupSessions.length > 0;
 
   const isGroupDropTarget = sortable.isDropTarget || isSessionDropTargetGroup;
   const groupDropPosition = getGroupDropPosition(
@@ -397,6 +411,18 @@ export function SessionGroupSection({
     });
   };
 
+  const requestFullReloadGroup = () => {
+    if (isBrowserGroup || !canFullReloadGroup) {
+      return;
+    }
+
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "fullReloadGroup",
+    });
+  };
+
   const handleTitleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -433,7 +459,9 @@ export function SessionGroupSection({
 
           event.preventDefault();
           event.stopPropagation();
-          setContextMenuPosition(clampContextMenuPosition(event.clientX, event.clientY, 3));
+          setContextMenuPosition(
+            clampContextMenuPosition(event.clientX, event.clientY, 3 + Number(canFullReloadGroup)),
+          );
         }}
         ref={sortable.ref}
       >
@@ -599,6 +627,17 @@ export function SessionGroupSection({
                 )}
                 {allSessionsSleeping ? "Wake" : "Sleep"}
               </button>
+              {canFullReloadGroup ? (
+                <button
+                  className="session-context-menu-item"
+                  onClick={requestFullReloadGroup}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconRefresh aria-hidden="true" className="session-context-menu-icon" size={14} />
+                  Full reload
+                </button>
+              ) : null}
               <button
                 className="session-context-menu-item"
                 onClick={() => {

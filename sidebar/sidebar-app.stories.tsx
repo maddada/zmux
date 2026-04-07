@@ -21,6 +21,19 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
 
+export const ActiveSortToggle: Story = {
+  args: {
+    fixture: "sort-toggle-demo",
+    highlightedVisibleCount: 2,
+    showCloseButtonOnSessionCards: true,
+    showHotkeysOnSessionCards: true,
+    showLastInteractionTimeOnSessionCards: true,
+    theme: "dark-blue",
+    viewMode: "grid",
+    visibleCount: 2,
+  },
+};
+
 export const SelectorStates: Story = {
   args: {
     fixture: "selector-states",

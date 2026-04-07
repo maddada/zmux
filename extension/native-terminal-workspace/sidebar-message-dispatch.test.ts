@@ -21,6 +21,7 @@ function createHandlers(): SidebarMessageHandlers {
     deleteSidebarCommand: vi.fn(async () => undefined),
     focusGroup: vi.fn(async () => undefined),
     focusSession: vi.fn(async () => undefined),
+    fullReloadGroup: vi.fn(async () => undefined),
     fullReloadSession: vi.fn(async () => undefined),
     killDaemonSession: vi.fn(async () => undefined),
     killTerminalDaemon: vi.fn(async () => undefined),
@@ -122,6 +123,21 @@ describe("dispatchSidebarMessage", () => {
 
     expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.setGroupSleeping).toHaveBeenCalledWith("group-2", true);
+  });
+
+  test("should route fullReloadGroup to the matching handler", async () => {
+    const handlers = createHandlers();
+
+    await dispatchSidebarMessage(
+      {
+        groupId: "group-2",
+        type: "fullReloadGroup",
+      },
+      handlers,
+    );
+
+    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
+    expect(handlers.fullReloadGroup).toHaveBeenCalledWith("group-2");
   });
 
   test("should route toggleActiveSessionsSortMode to the matching handler", async () => {
