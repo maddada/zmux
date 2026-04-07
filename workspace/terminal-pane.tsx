@@ -172,8 +172,52 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     });
   };
 
+  const isTerminalFocusWithin = () => {
+    const root = rootRef.current;
+    const activeElement = document.activeElement;
+    return !!root && !!activeElement && root.contains(activeElement);
+  };
+
   const focusTerminal = () => {
     activePaneRef.current?.focus();
+  };
+
+  const focusTerminalWithRetries = (reason: string) => {
+    const maxAttempts = 12;
+    let attempts = 0;
+
+    const tryFocus = () => {
+      if (!isVisibleRef.current) {
+        return;
+      }
+
+      attempts += 1;
+      focusTerminal();
+
+      requestAnimationFrame(() => {
+        if (isTerminalFocusWithin()) {
+          reportDebug("terminal.focusSettled", {
+            attempts,
+            reason,
+            sessionId: pane.sessionId,
+          });
+          return;
+        }
+
+        if (attempts >= maxAttempts) {
+          reportDebug("terminal.focusSettleTimedOut", {
+            attempts,
+            reason,
+            sessionId: pane.sessionId,
+          });
+          return;
+        }
+
+        tryFocus();
+      });
+    };
+
+    tryFocus();
   };
 
   const openSearch = () => {
@@ -765,7 +809,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     let rafFrameCount = 0;
     let rafGapTotalMs = 0;
     let rafGapMaxMs = 0;
-    let startedAt = performance.now();
+    const monitorStartedAt = performance.now();
+    let startedAt = monitorStartedAt;
 
     const flushWindow = (source: string) => {
       const now = performance.now();
@@ -986,7 +1031,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       if (!isVisibleRef.current) {
         return;
       }
-      focusTerminal();
+      focusTerminalWithRetries("window-focus");
     };
     window.addEventListener("focus", onWindowFocus);
 
@@ -1017,7 +1062,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         applyAppearance("mount-visible");
         runVisibleMaintenance("mount-visible");
         if (document.hasFocus() && isVisibleRef.current) {
-          focusTerminal();
+          focusTerminalWithRetries("mount-visible");
         }
 
         if (connection.mock) {
@@ -1202,13 +1247,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     }
 
     handledAutoFocusRequestIdRef.current = autoFocusRequest.requestId;
-    requestAnimationFrame(() => {
-      focusTerminal();
-      reportDebug("terminal.autoFocusRequestApplied", {
-        requestId: autoFocusRequest.requestId,
-        sessionId: pane.sessionId,
-        source: autoFocusRequest.source,
-      });
+    focusTerminalWithRetries(`auto-focus:${autoFocusRequest.source}`);
+    reportDebug("terminal.autoFocusRequestApplied", {
+      requestId: autoFocusRequest.requestId,
+      sessionId: pane.sessionId,
+      source: autoFocusRequest.source,
     });
   }, [autoFocusRequest, isVisible, pane.sessionId]);
 

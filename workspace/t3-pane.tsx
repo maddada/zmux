@@ -17,12 +17,7 @@ export type T3PaneProps = {
   pane: WorkspacePanelT3Pane;
 };
 
-export const T3Pane: React.FC<T3PaneProps> = ({
-  autoFocusRequest,
-  isFocused,
-  onFocus,
-  pane,
-}) => {
+export const T3Pane: React.FC<T3PaneProps> = ({ autoFocusRequest, isFocused, onFocus, pane }) => {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const blobUrlRef = useRef<string | undefined>(undefined);
   const lastHandledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
@@ -119,13 +114,50 @@ export const T3Pane: React.FC<T3PaneProps> = ({
     };
 
     const handleMessage = (event: MessageEvent) => {
-      if (event.source !== iframeRef.current?.contentWindow || typeof event.data?.type !== "string") {
+      if (
+        event.source !== iframeRef.current?.contentWindow ||
+        typeof event.data?.type !== "string"
+      ) {
         return;
       }
 
       if (event.data.type === "vsmuxT3ClipboardWrite") {
         const text = typeof event.data.text === "string" ? event.data.text : "";
         void navigator.clipboard.writeText(text).catch(() => {});
+        return;
+      }
+
+      if (event.data.type === "vsmuxT3ClipboardWriteRequest") {
+        const requestId =
+          typeof event.data.requestId === "number" ? event.data.requestId : undefined;
+        const text = typeof event.data.text === "string" ? event.data.text : "";
+        if (requestId === undefined) {
+          return;
+        }
+
+        void navigator.clipboard.writeText(text).then(
+          () => {
+            iframeRef.current?.contentWindow?.postMessage(
+              {
+                ok: true,
+                requestId,
+                type: "vsmuxT3ClipboardWriteResult",
+              },
+              "*",
+            );
+          },
+          (error) => {
+            iframeRef.current?.contentWindow?.postMessage(
+              {
+                error: error instanceof Error ? error.message : String(error),
+                ok: false,
+                requestId,
+                type: "vsmuxT3ClipboardWriteResult",
+              },
+              "*",
+            );
+          },
+        );
         return;
       }
 
