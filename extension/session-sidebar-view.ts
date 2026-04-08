@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import * as vscode from "vscode";
 import { COMPLETION_SOUND_OPTIONS, getCompletionSoundFileName } from "../shared/completion-sound";
+import { isSidebarCommandRunMode } from "../shared/sidebar-commands";
 import type {
   ExtensionToSidebarMessage,
   SidebarToExtensionMessage,
@@ -99,8 +100,9 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
   }
 }
 
-function shouldBypassSidebarMessageQueue(message: SidebarToExtensionMessage): boolean {
+export function shouldBypassSidebarMessageQueue(message: SidebarToExtensionMessage): boolean {
   switch (message.type) {
+    case "focusSession":
     case "runSidebarGitAction":
     case "confirmSidebarGitCommit":
     case "cancelSidebarGitCommit":
@@ -213,6 +215,11 @@ export function isSidebarMessage(candidate: unknown): candidate is SidebarToExte
       return true;
 
     case "runSidebarCommand":
+      return (
+        typeof message.commandId === "string" &&
+        message.commandId.length > 0 &&
+        (message.runMode === undefined || isSidebarCommandRunMode(message.runMode))
+      );
     case "deleteSidebarCommand":
       return typeof message.commandId === "string" && message.commandId.length > 0;
 

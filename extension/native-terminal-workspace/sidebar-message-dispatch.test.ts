@@ -64,6 +64,22 @@ function createHandlers(): SidebarMessageHandlers {
 }
 
 describe("dispatchSidebarMessage", () => {
+  test("should route runSidebarCommand messages with the requested run mode", async () => {
+    const handlers = createHandlers();
+
+    await dispatchSidebarMessage(
+      {
+        commandId: "build",
+        runMode: "debug",
+        type: "runSidebarCommand",
+      },
+      handlers,
+    );
+
+    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
+    expect(handlers.runSidebarCommand).toHaveBeenCalledWith("build", "debug");
+  });
+
   test("should route forkSession to the matching handler", async () => {
     const handlers = createHandlers();
 

@@ -4,7 +4,7 @@ import type {
   SidebarToExtensionMessage,
 } from "../../shared/session-grid-contract";
 import type { TerminalViewMode } from "../../shared/session-grid-contract";
-import type { SidebarActionType } from "../../shared/sidebar-commands";
+import type { SidebarActionType, SidebarCommandRunMode } from "../../shared/sidebar-commands";
 import type { SidebarAgentIcon } from "../../shared/sidebar-agents";
 import type { SidebarGitAction } from "../../shared/sidebar-git";
 
@@ -48,7 +48,7 @@ export type SidebarMessageHandlers = {
   restartSession: (sessionId: string) => Promise<void>;
   restorePreviousSession: (historyId: string) => Promise<void>;
   runSidebarAgent: (agentId: string) => Promise<void>;
-  runSidebarCommand: (commandId: string) => Promise<void>;
+  runSidebarCommand: (commandId: string, runMode?: SidebarCommandRunMode) => Promise<void>;
   runSidebarGitAction: (action: SidebarGitAction) => Promise<void>;
   setSidebarGitCommitConfirmationEnabled: (enabled: boolean) => Promise<void>;
   setSidebarGitGenerateCommitBodyEnabled: (enabled: boolean) => Promise<void>;
@@ -135,7 +135,7 @@ export async function dispatchSidebarMessage(
       await handlers.runSidebarAgent(message.agentId);
       return;
     case "runSidebarCommand":
-      await handlers.runSidebarCommand(message.commandId);
+      await handlers.runSidebarCommand(message.commandId, message.runMode);
       return;
     case "runSidebarGitAction":
       await handlers.runSidebarGitAction(message.action);

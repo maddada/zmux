@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import * as os from "node:os";
 import { appendFile, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 
@@ -9,12 +8,10 @@ const DEBUG_LOG_FILE_NAME = "vsmux-debug.log";
 
 let outputChannel: vscode.OutputChannel | undefined;
 let debugLogFilePath: string | undefined;
-let desktopDebugLogFilePath: string | undefined;
 let fileWriteQueue: Promise<void> = Promise.resolve();
 
 export function initializeVSmuxDebugLog(context: vscode.ExtensionContext): void {
   debugLogFilePath = path.join(context.globalStorageUri.fsPath, DEBUG_LOG_FILE_NAME);
-  desktopDebugLogFilePath = path.join(os.homedir(), "Desktop", DEBUG_LOG_FILE_NAME);
 }
 
 export function resetVSmuxDebugLog(): void {
@@ -62,20 +59,17 @@ function safeSerialize(details: unknown): string {
 }
 
 function queueDebugLogFileAppend(text: string): void {
-  const logFilePaths = [debugLogFilePath, desktopDebugLogFilePath].filter(
-    (value): value is string => typeof value === "string" && value.length > 0,
-  );
-  if (logFilePaths.length === 0) {
+  if (!debugLogFilePath) {
     return;
   }
+
+  const logFilePath = debugLogFilePath;
 
   fileWriteQueue = fileWriteQueue
     .catch(() => undefined)
     .then(async () => {
-      for (const logFilePath of logFilePaths) {
-        const parentDir = path.dirname(logFilePath);
-        await mkdir(parentDir, { recursive: true });
-        await appendFile(logFilePath, text, "utf8");
-      }
+      const parentDir = path.dirname(logFilePath);
+      await mkdir(parentDir, { recursive: true });
+      await appendFile(logFilePath, text, "utf8");
     });
 }

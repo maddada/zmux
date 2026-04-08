@@ -1,21 +1,29 @@
-import { Tooltip } from '@base-ui/react/tooltip';
-import { DragDropProvider, type DragDropEventHandlers } from '@dnd-kit/react';
-import { isSortableOperation, useSortable } from '@dnd-kit/react/sortable';
-import { IconPencil, IconPlayerPlay, IconTrash, IconWorld } from '@tabler/icons-react';
-import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { useShallow } from 'zustand/react/shallow';
-import type { SidebarCommandButton } from '../shared/sidebar-commands';
-import { GitActionRow } from './git-action-row';
-import { SectionHeader } from './section-header';
-import { useSidebarStore } from './sidebar-store';
-import { TOOLTIP_DELAY_MS } from './tooltip-delay';
-import { CommandConfigModal, type CommandConfigDraft } from './command-config-modal';
-import type { WebviewApi } from './webview-api';
+import { Tooltip } from "@base-ui/react/tooltip";
+import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
+import { isSortableOperation, useSortable } from "@dnd-kit/react/sortable";
+import { IconBug, IconPencil, IconPlayerPlay, IconTrash, IconWorld } from "@tabler/icons-react";
+import { createPortal } from "react-dom";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
+import { useShallow } from "zustand/react/shallow";
+import type { SidebarCommandButton, SidebarCommandRunMode } from "../shared/sidebar-commands";
+import { GitActionRow } from "./git-action-row";
+import { SectionHeader } from "./section-header";
+import { useSidebarStore } from "./sidebar-store";
+import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
+import { CommandConfigModal, type CommandConfigDraft } from "./command-config-modal";
+import type { WebviewApi } from "./webview-api";
 
 const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 188;
-const CONTEXT_MENU_HEIGHT_PX = 110;
+const CONTEXT_MENU_VERTICAL_PADDING_PX = 24;
+const CONTEXT_MENU_ITEM_HEIGHT_PX = 43;
 
 type CommandsPanelProps = {
   createRequestId: number;
@@ -39,26 +47,39 @@ type CommandMenuState = {
 
 type CommandDragData = {
   commandId: string;
-  kind: 'sidebar-command';
+  kind: "sidebar-command";
 };
 
-function clampContextMenuPosition(clientX: number, clientY: number): ContextMenuPosition {
+function clampContextMenuPosition(
+  clientX: number,
+  clientY: number,
+  command: SidebarCommandButton,
+): ContextMenuPosition {
+  const menuHeight = getContextMenuHeight(command);
+
   return {
     x: Math.max(
       CONTEXT_MENU_MARGIN_PX,
-      Math.min(clientX, window.innerWidth - CONTEXT_MENU_WIDTH_PX - CONTEXT_MENU_MARGIN_PX)
+      Math.min(clientX, window.innerWidth - CONTEXT_MENU_WIDTH_PX - CONTEXT_MENU_MARGIN_PX),
     ),
     y: Math.max(
       CONTEXT_MENU_MARGIN_PX,
-      Math.min(clientY, window.innerHeight - CONTEXT_MENU_HEIGHT_PX - CONTEXT_MENU_MARGIN_PX)
+      Math.min(clientY, window.innerHeight - menuHeight - CONTEXT_MENU_MARGIN_PX),
     ),
   };
+}
+
+function getContextMenuHeight(command: SidebarCommandButton): number {
+  return (
+    CONTEXT_MENU_VERTICAL_PADDING_PX +
+    CONTEXT_MENU_ITEM_HEIGHT_PX * (command.actionType === "terminal" ? 3 : 2)
+  );
 }
 
 function createCommandDragData(commandId: string): CommandDragData {
   return {
     commandId,
-    kind: 'sidebar-command',
+    kind: "sidebar-command",
   };
 }
 
@@ -68,14 +89,14 @@ function getCommandDragData(candidate: unknown): CommandDragData | undefined {
   }
 
   const data = candidate.data;
-  if (!isObjectRecord(data) || !('kind' in data)) {
+  if (!isObjectRecord(data) || !("kind" in data)) {
     return undefined;
   }
 
-  return data.kind === 'sidebar-command' && typeof data.commandId === 'string'
+  return data.kind === "sidebar-command" && typeof data.commandId === "string"
     ? {
         commandId: data.commandId,
-        kind: 'sidebar-command',
+        kind: "sidebar-command",
       }
     : undefined;
 }
@@ -93,7 +114,7 @@ export function CommandsPanel({
     useShallow((state) => ({
       commands: state.hud.commands,
       git: state.hud.git,
-    }))
+    })),
   );
   const [contextMenu, setContextMenu] = useState<CommandMenuState>();
   const [draftCommandIds, setDraftCommandIds] = useState<string[] | undefined>();
@@ -120,7 +141,7 @@ export function CommandsPanel({
       setContextMenu(undefined);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setContextMenu(undefined);
       }
     };
@@ -128,23 +149,23 @@ export function CommandsPanel({
       setContextMenu(undefined);
     };
     const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') {
+      if (document.visibilityState !== "visible") {
         setContextMenu(undefined);
       }
     };
 
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('contextmenu', handleContextMenu);
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("contextmenu", handleContextMenu);
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlur);
 
     return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('contextmenu', handleContextMenu);
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlur);
     };
   }, [contextMenu]);
 
@@ -159,15 +180,22 @@ export function CommandsPanel({
     });
   };
 
-  const runOrConfigureCommand = (command: SidebarCommandButton) => {
-    if ((command.actionType === 'browser' && !command.url) || (command.actionType === 'terminal' && !command.command)) {
+  const runOrConfigureCommand = (
+    command: SidebarCommandButton,
+    runMode: SidebarCommandRunMode = "default",
+  ) => {
+    if (
+      (command.actionType === "browser" && !command.url) ||
+      (command.actionType === "terminal" && !command.command)
+    ) {
       openCommandEditor(command);
       return;
     }
 
     vscode.postMessage({
       commandId: command.commandId,
-      type: 'runSidebarCommand',
+      runMode,
+      type: "runSidebarCommand",
     });
   };
 
@@ -182,21 +210,23 @@ export function CommandsPanel({
 
     setContextMenu(undefined);
     setEditingCommand({
-      actionType: 'terminal',
+      actionType: "terminal",
       closeTerminalOnExit: false,
-      command: '',
+      command: "",
       commandId: undefined,
-      name: '',
-      url: '',
+      name: "",
+      url: "",
     });
   }, [createRequestId]);
 
   const orderedCommands = useMemo(() => {
-    const commandById = new Map<string, SidebarCommandButton>(commands.map((command) => [command.commandId, command]));
+    const commandById = new Map<string, SidebarCommandButton>(
+      commands.map((command) => [command.commandId, command]),
+    );
     const orderedCommandIds = draftCommandIds
       ? mergeCommandIds(
           draftCommandIds,
-          commands.map((command) => command.commandId)
+          commands.map((command) => command.commandId),
         )
       : commands.map((command) => command.commandId);
 
@@ -235,32 +265,32 @@ export function CommandsPanel({
     const nextCommandIds = moveCommandId(
       orderedCommands.map((command) => command.commandId),
       initialIndex,
-      targetIndex
+      targetIndex,
     );
     setDraftCommandIds(nextCommandIds);
     vscode.postMessage({
       commandIds: nextCommandIds,
-      type: 'syncSidebarCommandOrder',
+      type: "syncSidebarCommandOrder",
     });
-  }) satisfies DragDropEventHandlers['onDragEnd'];
+  }) satisfies DragDropEventHandlers["onDragEnd"];
 
   return (
     <>
       {shouldRenderSection ? (
-        <section className='commands-section'>
+        <section className="commands-section">
           <SectionHeader
             actions={titlebarActions}
             isCollapsed={isCollapsed}
             isCollapsible
             onToggleCollapsed={() => onToggleCollapsed(!isCollapsed)}
-            title='Actions'
+            title="Actions"
           />
           {!isCollapsed ? (
-            <div className='card commands-panel'>
+            <div className="card commands-panel">
               {showGitButton ? <GitActionRow git={git} vscode={vscode} /> : null}
               <Tooltip.Provider delay={TOOLTIP_DELAY_MS}>
                 <DragDropProvider onDragEnd={handleDragEnd}>
-                  <div className='commands-grid'>
+                  <div className="commands-grid">
                     {orderedCommands.map((command, index) => (
                       <SortableCommandButton
                         command={command}
@@ -272,7 +302,11 @@ export function CommandsPanel({
                           event.stopPropagation();
                           setContextMenu({
                             command,
-                            position: clampContextMenuPosition(event.clientX, event.clientY),
+                            position: clampContextMenuPosition(
+                              event.clientX,
+                              event.clientY,
+                              command,
+                            ),
                           });
                         }}
                         onRun={() => runOrConfigureCommand(command)}
@@ -288,14 +322,14 @@ export function CommandsPanel({
       {contextMenu
         ? createPortal(
             <div
-              className='session-context-menu'
+              className="session-context-menu"
               onClick={(event) => event.stopPropagation()}
               onContextMenu={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
               }}
               ref={menuRef}
-              role='menu'
+              role="menu"
               style={{
                 left: `${contextMenu.position.x}px`,
                 top: `${contextMenu.position.y}px`,
@@ -303,34 +337,48 @@ export function CommandsPanel({
               }}
             >
               <button
-                className='session-context-menu-item'
+                className="session-context-menu-item"
                 onClick={() => {
                   setContextMenu(undefined);
                   openCommandEditor(contextMenu.command);
                 }}
-                role='menuitem'
-                type='button'
+                role="menuitem"
+                type="button"
               >
-                <IconPencil aria-hidden='true' className='session-context-menu-icon' size={14} />
+                <IconPencil aria-hidden="true" className="session-context-menu-icon" size={14} />
                 Configure
               </button>
+              {contextMenu.command.actionType === "terminal" ? (
+                <button
+                  className="session-context-menu-item"
+                  onClick={() => {
+                    setContextMenu(undefined);
+                    runOrConfigureCommand(contextMenu.command, "debug");
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconBug aria-hidden="true" className="session-context-menu-icon" size={14} />
+                  Debug Aaction
+                </button>
+              ) : null}
               <button
-                className='session-context-menu-item session-context-menu-item-danger'
+                className="session-context-menu-item session-context-menu-item-danger"
                 onClick={() => {
                   setContextMenu(undefined);
                   vscode.postMessage({
                     commandId: contextMenu.command.commandId,
-                    type: 'deleteSidebarCommand',
+                    type: "deleteSidebarCommand",
                   });
                 }}
-                role='menuitem'
-                type='button'
+                role="menuitem"
+                type="button"
               >
-                <IconTrash aria-hidden='true' className='session-context-menu-icon' size={14} />
+                <IconTrash aria-hidden="true" className="session-context-menu-icon" size={14} />
                 Remove
               </button>
             </div>,
-            document.body
+            document.body,
           )
         : null}
       {editingCommand ? (
@@ -346,7 +394,7 @@ export function CommandsPanel({
               command: draft.command,
               commandId: draft.commandId,
               name: draft.name,
-              type: 'saveSidebarCommand',
+              type: "saveSidebarCommand",
               url: draft.url,
             });
           }}
@@ -372,13 +420,13 @@ function SortableCommandButton({
   onRun,
 }: SortableCommandButtonProps) {
   const sortable = useSortable({
-    accept: 'sidebar-command',
+    accept: "sidebar-command",
     data: createCommandDragData(command.commandId),
     disabled: isContextMenuOpen,
-    group: 'sidebar-commands',
+    group: "sidebar-commands",
     id: command.commandId,
     index,
-    type: 'sidebar-command',
+    type: "sidebar-command",
   });
 
   return (
@@ -386,27 +434,31 @@ function SortableCommandButton({
       <Tooltip.Trigger
         render={
           <button
-            aria-label={isConfigured(command) ? runActionAriaLabel(command) : `Configure ${command.name} action`}
-            className='command-button'
+            aria-label={
+              isConfigured(command)
+                ? runActionAriaLabel(command)
+                : `Configure ${command.name} action`
+            }
+            className="command-button"
             data-configured={String(isConfigured(command))}
             data-default={String(command.isDefault)}
             data-dragging={String(Boolean(sortable.isDragging))}
-            data-empty-space-blocking='true'
+            data-empty-space-blocking="true"
             onClick={onRun}
             onContextMenu={onContextMenu}
             ref={sortable.ref}
-            type='button'
+            type="button"
           >
-            <span aria-hidden='true' className='command-button-kind-badge'>
+            <span aria-hidden="true" className="command-button-kind-badge">
               <ActionKindIcon actionType={command.actionType} />
             </span>
-            <span className='command-button-label'>{command.name}</span>
+            <span className="command-button-label">{command.name}</span>
           </button>
         }
       />
       <Tooltip.Portal>
-        <Tooltip.Positioner className='tooltip-positioner' sideOffset={8}>
-          <Tooltip.Popup className='tooltip-popup'>{getActionTooltip(command)}</Tooltip.Popup>
+        <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
+          <Tooltip.Popup className="tooltip-popup">{getActionTooltip(command)}</Tooltip.Popup>
         </Tooltip.Positioner>
       </Tooltip.Portal>
     </Tooltip.Root>
@@ -414,20 +466,24 @@ function SortableCommandButton({
 }
 
 type ActionKindIconProps = {
-  actionType: SidebarCommandButton['actionType'];
+  actionType: SidebarCommandButton["actionType"];
 };
 
 function ActionKindIcon({ actionType }: ActionKindIconProps) {
-  const className = 'command-button-kind-icon';
+  const className = "command-button-kind-icon";
 
-  if (actionType === 'browser') {
-    return <IconWorld aria-hidden='true' className={className} size={15} stroke={1.8} />;
+  if (actionType === "browser") {
+    return <IconWorld aria-hidden="true" className={className} size={15} stroke={1.8} />;
   }
 
-  return <IconPlayerPlay aria-hidden='true' className={className} size={15} stroke={1.8} />;
+  return <IconPlayerPlay aria-hidden="true" className={className} size={15} stroke={1.8} />;
 }
 
-function moveCommandId(commandIds: readonly string[], initialIndex: number, index: number): string[] {
+function moveCommandId(
+  commandIds: readonly string[],
+  initialIndex: number,
+  index: number,
+): string[] {
   const nextCommandIds = [...commandIds];
   const [commandId] = nextCommandIds.splice(initialIndex, 1);
 
@@ -440,7 +496,7 @@ function moveCommandId(commandIds: readonly string[], initialIndex: number, inde
 }
 
 function hasData(candidate: unknown): candidate is { data?: unknown } {
-  return isObjectRecord(candidate) && 'data' in candidate;
+  return isObjectRecord(candidate) && "data" in candidate;
 }
 
 function isNode(value: EventTarget | null): value is Node {
@@ -448,10 +504,13 @@ function isNode(value: EventTarget | null): value is Node {
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === "object" && value !== null;
 }
 
-function mergeCommandIds(draftCommandIds: readonly string[], syncedCommandIds: readonly string[]): string[] {
+function mergeCommandIds(
+  draftCommandIds: readonly string[],
+  syncedCommandIds: readonly string[],
+): string[] {
   const syncedCommandIdSet = new Set(syncedCommandIds);
   const mergedCommandIds = draftCommandIds.filter((commandId) => syncedCommandIdSet.has(commandId));
 
@@ -466,7 +525,7 @@ function mergeCommandIds(draftCommandIds: readonly string[], syncedCommandIds: r
 
 function reconcileDraftCommandIds(
   draftCommandIds: readonly string[] | undefined,
-  commands: readonly SidebarCommandButton[]
+  commands: readonly SidebarCommandButton[],
 ): string[] | undefined {
   if (!draftCommandIds) {
     return undefined;
@@ -474,7 +533,9 @@ function reconcileDraftCommandIds(
 
   const syncedCommandIds = commands.map((command) => command.commandId);
   const nextDraftCommandIds = mergeCommandIds(draftCommandIds, syncedCommandIds);
-  return haveSameCommandOrder(nextDraftCommandIds, syncedCommandIds) ? undefined : nextDraftCommandIds;
+  return haveSameCommandOrder(nextDraftCommandIds, syncedCommandIds)
+    ? undefined
+    : nextDraftCommandIds;
 }
 
 function haveSameCommandOrder(left: readonly string[], right: readonly string[]): boolean {
@@ -486,7 +547,7 @@ function haveSameCommandOrder(left: readonly string[], right: readonly string[])
 }
 
 function isConfigured(command: SidebarCommandButton): boolean {
-  return command.actionType === 'browser' ? Boolean(command.url) : Boolean(command.command);
+  return command.actionType === "browser" ? Boolean(command.url) : Boolean(command.command);
 }
 
 function getActionTooltip(command: SidebarCommandButton): string {
@@ -494,9 +555,11 @@ function getActionTooltip(command: SidebarCommandButton): string {
     return `Configure ${command.name}`;
   }
 
-  return command.actionType === 'browser' ? `${command.name}: ${command.url}` : `${command.name}: ${command.command}`;
+  return command.actionType === "browser"
+    ? `${command.name}: ${command.url}`
+    : `${command.name}: ${command.command}`;
 }
 
 function runActionAriaLabel(command: SidebarCommandButton): string {
-  return command.actionType === 'browser' ? `Open ${command.name}` : `Run ${command.name}`;
+  return command.actionType === "browser" ? `Open ${command.name}` : `Run ${command.name}`;
 }

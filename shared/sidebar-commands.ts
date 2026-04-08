@@ -22,6 +22,7 @@ export const DEFAULT_BROWSER_LAUNCH_URL = "https://www.google.com";
 
 export type DefaultSidebarCommandId = (typeof DEFAULT_SIDEBAR_COMMANDS)[number]["commandId"];
 export type SidebarActionType = "browser" | "terminal";
+export type SidebarCommandRunMode = "default" | "debug";
 
 export type SidebarCommandButton = {
   actionType: SidebarActionType;
@@ -42,6 +43,10 @@ export type StoredSidebarCommand = {
   command?: string;
   url?: string;
 };
+
+export function isSidebarCommandRunMode(value: unknown): value is SidebarCommandRunMode {
+  return value === "default" || value === "debug";
+}
 
 export function getFirstBrowserSidebarCommandUrl(
   commands: readonly SidebarCommandButton[],

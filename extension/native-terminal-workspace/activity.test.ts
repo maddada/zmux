@@ -18,8 +18,13 @@ vi.mock("../terminal-workspace-helpers", () => ({
   }),
 }));
 
-import { syncKnownSessionActivities } from "./activity";
-import { MIN_WORKING_DURATION_BEFORE_ATTENTION_MS } from "./activity";
+import {
+  INITIAL_ACTIVITY_SUPPRESSION_MS,
+  MIN_WORKING_DURATION_BEFORE_ATTENTION_MS,
+  getEffectiveSessionActivity,
+  shouldRefreshLastActivityOnTransition,
+  syncKnownSessionActivities,
+} from "./activity";
 
 function createSnapshot(
   sessionId: string,
@@ -146,5 +151,123 @@ describe("syncKnownSessionActivities", () => {
     expect(queueCompletionSound).not.toHaveBeenCalled();
     expect(lastKnownActivityBySessionId.get(session.sessionId)).toBe("idle");
     vi.useRealTimers();
+  });
+
+  test("should record last-activity transitions when a session starts and finishes working", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const session = createSessionRecord(1, 0);
+    const snapshots = new Map<string, TerminalSessionSnapshot>([
+      [session.sessionId, createSnapshot(session.sessionId, "idle")],
+    ]);
+    const recordLastActivityTransition = vi.fn();
+    const context = {
+      cancelPendingCompletionSound: vi.fn(),
+      getSessionSnapshot: (sessionId: string) => snapshots.get(sessionId),
+      getT3ActivityState: () => ({ activity: "idle" as const, isRunning: false }),
+      lastKnownActivityBySessionId: new Map<string, TerminalSessionSnapshot["agentStatus"]>(),
+      queueCompletionSound: vi.fn(),
+      recordLastActivityTransition,
+      workingStartedAtBySessionId: new Map<string, number>(),
+      workspaceId: "workspace-1",
+    };
+
+    await syncKnownSessionActivities(context, [session], false);
+    expect(recordLastActivityTransition).not.toHaveBeenCalled();
+
+    snapshots.set(session.sessionId, createSnapshot(session.sessionId, "working"));
+    await syncKnownSessionActivities(context, [session], false);
+
+    vi.advanceTimersByTime(MIN_WORKING_DURATION_BEFORE_ATTENTION_MS);
+    snapshots.set(session.sessionId, createSnapshot(session.sessionId, "attention"));
+    await syncKnownSessionActivities(context, [session], false);
+
+    expect(recordLastActivityTransition).toHaveBeenCalledTimes(2);
+    expect(recordLastActivityTransition).toHaveBeenNthCalledWith(
+      1,
+      session.sessionId,
+      "idle",
+      "working",
+    );
+    expect(recordLastActivityTransition).toHaveBeenNthCalledWith(
+      2,
+      session.sessionId,
+      "working",
+      "attention",
+    );
+    vi.useRealTimers();
+  });
+});
+
+describe("getEffectiveSessionActivity", () => {
+  test("should suppress working indicators during the initial timeout for non-t3 sessions", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const session = createSessionRecord(1, 0);
+
+    const activity = getEffectiveSessionActivity(
+      {
+        cancelPendingCompletionSound: vi.fn(),
+        getActivitySuppressedUntil: () => Date.now() + INITIAL_ACTIVITY_SUPPRESSION_MS,
+        getSessionSnapshot: () => createSnapshot(session.sessionId, "working"),
+        getT3ActivityState: () => ({ activity: "idle" as const, isRunning: false }),
+        lastKnownActivityBySessionId: new Map<string, TerminalSessionSnapshot["agentStatus"]>(),
+        queueCompletionSound: vi.fn(),
+        workingStartedAtBySessionId: new Map<string, number>(),
+        workspaceId: "workspace-1",
+      },
+      session,
+      createSnapshot(session.sessionId, "working"),
+    );
+
+    expect(activity.activity).toBe("idle");
+    vi.useRealTimers();
+  });
+
+  test("should keep t3 activity behavior unchanged when suppression is configured", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const session = createSessionRecord(1, 0, {
+      kind: "t3",
+      t3: {
+        serverOrigin: "http://127.0.0.1:3774",
+        sessionId: "thread-session",
+        threadId: "thread-1",
+      },
+      title: "T3 Code",
+    });
+
+    const activity = getEffectiveSessionActivity(
+      {
+        cancelPendingCompletionSound: vi.fn(),
+        getActivitySuppressedUntil: () => Date.now() + INITIAL_ACTIVITY_SUPPRESSION_MS,
+        getSessionSnapshot: () => createSnapshot(session.sessionId, "working"),
+        getT3ActivityState: () => ({ activity: "working" as const, isRunning: true }),
+        lastKnownActivityBySessionId: new Map<string, TerminalSessionSnapshot["agentStatus"]>(),
+        queueCompletionSound: vi.fn(),
+        workingStartedAtBySessionId: new Map<string, number>(),
+        workspaceId: "workspace-1",
+      },
+      session,
+      createSnapshot(session.sessionId, "working"),
+    );
+
+    expect(activity.activity).toBe("working");
+    vi.useRealTimers();
+  });
+});
+
+describe("shouldRefreshLastActivityOnTransition", () => {
+  test("should return true when a session starts or finishes working", () => {
+    expect(shouldRefreshLastActivityOnTransition("idle", "working")).toBe(true);
+    expect(shouldRefreshLastActivityOnTransition("working", "idle")).toBe(true);
+    expect(shouldRefreshLastActivityOnTransition("working", "attention")).toBe(true);
+  });
+
+  test("should return false for non-working transitions", () => {
+    expect(shouldRefreshLastActivityOnTransition(undefined, "idle")).toBe(false);
+    expect(shouldRefreshLastActivityOnTransition("idle", "attention")).toBe(false);
+    expect(shouldRefreshLastActivityOnTransition("attention", "idle")).toBe(false);
+    expect(shouldRefreshLastActivityOnTransition("working", "working")).toBe(false);
   });
 });

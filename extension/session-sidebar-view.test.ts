@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vite-plus/test";
-import { isSidebarMessage } from "./session-sidebar-view";
+import { isSidebarMessage, shouldBypassSidebarMessageQueue } from "./session-sidebar-view";
 
 vi.mock("vscode", () => ({
   extensions: {
@@ -12,6 +12,26 @@ vi.mock("vscode", () => ({
 }));
 
 describe("isSidebarMessage", () => {
+  test("should accept runSidebarCommand messages with a debug run mode", () => {
+    expect(
+      isSidebarMessage({
+        commandId: "build",
+        runMode: "debug",
+        type: "runSidebarCommand",
+      }),
+    ).toBe(true);
+  });
+
+  test("should reject runSidebarCommand messages with an unknown run mode", () => {
+    expect(
+      isSidebarMessage({
+        commandId: "build",
+        runMode: "inspect",
+        type: "runSidebarCommand",
+      }),
+    ).toBe(false);
+  });
+
   test("should accept forkSession messages with a session id", () => {
     expect(
       isSidebarMessage({
@@ -64,6 +84,27 @@ describe("isSidebarMessage", () => {
         favorite: "yes",
         sessionId: "session-7",
         type: "setSessionFavorite",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldBypassSidebarMessageQueue", () => {
+  test("should bypass focusSession messages", () => {
+    expect(
+      shouldBypassSidebarMessageQueue({
+        sessionId: "session-7",
+        type: "focusSession",
+      }),
+    ).toBe(true);
+  });
+
+  test("should keep renameSession messages queued", () => {
+    expect(
+      shouldBypassSidebarMessageQueue({
+        sessionId: "session-7",
+        title: "Rename this session",
+        type: "renameSession",
       }),
     ).toBe(false);
   });

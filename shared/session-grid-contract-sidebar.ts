@@ -1,6 +1,10 @@
 import type { CompletionSoundSetting } from "./completion-sound";
 import type { SidebarAgentButton, SidebarAgentIcon } from "./sidebar-agents";
-import type { SidebarActionType, SidebarCommandButton } from "./sidebar-commands";
+import type {
+  SidebarActionType,
+  SidebarCommandButton,
+  SidebarCommandRunMode,
+} from "./sidebar-commands";
 import type { SidebarGitAction, SidebarGitState } from "./sidebar-git";
 import type {
   SessionGridSnapshot,
@@ -369,6 +373,7 @@ export type SidebarToExtensionMessage =
   | {
       type: "runSidebarCommand";
       commandId: string;
+      runMode?: SidebarCommandRunMode;
     }
   | {
       action: SidebarGitAction;

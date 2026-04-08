@@ -6,19 +6,36 @@ import type {
 import { createDisconnectedSessionSnapshot } from "../terminal-workspace-helpers";
 
 export const MIN_WORKING_DURATION_BEFORE_ATTENTION_MS = 5_000;
+export const INITIAL_ACTIVITY_SUPPRESSION_MS = 7_000;
 
 type SessionActivityContext = {
   cancelPendingCompletionSound: (sessionId: string) => void;
+  getActivitySuppressedUntil?: (sessionRecord: SessionRecord) => number | undefined;
   getSessionSnapshot: (sessionId: string) => TerminalSessionSnapshot | undefined;
   getT3ActivityState: (sessionRecord: SessionRecord) => {
     activity: TerminalAgentStatus;
     isRunning: boolean;
   };
   lastKnownActivityBySessionId: Map<string, TerminalAgentStatus>;
+  recordLastActivityTransition?: (
+    sessionId: string,
+    previousActivity: TerminalAgentStatus | undefined,
+    nextActivity: TerminalAgentStatus,
+  ) => void;
   queueCompletionSound: (sessionId: string) => void;
   workingStartedAtBySessionId: Map<string, number>;
   workspaceId: string;
 };
+
+export function shouldRefreshLastActivityOnTransition(
+  previousActivity: TerminalAgentStatus | undefined,
+  nextActivity: TerminalAgentStatus,
+): boolean {
+  return (
+    (nextActivity === "working" && previousActivity !== "working") ||
+    (previousActivity === "working" && nextActivity !== "working")
+  );
+}
 
 export function getEffectiveSessionActivity(
   context: SessionActivityContext,
@@ -33,6 +50,19 @@ export function getEffectiveSessionActivity(
   }
 
   const sessionId = sessionRecord.sessionId;
+  const activitySuppressedUntil = context.getActivitySuppressedUntil?.(sessionRecord);
+  if (
+    activitySuppressedUntil !== undefined &&
+    Number.isFinite(activitySuppressedUntil) &&
+    Date.now() < activitySuppressedUntil
+  ) {
+    context.workingStartedAtBySessionId.delete(sessionId);
+    return {
+      activity: "idle",
+      agentName: sessionSnapshot.agentName,
+    };
+  }
+
   if (sessionSnapshot.agentStatus === "working") {
     if (!context.workingStartedAtBySessionId.has(sessionId)) {
       context.workingStartedAtBySessionId.set(sessionId, Date.now());
@@ -84,6 +114,13 @@ export async function syncKnownSessionActivities(
     const effectiveActivity = getEffectiveSessionActivity(context, sessionRecord, sessionSnapshot);
     const previousActivity = context.lastKnownActivityBySessionId.get(sessionRecord.sessionId);
     nextActivityBySessionId.set(sessionRecord.sessionId, effectiveActivity.activity);
+    if (shouldRefreshLastActivityOnTransition(previousActivity, effectiveActivity.activity)) {
+      context.recordLastActivityTransition?.(
+        sessionRecord.sessionId,
+        previousActivity,
+        effectiveActivity.activity,
+      );
+    }
 
     if (!playSound) {
       continue;
