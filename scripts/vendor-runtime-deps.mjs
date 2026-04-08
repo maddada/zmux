@@ -11,6 +11,7 @@ const require = createRequire(import.meta.url);
 const runtimePackages = [
   "ws",
   "@lydell/node-pty",
+  "restty",
 ];
 
 async function main() {

@@ -7,10 +7,12 @@ import { createManagedTerminalEnvironment } from "./native-managed-terminal";
 import {
   createPendingAttachQueue,
   createTerminalReplayChunks,
+  createManagedTerminalHeadless,
+  flushPendingAttachQueue,
+  type ManagedTerminalHeadless,
   type PendingAttachQueue,
   queuePendingAttachChunk,
-  serializeTerminalReplayHistory,
-} from "./terminal-daemon-replay";
+} from "./terminal-daemon-headless";
 import {
   readPersistedSessionStateFromFile,
   updatePersistedSessionStateFile,
@@ -23,7 +25,6 @@ import {
   getTitleDerivedSessionActivityFromTransition,
   type TitleDerivedSessionActivity,
 } from "./session-title-activity";
-import { TerminalDaemonRingBuffer } from "./terminal-daemon-ring-buffer";
 import { createTerminalDaemonSessionKey } from "./terminal-daemon-session-scope";
 import { parseTerminalTitleFromOutputChunk } from "./terminal-workspace-history";
 import type {
@@ -57,7 +58,7 @@ type DaemonInfo = {
 type ManagedSession = {
   cols: number;
   cwd: string;
-  historyBuffer: TerminalDaemonRingBuffer;
+  headless: ManagedTerminalHeadless;
   liveTitle?: string;
   lastKnownPersistedTitle?: string;
   pendingAttachQueues: PendingAttachQueue[];
@@ -94,7 +95,6 @@ type PendingSessionAttachment = {
 const DEFAULT_IDLE_SHUTDOWN_TIMEOUT_MS = 5 * 60_000;
 const DAEMON_OWNER_HEARTBEAT_TIMEOUT_MS = 20_000;
 const DAEMON_OWNER_STARTUP_GRACE_MS = 30_000;
-const MAX_HISTORY_BYTES = 8 * 1024 * 1024;
 const SESSION_ATTACH_READY_TIMEOUT_MS = 15_000;
 const REPLAY_CHUNK_BYTES = 128 * 1024;
 const INFO_FILE_NAME = "daemon-info.json";
@@ -347,7 +347,7 @@ async function handleCreateOrAttachRequest(
   const session =
     existingSession && existingSession.snapshot.status !== "exited"
       ? existingSession
-      : createSession(request);
+      : await createSession(request);
 
   if (session.cols !== request.cols || session.rows !== request.rows) {
     resizeSession(session, request.cols, request.rows);
@@ -409,6 +409,7 @@ async function handleKillRequest(
   const session = sessions.get(sessionKey);
   if (session) {
     session.pty.kill();
+    await session.headless.dispose();
     sessions.delete(sessionKey);
   }
   socket.send(JSON.stringify(okResponse(undefined, undefined, request)));
@@ -437,9 +438,17 @@ async function handleAcknowledgeAttentionRequest(
   socket.send(JSON.stringify({ type: "response", ok: true, requestId: request.sessionId }));
 }
 
-function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSession {
+async function createSession(request: TerminalHostCreateOrAttachRequest): Promise<ManagedSession> {
   const sessionKey = createTerminalDaemonSessionKey(request.workspaceId, request.sessionId);
-  const spawnedPty = pty.spawn(request.shell, [], {
+  let spawnedPty: pty.IPty | undefined;
+  const headless = await createManagedTerminalHeadless({
+    cols: request.cols,
+    onReplyData: (data) => {
+      spawnedPty?.write(data);
+    },
+    rows: request.rows,
+  });
+  spawnedPty = pty.spawn(request.shell, [], {
     cols: request.cols,
     cwd: request.cwd,
     encoding: null,
@@ -451,7 +460,7 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
   const session: ManagedSession = {
     cols: request.cols,
     cwd: request.cwd,
-    historyBuffer: new TerminalDaemonRingBuffer(MAX_HISTORY_BYTES),
+    headless,
     liveTitle: undefined,
     pendingAttachQueues: [],
     pty: spawnedPty,
@@ -482,11 +491,9 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
 
   spawnedPty.onData((data: string) => {
     const outputBuffer = normalizePtyOutputChunk(data);
-    const chunkStartCursor = session.historyBuffer.bytesWritten;
-    session.historyBuffer.write(outputBuffer);
-    const chunkEndCursor = session.historyBuffer.bytesWritten;
+    session.headless.recordOutput(outputBuffer);
     for (const pendingAttachQueue of session.pendingAttachQueues) {
-      queuePendingAttachChunk(pendingAttachQueue, outputBuffer, chunkStartCursor, chunkEndCursor);
+      queuePendingAttachChunk(pendingAttachQueue, outputBuffer);
     }
     const didChangeTitle = updateSessionLiveTitle(session, outputBuffer.toString("utf8"));
     broadcastSessionMessage(session.sessionKey, outputBuffer);
@@ -521,6 +528,7 @@ function resizeSession(session: ManagedSession, cols: number, rows: number): voi
     cols,
     rows,
   };
+  session.headless.resize(cols, rows);
   session.pty.resize(cols, rows);
 }
 
@@ -534,7 +542,7 @@ async function buildSnapshot(
     ...session.snapshot,
     agentName: session.titleActivity?.agentName ?? persistedState.agentName,
     agentStatus: session.titleActivity?.activity ?? persistedState.agentStatus,
-    history: includeHistory ? serializeTerminalReplayHistory(session.historyBuffer) : undefined,
+    history: includeHistory ? session.headless.serialize() : undefined,
     isAttached: sessionSocketsBySessionKey.get(session.sessionKey)?.readyState === WebSocket.OPEN,
     title: session.liveTitle ?? persistedState.title,
   };
@@ -904,6 +912,7 @@ async function shutdown(reason = "unknown"): Promise<void> {
     } catch {
       // Ignore process shutdown races.
     }
+    await session.headless.dispose();
   }
   sessions.clear();
   await new Promise<void>((resolve) => {
@@ -958,6 +967,7 @@ async function expireLeasedSessionsAndMaybeShutdown(): Promise<void> {
       } catch {
         // Ignore process shutdown races when expiring leased sessions.
       }
+      await session.headless.dispose();
       sessions.delete(sessionKey);
     }
   }
@@ -1157,21 +1167,6 @@ async function attachSessionSocketWithReplay(
   bindSessionSocket(session, sessionKey, socket, attachment);
 }
 
-function flushPendingAttachQueue(socket: WebSocket, pendingAttachQueue: PendingAttachQueue): void {
-  let flushedCount = 0;
-  for (const chunk of pendingAttachQueue.chunks) {
-    if (socket.readyState !== WebSocket.OPEN) {
-      break;
-    }
-    socket.send(chunk);
-    flushedCount += 1;
-  }
-
-  if (flushedCount > 0) {
-    pendingAttachQueue.chunks.splice(0, flushedCount);
-  }
-}
-
 function sendReplayChunks(socket: WebSocket, replayChunks: Buffer[]): void {
   for (const replayChunk of replayChunks) {
     if (socket.readyState !== WebSocket.OPEN) {
@@ -1240,7 +1235,7 @@ async function activatePendingSessionAttachment(
     resizeSession(session, attachment.initialCols, attachment.initialRows);
   }
 
-  const pendingAttachQueue = createPendingAttachQueue(session.historyBuffer.bytesWritten);
+  const pendingAttachQueue = createPendingAttachQueue();
   attachment.pendingAttachQueue = pendingAttachQueue;
   session.pendingAttachQueues.push(pendingAttachQueue);
 
@@ -1256,11 +1251,7 @@ async function activatePendingSessionAttachment(
     previousSocket.close();
   }
 
-  const replayChunks = createTerminalReplayChunks(
-    session.historyBuffer,
-    pendingAttachQueue.replayCursor,
-    REPLAY_CHUNK_BYTES,
-  );
+  const replayChunks = createTerminalReplayChunks(session.headless.serialize(), REPLAY_CHUNK_BYTES);
   if (replayChunks.length > 0) {
     sendReplayChunks(socket, replayChunks);
   }
