@@ -7,6 +7,7 @@ import {
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { createEditorLayoutPlan } from "../shared/editor-layout";
 import type {
   ExtensionToWorkspacePanelMessage,
@@ -107,6 +108,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const [localPaneOrder, setLocalPaneOrder] = useState<string[] | undefined>();
   const [draggedPaneId, setDraggedPaneId] = useState<string | undefined>();
   const [dropTargetPaneId, setDropTargetPaneId] = useState<string | undefined>();
+  const [, setTerminalPortalVersion] = useState(0);
   const focusRequestSequenceRef = useRef(0);
   const debuggingModeRef = useRef<boolean | undefined>(undefined);
   const lagAutoReloadRequestedRef = useRef(false);
@@ -125,6 +127,11 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const pendingFocusedSessionIdRef = useRef<string | undefined>(undefined);
   const workspaceStateRef = useRef<WorkspaceStateMessage | undefined>(undefined);
   const presentedFocusedSessionIdRef = useRef<string | undefined>(undefined);
+  const terminalPortalTargetsRef = useRef(new Map<string, HTMLDivElement>());
+  const terminalPortalRefCallbacksRef = useRef(
+    new Map<string, (element: HTMLDivElement | null) => void>(),
+  );
+  const terminalPortalTargetVersionRef = useRef(0);
   const handleT3IframeFocusRef = useRef<
     | ((sessionId: string, event: MessageEvent<{ sessionId?: string; type?: string }>) => void)
     | undefined
@@ -442,6 +449,14 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     () => visiblePanes.filter((pane) => pane.kind === "terminal").map((pane) => pane.sessionId),
     [visiblePanes],
   );
+  const terminalPanes = useMemo(
+    () =>
+      orderedPanes.filter(
+        (pane): pane is Extract<WorkspacePanelPane, { kind: "terminal" }> =>
+          pane.kind === "terminal",
+      ),
+    [orderedPanes],
+  );
   const workspaceShellStyle = useMemo(() => {
     const nextStyle: WorkspaceShellStyle = {
       "--workspace-active-pane-border-color":
@@ -729,6 +744,45 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     setDropTargetPaneId(undefined);
   };
 
+  const getTerminalPortalTargetRef = (sessionId: string) => {
+    const existingCallback = terminalPortalRefCallbacksRef.current.get(sessionId);
+    if (existingCallback) {
+      return existingCallback;
+    }
+
+    const callback = (element: HTMLDivElement | null) => {
+      const targets = terminalPortalTargetsRef.current;
+      const previousElement = targets.get(sessionId) ?? null;
+      if (previousElement === element) {
+        return;
+      }
+
+      if (element) {
+        targets.set(sessionId, element);
+      } else {
+        targets.delete(sessionId);
+      }
+      terminalPortalTargetVersionRef.current += 1;
+      setTerminalPortalVersion(terminalPortalTargetVersionRef.current);
+    };
+    terminalPortalRefCallbacksRef.current.set(sessionId, callback);
+    return callback;
+  };
+
+  useEffect(() => {
+    const activeSessionIds = new Set(terminalPanes.map((pane) => pane.sessionId));
+    for (const sessionId of [...terminalPortalTargetsRef.current.keys()]) {
+      if (!activeSessionIds.has(sessionId)) {
+        terminalPortalTargetsRef.current.delete(sessionId);
+      }
+    }
+    for (const sessionId of [...terminalPortalRefCallbacksRef.current.keys()]) {
+      if (!activeSessionIds.has(sessionId)) {
+        terminalPortalRefCallbacksRef.current.delete(sessionId);
+      }
+    }
+  }, [terminalPanes]);
+
   const setCurrentDropTargetPaneId = (paneId: string | undefined) => {
     dropTargetPaneIdRef.current = paneId;
     setDropTargetPaneId(paneId);
@@ -840,11 +894,9 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       {/* Lag notice UI intentionally disabled. Startup lag is handled by automatic workarea reload. */}
       {orderedPanes.map((pane) => (
         <WorkspacePaneView
-          connection={workspaceState.connection}
           debugLog={(event, payload) =>
             postWorkspaceDebugLog(workspaceState.debuggingMode, event, payload)
           }
-          debuggingMode={workspaceState.debuggingMode}
           fallbackLayoutStyle={
             visiblePaneLayoutBySessionId.get(workspaceState.focusedSessionId ?? "") ??
             visiblePaneLayoutBySessionId.get(visiblePanes[0]?.sessionId ?? "")
@@ -854,9 +906,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           key={pane.kind === "terminal" ? `${pane.sessionId}:${pane.renderNonce}` : pane.sessionId}
           layoutStyle={visiblePaneLayoutBySessionId.get(pane.sessionId)}
           onLocalFocus={() => applyLocalFocusVisual(pane.sessionId)}
-          onLagDetected={handleTerminalLagDetected}
           onFocus={() => requestFocusSession(pane.sessionId)}
-          onTerminalActivate={handleTerminalActivate}
           onClose={() =>
             vscode.postMessage({
               sessionId: pane.sessionId,
@@ -878,14 +928,10 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
             });
           }}
           pane={pane}
-          refreshRequestId={0}
-          terminalAppearance={workspaceState.terminalAppearance}
-          canDrag={pane.kind === "terminal" && pane.isVisible && reorderablePaneIds.length > 1}
-          autoFocusRequest={
-            workspaceState.autoFocusRequest?.sessionId === pane.sessionId
-              ? workspaceState.autoFocusRequest
-              : undefined
+          registerTerminalPortalTarget={
+            pane.kind === "terminal" ? getTerminalPortalTargetRef(pane.sessionId) : undefined
           }
+          canDrag={pane.kind === "terminal" && pane.isVisible && reorderablePaneIds.length > 1}
           isDragging={draggedPaneId === pane.sessionId}
           isDropTarget={dropTargetPaneId === pane.sessionId && draggedPaneId !== pane.sessionId}
           onHeaderNativeDragStart={(event) => {
@@ -932,6 +978,36 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           }}
         />
       ))}
+      {terminalPanes.map((pane) => {
+        const target = terminalPortalTargetsRef.current.get(pane.sessionId);
+        if (!target) {
+          return null;
+        }
+
+        return createPortal(
+          <TerminalPane
+            autoFocusRequest={
+              workspaceState.autoFocusRequest?.sessionId === pane.sessionId
+                ? workspaceState.autoFocusRequest
+                : undefined
+            }
+            connection={workspaceState.connection}
+            debugLog={(event, payload) =>
+              postWorkspaceDebugLog(workspaceState.debuggingMode, event, payload)
+            }
+            debuggingMode={workspaceState.debuggingMode}
+            isFocused={presentedFocusedSessionId === pane.sessionId}
+            isVisible={pane.isVisible}
+            onLagDetected={handleTerminalLagDetected}
+            onActivate={(source) => handleTerminalActivate(pane.sessionId, source)}
+            pane={pane}
+            refreshRequestId={0}
+            terminalAppearance={workspaceState.terminalAppearance}
+          />,
+          target,
+          pane.sessionId,
+        );
+      })}
       {visiblePanes.length === 0 ? (
         <div className="workspace-empty-state">No sessions in this group.</div>
       ) : null}
@@ -940,10 +1016,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
 };
 
 type WorkspacePaneViewProps = {
-  autoFocusRequest?: WorkspacePanelAutoFocusRequest;
-  connection: WorkspacePanelHydrateMessage["connection"];
   debugLog: (event: string, payload?: Record<string, unknown>) => void;
-  debuggingMode: boolean;
   fallbackLayoutStyle?: CSSProperties;
   isFocused: boolean;
   isWorkspaceFocused: boolean;
@@ -951,28 +1024,18 @@ type WorkspacePaneViewProps = {
   isDragging: boolean;
   isDropTarget: boolean;
   layoutStyle?: CSSProperties;
-  onLagDetected: (payload: {
-    overshootMs: number;
-    sessionId: string;
-    visibilityState: DocumentVisibilityState;
-  }) => void;
   onLocalFocus: () => void;
   onFocus: () => void;
   onClose: () => void;
   onReload: () => void;
   onHeaderPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
   onHeaderNativeDragStart: (event: ReactDragEvent<HTMLElement>) => void;
-  onTerminalActivate: (sessionId: string, source: WorkspaceTerminalActivationSource) => void;
   pane: WorkspacePanelPane;
-  refreshRequestId: number;
-  terminalAppearance: WorkspacePanelHydrateMessage["terminalAppearance"];
+  registerTerminalPortalTarget?: (element: HTMLDivElement | null) => void;
 };
 
 const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
-  autoFocusRequest,
-  connection,
   debugLog,
-  debuggingMode,
   fallbackLayoutStyle,
   isFocused,
   isWorkspaceFocused,
@@ -980,17 +1043,14 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
   isDragging,
   isDropTarget,
   layoutStyle,
-  onLagDetected,
   onLocalFocus,
   onFocus,
   onClose,
   onReload,
   onHeaderPointerDown,
   onHeaderNativeDragStart,
-  onTerminalActivate,
   pane,
-  refreshRequestId,
-  terminalAppearance,
+  registerTerminalPortalTarget,
 }) => {
   const primaryTitle = getWorkspacePanePrimaryTitle(pane);
 
@@ -1035,18 +1095,10 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
       </header>
       <div className="workspace-pane-body">
         {pane.kind === "terminal" ? (
-          <TerminalPane
-            autoFocusRequest={autoFocusRequest}
-            connection={connection}
-            debugLog={debugLog}
-            debuggingMode={debuggingMode}
-            isFocused={isFocused}
-            isVisible={pane.isVisible}
-            onLagDetected={onLagDetected}
-            onActivate={(source) => onTerminalActivate(pane.sessionId, source)}
-            pane={pane}
-            refreshRequestId={refreshRequestId}
-            terminalAppearance={terminalAppearance}
+          <div
+            className="workspace-terminal-portal-target"
+            ref={registerTerminalPortalTarget}
+            style={{ height: "100%", width: "100%" }}
           />
         ) : (
           <T3Pane
