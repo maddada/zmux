@@ -9,55 +9,91 @@ const debugging_status_indicator_1 = require("./debugging-status-indicator");
 const native_terminal_workspace_1 = require("./native-terminal-workspace");
 const vsmux_debug_log_1 = require("./vsmux-debug-log");
 function activate(context) {
-    (0, vsmux_debug_log_1.initializeVSmuxDebugLog)(context);
-    (0, extension_1.activate)(context);
-    const workspace = new native_terminal_workspace_1.NativeTerminalWorkspaceController(context);
-    (0, chat_history_vsmux_bridge_1.setChatHistoryVSmuxTarget)(workspace);
-    const debuggingStatusIndicator = new debugging_status_indicator_1.DebuggingStatusIndicator(workspace);
-    context.subscriptions.push({
-        dispose: () => {
-            (0, chat_history_vsmux_bridge_1.setChatHistoryVSmuxTarget)(undefined);
-        },
-    }, workspace, debuggingStatusIndicator, vscode.window.registerWebviewViewProvider(native_terminal_workspace_1.SESSIONS_VIEW_ID, workspace.sidebarProvider), registerCommand("VSmux.openWorkspace", () => workspace.openWorkspace()), registerCommand("VSmux.openSettings", () => workspace.openSettings()), registerCommand("VSmux.moveToSecondarySidebar", () => workspace.moveSidebarToSecondarySidebar()), registerCommand("VSmux.createSession", () => workspace.createSession()), registerCommand("VSmux.revealSession", () => workspace.revealSession()), registerCommand("VSmux.restartSession", () => workspace.restartSessionFromCommand()), registerCommand("VSmux.renameActiveSession", () => workspace.promptRenameFocusedSession()), registerFocusGroupCommand("VSmux.focusGroup1", workspace, 1), registerFocusGroupCommand("VSmux.focusGroup2", workspace, 2), registerFocusGroupCommand("VSmux.focusGroup3", workspace, 3), registerFocusGroupCommand("VSmux.focusGroup4", workspace, 4), registerCommand("VSmux.focusUp", () => workspace.focusDirection("up")), registerCommand("VSmux.focusRight", () => workspace.focusDirection("right")), registerCommand("VSmux.focusDown", () => workspace.focusDirection("down")), registerCommand("VSmux.focusLeft", () => workspace.focusDirection("left")), registerSlotFocusCommand("VSmux.focusSessionSlot", workspace), registerVisibleCountCommand("VSmux.showOne", workspace, 1), registerVisibleCountCommand("VSmux.showTwo", workspace, 2), registerVisibleCountCommand("VSmux.showThree", workspace, 3), registerVisibleCountCommand("VSmux.showFour", workspace, 4), registerVisibleCountCommand("VSmux.showSix", workspace, 6), registerVisibleCountCommand("VSmux.showNine", workspace, 9), registerCommand("VSmux.toggleFullscreenSession", async () => {
-        await workspace.toggleFullscreenSession();
-        await workspace.revealSidebar();
-    }), registerCommand("VSmux.resetWorkspace", () => workspace.resetWorkspace()));
-    void workspace.initialize().catch((error) => {
-        void vscode.window.showErrorMessage(getErrorMessage(error));
-    });
+  (0, vsmux_debug_log_1.initializeVSmuxDebugLog)(context);
+  (0, extension_1.activate)(context);
+  const workspace = new native_terminal_workspace_1.NativeTerminalWorkspaceController(context);
+  (0, chat_history_vsmux_bridge_1.setChatHistoryVSmuxTarget)(workspace);
+  const debuggingStatusIndicator = new debugging_status_indicator_1.DebuggingStatusIndicator(
+    workspace,
+  );
+  context.subscriptions.push(
+    {
+      dispose: () => {
+        (0, chat_history_vsmux_bridge_1.setChatHistoryVSmuxTarget)(undefined);
+      },
+    },
+    workspace,
+    debuggingStatusIndicator,
+    vscode.window.registerWebviewViewProvider(
+      native_terminal_workspace_1.SESSIONS_VIEW_ID,
+      workspace.sidebarProvider,
+    ),
+    registerCommand("VSmux.openWorkspace", () => workspace.openWorkspace()),
+    registerCommand("VSmux.openSettings", () => workspace.openSettings()),
+    registerCommand("VSmux.moveToSecondarySidebar", () =>
+      workspace.moveSidebarToSecondarySidebar(),
+    ),
+    registerCommand("VSmux.createSession", () => workspace.createSession()),
+    registerCommand("VSmux.revealSession", () => workspace.revealSession()),
+    registerCommand("VSmux.restartSession", () => workspace.restartSessionFromCommand()),
+    registerCommand("VSmux.renameActiveSession", () => workspace.promptRenameFocusedSession()),
+    registerFocusGroupCommand("VSmux.focusGroup1", workspace, 1),
+    registerFocusGroupCommand("VSmux.focusGroup2", workspace, 2),
+    registerFocusGroupCommand("VSmux.focusGroup3", workspace, 3),
+    registerFocusGroupCommand("VSmux.focusGroup4", workspace, 4),
+    registerCommand("VSmux.focusUp", () => workspace.focusDirection("up")),
+    registerCommand("VSmux.focusRight", () => workspace.focusDirection("right")),
+    registerCommand("VSmux.focusDown", () => workspace.focusDirection("down")),
+    registerCommand("VSmux.focusLeft", () => workspace.focusDirection("left")),
+    registerSlotFocusCommand("VSmux.focusSessionSlot", workspace),
+    registerVisibleCountCommand("VSmux.showOne", workspace, 1),
+    registerVisibleCountCommand("VSmux.showTwo", workspace, 2),
+    registerVisibleCountCommand("VSmux.showThree", workspace, 3),
+    registerVisibleCountCommand("VSmux.showFour", workspace, 4),
+    registerVisibleCountCommand("VSmux.showSix", workspace, 6),
+    registerVisibleCountCommand("VSmux.showNine", workspace, 9),
+    registerCommand("VSmux.toggleFullscreenSession", async () => {
+      await workspace.toggleFullscreenSession();
+      await workspace.revealSidebar();
+    }),
+    registerCommand("VSmux.resetWorkspace", () => workspace.resetWorkspace()),
+  );
+  void workspace.initialize().catch((error) => {
+    void vscode.window.showErrorMessage(getErrorMessage(error));
+  });
 }
-function deactivate() { }
+function deactivate() {}
 function registerCommand(command, callback) {
-    return vscode.commands.registerCommand(command, () => {
-        void Promise.resolve(callback()).catch((error) => {
-            void vscode.window.showErrorMessage(getErrorMessage(error));
-        });
+  return vscode.commands.registerCommand(command, () => {
+    void Promise.resolve(callback()).catch((error) => {
+      void vscode.window.showErrorMessage(getErrorMessage(error));
     });
+  });
 }
 function registerVisibleCountCommand(command, workspace, visibleCount) {
-    return registerCommand(command, async () => {
-        await workspace.setVisibleCount(visibleCount);
-        await workspace.revealSidebar();
-    });
+  return registerCommand(command, async () => {
+    await workspace.setVisibleCount(visibleCount);
+    await workspace.revealSidebar();
+  });
 }
 function registerFocusGroupCommand(command, workspace, groupIndex) {
-    return registerCommand(command, async () => {
-        await workspace.focusGroupByIndex(groupIndex);
-        await workspace.revealSidebar();
-    });
+  return registerCommand(command, async () => {
+    await workspace.focusGroupByIndex(groupIndex);
+    await workspace.revealSidebar();
+  });
 }
 function registerSlotFocusCommand(command, workspace) {
-    return vscode.commands.registerCommand(command, (slotNumber) => {
-        const resolvedSlotNumber = typeof slotNumber === "number" ? slotNumber : Number(slotNumber);
-        if (!Number.isFinite(resolvedSlotNumber)) {
-            return;
-        }
-        void workspace.focusSessionSlot(resolvedSlotNumber).catch((error) => {
-            void vscode.window.showErrorMessage(getErrorMessage(error));
-        });
+  return vscode.commands.registerCommand(command, (slotNumber) => {
+    const resolvedSlotNumber = typeof slotNumber === "number" ? slotNumber : Number(slotNumber);
+    if (!Number.isFinite(resolvedSlotNumber)) {
+      return;
+    }
+    void workspace.focusSessionSlot(resolvedSlotNumber).catch((error) => {
+      void vscode.window.showErrorMessage(getErrorMessage(error));
     });
+  });
 }
 function getErrorMessage(error) {
-    return error instanceof Error ? error.message : String(error);
+  return error instanceof Error ? error.message : String(error);
 }
 //# sourceMappingURL=extension.js.map

@@ -8,6 +8,11 @@ overrides:
   vite: npm:@voidzero-dev/vite-plus-core@latest
   vitest: npm:@voidzero-dev/vite-plus-test@latest
 
+patchedDependencies:
+  restty@0.1.35:
+    hash: a3387e22a7da6cd87b236e8a4511570ed0ada7aeb631d43876d4bc998b6a1a83
+    path: patches/restty@0.1.35.patch
+
 importers:
 
   .:
@@ -64,8 +69,8 @@ importers:
         specifier: ^4.0.1
         version: 4.0.1
       restty:
-        specifier: file:../restty-fork
-        version: file:../restty-fork(typescript@5.9.3)
+        specifier: 0.1.35
+        version: 0.1.35(patch_hash=a3387e22a7da6cd87b236e8a4511570ed0ada7aeb631d43876d4bc998b6a1a83)(typescript@5.9.3)
       shadcn:
         specifier: ^3.6.0
         version: 3.8.5(@types/node@25.5.0)(typescript@5.9.3)
@@ -4329,8 +4334,8 @@ packages:
     resolution: {integrity: sha512-oMA2dcrw6u0YfxJQXm342bFKX/E4sG9rbTzO9ptUcR/e8A33cHuvStiYOwH7fszkZlZ1z/ta9AAoPk2F4qIOHA==}
     engines: {node: '>=18'}
 
-  restty@file:../restty-fork:
-    resolution: {directory: ../restty-fork, type: directory}
+  restty@0.1.35:
+    resolution: {integrity: sha512-IUr4NsdYCTErKBxuAd0eu/KdiGZhADBxA0ddSPEEIxAz8np3RT1bLiL9iIH+wglmUeSmHRmJzkPN7hGJJ+E/Yw==}
     engines: {bun: '>=1.2.0'}
 
   rettime@0.10.1:
@@ -9824,7 +9829,7 @@ snapshots:
       onetime: 7.0.0
       signal-exit: 4.1.0
 
-  restty@file:../restty-fork(typescript@5.9.3):
+  restty@0.1.35(patch_hash=a3387e22a7da6cd87b236e8a4511570ed0ada7aeb631d43876d4bc998b6a1a83)(typescript@5.9.3):
     dependencies:
       text-shaper: 0.1.22(typescript@5.9.3)
     transitivePeerDependencies:

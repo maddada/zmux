@@ -128,7 +128,6 @@ export const acquireCachedTerminalRuntime = (
       fontPreset: "none",
       fontSize: options.terminalAppearance.fontSize,
       fontSources: getResttyFontSources(options.terminalAppearance.fontFamily),
-      forwardTerminalReplies: false,
       ptyTransport: transportController?.transport,
       renderer: TERMINAL_PREFERRED_RENDERER,
     },

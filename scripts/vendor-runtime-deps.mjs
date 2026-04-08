@@ -8,11 +8,7 @@ const repoRoot = path.resolve(__dirname, "..");
 const outNodeModulesDir = path.join(repoRoot, "out", "extension", "node_modules");
 const require = createRequire(import.meta.url);
 
-const runtimePackages = [
-  "ws",
-  "@lydell/node-pty",
-  "restty",
-];
+const runtimePackages = ["ws", "@lydell/node-pty"];
 
 async function main() {
   await rm(outNodeModulesDir, { force: true, recursive: true });
