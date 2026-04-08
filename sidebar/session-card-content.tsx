@@ -45,12 +45,7 @@ export function SessionCardContent({
   showLastInteractionTime = false,
 }: SessionCardContentProps) {
   const headingText = session.primaryTitle?.trim() || session.alias;
-  const terminalTitle = getAgentSecondaryText(session.terminalTitle, session.agentIcon);
-  const secondaryText =
-    session.detail ??
-    terminalTitle ??
-    session.activityLabel ??
-    getSidebarAgentNameByIcon(session.agentIcon);
+  const secondaryText = getSessionTooltipSecondaryText(session);
   const showDebugSessionNumber = showDebugSessionNumbers && session.sessionNumber !== undefined;
   const debugSessionNumberTooltip = showDebugSessionNumber
     ? `Session number: ${session.sessionNumber}`
@@ -156,6 +151,22 @@ export function buildSessionTitleTooltip({
   return uniqueLines.join("\n");
 }
 
+export function getSessionTooltipSecondaryText(
+  session: Pick<SidebarSessionItem, "activityLabel" | "agentIcon" | "detail" | "terminalTitle">,
+): string | undefined {
+  const detail = stripAgentTooltipText(session.detail, session.agentIcon);
+  if (detail) {
+    return detail;
+  }
+
+  const terminalTitle = stripAgentTooltipText(session.terminalTitle, session.agentIcon);
+  if (terminalTitle) {
+    return terminalTitle;
+  }
+
+  return session.activityLabel?.trim() || undefined;
+}
+
 export function getSessionTitleTooltipOptions({
   alwaysShowTitleTooltip,
   headingText,
@@ -243,6 +254,54 @@ function getAgentSecondaryText(
   );
   if (matchingGenericLabel) {
     return getSidebarAgentNameByIcon(agentIcon);
+  }
+
+  return normalizedValue;
+}
+
+function stripAgentTooltipText(
+  value: string | undefined,
+  agentIcon: SidebarSessionItem["agentIcon"],
+): string | undefined {
+  const normalizedValue = value?.trim();
+  if (!normalizedValue) {
+    return undefined;
+  }
+
+  if (!agentIcon) {
+    return normalizedValue;
+  }
+
+  const normalizedAgentLabels = Array.from(
+    new Set([getSidebarAgentNameByIcon(agentIcon), ...AGENT_SECONDARY_LABELS[agentIcon]]),
+  )
+    .map((label) => label.trim())
+    .filter((label) => label.length > 0)
+    .sort((left, right) => right.length - left.length);
+  const lowerValue = normalizedValue.toLowerCase();
+
+  for (const label of normalizedAgentLabels) {
+    const lowerLabel = label.toLowerCase();
+    if (lowerValue === lowerLabel) {
+      return undefined;
+    }
+
+    if (!lowerValue.startsWith(lowerLabel)) {
+      continue;
+    }
+
+    const remainder = normalizedValue.slice(label.length).trimStart();
+    if (!remainder) {
+      return undefined;
+    }
+
+    const separatorMatch = remainder.match(/^([:/|-]+)\s*(.*)$/);
+    if (separatorMatch) {
+      const strippedValue = separatorMatch[2]?.trim();
+      return strippedValue || undefined;
+    }
+
+    return normalizedValue;
   }
 
   return normalizedValue;

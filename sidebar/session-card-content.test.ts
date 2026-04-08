@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { buildSessionTitleTooltip, getSessionTitleTooltipOptions } from "./session-card-content";
+import {
+  buildSessionTitleTooltip,
+  getSessionTitleTooltipOptions,
+  getSessionTooltipSecondaryText,
+} from "./session-card-content";
 
 describe("buildSessionTitleTooltip", () => {
   test("should collapse duplicate heading and secondary lines", () => {
@@ -57,5 +61,40 @@ describe("getSessionTitleTooltipOptions", () => {
       tooltip: undefined,
       tooltipWhen: "overflow",
     });
+  });
+});
+
+describe("getSessionTooltipSecondaryText", () => {
+  test("should omit agent-only detail labels from tooltips", () => {
+    expect(
+      getSessionTooltipSecondaryText({
+        activityLabel: undefined,
+        agentIcon: "codex",
+        detail: "OpenAI Codex",
+        terminalTitle: undefined,
+      }),
+    ).toBeUndefined();
+  });
+
+  test("should strip agent prefixes from tooltip detail text", () => {
+    expect(
+      getSessionTooltipSecondaryText({
+        activityLabel: undefined,
+        agentIcon: "claude",
+        detail: "Claude Code / visual diff / attention state",
+        terminalTitle: undefined,
+      }),
+    ).toBe("visual diff / attention state");
+  });
+
+  test("should fall back to non-agent activity labels", () => {
+    expect(
+      getSessionTooltipSecondaryText({
+        activityLabel: "Needs attention",
+        agentIcon: "codex",
+        detail: "OpenAI Codex",
+        terminalTitle: undefined,
+      }),
+    ).toBe("Needs attention");
   });
 });
