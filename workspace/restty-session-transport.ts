@@ -204,12 +204,31 @@ export function createWorkspaceResttyTransport(
 
   const openSocket = () => {
     if (explicitDisconnect || socket || !desiredUrl.trim()) {
+      options.reportDebug?.("terminal.socketOpenSkipped", {
+        activeConnectId,
+        explicitDisconnect,
+        hasDesiredUrl: desiredUrl.trim().length > 0,
+        hasSocket: !!socket,
+        readySentConnectId,
+        sessionId: options.sessionId,
+        socketReadyState: socket?.readyState,
+        terminalReady,
+      });
       return;
     }
 
     const connectId = connectSequence + 1;
     connectSequence = connectId;
     activeConnectId = connectId;
+    options.reportDebug?.("terminal.transportConnectRequested", {
+      cols: desiredCols,
+      connectionId: connectId,
+      hasConnectedOnce,
+      rows: desiredRows,
+      sessionId: options.sessionId,
+      terminalReady,
+      url: desiredUrl,
+    });
     const nextSocket = new WebSocket(buildSocketUrlWithSize(desiredUrl, desiredCols, desiredRows));
     nextSocket.binaryType = "arraybuffer";
     socket = nextSocket;
@@ -396,11 +415,24 @@ export function createWorkspaceResttyTransport(
       desiredCols = Math.max(1, Math.round(cols));
       desiredRows = Math.max(1, Math.round(rows));
       terminalReady = true;
+      options.reportDebug?.("terminal.transportMarkedReady", {
+        cols: desiredCols,
+        readySentConnectId,
+        rows: desiredRows,
+        sessionId: options.sessionId,
+      });
       sendReadyIfPossible();
     },
     sendRawInput,
     transport: {
       connect: ({ callbacks: nextCallbacks, cols, rows, url }) => {
+        options.reportDebug?.("terminal.transportConnectCalled", {
+          cols,
+          rows,
+          sessionId: options.sessionId,
+          terminalReady,
+          url,
+        });
         callbacks = nextCallbacks;
         desiredUrl = url.trim();
         desiredCols = Number.isFinite(cols) ? Math.max(1, Math.round(cols ?? 80)) : desiredCols;

@@ -5,6 +5,27 @@ import * as path from "node:path";
 const SETTINGS_SECTION = "VSmux";
 const DEBUGGING_MODE_SETTING = "debuggingMode";
 const DEBUG_LOG_FILE_NAME = "vsmux-debug.log";
+const DEBUG_EVENT_PREFIX_ALLOWLIST = [
+  "workspace.webview.terminal.",
+  "workspace.webview.workspace.sessionStatePaneSummary",
+  "workspace.webview.workspace.terminalPresentationChanged",
+  "workspace.webview.workspace.terminalLayerSummary",
+  "workspace.webview.workspace.terminalHost",
+  "workspace.webview.workspace.generation",
+  "workspace.webview.workspace.mainPane",
+  "workspace.webview.workspace.paneMeasuredBounds",
+  "workspace.webview.workspace.terminalPortalTargetChanged",
+  "workspace.webview.workspace.paneView",
+  "controller.refreshWorkspacePanel.",
+  "controller.createWorkspacePanelMessage.",
+  "controller.focusSession.",
+  "controller.reloadWorkspacePanel.",
+  "daemon.runtime.",
+] as const;
+const DEBUG_EVENT_ALLOWLIST = new Set<string>([
+  "workspace.webview.instanceMounted",
+  "workspace.webview.instanceUnmounted",
+]);
 
 let outputChannel: vscode.OutputChannel | undefined;
 let debugLogFilePath: string | undefined;
@@ -20,6 +41,9 @@ export function resetVSmuxDebugLog(): void {
 
 export function logVSmuxDebug(event: string, details?: unknown): void {
   if (!isDebugLoggingEnabled()) {
+    return;
+  }
+  if (!shouldLogDebugEvent(event)) {
     return;
   }
 
@@ -72,4 +96,12 @@ function queueDebugLogFileAppend(text: string): void {
       await mkdir(parentDir, { recursive: true });
       await appendFile(logFilePath, text, "utf8");
     });
+}
+
+function shouldLogDebugEvent(event: string): boolean {
+  if (DEBUG_EVENT_ALLOWLIST.has(event)) {
+    return true;
+  }
+
+  return DEBUG_EVENT_PREFIX_ALLOWLIST.some((prefix) => event.startsWith(prefix));
 }

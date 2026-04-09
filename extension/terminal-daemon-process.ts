@@ -99,6 +99,21 @@ const SESSION_ATTACH_READY_TIMEOUT_MS = 15_000;
 const REPLAY_CHUNK_BYTES = 128 * 1024;
 const INFO_FILE_NAME = "daemon-info.json";
 const DAEMON_DEBUG_LOG_FILE_NAME = "terminal-daemon-debug.log";
+const DAEMON_DEBUG_EVENT_ALLOWLIST = new Set<string>([
+  "daemon.start",
+  "daemon.startSkippedExisting",
+  "daemon.shutdown",
+  "daemon.sessionSocketRejected",
+  "daemon.sessionSocketAccepted",
+  "daemon.sessionAttachmentStarted",
+  "daemon.sessionAttachmentReadyReceived",
+  "daemon.sessionAttachmentResizeReceived",
+  "daemon.sessionAttachmentActivated",
+  "daemon.sessionAttachmentPreemptedPreviousSocket",
+  "daemon.sessionAttachmentCompleted",
+  "daemon.sessionAttachmentReadyTimeout",
+  "daemon.sessionSocketEnded",
+]);
 
 const stateDir = getStateDirFromArgs();
 const infoFilePath = path.join(stateDir, INFO_FILE_NAME);
@@ -991,6 +1006,9 @@ async function expireLeasedSessionsAndMaybeShutdown(): Promise<void> {
 }
 
 async function logDaemonDebug(event: string, details?: unknown): Promise<void> {
+  if (!DAEMON_DEBUG_EVENT_ALLOWLIST.has(event)) {
+    return;
+  }
   const line = `${new Date().toISOString()} ${event}${details ? ` ${safeSerialize(details)}` : ""}\n`;
   try {
     await mkdir(stateDir, { recursive: true });

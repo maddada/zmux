@@ -3365,6 +3365,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private async createWorkspacePanelMessage(
     type: "hydrate" | "sessionState",
   ): Promise<ExtensionToWorkspacePanelMessage> {
+    const startedAt = Date.now();
     const workspaceSnapshot = this.store.getSnapshot();
     const activeSnapshot = this.getActiveSnapshot();
     const activeGroupSessions = sortWorkspacePaneSessionRecords(
@@ -3418,6 +3419,18 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         }),
       )
     ).filter((pane): pane is NonNullable<typeof pane> => pane !== undefined);
+    logVSmuxDebug("controller.createWorkspacePanelMessage.summary", {
+      activeGroupId: workspaceSnapshot.activeGroupId,
+      autoFocusRequest,
+      durationMs: Date.now() - startedAt,
+      focusedSessionId: activeSnapshot.focusedSessionId,
+      paneIds: panes.map((pane) => `${pane.sessionId}:${pane.isVisible ? "visible" : "hidden"}`),
+      type,
+      viewMode: activeSnapshot.viewMode,
+      visibleCount: activeSnapshot.visibleCount,
+      visibleSessionIds: activeSnapshot.visibleSessionIds,
+      workspaceId: this.workspaceId,
+    });
 
     if (type === "hydrate") {
       return {

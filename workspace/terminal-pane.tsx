@@ -18,6 +18,7 @@ import {
 } from "./terminal-runtime-cache";
 import "./terminal-pane.css";
 
+let nextTerminalPaneInstanceId = 0;
 const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 const RESTTY_STARTUP_BACKGROUND = "#121212";
 const TYPING_AUTO_SCROLL_BURST_WINDOW_MS = 450;
@@ -50,6 +51,7 @@ export type TerminalPaneProps = {
   pane: WorkspacePanelTerminalPane;
   refreshRequestId: number;
   terminalAppearance: WorkspacePanelTerminalAppearance;
+  workspaceGenerationId: string;
 };
 
 type SearchResultsState = {
@@ -69,10 +71,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   pane,
   refreshRequestId,
   terminalAppearance,
+  workspaceGenerationId,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<CachedTerminalRuntime | null>(null);
+  const paneInstanceIdRef = useRef(`terminal-pane-${++nextTerminalPaneInstanceId}`);
   const debugLogRef = useRef(debugLog);
   const debuggingModeRef = useRef(debuggingMode);
   const isFocusedRef = useRef(isFocused);
@@ -107,7 +111,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultsState>(SEARCH_RESULTS_EMPTY);
-  const runtimeCacheKey = getTerminalRuntimeCacheKey(pane.sessionId);
+  const runtimeCacheKey = getTerminalRuntimeCacheKey(pane.sessionId, workspaceGenerationId);
 
   useEffect(() => {
     debugLogRef.current = debugLog;
@@ -130,9 +134,29 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   }, [onLagDetected]);
 
   const reportDebug = (event: string, payload?: Record<string, unknown>) => {
-    logWorkspaceDebug(debuggingModeRef.current, event, payload);
-    debugLogRef.current?.(event, payload);
+    const runtime = runtimeRef.current;
+    const decoratedPayload = {
+      paneInstanceId: paneInstanceIdRef.current,
+      portalTargetId:
+        rootRef.current?.parentElement?.dataset.vsmuxPortalTargetId ??
+        runtime?.host.parentElement?.dataset.vsmuxPortalTargetId,
+      renderNonce: pane.renderNonce,
+      runtimeCacheKey,
+      runtimeHostId: runtime?.runtimeHostId,
+      runtimeInstanceId: runtime?.runtimeInstanceId,
+      sessionId: pane.sessionId,
+      ...payload,
+    };
+    logWorkspaceDebug(debuggingModeRef.current, event, decoratedPayload);
+    debugLogRef.current?.(event, decoratedPayload);
   };
+
+  const collectSnapshotMetrics = () => ({
+    snapshotAgentName: pane.snapshot?.agentName,
+    snapshotHistoryBytes: pane.snapshot?.history?.length ?? 0,
+    snapshotIsAttached: pane.snapshot?.isAttached,
+    snapshotStatus: pane.snapshot?.status,
+  });
 
   const syncRefsFromRuntime = (runtime: CachedTerminalRuntime) => {
     activePaneRef.current = runtime.activePane;
@@ -421,7 +445,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       reportDebug("terminal.canvasVisibilitySet", {
         nextVisible: visible,
         previousVisible,
-        sessionId: pane.sessionId,
         withContainer: false,
       });
       return;
@@ -439,7 +462,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       affectedCanvasCount,
       nextVisible: visible,
       previousVisible,
-      sessionId: pane.sessionId,
       withContainer: true,
     });
   };
@@ -469,7 +491,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       reportDebug("terminal.canvasRevealed", {
         canvasHeight: canvas.height,
         canvasWidth: canvas.width,
-        sessionId: pane.sessionId,
         source: sourceLabel,
       });
     }
@@ -602,6 +623,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     const container = containerRef.current;
     if (!container) {
       return {
+        canvasDetails: [],
         hiddenCanvasCount: 0,
         visibleCanvasCount: 0,
       };
@@ -609,6 +631,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
     let hiddenCanvasCount = 0;
     let visibleCanvasCount = 0;
+    const canvasDetails: Array<{
+      className: string;
+      clientHeight: number;
+      clientWidth: number;
+      height: number;
+      opacity: string;
+      visibility: string;
+      width: number;
+    }> = [];
     const canvases = container.querySelectorAll<HTMLCanvasElement>(
       ".restty-native-scroll-canvas, .pane-canvas, canvas",
     );
@@ -623,9 +654,19 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       } else {
         hiddenCanvasCount += 1;
       }
+      canvasDetails.push({
+        className: canvas.className,
+        clientHeight: Math.round(canvas.getBoundingClientRect().height),
+        clientWidth: Math.round(canvas.getBoundingClientRect().width),
+        height: canvas.height,
+        opacity: canvasStyle.opacity,
+        visibility: canvasStyle.visibility,
+        width: canvas.width,
+      });
     }
 
     return {
+      canvasDetails,
       hiddenCanvasCount,
       visibleCanvasCount,
     };
@@ -706,7 +747,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           cols: stableSize.cols,
           durationMs: Math.round(performance.now() - startedAt),
           rows: stableSize.rows,
-          sessionId: pane.sessionId,
         });
         return stableSize;
       }
@@ -719,7 +759,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       cols: latestTermSizeRef.current?.cols,
       durationMs: Math.round(performance.now() - startedAt),
       rows: latestTermSizeRef.current?.rows,
-      sessionId: pane.sessionId,
     });
     return latestTermSizeRef.current;
   };
@@ -782,19 +821,59 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   };
 
   const connectTerminalWhenReady = async (sourceLabel: string) => {
-    if (connection.mock || connectPtyStartedRef.current) {
+    if (connection.mock) {
+      reportDebug("terminal.connectSkipped", {
+        reason: "mock-connection",
+        sessionId: pane.sessionId,
+        source: sourceLabel,
+        ...collectSnapshotMetrics(),
+      });
+      return;
+    }
+
+    if (connectPtyStartedRef.current) {
+      reportDebug("terminal.connectSkipped", {
+        reason: "connect-already-started",
+        sessionId: pane.sessionId,
+        source: sourceLabel,
+        ...collectSnapshotMetrics(),
+      });
       return;
     }
 
     const activePane = activePaneRef.current;
     const transportController = transportRef.current;
     if (!activePane || !transportController) {
+      reportDebug("terminal.connectSkipped", {
+        hasActivePane: !!activePane,
+        hasTransportController: !!transportController,
+        reason: "missing-runtime-primitives",
+        sessionId: pane.sessionId,
+        source: sourceLabel,
+        ...collectSnapshotMetrics(),
+      });
       return;
     }
+
+    reportDebug("terminal.connectAttempt", {
+      isFocused: isFocusedRef.current,
+      isVisible: isVisibleRef.current,
+      renderNonce: pane.renderNonce,
+      sessionId: pane.sessionId,
+      source: sourceLabel,
+      ...collectSnapshotMetrics(),
+    });
 
     await appearancePromiseRef.current;
     const stableTerminalSize = await waitForStableTerminalSize();
     if (!stableTerminalSize || connectPtyStartedRef.current) {
+      reportDebug("terminal.connectSkipped", {
+        connectPtyStarted: connectPtyStartedRef.current,
+        reason: stableTerminalSize ? "connect-started-during-wait" : "missing-stable-size",
+        sessionId: pane.sessionId,
+        source: sourceLabel,
+        ...collectSnapshotMetrics(),
+      });
       return;
     }
 
@@ -1014,6 +1093,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
     container.style.backgroundColor = RESTTY_STARTUP_BACKGROUND;
     let didDispose = false;
+    const canvasContextListeners: Array<{
+      canvas: HTMLCanvasElement;
+      handleContextLost: EventListener;
+      handleContextRestored: EventListener;
+    }> = [];
+    reportDebug("terminal.paneMount", {
+      isFocused,
+      isVisible,
+      ...collectSnapshotMetrics(),
+    });
     const runtime = acquireCachedTerminalRuntime({
       cacheKey: runtimeCacheKey,
       callbacks: {
@@ -1041,7 +1130,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           reportDebug("terminal.termSizeChanged", {
             cols,
             rows,
-            sessionId: pane.sessionId,
           });
         },
         reportDebug,
@@ -1056,14 +1144,38 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     const previousHostParentTagName = runtime.host.parentElement?.tagName ?? null;
     container.replaceChildren(runtime.host);
     reportDebug("terminal.runtimeHostAttached", {
+      hostParentPortalTargetId: runtime.host.parentElement?.dataset.vsmuxPortalTargetId ?? null,
       previousHostParentTagName,
-      renderNonce: pane.renderNonce,
-      sessionId: pane.sessionId,
     });
     if (!bootstrapVisualsCompleteRef.current) {
       seedResttyBackgroundSurfaces();
     }
     setResttyCanvasVisibility(canvasVisibleRef.current);
+    for (const canvas of container.querySelectorAll<HTMLCanvasElement>(
+      ".restty-native-scroll-canvas, .pane-canvas, canvas",
+    )) {
+      const handleContextLost = (event: Event) => {
+        reportDebug("terminal.canvasContextLost", {
+          className: canvas.className,
+          type: event.type,
+        });
+      };
+      const handleContextRestored = (event: Event) => {
+        reportDebug("terminal.canvasContextRestored", {
+          className: canvas.className,
+          type: event.type,
+        });
+      };
+      canvas.addEventListener("webglcontextlost", handleContextLost as EventListener);
+      canvas.addEventListener("webglcontextrestored", handleContextRestored as EventListener);
+      canvas.addEventListener("contextlost", handleContextLost as EventListener);
+      canvas.addEventListener("contextrestored", handleContextRestored as EventListener);
+      canvasContextListeners.push({
+        canvas,
+        handleContextLost: handleContextLost as EventListener,
+        handleContextRestored: handleContextRestored as EventListener,
+      });
+    }
     if (runtime.appearanceRequestId === 0) {
       applyAppearance("mount-init");
     }
@@ -1104,6 +1216,17 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
     return () => {
       didDispose = true;
+      for (const { canvas, handleContextLost, handleContextRestored } of canvasContextListeners) {
+        canvas.removeEventListener("webglcontextlost", handleContextLost);
+        canvas.removeEventListener("webglcontextrestored", handleContextRestored);
+        canvas.removeEventListener("contextlost", handleContextLost);
+        canvas.removeEventListener("contextrestored", handleContextRestored);
+      }
+      reportDebug("terminal.paneUnmount", {
+        isFocused: isFocusedRef.current,
+        isVisible: isVisibleRef.current,
+        ...collectSnapshotMetrics(),
+      });
       appearanceRequestIdRef.current += 1;
       window.removeEventListener("focus", onWindowFocus);
       boundScrollHostRef.current?.removeEventListener("scroll", scrollHostListenerRef.current);
@@ -1111,8 +1234,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       runtime.callbacks = {};
       if (runtime.host.parentElement === container) {
         reportDebug("terminal.runtimeHostDetached", {
-          renderNonce: pane.renderNonce,
-          sessionId: pane.sessionId,
+          hostParentPortalTargetId: runtime.host.parentElement?.dataset.vsmuxPortalTargetId ?? null,
         });
         runtime.host.remove();
       }
@@ -1160,6 +1282,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   }, [isVisible, refreshRequestId]);
 
   useEffect(() => {
+    reportDebug("terminal.visibilityStateChanged", {
+      isFocused,
+      isVisible,
+      ...collectSnapshotMetrics(),
+    });
+
     const container = containerRef.current;
     if (!container) {
       return;

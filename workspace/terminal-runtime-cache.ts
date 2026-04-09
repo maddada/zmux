@@ -12,6 +12,8 @@ import {
 const TERMINAL_RUNTIME_HOST_CLASS_NAME = "terminal-pane-runtime-host";
 const TERMINAL_STARTUP_BACKGROUND = "#121212";
 const TERMINAL_PREFERRED_RENDERER = "auto";
+let nextTerminalRuntimeInstanceId = 0;
+let nextTerminalRuntimeHostId = 0;
 
 export type CachedTerminalRuntimeCallbacks = {
   onFirstData?: (connectionId: number) => void;
@@ -39,6 +41,8 @@ export type CachedTerminalRuntime = {
   rendererMode: string | null;
   renderNonce: number;
   restty: Restty;
+  runtimeHostId: string;
+  runtimeInstanceId: string;
   sessionId: string;
   transportController: WorkspaceResttyTransportController | null;
 };
@@ -57,6 +61,7 @@ const cachedTerminalRuntimes = new Map<string, CachedTerminalRuntime>();
 const buildRuntimeHost = () => {
   const host = document.createElement("div");
   host.className = TERMINAL_RUNTIME_HOST_CLASS_NAME;
+  host.dataset.vsmuxRuntimeHostId = `runtime-host-${++nextTerminalRuntimeHostId}`;
   return host;
 };
 
@@ -66,7 +71,8 @@ const destroyRuntime = (runtime: CachedTerminalRuntime) => {
   runtime.host.remove();
 };
 
-export const getTerminalRuntimeCacheKey = (sessionId: string) => sessionId;
+export const getTerminalRuntimeCacheKey = (sessionId: string, workspaceGenerationId?: string) =>
+  workspaceGenerationId ? `${workspaceGenerationId}:${sessionId}` : sessionId;
 
 export const acquireCachedTerminalRuntime = (
   options: CreateCachedTerminalRuntimeOptions,
@@ -74,11 +80,34 @@ export const acquireCachedTerminalRuntime = (
   const existingRuntime = cachedTerminalRuntimes.get(options.cacheKey);
   if (existingRuntime) {
     if (existingRuntime.renderNonce !== options.renderNonce) {
+      options.callbacks.reportDebug?.("terminal.runtimeCacheReplace", {
+        bootstrapVisualsComplete: existingRuntime.bootstrapVisualsComplete,
+        cacheKey: options.cacheKey,
+        connectPtyStarted: existingRuntime.connectPtyStarted,
+        existingRenderNonce: existingRuntime.renderNonce,
+        existingRuntimeHostId: existingRuntime.runtimeHostId,
+        existingRuntimeInstanceId: existingRuntime.runtimeInstanceId,
+        nextRenderNonce: options.renderNonce,
+        refCount: existingRuntime.refCount,
+        sessionId: options.sessionId,
+      });
       cachedTerminalRuntimes.delete(options.cacheKey);
       destroyRuntime(existingRuntime);
     } else {
       existingRuntime.refCount += 1;
       existingRuntime.callbacks = options.callbacks;
+      existingRuntime.callbacks.reportDebug?.("terminal.runtimeCacheReused", {
+        bootstrapVisualsComplete: existingRuntime.bootstrapVisualsComplete,
+        cacheKey: options.cacheKey,
+        canvasVisible: existingRuntime.canvasVisible,
+        connectPtyStarted: existingRuntime.connectPtyStarted,
+        refCount: existingRuntime.refCount,
+        renderNonce: existingRuntime.renderNonce,
+        rendererMode: existingRuntime.rendererMode,
+        runtimeHostId: existingRuntime.runtimeHostId,
+        runtimeInstanceId: existingRuntime.runtimeInstanceId,
+        sessionId: options.sessionId,
+      });
       return existingRuntime;
     }
   }
@@ -158,11 +187,21 @@ export const acquireCachedTerminalRuntime = (
   runtime.rendererMode = null;
   runtime.renderNonce = options.renderNonce;
   runtime.restty = restty;
+  runtime.runtimeHostId = host.dataset.vsmuxRuntimeHostId ?? `runtime-host-fallback-${Date.now()}`;
+  runtime.runtimeInstanceId = `runtime-${++nextTerminalRuntimeInstanceId}`;
   runtime.sessionId = options.sessionId;
   runtime.transportController = transportController;
 
   runtime.callbacks.reportDebug?.("terminal.rendererPreference", {
     preferredRenderer: TERMINAL_PREFERRED_RENDERER,
+    sessionId: options.sessionId,
+  });
+  runtime.callbacks.reportDebug?.("terminal.runtimeCacheCreated", {
+    cacheKey: options.cacheKey,
+    hasTransportController: transportController !== null,
+    renderNonce: options.renderNonce,
+    runtimeHostId: runtime.runtimeHostId,
+    runtimeInstanceId: runtime.runtimeInstanceId,
     sessionId: options.sessionId,
   });
 
@@ -177,6 +216,17 @@ export const releaseCachedTerminalRuntime = (cacheKey: string) => {
   }
 
   runtime.refCount = Math.max(0, runtime.refCount - 1);
+  runtime.callbacks.reportDebug?.("terminal.runtimeCacheReleased", {
+    bootstrapVisualsComplete: runtime.bootstrapVisualsComplete,
+    cacheKey,
+    connectPtyStarted: runtime.connectPtyStarted,
+    refCount: runtime.refCount,
+    renderNonce: runtime.renderNonce,
+    rendererMode: runtime.rendererMode,
+    runtimeHostId: runtime.runtimeHostId,
+    runtimeInstanceId: runtime.runtimeInstanceId,
+    sessionId: runtime.sessionId,
+  });
   runtime.callbacks = {};
   if (runtime.refCount > 0) {
     return;
@@ -191,8 +241,29 @@ export const destroyCachedTerminalRuntime = (cacheKey: string) => {
     return;
   }
 
+  runtime.callbacks.reportDebug?.("terminal.runtimeCacheDestroyed", {
+    bootstrapVisualsComplete: runtime.bootstrapVisualsComplete,
+    cacheKey,
+    connectPtyStarted: runtime.connectPtyStarted,
+    renderNonce: runtime.renderNonce,
+    rendererMode: runtime.rendererMode,
+    runtimeHostId: runtime.runtimeHostId,
+    runtimeInstanceId: runtime.runtimeInstanceId,
+    sessionId: runtime.sessionId,
+  });
   cachedTerminalRuntimes.delete(cacheKey);
   destroyRuntime(runtime);
+};
+
+export const destroyCachedTerminalRuntimesForGeneration = (workspaceGenerationId: string) => {
+  const generationPrefix = `${workspaceGenerationId}:`;
+  for (const cacheKey of [...cachedTerminalRuntimes.keys()]) {
+    if (!cacheKey.startsWith(generationPrefix)) {
+      continue;
+    }
+
+    destroyCachedTerminalRuntime(cacheKey);
+  }
 };
 
 const destroyAllCachedTerminalRuntimes = () => {

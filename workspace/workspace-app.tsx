@@ -30,7 +30,11 @@ import {
   buildVisiblePaneOrderForDrop,
   sortPanesBySessionIds,
 } from "./workspace-pane-reorder";
-import { destroyCachedTerminalRuntime, getTerminalRuntimeCacheKey } from "./terminal-runtime-cache";
+import {
+  destroyCachedTerminalRuntime,
+  destroyCachedTerminalRuntimesForGeneration,
+  getTerminalRuntimeCacheKey,
+} from "./terminal-runtime-cache";
 import { TerminalPane } from "./terminal-pane";
 import { T3Pane } from "./t3-pane";
 
@@ -50,6 +54,11 @@ type WorkspaceShellStyle = CSSProperties & {
   "--workspace-pane-gap": string;
 };
 
+type WorkspacePaneMeasuredBounds = {
+  height: number;
+  width: number;
+};
+
 type WorkspaceTerminalActivationSource = "focusin" | "pointer";
 
 type WorkspacePanePointerDragState = {
@@ -67,9 +76,25 @@ type WorkspaceAutoFocusGuard = {
   sessionId: string;
 };
 
+type WorkspaceTerminalHostPresence = {
+  ownerId: string;
+  priority: number;
+  visible: boolean;
+  workspaceGenerationId: string;
+};
+
 const AUTO_FOCUS_ACTIVATION_GUARD_MS = 400;
 const AUTO_RELOAD_ON_LAG = true;
+const TERMINAL_HOST_HEARTBEAT_MS = 1_000;
+const TERMINAL_HOST_STALE_AFTER_MS = 3_500;
 let nextWorkspaceBootId = 0;
+let nextWorkspaceGenerationId = 0;
+let nextWorkspaceTerminalHostOwnerId = 0;
+let nextWorkspacePaneViewInstanceId = 0;
+let nextWorkspacePortalTargetId = 0;
+const WORKSPACE_GENERATION_EVENT = "vsmux:workspace-generation";
+const buildWorkspaceTerminalHostOwnerId = () =>
+  `terminal-host-owner-${++nextWorkspaceTerminalHostOwnerId}`;
 
 const getInitialWorkspaceState = (): WorkspaceStateMessage | undefined => {
   if (typeof window === "undefined") {
@@ -93,8 +118,59 @@ const describeActiveElement = () => {
   };
 };
 
+const summarizeWorkspaceTerminalPanes = (panes: WorkspacePanelPane[]) =>
+  panes.flatMap((pane) =>
+    pane.kind !== "terminal"
+      ? []
+      : [
+          {
+            isVisible: pane.isVisible,
+            renderNonce: pane.renderNonce,
+            sessionId: pane.sessionId,
+            snapshotAgentName: pane.snapshot?.agentName,
+            snapshotHistoryBytes: pane.snapshot?.history?.length ?? 0,
+            snapshotIsAttached: pane.snapshot?.isAttached,
+            snapshotStatus: pane.snapshot?.status,
+          },
+        ],
+  );
+
+const summarizeTerminalLayerState = (
+  panes: WorkspacePanelPane[],
+  focusedSessionId: string | undefined,
+  layoutBySessionId: Map<string, { gridColumn: string; gridRow: string }>,
+  portalTargets: Map<string, HTMLDivElement>,
+) =>
+  panes.flatMap((pane) =>
+    pane.kind !== "terminal"
+      ? []
+      : [
+          {
+            gridColumn: layoutBySessionId.get(pane.sessionId)?.gridColumn,
+            gridRow: layoutBySessionId.get(pane.sessionId)?.gridRow,
+            isFocused: focusedSessionId === pane.sessionId,
+            isVisible: pane.isVisible,
+            portalTargetId:
+              portalTargets.get(pane.sessionId)?.dataset.vsmuxPortalTargetId ?? undefined,
+            renderNonce: pane.renderNonce,
+            sessionId: pane.sessionId,
+          },
+        ],
+  );
+
 export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = window, vscode }) => {
   const workspaceBootIdRef = useRef(++nextWorkspaceBootId);
+  const workspaceGenerationIdRef = useRef(`workspace-generation-${++nextWorkspaceGenerationId}`);
+  const terminalHostOwnerIdRef = useRef(buildWorkspaceTerminalHostOwnerId());
+  const terminalHostPeersRef = useRef(
+    new Map<
+      string,
+      {
+        lastSeenAt: number;
+        presence: WorkspaceTerminalHostPresence;
+      }
+    >(),
+  );
   const [isWorkspaceFocused, setIsWorkspaceFocused] = useState(
     () =>
       typeof document !== "undefined" &&
@@ -108,6 +184,9 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const [localPaneOrder, setLocalPaneOrder] = useState<string[] | undefined>();
   const [draggedPaneId, setDraggedPaneId] = useState<string | undefined>();
   const [dropTargetPaneId, setDropTargetPaneId] = useState<string | undefined>();
+  const [isRetired, setIsRetired] = useState(false);
+  const [isTerminalHostLeader, setIsTerminalHostLeader] = useState(true);
+  const [paneMeasuredBoundsVersion, setPaneMeasuredBoundsVersion] = useState(0);
   const [, setTerminalPortalVersion] = useState(0);
   const focusRequestSequenceRef = useRef(0);
   const debuggingModeRef = useRef<boolean | undefined>(undefined);
@@ -127,6 +206,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const pendingFocusedSessionIdRef = useRef<string | undefined>(undefined);
   const workspaceStateRef = useRef<WorkspaceStateMessage | undefined>(undefined);
   const presentedFocusedSessionIdRef = useRef<string | undefined>(undefined);
+  const paneMeasuredBoundsRef = useRef(new Map<string, WorkspacePaneMeasuredBounds>());
   const terminalPortalTargetsRef = useRef(new Map<string, HTMLDivElement>());
   const terminalPortalRefCallbacksRef = useRef(
     new Map<string, (element: HTMLDivElement | null) => void>(),
@@ -166,11 +246,174 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   };
 
   useEffect(() => {
+    const workspaceGenerationId = workspaceGenerationIdRef.current;
+    const handleGenerationChanged = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail : undefined;
+      const nextGenerationId =
+        detail && typeof detail.generationId === "string" ? detail.generationId : undefined;
+      if (!nextGenerationId || nextGenerationId === workspaceGenerationId) {
+        return;
+      }
+
+      postWorkspaceDebugLog(true, "workspace.generationRetired", {
+        bootId: workspaceBootIdRef.current,
+        nextGenerationId,
+        workspaceGenerationId,
+      });
+      setIsRetired(true);
+      destroyCachedTerminalRuntimesForGeneration(workspaceGenerationId);
+    };
+
+    window.addEventListener(WORKSPACE_GENERATION_EVENT, handleGenerationChanged as EventListener);
+    window.dispatchEvent(
+      new CustomEvent(WORKSPACE_GENERATION_EVENT, {
+        detail: {
+          bootId: workspaceBootIdRef.current,
+          generationId: workspaceGenerationId,
+        },
+      }),
+    );
+    postWorkspaceDebugLog(true, "workspace.generationActivated", {
+      bootId: workspaceBootIdRef.current,
+      workspaceGenerationId,
+    });
+
+    return () => {
+      window.removeEventListener(
+        WORKSPACE_GENERATION_EVENT,
+        handleGenerationChanged as EventListener,
+      );
+      destroyCachedTerminalRuntimesForGeneration(workspaceGenerationId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isRetired || !workspaceState?.connection.workspaceId) {
+      return;
+    }
+
+    const workspaceId = workspaceState.connection.workspaceId;
+    const channel = new BroadcastChannel(`vsmux-terminal-host-${workspaceId}`);
+    const ownerId = terminalHostOwnerIdRef.current;
+    const workspaceGenerationId = workspaceGenerationIdRef.current;
+
+    const getLocalPresence = (): WorkspaceTerminalHostPresence => ({
+      ownerId,
+      priority: isWorkspaceFocused ? 2 : document.visibilityState === "visible" ? 1 : 0,
+      visible: document.visibilityState === "visible",
+      workspaceGenerationId,
+    });
+
+    const comparePresence = (
+      left: WorkspaceTerminalHostPresence,
+      right: WorkspaceTerminalHostPresence,
+    ) => {
+      if (left.priority !== right.priority) {
+        return left.priority - right.priority;
+      }
+
+      return left.ownerId.localeCompare(right.ownerId) * -1;
+    };
+
+    const evaluateLeader = (source: string) => {
+      const now = Date.now();
+      for (const [peerOwnerId, peer] of terminalHostPeersRef.current.entries()) {
+        if (now - peer.lastSeenAt <= TERMINAL_HOST_STALE_AFTER_MS) {
+          continue;
+        }
+
+        terminalHostPeersRef.current.delete(peerOwnerId);
+      }
+
+      let leaderPresence = getLocalPresence();
+      for (const { presence } of terminalHostPeersRef.current.values()) {
+        if (comparePresence(presence, leaderPresence) > 0) {
+          leaderPresence = presence;
+        }
+      }
+
+      const nextIsLeader = leaderPresence.ownerId === ownerId;
+      setIsTerminalHostLeader((previousIsLeader) => {
+        if (previousIsLeader === nextIsLeader) {
+          return previousIsLeader;
+        }
+
+        postWorkspaceDebugLog(debuggingModeRef.current, "workspace.terminalHostLeadershipChanged", {
+          bootId: workspaceBootIdRef.current,
+          isLeader: nextIsLeader,
+          leaderOwnerId: leaderPresence.ownerId,
+          ownerId,
+          source,
+          workspaceGenerationId,
+          workspaceId,
+        });
+        return nextIsLeader;
+      });
+    };
+
+    const postPresence = (source: string) => {
+      const presence = getLocalPresence();
+      channel.postMessage({
+        presence,
+        source,
+        type: "presence",
+      });
+      evaluateLeader(`local-${source}`);
+    };
+
+    channel.onmessage = (event) => {
+      const data = event.data;
+      if (!data || typeof data !== "object" || data.type !== "presence") {
+        return;
+      }
+
+      const presence = data.presence as WorkspaceTerminalHostPresence | undefined;
+      if (!presence || typeof presence.ownerId !== "string" || presence.ownerId === ownerId) {
+        return;
+      }
+
+      terminalHostPeersRef.current.set(presence.ownerId, {
+        lastSeenAt: Date.now(),
+        presence,
+      });
+      evaluateLeader(`peer-${data.source ?? "presence"}`);
+    };
+
+    postPresence("mount");
+    const heartbeatId = window.setInterval(() => {
+      postPresence("heartbeat");
+    }, TERMINAL_HOST_HEARTBEAT_MS);
+
+    return () => {
+      window.clearInterval(heartbeatId);
+      channel.postMessage({
+        presence: {
+          ...getLocalPresence(),
+          priority: -1,
+          visible: false,
+        },
+        source: "dispose",
+        type: "presence",
+      });
+      channel.close();
+    };
+  }, [debuggingModeRef, isRetired, isWorkspaceFocused, workspaceState?.connection.workspaceId]);
+
+  useEffect(() => {
+    if (isTerminalHostLeader) {
+      return;
+    }
+
+    destroyCachedTerminalRuntimesForGeneration(workspaceGenerationIdRef.current);
+  }, [isTerminalHostLeader]);
+
+  useEffect(() => {
     postWorkspaceDebugLog(true, "workspace.instanceMounted", {
       bootId: workspaceBootIdRef.current,
       documentHasFocus: document.hasFocus(),
       hidden: document.hidden,
       visibilityState: document.visibilityState,
+      workspaceGenerationId: workspaceGenerationIdRef.current,
     });
 
     return () => {
@@ -179,6 +422,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         documentHasFocus: document.hasFocus(),
         hidden: document.hidden,
         visibilityState: document.visibilityState,
+        workspaceGenerationId: workspaceGenerationIdRef.current,
       });
     };
   }, []);
@@ -221,6 +465,10 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   }, []);
 
   useEffect(() => {
+    if (isRetired) {
+      return;
+    }
+
     const applyWorkspaceStateMessage = (
       message: WorkspacePanelHydrateMessage | WorkspacePanelSessionStateMessage,
     ) => {
@@ -297,6 +545,14 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       }
 
       if (nextMessage.type === "terminalPresentationChanged") {
+        postWorkspaceDebugLog(debuggingModeRef.current, "workspace.terminalPresentationChanged", {
+          sessionId: nextMessage.sessionId,
+          snapshotAgentName: nextMessage.snapshot?.agentName,
+          snapshotHistoryBytes: nextMessage.snapshot?.history?.length ?? 0,
+          snapshotIsAttached: nextMessage.snapshot?.isAttached,
+          snapshotStatus: nextMessage.snapshot?.status,
+          terminalTitle: nextMessage.terminalTitle,
+        });
         setServerState((previousState) => {
           if (
             !previousState ||
@@ -322,13 +578,23 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       }
 
       if (nextMessage.type === "destroyTerminalRuntime") {
-        destroyCachedTerminalRuntime(getTerminalRuntimeCacheKey(nextMessage.sessionId));
+        destroyCachedTerminalRuntime(
+          getTerminalRuntimeCacheKey(nextMessage.sessionId, workspaceGenerationIdRef.current),
+        );
         return;
       }
 
       if (nextMessage.type !== "hydrate" && nextMessage.type !== "sessionState") {
         return;
       }
+
+      postWorkspaceDebugLog(nextMessage.debuggingMode, "workspace.sessionStatePaneSummary", {
+        activeGroupId: nextMessage.activeGroupId,
+        bootId: workspaceBootIdRef.current,
+        focusedSessionId: nextMessage.focusedSessionId,
+        paneCount: nextMessage.panes.length,
+        panes: summarizeWorkspaceTerminalPanes(nextMessage.panes),
+      });
 
       applyWorkspaceStateMessage(nextMessage);
     };
@@ -355,7 +621,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       messageSource.removeEventListener("message", handleWorkspaceMessage);
       window.removeEventListener("message", handleIframeFocus);
     };
-  }, [messageSource, vscode]);
+  }, [isRetired, messageSource, vscode]);
 
   const panes = useMemo(() => workspaceState?.panes ?? [], [workspaceState]);
   const workspacePaneIdsKey = panes.map((pane) => pane.sessionId).join("|");
@@ -477,6 +743,55 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     workspaceState?.layoutAppearance.paneGap,
     workspaceState?.viewMode,
     visiblePanes.length,
+  ]);
+  const hiddenPaneParkingStyles = useMemo(() => {
+    const paneGap = workspaceState?.layoutAppearance.paneGap ?? 12;
+    const hiddenTerminalPanes = orderedPanes.filter(
+      (pane): pane is Extract<WorkspacePanelPane, { kind: "terminal" }> =>
+        pane.kind === "terminal" && !pane.isVisible,
+    );
+    const nextStyles = new Map<string, CSSProperties>();
+
+    hiddenTerminalPanes.forEach((pane, index) => {
+      const measuredBounds = paneMeasuredBoundsRef.current.get(pane.sessionId);
+      nextStyles.set(pane.sessionId, {
+        height: measuredBounds?.height ? `${String(measuredBounds.height)}px` : "1px",
+        left: "0",
+        pointerEvents: "none",
+        position: "absolute",
+        top: `calc(100% + ${String((index + 1) * (paneGap + 24))}px)`,
+        width: measuredBounds?.width ? `${String(measuredBounds.width)}px` : "1px",
+        zIndex: 0,
+      });
+    });
+
+    return nextStyles;
+  }, [orderedPanes, paneMeasuredBoundsVersion, workspaceState?.layoutAppearance.paneGap]);
+
+  useEffect(() => {
+    if (!workspaceState) {
+      return;
+    }
+
+    postWorkspaceDebugLog(workspaceState.debuggingMode, "workspace.terminalLayerSummary", {
+      activeGroupId: workspaceState.activeGroupId,
+      bootId: workspaceBootIdRef.current,
+      focusedSessionId: presentedFocusedSessionId,
+      terminalLayers: summarizeTerminalLayerState(
+        orderedPanes,
+        presentedFocusedSessionId,
+        visiblePaneLayoutBySessionId,
+        terminalPortalTargetsRef.current,
+      ),
+      visiblePaneIds,
+      workspaceGenerationId: workspaceGenerationIdRef.current,
+    });
+  }, [
+    orderedPanes,
+    presentedFocusedSessionId,
+    visiblePaneIdsKey,
+    visiblePaneLayoutBySessionId,
+    workspaceState,
   ]);
 
   useEffect(() => {
@@ -758,6 +1073,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       }
 
       if (element) {
+        element.dataset.vsmuxPortalTargetId ||= `portal-target-${++nextWorkspacePortalTargetId}`;
         targets.set(sessionId, element);
       } else {
         targets.delete(sessionId);
@@ -765,6 +1081,8 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       postWorkspaceDebugLog(debuggingModeRef.current, "workspace.terminalPortalTargetChanged", {
         hadPreviousTarget: previousElement !== null,
         hasNextTarget: element !== null,
+        nextTargetId: element?.dataset.vsmuxPortalTargetId ?? null,
+        previousTargetId: previousElement?.dataset.vsmuxPortalTargetId ?? null,
         sessionId,
       });
       terminalPortalTargetVersionRef.current += 1;
@@ -791,6 +1109,21 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const setCurrentDropTargetPaneId = (paneId: string | undefined) => {
     dropTargetPaneIdRef.current = paneId;
     setDropTargetPaneId(paneId);
+  };
+
+  const recordPaneMeasuredBounds = (sessionId: string, bounds: WorkspacePaneMeasuredBounds) => {
+    const previousBounds = paneMeasuredBoundsRef.current.get(sessionId);
+    if (previousBounds?.width === bounds.width && previousBounds.height === bounds.height) {
+      return;
+    }
+
+    paneMeasuredBoundsRef.current.set(sessionId, bounds);
+    setPaneMeasuredBoundsVersion((value) => value + 1);
+    postWorkspaceDebugLog(workspaceState?.debuggingMode, "workspace.paneMeasuredBounds", {
+      bounds,
+      sessionId,
+      workspaceGenerationId: workspaceGenerationIdRef.current,
+    });
   };
 
   useEffect(() => {
@@ -885,6 +1218,10 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     };
   }, []);
 
+  if (isRetired) {
+    return <main className="workspace-shell workspace-shell-empty" />;
+  }
+
   if (!workspaceState) {
     return <main className="workspace-shell workspace-shell-empty" />;
   }
@@ -903,13 +1240,20 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
             postWorkspaceDebugLog(workspaceState.debuggingMode, event, payload)
           }
           fallbackLayoutStyle={
-            visiblePaneLayoutBySessionId.get(workspaceState.focusedSessionId ?? "") ??
-            visiblePaneLayoutBySessionId.get(visiblePanes[0]?.sessionId ?? "")
+            pane.isVisible
+              ? (visiblePaneLayoutBySessionId.get(workspaceState.focusedSessionId ?? "") ??
+                visiblePaneLayoutBySessionId.get(visiblePanes[0]?.sessionId ?? ""))
+              : undefined
           }
           isFocused={presentedFocusedSessionId === pane.sessionId}
           isWorkspaceFocused={isWorkspaceFocused}
           key={pane.kind === "terminal" ? `${pane.sessionId}:${pane.renderNonce}` : pane.sessionId}
-          layoutStyle={visiblePaneLayoutBySessionId.get(pane.sessionId)}
+          layoutStyle={
+            pane.isVisible
+              ? visiblePaneLayoutBySessionId.get(pane.sessionId)
+              : hiddenPaneParkingStyles.get(pane.sessionId)
+          }
+          onBoundsMeasured={(bounds) => recordPaneMeasuredBounds(pane.sessionId, bounds)}
           onLocalFocus={() => applyLocalFocusVisual(pane.sessionId)}
           onFocus={() => requestFocusSession(pane.sessionId)}
           onClose={() =>
@@ -984,6 +1328,10 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         />
       ))}
       {terminalPanes.map((pane) => {
+        if (!isTerminalHostLeader) {
+          return null;
+        }
+
         const target = terminalPortalTargetsRef.current.get(pane.sessionId);
         if (!target) {
           return null;
@@ -1008,6 +1356,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
             pane={pane}
             refreshRequestId={0}
             terminalAppearance={workspaceState.terminalAppearance}
+            workspaceGenerationId={workspaceGenerationIdRef.current}
           />,
           target,
           pane.sessionId,
@@ -1033,6 +1382,7 @@ type WorkspacePaneViewProps = {
   onFocus: () => void;
   onClose: () => void;
   onReload: () => void;
+  onBoundsMeasured: (bounds: WorkspacePaneMeasuredBounds) => void;
   onHeaderPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
   onHeaderNativeDragStart: (event: ReactDragEvent<HTMLElement>) => void;
   pane: WorkspacePanelPane;
@@ -1051,13 +1401,69 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
   onLocalFocus,
   onFocus,
   onClose,
+  onBoundsMeasured,
   onReload,
   onHeaderPointerDown,
   onHeaderNativeDragStart,
   pane,
   registerTerminalPortalTarget,
 }) => {
+  const paneViewInstanceIdRef = useRef(`workspace-pane-view-${++nextWorkspacePaneViewInstanceId}`);
+  const sectionRef = useRef<HTMLElement | null>(null);
   const primaryTitle = getWorkspacePanePrimaryTitle(pane);
+
+  useEffect(() => {
+    debugLog("workspace.paneViewMount", {
+      isFocused,
+      isWorkspaceFocused,
+      isVisible: pane.isVisible,
+      kind: pane.kind,
+      paneViewInstanceId: paneViewInstanceIdRef.current,
+      renderNonce: pane.kind === "terminal" ? pane.renderNonce : undefined,
+      sessionId: pane.sessionId,
+    });
+
+    return () => {
+      debugLog("workspace.paneViewUnmount", {
+        isFocused,
+        isWorkspaceFocused,
+        isVisible: pane.isVisible,
+        kind: pane.kind,
+        paneViewInstanceId: paneViewInstanceIdRef.current,
+        renderNonce: pane.kind === "terminal" ? pane.renderNonce : undefined,
+        sessionId: pane.sessionId,
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) {
+      return;
+    }
+
+    const reportBounds = () => {
+      if (!pane.isVisible) {
+        return;
+      }
+
+      const bounds = section.getBoundingClientRect();
+      const width = Math.round(bounds.width);
+      const height = Math.round(bounds.height);
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+
+      onBoundsMeasured({ height, width });
+    };
+
+    reportBounds();
+    const observer = new ResizeObserver(reportBounds);
+    observer.observe(section);
+    return () => {
+      observer.disconnect();
+    };
+  }, [onBoundsMeasured, pane.isVisible]);
 
   return (
     <section
@@ -1073,7 +1479,16 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
         .filter(Boolean)
         .join(" ")}
       data-workspace-pane-id={pane.sessionId}
+      ref={sectionRef}
       onMouseDown={() => {
+        debugLog("workspace.mainPanePointerDown", {
+          isFocused,
+          isVisible: pane.isVisible,
+          layoutStyle,
+          paneViewInstanceId: paneViewInstanceIdRef.current,
+          renderNonce: pane.kind === "terminal" ? pane.renderNonce : undefined,
+          sessionId: pane.sessionId,
+        });
         onLocalFocus();
         if (!isFocused) {
           debugLog("focus.mouseDownRequestsFocus", {
@@ -1103,6 +1518,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
           <div
             className="workspace-terminal-portal-target"
             ref={registerTerminalPortalTarget}
+            data-vsmux-pane-view-id={paneViewInstanceIdRef.current}
             style={{ height: "100%", width: "100%" }}
           />
         ) : (
