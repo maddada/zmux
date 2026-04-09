@@ -11,6 +11,7 @@ import {
   type TerminalViewMode,
   type VisibleSessionCount,
 } from "../shared/session-grid-contract";
+import { logAgentTilerFocusTrace } from "./agent-tiler-focus-trace-log";
 import {
   createGroupInSimpleWorkspace,
   createGroupFromSessionInSimpleWorkspace,
@@ -120,8 +121,24 @@ export class SessionGridStore {
   }
 
   public async focusSession(sessionId: string): Promise<boolean> {
+    const previousSnapshot = this.snapshot;
+    logAgentTilerFocusTrace("store.focusSession.before", {
+      activeGroup: summarizeFocusTraceGroup(
+        previousSnapshot.groups.find((group) => group.groupId === previousSnapshot.activeGroupId),
+      ),
+      requestedSessionId: sessionId,
+      targetGroup: summarizeFocusTraceGroup(getGroupForSession(previousSnapshot, sessionId)),
+    });
     const result = focusSessionInSimpleWorkspace(this.snapshot, sessionId);
     this.snapshot = result.snapshot;
+    logAgentTilerFocusTrace("store.focusSession.after", {
+      activeGroup: summarizeFocusTraceGroup(
+        this.snapshot.groups.find((group) => group.groupId === this.snapshot.activeGroupId),
+      ),
+      changed: result.changed,
+      requestedSessionId: sessionId,
+      targetGroup: summarizeFocusTraceGroup(getGroupForSession(this.snapshot, sessionId)),
+    });
     if (result.changed) {
       await this.persist();
     }
@@ -386,6 +403,33 @@ function summarizeWorkspaceSnapshot(snapshot: GroupedSessionWorkspaceSnapshot) {
       sessionIds: group.snapshot.sessions.map((session) => session.sessionId),
       title: group.title,
       visibleSessionIds: [...group.snapshot.visibleSessionIds],
+    })),
+  };
+}
+
+function summarizeFocusTraceGroup(group: SessionGroupRecord | undefined) {
+  if (!group) {
+    return undefined;
+  }
+
+  return {
+    focusedSessionId: group.snapshot.focusedSessionId,
+    groupId: group.groupId,
+    sessions: group.snapshot.sessions.map((session, index) => ({
+      alias: session.alias,
+      displayId: session.displayId,
+      index,
+      isSleeping: session.isSleeping,
+      kind: session.kind,
+      sessionId: session.sessionId,
+    })),
+    title: group.title,
+    viewMode: group.snapshot.viewMode,
+    visibleCount: group.snapshot.visibleCount,
+    visibleSlots: group.snapshot.visibleSessionIds.map((sessionId, slotIndex) => ({
+      isFocused: sessionId === group.snapshot.focusedSessionId,
+      sessionId,
+      slotIndex,
     })),
   };
 }

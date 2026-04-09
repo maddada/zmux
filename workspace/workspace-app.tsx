@@ -852,6 +852,26 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       sessionId,
       source,
     });
+    postWorkspaceDebugLog(true, "focusTrace.workspaceActivation", {
+      activeGroupId: workspaceState?.activeGroupId,
+      orderedPaneIds: panes.map((pane) => ({
+        isVisible: pane.isVisible,
+        sessionId: pane.sessionId,
+      })),
+      presentedFocusedSessionId,
+      serverFocusedSessionId: workspaceState?.focusedSessionId,
+      sessionId,
+      source,
+      visiblePaneSlots: visiblePaneIds.map((visibleSessionId, slotIndex) => ({
+        isFocused: visibleSessionId === presentedFocusedSessionId,
+        sessionId: visibleSessionId,
+        slotIndex,
+      })),
+      workspaceVisibleSessionIds:
+        workspaceState?.workspaceSnapshot.groups.find(
+          (group) => group.groupId === workspaceState.activeGroupId,
+        )?.snapshot.visibleSessionIds ?? [],
+    });
     if (ignored) {
       return;
     }

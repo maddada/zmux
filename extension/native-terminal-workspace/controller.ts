@@ -16,6 +16,7 @@ import {
   type SessionGridSnapshot,
   type SessionRecord,
   type SidebarDaemonSessionItem,
+  type SessionGroupRecord,
   type SidebarHydrateMessage,
   type SidebarSessionItem,
   type SidebarSessionStateMessage,
@@ -81,6 +82,7 @@ import {
   getFirstBrowserSidebarCommandUrl,
   type SidebarCommandRunMode,
 } from "../../shared/sidebar-commands";
+import { logAgentTilerFocusTrace } from "../agent-tiler-focus-trace-log";
 import { SessionGridStore } from "../session-grid-store";
 import { SessionSidebarViewProvider } from "../session-sidebar-view";
 import {
@@ -299,6 +301,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       onMessage: async (message) => {
         if (message.type === "workspaceDebugLog") {
           logVSmuxDebug(`workspace.webview.${message.event}`, message.details);
+          if (message.event.startsWith("focusTrace.")) {
+            logAgentTilerFocusTrace(
+              `workspace.webview.${message.event}`,
+              parseFocusTraceDetails(message.details),
+            );
+          }
           return;
         }
 
@@ -503,6 +511,13 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       source,
       startedAt: focusStartedAt,
     });
+    logAgentTilerFocusTrace("controller.focusSession.request", {
+      activeGroup: this.describeFocusTraceGroup(this.store.getActiveGroup()),
+      focusRequestId,
+      requestedSessionId: sessionId,
+      source,
+      targetGroup: this.describeFocusTraceGroup(this.store.getSessionGroup(sessionId)),
+    });
     const shouldReattachDetachedTerminal =
       source === "sidebar" &&
       sessionRecord.kind === "terminal" &&
@@ -522,6 +537,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       focusRequestId,
       sessionId,
       snapshot: this.describeActiveSnapshot(),
+    });
+    logAgentTilerFocusTrace("controller.focusSession.afterStoreFocus", {
+      activeGroup: this.describeFocusTraceGroup(this.store.getActiveGroup()),
+      changed,
+      durationMs: Date.now() - focusStartedAt,
+      focusRequestId,
+      requestedSessionId: sessionId,
+      source,
+      targetGroup: this.describeFocusTraceGroup(this.store.getSessionGroup(sessionId)),
     });
     if (source === "sidebar") {
       this.enqueueWorkspaceAutoFocus(sessionId, "sidebar");
@@ -3361,6 +3385,33 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     };
   }
 
+  private describeFocusTraceGroup(group: SessionGroupRecord | undefined) {
+    if (!group) {
+      return undefined;
+    }
+
+    return {
+      focusedSessionId: group.snapshot.focusedSessionId,
+      groupId: group.groupId,
+      sessions: group.snapshot.sessions.map((session, index) => ({
+        alias: session.alias,
+        displayId: session.displayId,
+        index,
+        isSleeping: session.isSleeping,
+        kind: session.kind,
+        sessionId: session.sessionId,
+      })),
+      title: group.title,
+      viewMode: group.snapshot.viewMode,
+      visibleCount: group.snapshot.visibleCount,
+      visibleSlots: group.snapshot.visibleSessionIds.map((sessionId, slotIndex) => ({
+        isFocused: sessionId === group.snapshot.focusedSessionId,
+        sessionId,
+        slotIndex,
+      })),
+    };
+  }
+
   private clearObservedSidebarFocusState(): void {
     return;
   }
@@ -3521,6 +3572,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       visibleCount: activeSnapshot.visibleCount,
       visibleSessionIds: activeSnapshot.visibleSessionIds,
       workspaceId: this.workspaceId,
+    });
+    logAgentTilerFocusTrace("controller.createWorkspacePanelMessage.summary", {
+      activeGroupId: workspaceSnapshot.activeGroupId,
+      autoFocusRequest,
+      focusedSessionId: activeSnapshot.focusedSessionId,
+      paneIds: panes.map((pane) => `${pane.sessionId}:${pane.isVisible ? "visible" : "hidden"}`),
+      type,
+      visibleCount: activeSnapshot.visibleCount,
+      visibleSessionIds: [...activeSnapshot.visibleSessionIds],
     });
 
     if (type === "hydrate") {
@@ -3838,6 +3898,18 @@ function formatDebugActivityAt(value: number | undefined): string | undefined {
   }
 
   return new Date(value).toISOString();
+}
+
+function parseFocusTraceDetails(details: string | undefined): unknown {
+  if (!details) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(details);
+  } catch {
+    return details;
+  }
 }
 
 function getCommandTerminalShellArgs(shellPath: string, command: string): string[] {
