@@ -30,11 +30,7 @@ import {
   buildVisiblePaneOrderForDrop,
   sortPanesBySessionIds,
 } from "./workspace-pane-reorder";
-import {
-  destroyCachedTerminalRuntime,
-  destroyCachedTerminalRuntimesForGeneration,
-  getTerminalRuntimeCacheKey,
-} from "./terminal-runtime-cache";
+import { destroyCachedTerminalRuntime, getTerminalRuntimeCacheKey } from "./terminal-runtime-cache";
 import { TerminalPane } from "./terminal-pane";
 import { T3Pane } from "./t3-pane";
 
@@ -76,25 +72,11 @@ type WorkspaceAutoFocusGuard = {
   sessionId: string;
 };
 
-type WorkspacePanelInstanceIdentity = {
-  createdAt: number;
-  id: string;
-};
-
 const AUTO_FOCUS_ACTIVATION_GUARD_MS = 400;
 const AUTO_RELOAD_ON_LAG = true;
 let nextWorkspaceBootId = 0;
 let nextWorkspacePaneViewInstanceId = 0;
 let nextWorkspacePortalTargetId = 0;
-const WORKSPACE_GENERATION_EVENT = "vsmux:workspace-generation";
-const TERMINAL_HOST_LOCK_PREFIX = "vsmux-terminal-host:";
-const buildUniqueWorkspaceId = (prefix: string) => {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-};
 
 const getInitialWorkspaceState = (): WorkspaceStateMessage | undefined => {
   if (typeof window === "undefined") {
@@ -104,18 +86,9 @@ const getInitialWorkspaceState = (): WorkspaceStateMessage | undefined => {
   return window.__VSMUX_WORKSPACE_BOOTSTRAP__;
 };
 
-const getWorkspacePanelInstanceIdentity = (): WorkspacePanelInstanceIdentity | undefined => {
-  if (typeof window === "undefined") {
-    return undefined;
-  }
-
-  return window.__VSMUX_WORKSPACE_PANEL_INSTANCE__;
-};
-
 declare global {
   interface Window {
     __VSMUX_WORKSPACE_BOOTSTRAP__?: WorkspaceStateMessage;
-    __VSMUX_WORKSPACE_PANEL_INSTANCE__?: WorkspacePanelInstanceIdentity;
   }
 }
 
@@ -175,9 +148,6 @@ const summarizeTerminalLayerState = (
 
 export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = window, vscode }) => {
   const workspaceBootIdRef = useRef(++nextWorkspaceBootId);
-  const workspaceGenerationIdRef = useRef(buildUniqueWorkspaceId("workspace-generation"));
-  const terminalHostOwnerIdRef = useRef(buildUniqueWorkspaceId("terminal-host-owner"));
-  const workspacePanelInstanceIdentityRef = useRef(getWorkspacePanelInstanceIdentity());
   const [isWorkspaceFocused, setIsWorkspaceFocused] = useState(
     () =>
       typeof document !== "undefined" &&
@@ -191,8 +161,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const [localPaneOrder, setLocalPaneOrder] = useState<string[] | undefined>();
   const [draggedPaneId, setDraggedPaneId] = useState<string | undefined>();
   const [dropTargetPaneId, setDropTargetPaneId] = useState<string | undefined>();
-  const [isRetired, setIsRetired] = useState(false);
-  const [isTerminalHostLeader, setIsTerminalHostLeader] = useState(false);
   const [paneMeasuredBoundsVersion, setPaneMeasuredBoundsVersion] = useState(0);
   const [, setTerminalPortalVersion] = useState(0);
   const focusRequestSequenceRef = useRef(0);
@@ -239,10 +207,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   workspaceStateRef.current = workspaceState;
 
   const postToExtension = (message: Record<string, unknown>) => {
-    vscode.postMessage({
-      ...message,
-      workspacePanelInstanceId: workspacePanelInstanceIdentityRef.current?.id,
-    });
+    vscode.postMessage(message);
   };
 
   const postWorkspaceDebugLog = (
@@ -263,230 +228,11 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   };
 
   useEffect(() => {
-    const workspaceGenerationId = workspaceGenerationIdRef.current;
-    const handleGenerationChanged = (event: Event) => {
-      const detail = event instanceof CustomEvent ? event.detail : undefined;
-      const nextGenerationId =
-        detail && typeof detail.generationId === "string" ? detail.generationId : undefined;
-      if (!nextGenerationId || nextGenerationId === workspaceGenerationId) {
-        return;
-      }
-
-      postWorkspaceDebugLog(true, "workspace.generationRetired", {
-        bootId: workspaceBootIdRef.current,
-        nextGenerationId,
-        workspaceGenerationId,
-      });
-      setIsRetired(true);
-      destroyCachedTerminalRuntimesForGeneration(workspaceGenerationId);
-    };
-
-    window.addEventListener(WORKSPACE_GENERATION_EVENT, handleGenerationChanged as EventListener);
-    window.dispatchEvent(
-      new CustomEvent(WORKSPACE_GENERATION_EVENT, {
-        detail: {
-          bootId: workspaceBootIdRef.current,
-          generationId: workspaceGenerationId,
-        },
-      }),
-    );
-    postWorkspaceDebugLog(true, "workspace.generationActivated", {
-      bootId: workspaceBootIdRef.current,
-      workspaceGenerationId,
-    });
-
-    return () => {
-      window.removeEventListener(
-        WORKSPACE_GENERATION_EVENT,
-        handleGenerationChanged as EventListener,
-      );
-      destroyCachedTerminalRuntimesForGeneration(workspaceGenerationId);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (isRetired || !workspaceState?.connection.workspaceId) {
-      setIsTerminalHostLeader(false);
-      return;
-    }
-
-    const workspaceId = workspaceState.connection.workspaceId;
-    const ownerId = terminalHostOwnerIdRef.current;
-    const workspaceGenerationId = workspaceGenerationIdRef.current;
-    const lockName = `${TERMINAL_HOST_LOCK_PREFIX}${workspaceId}`;
-    let disposed = false;
-    let releaseLeadership: (() => void) | undefined;
-    const abortController = new AbortController();
-
-    const setLeaderState = (nextIsLeader: boolean, source: string) => {
-      setIsTerminalHostLeader((previousIsLeader) => {
-        if (previousIsLeader === nextIsLeader) {
-          return previousIsLeader;
-        }
-
-        postWorkspaceDebugLog(debuggingModeRef.current, "workspace.terminalHostLeadershipChanged", {
-          bootId: workspaceBootIdRef.current,
-          isLeader: nextIsLeader,
-          lockName,
-          ownerId,
-          source,
-          workspaceGenerationId,
-          workspaceId,
-        });
-        return nextIsLeader;
-      });
-    };
-
-    const acquireLock = async () => {
-      if (typeof navigator === "undefined" || !("locks" in navigator) || !navigator.locks) {
-        postWorkspaceDebugLog(debuggingModeRef.current, "workspace.terminalHostLockUnavailable", {
-          bootId: workspaceBootIdRef.current,
-          lockName,
-          ownerId,
-          workspaceGenerationId,
-          workspaceId,
-        });
-        setLeaderState(true, "fallback-no-web-locks");
-        return;
-      }
-
-      postWorkspaceDebugLog(debuggingModeRef.current, "workspace.terminalHostLockWaiting", {
-        bootId: workspaceBootIdRef.current,
-        lockName,
-        ownerId,
-        workspaceGenerationId,
-        workspaceId,
-      });
-
-      try {
-        await navigator.locks.request(
-          lockName,
-          {
-            mode: "exclusive",
-            signal: abortController.signal,
-          },
-          async () => {
-            if (disposed) {
-              return;
-            }
-
-            setLeaderState(true, "lock-acquired");
-            await new Promise<void>((resolve) => {
-              releaseLeadership = resolve;
-            });
-            setLeaderState(false, "lock-released");
-          },
-        );
-      } catch (error) {
-        if (abortController.signal.aborted || disposed) {
-          return;
-        }
-
-        postWorkspaceDebugLog(debuggingModeRef.current, "workspace.terminalHostLockError", {
-          error: error instanceof Error ? error.message : String(error),
-          lockName,
-          ownerId,
-          workspaceGenerationId,
-          workspaceId,
-        });
-      }
-    };
-
-    void acquireLock();
-
-    return () => {
-      disposed = true;
-      abortController.abort();
-      releaseLeadership?.();
-      setLeaderState(false, "effect-cleanup");
-    };
-  }, [debuggingModeRef, isRetired, workspaceState?.connection.workspaceId]);
-
-  useEffect(() => {
-    if (isTerminalHostLeader) {
-      return;
-    }
-
-    destroyCachedTerminalRuntimesForGeneration(workspaceGenerationIdRef.current);
-  }, [isTerminalHostLeader]);
-
-  useEffect(() => {
-    if (isRetired || !workspaceState?.connection.workspaceId) {
-      return;
-    }
-
-    const panelInstanceIdentity = workspacePanelInstanceIdentityRef.current;
-    if (!panelInstanceIdentity || typeof BroadcastChannel === "undefined") {
-      return;
-    }
-
-    const channel = new BroadcastChannel(
-      `vsmux-workspace-panel:${workspaceState.connection.workspaceId}`,
-    );
-    const shouldRetireForPeer = (peerIdentity: WorkspacePanelInstanceIdentity) => {
-      if (peerIdentity.id === panelInstanceIdentity.id) {
-        return false;
-      }
-
-      if (peerIdentity.createdAt !== panelInstanceIdentity.createdAt) {
-        return peerIdentity.createdAt > panelInstanceIdentity.createdAt;
-      }
-
-      return peerIdentity.id > panelInstanceIdentity.id;
-    };
-
-    const announcePresence = (source: string) => {
-      channel.postMessage({
-        bootId: workspaceBootIdRef.current,
-        source,
-        workspaceGenerationId: workspaceGenerationIdRef.current,
-        workspacePanelInstance: panelInstanceIdentity,
-      });
-    };
-
-    const handleMessage = (event: MessageEvent) => {
-      const data = event.data as
-        | {
-            workspacePanelInstance?: WorkspacePanelInstanceIdentity;
-          }
-        | undefined;
-      const peerIdentity = data?.workspacePanelInstance;
-      if (!peerIdentity || !shouldRetireForPeer(peerIdentity)) {
-        return;
-      }
-
-      postWorkspaceDebugLog(true, "workspace.panelInstanceRetiredForPeer", {
-        bootId: workspaceBootIdRef.current,
-        peerPanelCreatedAt: peerIdentity.createdAt,
-        peerPanelInstanceId: peerIdentity.id,
-        workspaceGenerationId: workspaceGenerationIdRef.current,
-        workspacePanelCreatedAt: panelInstanceIdentity.createdAt,
-        workspacePanelInstanceId: panelInstanceIdentity.id,
-      });
-      setIsRetired(true);
-      destroyCachedTerminalRuntimesForGeneration(workspaceGenerationIdRef.current);
-    };
-
-    channel.addEventListener("message", handleMessage as EventListener);
-    announcePresence("mount");
-    const heartbeatId = window.setInterval(() => announcePresence("heartbeat"), 2_000);
-
-    return () => {
-      window.clearInterval(heartbeatId);
-      channel.removeEventListener("message", handleMessage as EventListener);
-      channel.close();
-    };
-  }, [isRetired, workspaceState?.connection.workspaceId]);
-
-  useEffect(() => {
     postWorkspaceDebugLog(true, "workspace.instanceMounted", {
       bootId: workspaceBootIdRef.current,
       documentHasFocus: document.hasFocus(),
       hidden: document.hidden,
       visibilityState: document.visibilityState,
-      workspaceGenerationId: workspaceGenerationIdRef.current,
-      workspacePanelCreatedAt: workspacePanelInstanceIdentityRef.current?.createdAt,
-      workspacePanelInstanceId: workspacePanelInstanceIdentityRef.current?.id,
     });
 
     return () => {
@@ -495,9 +241,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         documentHasFocus: document.hasFocus(),
         hidden: document.hidden,
         visibilityState: document.visibilityState,
-        workspaceGenerationId: workspaceGenerationIdRef.current,
-        workspacePanelCreatedAt: workspacePanelInstanceIdentityRef.current?.createdAt,
-        workspacePanelInstanceId: workspacePanelInstanceIdentityRef.current?.id,
       });
     };
   }, []);
@@ -540,10 +283,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   }, []);
 
   useEffect(() => {
-    if (isRetired) {
-      return;
-    }
-
     const applyWorkspaceStateMessage = (
       message: WorkspacePanelHydrateMessage | WorkspacePanelSessionStateMessage,
     ) => {
@@ -653,9 +392,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       }
 
       if (nextMessage.type === "destroyTerminalRuntime") {
-        destroyCachedTerminalRuntime(
-          getTerminalRuntimeCacheKey(nextMessage.sessionId, workspaceGenerationIdRef.current),
-        );
+        destroyCachedTerminalRuntime(getTerminalRuntimeCacheKey(nextMessage.sessionId));
         return;
       }
 
@@ -704,7 +441,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       messageSource.removeEventListener("message", handleWorkspaceMessage);
       window.removeEventListener("message", handleIframeFocus);
     };
-  }, [isRetired, messageSource, vscode]);
+  }, [messageSource, vscode]);
 
   const panes = useMemo(() => workspaceState?.panes ?? [], [workspaceState]);
   const workspacePaneIdsKey = panes.map((pane) => pane.sessionId).join("|");
@@ -712,56 +449,15 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     () => (localPaneOrder ? sortPanesBySessionIds(panes, localPaneOrder) : panes),
     [localPaneOrder, panes],
   );
-  const activeGroupVisibleSessionIds = useMemo(() => {
-    const activeGroup = workspaceState?.workspaceSnapshot.groups.find(
-      (group) => group.groupId === workspaceState.activeGroupId,
-    );
-    if (!activeGroup) {
-      return panes.filter((pane) => pane.isVisible).map((pane) => pane.sessionId);
-    }
-
-    const visiblePaneIdSet = new Set(
-      panes.filter((pane) => pane.isVisible).map((pane) => pane.sessionId),
-    );
-    const snapshotVisibleSessionIds = activeGroup.snapshot.visibleSessionIds.filter((sessionId) =>
-      visiblePaneIdSet.has(sessionId),
-    );
-    const missingVisibleSessionIds = panes
-      .filter((pane) => pane.isVisible && !snapshotVisibleSessionIds.includes(pane.sessionId))
-      .map((pane) => pane.sessionId);
-    return snapshotVisibleSessionIds.concat(missingVisibleSessionIds);
-  }, [panes, workspaceState?.activeGroupId, workspaceState?.workspaceSnapshot.groups]);
   const activeGroupSessionIdSet = useMemo(() => {
     const activeGroup = workspaceState?.workspaceSnapshot.groups.find(
       (group) => group.groupId === workspaceState.activeGroupId,
     );
     return new Set(activeGroup?.snapshot.sessions.map((session) => session.sessionId) ?? []);
   }, [workspaceState?.activeGroupId, workspaceState?.workspaceSnapshot.groups]);
-  const visiblePaneOrderIds = useMemo(() => {
-    if (activeGroupVisibleSessionIds.length === 0) {
-      return activeGroupVisibleSessionIds;
-    }
-
-    if (!localPaneOrder) {
-      return activeGroupVisibleSessionIds;
-    }
-
-    const activeVisibleSessionIdSet = new Set(activeGroupVisibleSessionIds);
-    const locallyOrderedVisibleSessionIds = localPaneOrder.filter((sessionId) =>
-      activeVisibleSessionIdSet.has(sessionId),
-    );
-    return activeGroupVisibleSessionIds.every((sessionId) =>
-      locallyOrderedVisibleSessionIds.includes(sessionId),
-    )
-      ? locallyOrderedVisibleSessionIds
-      : activeGroupVisibleSessionIds;
-  }, [activeGroupVisibleSessionIds, localPaneOrder]);
   const visiblePanes = useMemo(() => {
-    return sortPanesBySessionIds(
-      panes.filter((pane) => pane.isVisible),
-      visiblePaneOrderIds,
-    );
-  }, [panes, visiblePaneOrderIds]);
+    return orderedPanes.filter((pane) => pane.isVisible);
+  }, [orderedPanes]);
   const visiblePaneLayoutBySessionId = useMemo(() => {
     const resolvedViewMode = workspaceState?.viewMode ?? "grid";
     const rowLengths = createEditorLayoutPlan(
@@ -916,7 +612,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         sessionId: pane.sessionId,
       })),
       viewMode: workspaceState.viewMode,
-      workspaceGenerationId: workspaceGenerationIdRef.current,
     });
   }, [
     presentedFocusedSessionId,
@@ -958,7 +653,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           },
         ];
       }),
-      workspaceGenerationId: workspaceGenerationIdRef.current,
     });
   }, [hiddenPaneInPlaceStyles, hiddenPaneParkingStyles, orderedPanes, workspaceState]);
 
@@ -978,7 +672,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         terminalPortalTargetsRef.current,
       ),
       visiblePaneIds,
-      workspaceGenerationId: workspaceGenerationIdRef.current,
     });
   }, [
     orderedPanes,
@@ -1317,7 +1010,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       bounds,
       previousBounds,
       sessionId,
-      workspaceGenerationId: workspaceGenerationIdRef.current,
     });
   };
 
@@ -1412,10 +1104,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       window.removeEventListener("pointercancel", handlePointerFinish, true);
     };
   }, []);
-
-  if (isRetired) {
-    return <main className="workspace-shell workspace-shell-empty" />;
-  }
 
   if (!workspaceState) {
     return <main className="workspace-shell workspace-shell-empty" />;
@@ -1524,10 +1212,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         />
       ))}
       {terminalPanes.map((pane) => {
-        if (!isTerminalHostLeader) {
-          return null;
-        }
-
         const target = terminalPortalTargetsRef.current.get(pane.sessionId);
         if (!target) {
           return null;
@@ -1552,7 +1236,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
             pane={pane}
             refreshRequestId={0}
             terminalAppearance={workspaceState.terminalAppearance}
-            workspaceGenerationId={workspaceGenerationIdRef.current}
           />,
           target,
           pane.sessionId,

@@ -9,7 +9,7 @@ import {
 } from "./workspace-pane-session-projection";
 
 describe("getWorkspacePaneSessionRecords", () => {
-  test("should return sessions from all groups in their existing group order", () => {
+  test("should return only sessions from the active group in their existing order", () => {
     const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
     const mainTerminal = createSessionRecord(1, 0);
     const mainT3 = createSessionRecord(2, 1, {
@@ -38,20 +38,16 @@ describe("getWorkspacePaneSessionRecords", () => {
       title: "Other",
     });
 
-    expect(getWorkspacePaneSessionRecords(workspaceSnapshot)).toEqual([
-      mainTerminal,
-      mainT3,
-      otherGroupTerminal,
-    ]);
+    expect(getWorkspacePaneSessionRecords(workspaceSnapshot)).toEqual([mainTerminal, mainT3]);
   });
 
-  test("should still return sessions even when the active group id is missing", () => {
+  test("should return an empty list when the active group id is missing", () => {
     const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
     const mainTerminal = createSessionRecord(1, 0);
     workspaceSnapshot.groups[0]!.snapshot.sessions = [mainTerminal];
     workspaceSnapshot.activeGroupId = "missing-group";
 
-    expect(getWorkspacePaneSessionRecords(workspaceSnapshot)).toEqual([mainTerminal]);
+    expect(getWorkspacePaneSessionRecords(workspaceSnapshot)).toEqual([]);
   });
 });
 

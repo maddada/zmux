@@ -71,8 +71,7 @@ const destroyRuntime = (runtime: CachedTerminalRuntime) => {
   runtime.host.remove();
 };
 
-export const getTerminalRuntimeCacheKey = (sessionId: string, workspaceGenerationId?: string) =>
-  workspaceGenerationId ? `${workspaceGenerationId}:${sessionId}` : sessionId;
+export const getTerminalRuntimeCacheKey = (sessionId: string) => sessionId;
 
 export const acquireCachedTerminalRuntime = (
   options: CreateCachedTerminalRuntimeOptions,
@@ -253,17 +252,6 @@ export const destroyCachedTerminalRuntime = (cacheKey: string) => {
   });
   cachedTerminalRuntimes.delete(cacheKey);
   destroyRuntime(runtime);
-};
-
-export const destroyCachedTerminalRuntimesForGeneration = (workspaceGenerationId: string) => {
-  const generationPrefix = `${workspaceGenerationId}:`;
-  for (const cacheKey of [...cachedTerminalRuntimes.keys()]) {
-    if (!cacheKey.startsWith(generationPrefix)) {
-      continue;
-    }
-
-    destroyCachedTerminalRuntime(cacheKey);
-  }
 };
 
 const destroyAllCachedTerminalRuntimes = () => {

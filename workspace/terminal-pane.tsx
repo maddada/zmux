@@ -51,7 +51,6 @@ export type TerminalPaneProps = {
   pane: WorkspacePanelTerminalPane;
   refreshRequestId: number;
   terminalAppearance: WorkspacePanelTerminalAppearance;
-  workspaceGenerationId: string;
 };
 
 type SearchResultsState = {
@@ -71,7 +70,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   pane,
   refreshRequestId,
   terminalAppearance,
-  workspaceGenerationId,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -107,11 +105,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const lastMeasuredBoundsRef = useRef<{ height: number; width: number } | null>(null);
   const transportRef = useRef<WorkspaceResttyTransportController | null>(null);
+  const liveFontAppearanceRef = useRef({
+    fontFamily: terminalAppearance.fontFamily,
+    fontSize: terminalAppearance.fontSize,
+  });
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultsState>(SEARCH_RESULTS_EMPTY);
-  const runtimeCacheKey = getTerminalRuntimeCacheKey(pane.sessionId, workspaceGenerationId);
+  const runtimeCacheKey = getTerminalRuntimeCacheKey(pane.sessionId);
 
   useEffect(() => {
     debugLogRef.current = debugLog;
@@ -358,6 +360,73 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           finishAppearanceApply();
         });
     });
+    appearancePromiseRef.current = appearancePromise;
+    syncRuntimeFromRefs();
+    return appearancePromise;
+  };
+
+  const applyLiveFontSettings = (sourceLabel: string): Promise<void> => {
+    const restty = resttyRef.current;
+    const activePane = activePaneRef.current;
+    if (!restty || !activePane) {
+      return Promise.resolve();
+    }
+
+    const requestId = appearanceRequestIdRef.current + 1;
+    appearanceRequestIdRef.current = requestId;
+    const fontSources = getResttyFontSources(terminalAppearance.fontFamily);
+    const fontSourcesSignature = JSON.stringify(fontSources);
+    const finishFontApply = (resolve: () => void) => {
+      if (
+        appearanceRequestIdRef.current !== requestId ||
+        resttyRef.current !== restty ||
+        activePaneRef.current !== activePane
+      ) {
+        resolve();
+        return;
+      }
+
+      activePane.setFontSize(terminalAppearance.fontSize);
+      resolve();
+      requestAnimationFrame(() => {
+        if (appearanceRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        updateTerminalSize();
+        updateScrollToBottomVisibility();
+      });
+    };
+
+    const appearancePromise = new Promise<void>((resolve) => {
+      reportDebug("terminal.liveFontAppearanceRequested", {
+        fontFamily: terminalAppearance.fontFamily,
+        fontSize: terminalAppearance.fontSize,
+        source: sourceLabel,
+      });
+
+      activePane.setFontSize(terminalAppearance.fontSize);
+      if (appliedFontSourcesSignatureRef.current === fontSourcesSignature) {
+        finishFontApply(resolve);
+        return;
+      }
+
+      void restty
+        .setFontSources(fontSources)
+        .then(() => {
+          if (appearanceRequestIdRef.current !== requestId) {
+            resolve();
+            return;
+          }
+
+          appliedFontSourcesSignatureRef.current = fontSourcesSignature;
+          finishFontApply(resolve);
+        })
+        .catch(() => {
+          finishFontApply(resolve);
+        });
+    });
+
     appearancePromiseRef.current = appearancePromise;
     syncRuntimeFromRefs();
     return appearancePromise;
@@ -1319,6 +1388,28 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       });
     });
   }, [isVisible, refreshRequestId]);
+
+  useEffect(() => {
+    const previousAppearance = liveFontAppearanceRef.current;
+    const nextAppearance = {
+      fontFamily: terminalAppearance.fontFamily,
+      fontSize: terminalAppearance.fontSize,
+    };
+
+    if (
+      previousAppearance.fontFamily === nextAppearance.fontFamily &&
+      previousAppearance.fontSize === nextAppearance.fontSize
+    ) {
+      return;
+    }
+
+    liveFontAppearanceRef.current = nextAppearance;
+    if (appearanceRequestIdRef.current === 0) {
+      return;
+    }
+
+    void applyLiveFontSettings("font-change");
+  }, [terminalAppearance.fontFamily, terminalAppearance.fontSize]);
 
   useEffect(() => {
     reportDebug("terminal.visibilityStateChanged", {
