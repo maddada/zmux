@@ -214,6 +214,9 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const workspaceStateRef = useRef<WorkspaceStateMessage | undefined>(undefined);
   const presentedFocusedSessionIdRef = useRef<string | undefined>(undefined);
   const paneMeasuredBoundsRef = useRef(new Map<string, WorkspacePaneMeasuredBounds>());
+  const lastVisibleLayoutBySessionIdRef = useRef(
+    new Map<string, { gridColumn: string; gridRow: string }>(),
+  );
   const terminalPortalTargetsRef = useRef(new Map<string, HTMLDivElement>());
   const terminalPortalRefCallbacksRef = useRef(
     new Map<string, (element: HTMLDivElement | null) => void>(),
@@ -728,6 +731,12 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       .map((pane) => pane.sessionId);
     return snapshotVisibleSessionIds.concat(missingVisibleSessionIds);
   }, [panes, workspaceState?.activeGroupId, workspaceState?.workspaceSnapshot.groups]);
+  const activeGroupSessionIdSet = useMemo(() => {
+    const activeGroup = workspaceState?.workspaceSnapshot.groups.find(
+      (group) => group.groupId === workspaceState.activeGroupId,
+    );
+    return new Set(activeGroup?.snapshot.sessions.map((session) => session.sessionId) ?? []);
+  }, [workspaceState?.activeGroupId, workspaceState?.workspaceSnapshot.groups]);
   const visiblePaneOrderIds = useMemo(() => {
     if (activeGroupVisibleSessionIds.length === 0) {
       return activeGroupVisibleSessionIds;
@@ -787,6 +796,15 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
 
     return nextLayoutBySessionId;
   }, [visiblePanes, workspaceState?.viewMode]);
+  useEffect(() => {
+    for (const [sessionId, layout] of visiblePaneLayoutBySessionId.entries()) {
+      if (!activeGroupSessionIdSet.has(sessionId)) {
+        continue;
+      }
+
+      lastVisibleLayoutBySessionIdRef.current.set(sessionId, layout);
+    }
+  }, [activeGroupSessionIdSet, visiblePaneLayoutBySessionId]);
   const presentedFocusedSessionId = localFocusedSessionId ?? workspaceState?.focusedSessionId;
   presentedFocusedSessionIdRef.current = presentedFocusedSessionId;
   const visiblePaneIds = useMemo(() => visiblePanes.map((pane) => pane.sessionId), [visiblePanes]);
@@ -824,11 +842,41 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     workspaceState?.viewMode,
     visiblePanes.length,
   ]);
+  const hiddenPaneInPlaceStyles = useMemo(() => {
+    const nextStyles = new Map<string, CSSProperties>();
+    for (const pane of orderedPanes) {
+      if (
+        pane.kind !== "terminal" ||
+        pane.isVisible ||
+        !activeGroupSessionIdSet.has(pane.sessionId)
+      ) {
+        continue;
+      }
+
+      const cachedLayout = lastVisibleLayoutBySessionIdRef.current.get(pane.sessionId);
+      if (!cachedLayout) {
+        continue;
+      }
+
+      nextStyles.set(pane.sessionId, {
+        gridColumn: cachedLayout.gridColumn,
+        gridRow: cachedLayout.gridRow,
+        pointerEvents: "none",
+        visibility: "hidden",
+        zIndex: 0,
+      });
+    }
+
+    return nextStyles;
+  }, [activeGroupSessionIdSet, orderedPanes]);
   const hiddenPaneParkingStyles = useMemo(() => {
     const paneGap = workspaceState?.layoutAppearance.paneGap ?? 12;
     const hiddenTerminalPanes = orderedPanes.filter(
       (pane): pane is Extract<WorkspacePanelPane, { kind: "terminal" }> =>
-        pane.kind === "terminal" && !pane.isVisible,
+        pane.kind === "terminal" &&
+        !pane.isVisible &&
+        (!activeGroupSessionIdSet.has(pane.sessionId) ||
+          !lastVisibleLayoutBySessionIdRef.current.has(pane.sessionId)),
     );
     const nextStyles = new Map<string, CSSProperties>();
 
@@ -846,7 +894,12 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     });
 
     return nextStyles;
-  }, [orderedPanes, paneMeasuredBoundsVersion, workspaceState?.layoutAppearance.paneGap]);
+  }, [
+    activeGroupSessionIdSet,
+    orderedPanes,
+    paneMeasuredBoundsVersion,
+    workspaceState?.layoutAppearance.paneGap,
+  ]);
 
   useEffect(() => {
     if (!workspaceState) {
@@ -886,10 +939,16 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         }
 
         const measuredBounds = paneMeasuredBoundsRef.current.get(pane.sessionId);
+        const inPlaceStyle = hiddenPaneInPlaceStyles.get(pane.sessionId);
         const parkingStyle = hiddenPaneParkingStyles.get(pane.sessionId);
         return [
           {
+            hiddenMode: inPlaceStyle ? "in-place" : "parked",
             measuredBounds,
+            inPlaceGridColumn:
+              typeof inPlaceStyle?.gridColumn === "string" ? inPlaceStyle.gridColumn : undefined,
+            inPlaceGridRow:
+              typeof inPlaceStyle?.gridRow === "string" ? inPlaceStyle.gridRow : undefined,
             parkingHeight:
               typeof parkingStyle?.height === "string" ? parkingStyle.height : undefined,
             parkingTop: typeof parkingStyle?.top === "string" ? parkingStyle.top : undefined,
@@ -901,7 +960,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       }),
       workspaceGenerationId: workspaceGenerationIdRef.current,
     });
-  }, [hiddenPaneParkingStyles, orderedPanes, workspaceState]);
+  }, [hiddenPaneInPlaceStyles, hiddenPaneParkingStyles, orderedPanes, workspaceState]);
 
   useEffect(() => {
     if (!workspaceState) {
@@ -1387,7 +1446,8 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           layoutStyle={
             pane.isVisible
               ? visiblePaneLayoutBySessionId.get(pane.sessionId)
-              : hiddenPaneParkingStyles.get(pane.sessionId)
+              : (hiddenPaneInPlaceStyles.get(pane.sessionId) ??
+                hiddenPaneParkingStyles.get(pane.sessionId))
           }
           onBoundsMeasured={(bounds) => recordPaneMeasuredBounds(pane.sessionId, bounds)}
           onLocalFocus={() => applyLocalFocusVisual(pane.sessionId)}
