@@ -97,7 +97,7 @@
 
 .previous-sessions-modal {
   gap: 14px;
-  max-height: calc(100vh - 24px);
+  max-height: 80vh;
   max-width: min(280px, 100%);
   width: min(280px, 100%);
 }
