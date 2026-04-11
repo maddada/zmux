@@ -24,28 +24,12 @@ describe("getTitleDerivedSessionActivity", () => {
     expect(getInterestingTitleSymbols("plain words 123")).toEqual([]);
   });
 
-  test("should detect OpenCode titles for agent persistence without marking them active", () => {
-    expect(getTitleDerivedSessionActivity("OC | Review repository")).toEqual({
-      activity: "idle",
-      agentName: "opencode",
-      hasSeenWorking: false,
-      isAcknowledged: false,
-      lastTitleChangeAt: undefined,
-    });
-    expect(getTitleDerivedSessionActivity("⠸ OC | Review repository")).toEqual({
-      activity: "idle",
-      agentName: "opencode",
-      hasSeenWorking: false,
-      isAcknowledged: false,
-      lastTitleChangeAt: undefined,
-    });
-    expect(getTitleDerivedSessionActivity("OC | Review repository", undefined, "opencode")).toEqual({
-      activity: "idle",
-      agentName: "opencode",
-      hasSeenWorking: false,
-      isAcknowledged: false,
-      lastTitleChangeAt: undefined,
-    });
+  test("should ignore OpenCode titles for heuristic activity detection", () => {
+    expect(getTitleDerivedSessionActivity("OC | Review repository")).toBeUndefined();
+    expect(getTitleDerivedSessionActivity("⠸ OC | Review repository")).toBeUndefined();
+    expect(
+      getTitleDerivedSessionActivity("OC | Review repository", undefined, "opencode"),
+    ).toBeUndefined();
   });
 
   test("should detect Codex spinner titles as working", () => {
@@ -186,7 +170,10 @@ describe("getTitleDerivedSessionActivity", () => {
   });
 
   test("should treat a frozen Codex spinner as attention after the activity window", () => {
-    const derivedActivity = getTitleDerivedSessionActivityFromTransition(undefined, "⠏ OpenAI Codex");
+    const derivedActivity = getTitleDerivedSessionActivityFromTransition(
+      undefined,
+      "⠏ OpenAI Codex",
+    );
     vi.advanceTimersByTime(SLOW_SPINNER_ACTIVITY_WINDOW_MS + 1);
 
     expect(getTitleDerivedSessionActivity("⠏ OpenAI Codex", derivedActivity)).toEqual({
@@ -204,15 +191,15 @@ describe("getTitleDerivedSessionActivity", () => {
       "· Claude Code · API Usage",
     );
 
-    expect(
-      getTitleDerivedSessionActivity("·· Claude Code · API Usage ·", derivedActivity),
-    ).toEqual({
-      activity: "working",
-      agentName: "claude",
-      hasSeenWorking: true,
-      isAcknowledged: false,
-      lastTitleChangeAt: derivedActivity?.lastTitleChangeAt,
-    });
+    expect(getTitleDerivedSessionActivity("·· Claude Code · API Usage ·", derivedActivity)).toEqual(
+      {
+        activity: "working",
+        agentName: "claude",
+        hasSeenWorking: true,
+        isAcknowledged: false,
+        lastTitleChangeAt: derivedActivity?.lastTitleChangeAt,
+      },
+    );
   });
 
   test("should treat a frozen Claude working title as attention after the activity window", () => {
@@ -294,7 +281,9 @@ describe("getTitleDerivedSessionActivity", () => {
       "⠐ Determine project purpose and scope",
     );
 
-    expect(getTitleDerivedSessionActivity("⠐ Determine project purpose and scope", derivedActivity)).toEqual({
+    expect(
+      getTitleDerivedSessionActivity("⠐ Determine project purpose and scope", derivedActivity),
+    ).toEqual({
       activity: "working",
       agentName: "claude",
       hasSeenWorking: true,
@@ -304,7 +293,9 @@ describe("getTitleDerivedSessionActivity", () => {
   });
 
   test("should treat a static Claude spinner without a seen title change as idle", () => {
-    expect(getTitleDerivedSessionActivity("⠐ Determine project purpose and scope", undefined, "claude")).toEqual({
+    expect(
+      getTitleDerivedSessionActivity("⠐ Determine project purpose and scope", undefined, "claude"),
+    ).toEqual({
       activity: "idle",
       agentName: "claude",
       hasSeenWorking: false,
@@ -314,7 +305,10 @@ describe("getTitleDerivedSessionActivity", () => {
   });
 
   test("should detect Gemini working and ready titles", () => {
-    const workingActivity = getTitleDerivedSessionActivityFromTransition(undefined, "✦ agent-tiler");
+    const workingActivity = getTitleDerivedSessionActivityFromTransition(
+      undefined,
+      "✦ agent-tiler",
+    );
     expect(getTitleDerivedSessionActivity("✦ agent-tiler", workingActivity)).toEqual({
       activity: "working",
       agentName: "gemini",
@@ -446,13 +440,17 @@ describe("getTitleDerivedSessionActivityFromTransition", () => {
 
   test("should keep the detected Codex agent when a glyph-only Codex title becomes plain text", () => {
     expect(
-      getTitleDerivedSessionActivityFromTransition("⠸ Review repository...", "Review repository...", {
-        activity: "working",
-        agentName: "codex",
-        hasSeenWorking: true,
-        isAcknowledged: false,
-        lastTitleChangeAt: Date.now(),
-      }),
+      getTitleDerivedSessionActivityFromTransition(
+        "⠸ Review repository...",
+        "Review repository...",
+        {
+          activity: "working",
+          agentName: "codex",
+          hasSeenWorking: true,
+          isAcknowledged: false,
+          lastTitleChangeAt: Date.now(),
+        },
+      ),
     ).toEqual({
       activity: "attention",
       agentName: "codex",
@@ -464,13 +462,17 @@ describe("getTitleDerivedSessionActivityFromTransition", () => {
 
   test("should keep the detected Claude agent when a glyph-only Claude title becomes an idle marker", () => {
     expect(
-      getTitleDerivedSessionActivityFromTransition("⠐ Determine project purpose and scope", "✳ Review repository...", {
-        activity: "working",
-        agentName: "claude",
-        hasSeenWorking: true,
-        isAcknowledged: false,
-        lastTitleChangeAt: Date.now(),
-      }),
+      getTitleDerivedSessionActivityFromTransition(
+        "⠐ Determine project purpose and scope",
+        "✳ Review repository...",
+        {
+          activity: "working",
+          agentName: "claude",
+          hasSeenWorking: true,
+          isAcknowledged: false,
+          lastTitleChangeAt: Date.now(),
+        },
+      ),
     ).toEqual({
       activity: "attention",
       agentName: "claude",

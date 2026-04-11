@@ -1,6 +1,9 @@
 import { describe, expect, test, vi } from "vite-plus/test";
 import { createDisconnectedSessionSnapshot } from "./terminal-workspace-environment";
-import { applyPersistedSessionStateToDisconnectedSnapshot } from "./daemon-terminal-workspace-backend";
+import {
+  applyPersistedSessionStateToDisconnectedSnapshot,
+  hasMeaningfulAgentPresentationChange,
+} from "./daemon-terminal-workspace-backend";
 
 vi.mock("vscode", () => ({
   workspace: {
@@ -27,5 +30,34 @@ describe("applyPersistedSessionStateToDisconnectedSnapshot", () => {
       agentStatus: "attention",
       title: "Claude Code",
     });
+  });
+});
+
+describe("hasMeaningfulAgentPresentationChange", () => {
+  test("should return true when the agent status changes", () => {
+    expect(
+      hasMeaningfulAgentPresentationChange({
+        agentNameChanged: false,
+        agentStatusChanged: true,
+      }),
+    ).toBe(true);
+  });
+
+  test("should return true when the agent name changes", () => {
+    expect(
+      hasMeaningfulAgentPresentationChange({
+        agentNameChanged: true,
+        agentStatusChanged: false,
+      }),
+    ).toBe(true);
+  });
+
+  test("should return false for title-only presentation changes", () => {
+    expect(
+      hasMeaningfulAgentPresentationChange({
+        agentNameChanged: false,
+        agentStatusChanged: false,
+      }),
+    ).toBe(false);
   });
 });

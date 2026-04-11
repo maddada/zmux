@@ -39,7 +39,7 @@ export function getTitleDerivedSessionActivity(
       previousDerivedActivity?.activity === "working" ||
       previousDerivedActivity?.activity === "attention"
     : false;
-  const isAcknowledged = sameAgent ? previousDerivedActivity?.isAcknowledged ?? false : false;
+  const isAcknowledged = sameAgent ? (previousDerivedActivity?.isAcknowledged ?? false) : false;
   const lastTitleChangeAt = sameAgent ? previousDerivedActivity?.lastTitleChangeAt : undefined;
   if (titleState.state === "idle") {
     return {
@@ -83,7 +83,10 @@ export function getTitleDerivedSessionActivityFromTransition(
   previousDerivedActivity?: TitleDerivedSessionActivity,
   knownAgentName?: string,
 ): TitleDerivedSessionActivity | undefined {
-  const nextTitleState = getTitleState(nextTitle, knownAgentName ?? previousDerivedActivity?.agentName);
+  const nextTitleState = getTitleState(
+    nextTitle,
+    knownAgentName ?? previousDerivedActivity?.agentName,
+  );
   if (nextTitleState) {
     const sameAgent = previousDerivedActivity?.agentName === nextTitleState.agentName;
     const hasSeenWorking = sameAgent
@@ -91,7 +94,7 @@ export function getTitleDerivedSessionActivityFromTransition(
         previousDerivedActivity?.activity === "working" ||
         previousDerivedActivity?.activity === "attention"
       : false;
-    const isAcknowledged = sameAgent ? previousDerivedActivity?.isAcknowledged ?? false : false;
+    const isAcknowledged = sameAgent ? (previousDerivedActivity?.isAcknowledged ?? false) : false;
     return {
       activity:
         nextTitleState.state === "working"
@@ -106,7 +109,7 @@ export function getTitleDerivedSessionActivityFromTransition(
         nextTitleState.state === "working"
           ? previousDerivedActivity?.agentName === nextTitleState.agentName &&
             previousTitle?.trim() === nextTitle.trim()
-            ? previousDerivedActivity.lastTitleChangeAt ?? Date.now()
+            ? (previousDerivedActivity.lastTitleChangeAt ?? Date.now())
             : Date.now()
           : previousDerivedActivity?.agentName === nextTitleState.agentName
             ? previousDerivedActivity.lastTitleChangeAt
@@ -165,14 +168,13 @@ export function getInterestingTitleSymbols(title: string): string[] {
 function getTitleState(
   title: string,
   knownAgentName?: string,
-): { agentName: "claude" | "codex" | "copilot" | "gemini" | "opencode"; state: "idle" | "working" } | undefined {
+):
+  | { agentName: "claude" | "codex" | "copilot" | "gemini" | "opencode"; state: "idle" | "working" }
+  | undefined {
   const normalizedAgentName = normalizeKnownAgentName(knownAgentName);
   const normalizedTitle = title.trim().replace(/\s+/g, " ");
   if (hasOpenCodeTitlePrefix(normalizedTitle)) {
-    return {
-      agentName: "opencode",
-      state: "idle",
-    };
+    return undefined;
   }
 
   const claudeCodeTitleState = getClaudeCodeTitleState(title, normalizedAgentName === "claude");
@@ -210,7 +212,7 @@ function getTitleState(
   return undefined;
 }
 
-function hasOpenCodeTitlePrefix(title: string): boolean {
+export function hasOpenCodeTitlePrefix(title: string): boolean {
   return OPENCODE_TITLE_PREFIX_PATTERN.test(title);
 }
 
@@ -224,9 +226,7 @@ function getClaudeCodeTitleState(
 
   const hasClaudeKeyword = lowerTitle.includes(lowerClaudeCodeTitle);
   const hasClaudeInferenceMarker =
-    normalizedTitle.includes("✳") ||
-    normalizedTitle.includes("⠐") ||
-    normalizedTitle.includes("⠂");
+    normalizedTitle.includes("✳") || normalizedTitle.includes("⠐") || normalizedTitle.includes("⠂");
   if (!allowAgentHintMatch && !hasClaudeKeyword && !hasClaudeInferenceMarker) {
     return undefined;
   }
@@ -267,7 +267,10 @@ function getClaudeCodeTitleState(
   return undefined;
 }
 
-function getCodexTitleState(title: string, allowAgentHintMatch = false): "idle" | "working" | undefined {
+function getCodexTitleState(
+  title: string,
+  allowAgentHintMatch = false,
+): "idle" | "working" | undefined {
   const normalizedTitle = title.trim().replace(/\s+/g, " ");
   const hasCodexKeyword = normalizedTitle.toLowerCase().includes(CODEX_TITLE_KEYWORD);
   const hasCodexWorkingMarker = getCodexWorkingMarker(normalizedTitle) !== undefined;
@@ -282,7 +285,10 @@ function getCodexTitleState(title: string, allowAgentHintMatch = false): "idle" 
   return "idle";
 }
 
-function getGeminiTitleState(title: string, allowAgentHintMatch = false): "idle" | "working" | undefined {
+function getGeminiTitleState(
+  title: string,
+  allowAgentHintMatch = false,
+): "idle" | "working" | undefined {
   const normalizedTitle = title.trim().replace(/\s+/g, " ");
   const lowerTitle = normalizedTitle.toLowerCase();
   if (
@@ -305,7 +311,10 @@ function getGeminiTitleState(title: string, allowAgentHintMatch = false): "idle"
   return undefined;
 }
 
-function getCopilotTitleState(title: string, allowAgentHintMatch = false): "idle" | "working" | undefined {
+function getCopilotTitleState(
+  title: string,
+  allowAgentHintMatch = false,
+): "idle" | "working" | undefined {
   const normalizedTitle = title.trim().replace(/\s+/g, " ");
   const lowerTitle = normalizedTitle.toLowerCase();
   if (

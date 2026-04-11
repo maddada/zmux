@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vite-plus/test";
-import { resolvePersistedSessionPresentationState } from "./terminal-daemon-session-state";
+import {
+  resolvePersistedSessionPresentationState,
+  shouldPreferPersistedSessionPresentation,
+} from "./terminal-daemon-session-state";
 
 describe("resolvePersistedSessionPresentationState", () => {
   test("should preserve the current agent when there is no title-derived agent update", () => {
@@ -69,5 +72,52 @@ describe("resolvePersistedSessionPresentationState", () => {
       lastActivityAt: "2026-04-08T10:00:00.000Z",
       title: "Auto fix corruption",
     });
+  });
+
+  test("should preserve persisted OpenCode presentation instead of title-derived idle state", () => {
+    expect(
+      resolvePersistedSessionPresentationState(
+        {
+          agentName: "opencode",
+          agentStatus: "attention",
+          lastActivityAt: "2026-04-08T10:00:00.000Z",
+          title: "Project overview question",
+        },
+        {
+          liveTitle: "OC | Project overview question",
+          snapshotAgentName: "opencode",
+          snapshotAgentStatus: "idle",
+          titleActivityAgentName: "opencode",
+          titleActivityStatus: "idle",
+        },
+      ),
+    ).toEqual({
+      agentName: "opencode",
+      agentStatus: "attention",
+      lastActivityAt: "2026-04-08T10:00:00.000Z",
+      title: "Project overview question",
+    });
+  });
+});
+
+describe("shouldPreferPersistedSessionPresentation", () => {
+  test("should prefer persisted presentation for OpenCode", () => {
+    expect(
+      shouldPreferPersistedSessionPresentation({
+        agentName: "opencode",
+        agentStatus: "idle",
+        title: "Project overview question",
+      }),
+    ).toBe(true);
+  });
+
+  test("should not prefer persisted presentation for non-OpenCode agents", () => {
+    expect(
+      shouldPreferPersistedSessionPresentation({
+        agentName: "codex",
+        agentStatus: "idle",
+        title: "Auto fix corruption",
+      }),
+    ).toBe(false);
   });
 });

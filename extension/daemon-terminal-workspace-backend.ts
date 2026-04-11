@@ -105,6 +105,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         snapshot,
         nextTitle,
       );
+      const didChangeAgentPresentation = hasMeaningfulAgentPresentationChange(presentationDiff);
       if (!presentationDiff.isSame) {
         logVSmuxDebug("backend.daemon.sessionPresentationDiff", {
           ...presentationDiff,
@@ -125,7 +126,10 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
           title: nextTitle,
         });
       }
-      if (!haveSameTerminalSessionSnapshot(previousSnapshot, snapshot)) {
+      if (
+        didChangeAgentPresentation ||
+        !haveSameTerminalSessionSnapshot(previousSnapshot, snapshot)
+      ) {
         this.changeSessionsEmitter.fire();
       }
     });
@@ -368,6 +372,8 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         nextSnapshot,
         nextTitle,
       );
+      const didChangeAgentPresentation = hasMeaningfulAgentPresentationChange(presentationDiff);
+      didChange ||= didChangeAgentPresentation;
       if (!presentationDiff.isSame) {
         logVSmuxDebug("backend.daemon.sessionPresentationDiff", {
           ...presentationDiff,
@@ -583,6 +589,13 @@ function haveSameTerminalSessionSnapshot(
     left.status === right.status &&
     left.workspaceId === right.workspaceId
   );
+}
+
+export function hasMeaningfulAgentPresentationChange(diff: {
+  agentNameChanged: boolean;
+  agentStatusChanged: boolean;
+}): boolean {
+  return diff.agentNameChanged || diff.agentStatusChanged;
 }
 
 function normalizeTitle(title: string | undefined): string | undefined {

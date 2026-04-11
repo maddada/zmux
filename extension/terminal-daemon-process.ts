@@ -18,8 +18,12 @@ import {
   readPersistedSessionStateFromFile,
   updatePersistedSessionStateFile,
 } from "./session-state-file";
-import { resolvePersistedSessionPresentationState } from "./terminal-daemon-session-state";
 import {
+  resolvePersistedSessionPresentationState,
+  shouldPreferPersistedSessionPresentation,
+} from "./terminal-daemon-session-state";
+import {
+  hasOpenCodeTitlePrefix,
   getTitleActivityWindowMs,
   acknowledgeTitleDerivedSessionActivity,
   getTitleDerivedSessionActivity,
@@ -593,13 +597,21 @@ async function buildSnapshot(
 ): Promise<TerminalSessionSnapshot> {
   const persistedState = await readPersistedSessionStateFromFile(session.sessionStateFilePath);
   session.lastKnownPersistedTitle = persistedState.title;
+  const shouldPreferPersistedPresentation =
+    shouldPreferPersistedSessionPresentation(persistedState);
   session.snapshot = {
     ...session.snapshot,
-    agentName: session.titleActivity?.agentName ?? persistedState.agentName,
-    agentStatus: session.titleActivity?.activity ?? persistedState.agentStatus,
+    agentName: shouldPreferPersistedPresentation
+      ? (persistedState.agentName ?? session.snapshot.agentName)
+      : (session.titleActivity?.agentName ?? persistedState.agentName),
+    agentStatus: shouldPreferPersistedPresentation
+      ? persistedState.agentStatus
+      : (session.titleActivity?.activity ?? persistedState.agentStatus),
     history: includeHistory ? serializeSessionHistory(session) : undefined,
     isAttached: sessionSocketsBySessionKey.get(session.sessionKey)?.readyState === WebSocket.OPEN,
-    title: session.liveTitle ?? persistedState.title,
+    title: shouldPreferPersistedPresentation
+      ? (persistedState.title ?? session.snapshot.title)
+      : (session.liveTitle ?? persistedState.title),
   };
   return session.snapshot;
 }
@@ -743,11 +755,14 @@ function updateSessionLiveTitle(session: ManagedSession, chunk: string): boolean
   );
   applySessionTitleActivity(session);
   scheduleTitleActivityRefresh(session);
-  void persistSessionLiveTitle(session, title);
-  session.snapshot = {
-    ...session.snapshot,
-    title,
-  };
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  if (!hasOpenCodeTitlePrefix(normalizedTitle)) {
+    void persistSessionLiveTitle(session, title);
+    session.snapshot = {
+      ...session.snapshot,
+      title,
+    };
+  }
   return true;
 }
 
