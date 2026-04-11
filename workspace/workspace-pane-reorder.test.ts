@@ -93,6 +93,7 @@ function createTerminalPane(sessionId: string): WorkspacePanelPane {
       row: 0,
       sessionId,
       slotIndex: 0,
+      terminalEngine: "ghostty",
       title: sessionId,
     },
   };

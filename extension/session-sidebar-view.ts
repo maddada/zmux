@@ -103,11 +103,13 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
 export function shouldBypassSidebarMessageQueue(message: SidebarToExtensionMessage): boolean {
   switch (message.type) {
     case "focusSession":
+    case "sidebarDebugLog":
     case "runSidebarGitAction":
     case "confirmSidebarGitCommit":
     case "cancelSidebarGitCommit":
     case "refreshGitState":
     case "openSettings":
+    case "promptFindPreviousSession":
       return true;
     default:
       return false;
@@ -196,6 +198,8 @@ export function isSidebarMessage(candidate: unknown): candidate is SidebarToExte
       return true;
     case "openSettings":
     case "toggleCompletionBell":
+    case "openWorkspaceWelcome":
+    case "promptFindPreviousSession":
     case "refreshDaemonSessions":
     case "killTerminalDaemon":
     case "moveSidebarToOtherSide":

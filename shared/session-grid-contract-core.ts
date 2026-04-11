@@ -45,6 +45,7 @@ export type SidebarThemeSetting =
 export type SidebarThemeVariant = "light" | "dark";
 
 export type SessionKind = "browser" | "terminal" | "t3";
+export type TerminalEngine = "ghostty" | "xterm";
 
 export type T3SessionMetadata = {
   projectId: string;
@@ -73,6 +74,7 @@ export type BaseSessionRecord = {
 
 export type TerminalSessionRecord = BaseSessionRecord & {
   kind: "terminal";
+  terminalEngine: TerminalEngine;
 };
 
 export type T3SessionRecord = BaseSessionRecord & {
@@ -97,6 +99,7 @@ export type CreateSessionRecordOptions =
   | {
       displayId?: string;
       kind?: "terminal";
+      terminalEngine?: TerminalEngine;
       title?: string;
     }
   | {

@@ -13,6 +13,7 @@ import {
   type GroupedSessionWorkspaceSnapshot,
   type SessionGroupRecord,
   type SessionRecord,
+  type TerminalEngine,
   type T3SessionMetadata,
   type TerminalViewMode,
   type VisibleSessionCount,
@@ -457,6 +458,23 @@ export function setSessionTitleInSimpleWorkspace(
     ...session,
     title: nextTitle,
   }));
+}
+
+export function setTerminalSessionEngineInSimpleWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  sessionId: string,
+  terminalEngine: TerminalEngine,
+): WorkspaceMutationResult {
+  return updateSession(snapshot, sessionId, (session) => {
+    if (session.kind !== "terminal" || session.terminalEngine === terminalEngine) {
+      return session;
+    }
+
+    return {
+      ...session,
+      terminalEngine,
+    };
+  });
 }
 
 export function setT3SessionMetadataInSimpleWorkspace(

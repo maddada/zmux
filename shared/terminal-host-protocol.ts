@@ -1,4 +1,6 @@
-export const TERMINAL_HOST_PROTOCOL_VERSION = 21;
+import type { TerminalEngine } from "./session-grid-contract";
+
+export const TERMINAL_HOST_PROTOCOL_VERSION = 22;
 
 export type TerminalSessionStatus = "starting" | "running" | "exited" | "error" | "disconnected";
 
@@ -44,6 +46,7 @@ export type TerminalHostCreateOrAttachRequest = {
   rows: number;
   sessionStateFilePath: string;
   shell: string;
+  terminalEngine: TerminalEngine;
 };
 
 export type TerminalHostWriteRequest = {

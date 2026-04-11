@@ -7,6 +7,7 @@ import { createDisconnectedSessionSnapshot } from "../terminal-workspace-helpers
 
 export const MIN_WORKING_DURATION_BEFORE_ATTENTION_MS = 5_000;
 export const INITIAL_ACTIVITY_SUPPRESSION_MS = 7_000;
+export const MIN_WORKING_DURATION_BEFORE_LAST_ACTIVITY_MS = 7_000;
 
 type SessionActivityContext = {
   cancelPendingCompletionSound: (sessionId: string) => void;
@@ -27,6 +28,15 @@ type SessionActivityContext = {
   workspaceId: string;
 };
 
+export function hasReachedLastActivityThreshold(
+  workingDurationMs: number | undefined,
+): workingDurationMs is number {
+  return (
+    workingDurationMs !== undefined &&
+    workingDurationMs >= MIN_WORKING_DURATION_BEFORE_LAST_ACTIVITY_MS
+  );
+}
+
 export function shouldRefreshLastActivityOnTransition(
   previousActivity: TerminalAgentStatus | undefined,
   nextActivity: TerminalAgentStatus,
@@ -41,7 +51,11 @@ export function getEffectiveSessionActivity(
   context: SessionActivityContext,
   sessionRecord: SessionRecord,
   sessionSnapshot: TerminalSessionSnapshot,
-): { activity: TerminalAgentStatus; agentName: string | undefined } {
+): {
+  activity: TerminalAgentStatus;
+  agentName: string | undefined;
+  workingDurationMs?: number;
+} {
   if (isT3Session(sessionRecord)) {
     return {
       activity: context.getT3ActivityState(sessionRecord).activity,
@@ -50,11 +64,12 @@ export function getEffectiveSessionActivity(
   }
 
   const sessionId = sessionRecord.sessionId;
+  const now = Date.now();
   const activitySuppressedUntil = context.getActivitySuppressedUntil?.(sessionRecord);
   if (
     activitySuppressedUntil !== undefined &&
     Number.isFinite(activitySuppressedUntil) &&
-    Date.now() < activitySuppressedUntil
+    now < activitySuppressedUntil
   ) {
     context.workingStartedAtBySessionId.delete(sessionId);
     return {
@@ -65,20 +80,25 @@ export function getEffectiveSessionActivity(
 
   if (sessionSnapshot.agentStatus === "working") {
     if (!context.workingStartedAtBySessionId.has(sessionId)) {
-      context.workingStartedAtBySessionId.set(sessionId, Date.now());
+      context.workingStartedAtBySessionId.set(sessionId, now);
     }
 
+    const workingStartedAt = context.workingStartedAtBySessionId.get(sessionId);
     return {
       activity: "working",
       agentName: sessionSnapshot.agentName,
+      workingDurationMs:
+        workingStartedAt === undefined ? undefined : Math.max(0, now - workingStartedAt),
     };
   }
 
   if (sessionSnapshot.agentStatus === "attention") {
     const workingStartedAt = context.workingStartedAtBySessionId.get(sessionId);
+    const workingDurationMs =
+      workingStartedAt === undefined ? undefined : Math.max(0, now - workingStartedAt);
     if (
       workingStartedAt === undefined ||
-      Date.now() - workingStartedAt < MIN_WORKING_DURATION_BEFORE_ATTENTION_MS
+      (workingDurationMs ?? 0) < MIN_WORKING_DURATION_BEFORE_ATTENTION_MS
     ) {
       context.workingStartedAtBySessionId.delete(sessionId);
       return {
@@ -90,13 +110,18 @@ export function getEffectiveSessionActivity(
     return {
       activity: "attention",
       agentName: sessionSnapshot.agentName,
+      workingDurationMs,
     };
   }
 
+  const workingStartedAt = context.workingStartedAtBySessionId.get(sessionId);
+  const workingDurationMs =
+    workingStartedAt === undefined ? undefined : Math.max(0, now - workingStartedAt);
   context.workingStartedAtBySessionId.delete(sessionId);
   return {
     activity: sessionSnapshot.agentStatus,
     agentName: sessionSnapshot.agentName,
+    workingDurationMs,
   };
 }
 
@@ -114,14 +139,6 @@ export async function syncKnownSessionActivities(
     const effectiveActivity = getEffectiveSessionActivity(context, sessionRecord, sessionSnapshot);
     const previousActivity = context.lastKnownActivityBySessionId.get(sessionRecord.sessionId);
     nextActivityBySessionId.set(sessionRecord.sessionId, effectiveActivity.activity);
-    if (shouldRefreshLastActivityOnTransition(previousActivity, effectiveActivity.activity)) {
-      context.recordLastActivityTransition?.(
-        sessionRecord.sessionId,
-        previousActivity,
-        effectiveActivity.activity,
-      );
-    }
-
     if (!playSound) {
       continue;
     }

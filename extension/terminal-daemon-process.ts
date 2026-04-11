@@ -3,6 +3,8 @@ import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises
 import * as path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import * as pty from "@lydell/node-pty";
+import { SerializeAddon } from "@xterm/addon-serialize";
+import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { createManagedTerminalEnvironment } from "./native-managed-terminal";
 import {
   createPendingAttachQueue,
@@ -26,6 +28,7 @@ import {
 import { TerminalDaemonRingBuffer } from "./terminal-daemon-ring-buffer";
 import { createTerminalDaemonSessionKey } from "./terminal-daemon-session-scope";
 import { parseTerminalTitleFromOutputChunk } from "./terminal-workspace-history";
+import { normalizeTerminalEngine, type TerminalEngine } from "../shared/session-grid-contract";
 import type {
   TerminalHostAcknowledgeAttentionRequest,
   TerminalHostConfigureRequest,
@@ -57,10 +60,13 @@ type DaemonInfo = {
 type ManagedSession = {
   cols: number;
   cwd: string;
+  headlessTerminal?: HeadlessTerminal;
   historyBuffer: TerminalDaemonRingBuffer;
   liveTitle?: string;
   lastKnownPersistedTitle?: string;
   pendingAttachQueues: PendingAttachQueue[];
+  serializeAddon?: SerializeAddon;
+  terminalEngine: TerminalEngine;
   titleActivity?: TitleDerivedSessionActivity;
   titleActivityTimer?: NodeJS.Timeout;
   titleCarryover: string;
@@ -458,6 +464,7 @@ async function handleAcknowledgeAttentionRequest(
 
 function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSession {
   const sessionKey = createTerminalDaemonSessionKey(request.workspaceId, request.sessionId);
+  const terminalEngine = normalizeTerminalEngine(request.terminalEngine);
   const spawnedPty = pty.spawn(request.shell, [], {
     cols: request.cols,
     cwd: request.cwd,
@@ -466,10 +473,12 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
     name: "xterm-256color",
     rows: request.rows,
   });
+  const xtermState = createXtermSessionState(terminalEngine, request.cols, request.rows);
 
   const session: ManagedSession = {
     cols: request.cols,
     cwd: request.cwd,
+    headlessTerminal: xtermState?.headlessTerminal,
     historyBuffer: new TerminalDaemonRingBuffer(MAX_HISTORY_BYTES),
     liveTitle: undefined,
     pendingAttachQueues: [],
@@ -478,6 +487,7 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
     sessionId: request.sessionId,
     sessionKey,
     sessionStateFilePath: request.sessionStateFilePath,
+    serializeAddon: xtermState?.serializeAddon,
     shell: request.shell,
     snapshot: {
       agentName: undefined,
@@ -494,6 +504,7 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
       title: undefined,
       workspaceId: request.workspaceId,
     },
+    terminalEngine,
     titleCarryover: "",
     workspaceId: request.workspaceId,
     leaseExpiresAt: undefined,
@@ -502,6 +513,9 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
   spawnedPty.onData((data: string) => {
     const outputBuffer = normalizePtyOutputChunk(data);
     const chunkStartCursor = session.historyBuffer.bytesWritten;
+    if (isXtermSession(session)) {
+      session.headlessTerminal?.write(outputBuffer);
+    }
     session.historyBuffer.write(outputBuffer);
     const chunkEndCursor = session.historyBuffer.bytesWritten;
     for (const pendingAttachQueue of session.pendingAttachQueues) {
@@ -540,6 +554,9 @@ function resizeSession(session: ManagedSession, cols: number, rows: number): voi
     cols,
     rows,
   };
+  if (isXtermSession(session)) {
+    session.headlessTerminal?.resize(cols, rows);
+  }
   session.pty.resize(cols, rows);
 }
 
@@ -553,7 +570,7 @@ async function buildSnapshot(
     ...session.snapshot,
     agentName: session.titleActivity?.agentName ?? persistedState.agentName,
     agentStatus: session.titleActivity?.activity ?? persistedState.agentStatus,
-    history: includeHistory ? serializeTerminalReplayHistory(session.historyBuffer) : undefined,
+    history: includeHistory ? serializeSessionHistory(session) : undefined,
     isAttached: sessionSocketsBySessionKey.get(session.sessionKey)?.readyState === WebSocket.OPEN,
     title: session.liveTitle ?? persistedState.title,
   };
@@ -1278,13 +1295,9 @@ async function activatePendingSessionAttachment(
     previousSocket.close();
   }
 
-  const replayChunks = createTerminalReplayChunks(
-    session.historyBuffer,
-    pendingAttachQueue.replayCursor,
-    REPLAY_CHUNK_BYTES,
-  );
-  if (replayChunks.length > 0) {
-    sendReplayChunks(socket, replayChunks);
+  const replayPayloads = createSessionReplayPayloads(session, pendingAttachQueue);
+  if (replayPayloads.length > 0) {
+    sendReplayChunks(socket, replayPayloads);
   }
   if (socket.readyState !== WebSocket.OPEN) {
     return;
@@ -1301,7 +1314,7 @@ async function activatePendingSessionAttachment(
   sessionSocketsBySessionKey.set(sessionKey, socket);
   void logDaemonDebug("daemon.sessionAttachmentCompleted", {
     attachmentId: attachment.id,
-    replayChunkCount: replayChunks.length,
+    replayChunkCount: replayPayloads.length,
     sessionId: session.sessionId,
     sessionKey,
     workspaceId: session.workspaceId,
@@ -1371,4 +1384,60 @@ function removePendingAttachQueue(
   if (queueIndex >= 0) {
     session.pendingAttachQueues.splice(queueIndex, 1);
   }
+}
+
+function createXtermSessionState(
+  terminalEngine: TerminalEngine,
+  cols: number,
+  rows: number,
+):
+  | {
+      headlessTerminal: HeadlessTerminal;
+      serializeAddon: SerializeAddon;
+    }
+  | undefined {
+  if (terminalEngine !== "xterm") {
+    return undefined;
+  }
+
+  const headlessTerminal = new HeadlessTerminal({
+    allowProposedApi: true,
+    cols,
+    rows,
+    scrollback: 200_000,
+  });
+  const serializeAddon = new SerializeAddon();
+  headlessTerminal.loadAddon(serializeAddon);
+  return {
+    headlessTerminal,
+    serializeAddon,
+  };
+}
+
+function isXtermSession(session: ManagedSession): boolean {
+  return session.terminalEngine === "xterm";
+}
+
+function serializeSessionHistory(session: ManagedSession): string {
+  if (isXtermSession(session)) {
+    return session.serializeAddon?.serialize() ?? "";
+  }
+
+  return serializeTerminalReplayHistory(session.historyBuffer);
+}
+
+function createSessionReplayPayloads(
+  session: ManagedSession,
+  pendingAttachQueue: PendingAttachQueue,
+): Buffer[] {
+  if (!isXtermSession(session)) {
+    return createTerminalReplayChunks(
+      session.historyBuffer,
+      pendingAttachQueue.replayCursor,
+      REPLAY_CHUNK_BYTES,
+    );
+  }
+
+  const serializedState = serializeSessionHistory(session);
+  return serializedState.length > 0 ? [Buffer.from(serializedState, "utf8")] : [];
 }

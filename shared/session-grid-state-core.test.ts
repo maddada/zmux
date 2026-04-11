@@ -15,6 +15,7 @@ import {
   normalizeTerminalTitle,
 } from "./session-grid-contract";
 import { createSessionInSnapshot, normalizeSessionGridSnapshot } from "./session-grid-state";
+import { normalizeSessionRecord } from "./session-grid-state-helpers";
 
 describe("createSessionInSnapshot", () => {
   test("should allocate the lowest free slot in row-major order", () => {
@@ -63,6 +64,20 @@ describe("createSessionInSnapshot", () => {
     expect(result.snapshot.sessions.map((session) => session.slotIndex)).toEqual([0, 1, 2]);
     expect(result.snapshot.focusedSessionId).toBe("session-3");
     expect(result.snapshot.visibleSessionIds).toEqual(["session-1", "session-2", "session-3"]);
+  });
+
+  test("should preserve the configured terminal engine on new terminal sessions", () => {
+    const result = createSessionInSnapshot(createDefaultSessionGridSnapshot(), 1, {
+      terminalEngine: "xterm",
+      title: "Session 1",
+    });
+
+    expect(result.session?.kind).toBe("terminal");
+    expect(
+      result.session && "terminalEngine" in result.session
+        ? result.session.terminalEngine
+        : undefined,
+    ).toBe("xterm");
   });
 });
 
@@ -130,6 +145,16 @@ describe("normalizeSessionGridSnapshot", () => {
       createSessionAlias(1, 0),
       createSessionAlias(2, 1),
     ]);
+  });
+
+  test("should default legacy terminal sessions without an engine to ghostty", () => {
+    const normalized = normalizeSessionRecord({
+      ...createSessionRecord(1, 0),
+      terminalEngine: undefined as unknown as "ghostty",
+    });
+
+    expect(normalized.kind).toBe("terminal");
+    expect(normalized.terminalEngine).toBe("ghostty");
   });
 
   test("should preserve fullscreen restore count only while the snapshot is in fullscreen mode", () => {

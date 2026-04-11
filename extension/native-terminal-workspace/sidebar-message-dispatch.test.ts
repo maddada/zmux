@@ -28,7 +28,9 @@ function createHandlers(): SidebarMessageHandlers {
     moveSessionToGroup: vi.fn(async () => undefined),
     moveSidebarToOtherSide: vi.fn(async () => undefined),
     openBrowser: vi.fn(async () => undefined),
+    openWorkspaceWelcome: vi.fn(async () => undefined),
     openSettings: vi.fn(async () => undefined),
+    promptFindPreviousSession: vi.fn(async () => undefined),
     promptRenameSession: vi.fn(async () => undefined),
     refreshDaemonSessions: vi.fn(async () => undefined),
     refreshGitState: vi.fn(async () => undefined),
@@ -185,5 +187,33 @@ describe("dispatchSidebarMessage", () => {
 
     expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.toggleActiveSessionsSortMode).toHaveBeenCalledTimes(1);
+  });
+
+  test("should route openWorkspaceWelcome to the matching handler", async () => {
+    const handlers = createHandlers();
+
+    await dispatchSidebarMessage(
+      {
+        type: "openWorkspaceWelcome",
+      },
+      handlers,
+    );
+
+    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
+    expect(handlers.openWorkspaceWelcome).toHaveBeenCalledTimes(1);
+  });
+
+  test("should route promptFindPreviousSession to the matching handler", async () => {
+    const handlers = createHandlers();
+
+    await dispatchSidebarMessage(
+      {
+        type: "promptFindPreviousSession",
+      },
+      handlers,
+    );
+
+    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
+    expect(handlers.promptFindPreviousSession).toHaveBeenCalledTimes(1);
   });
 });

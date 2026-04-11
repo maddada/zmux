@@ -20,9 +20,10 @@ vi.mock("../terminal-workspace-helpers", () => ({
 
 import {
   INITIAL_ACTIVITY_SUPPRESSION_MS,
+  MIN_WORKING_DURATION_BEFORE_LAST_ACTIVITY_MS,
   MIN_WORKING_DURATION_BEFORE_ATTENTION_MS,
   getEffectiveSessionActivity,
-  shouldRefreshLastActivityOnTransition,
+  hasReachedLastActivityThreshold,
   syncKnownSessionActivities,
 } from "./activity";
 
@@ -152,51 +153,6 @@ describe("syncKnownSessionActivities", () => {
     expect(lastKnownActivityBySessionId.get(session.sessionId)).toBe("idle");
     vi.useRealTimers();
   });
-
-  test("should record last-activity transitions when a session starts and finishes working", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
-    const session = createSessionRecord(1, 0);
-    const snapshots = new Map<string, TerminalSessionSnapshot>([
-      [session.sessionId, createSnapshot(session.sessionId, "idle")],
-    ]);
-    const recordLastActivityTransition = vi.fn();
-    const context = {
-      cancelPendingCompletionSound: vi.fn(),
-      getSessionSnapshot: (sessionId: string) => snapshots.get(sessionId),
-      getT3ActivityState: () => ({ activity: "idle" as const, isRunning: false }),
-      lastKnownActivityBySessionId: new Map<string, TerminalSessionSnapshot["agentStatus"]>(),
-      queueCompletionSound: vi.fn(),
-      recordLastActivityTransition,
-      workingStartedAtBySessionId: new Map<string, number>(),
-      workspaceId: "workspace-1",
-    };
-
-    await syncKnownSessionActivities(context, [session], false);
-    expect(recordLastActivityTransition).not.toHaveBeenCalled();
-
-    snapshots.set(session.sessionId, createSnapshot(session.sessionId, "working"));
-    await syncKnownSessionActivities(context, [session], false);
-
-    vi.advanceTimersByTime(MIN_WORKING_DURATION_BEFORE_ATTENTION_MS);
-    snapshots.set(session.sessionId, createSnapshot(session.sessionId, "attention"));
-    await syncKnownSessionActivities(context, [session], false);
-
-    expect(recordLastActivityTransition).toHaveBeenCalledTimes(2);
-    expect(recordLastActivityTransition).toHaveBeenNthCalledWith(
-      1,
-      session.sessionId,
-      "idle",
-      "working",
-    );
-    expect(recordLastActivityTransition).toHaveBeenNthCalledWith(
-      2,
-      session.sessionId,
-      "working",
-      "attention",
-    );
-    vi.useRealTimers();
-  });
 });
 
 describe("getEffectiveSessionActivity", () => {
@@ -257,17 +213,17 @@ describe("getEffectiveSessionActivity", () => {
   });
 });
 
-describe("shouldRefreshLastActivityOnTransition", () => {
-  test("should return true when a session starts or finishes working", () => {
-    expect(shouldRefreshLastActivityOnTransition("idle", "working")).toBe(true);
-    expect(shouldRefreshLastActivityOnTransition("working", "idle")).toBe(true);
-    expect(shouldRefreshLastActivityOnTransition("working", "attention")).toBe(true);
+describe("hasReachedLastActivityThreshold", () => {
+  test("should return true once a working run reaches seven seconds", () => {
+    expect(hasReachedLastActivityThreshold(MIN_WORKING_DURATION_BEFORE_LAST_ACTIVITY_MS)).toBe(
+      true,
+    );
   });
 
-  test("should return false for non-working transitions", () => {
-    expect(shouldRefreshLastActivityOnTransition(undefined, "idle")).toBe(false);
-    expect(shouldRefreshLastActivityOnTransition("idle", "attention")).toBe(false);
-    expect(shouldRefreshLastActivityOnTransition("attention", "idle")).toBe(false);
-    expect(shouldRefreshLastActivityOnTransition("working", "working")).toBe(false);
+  test("should return false before the seven second threshold", () => {
+    expect(hasReachedLastActivityThreshold(MIN_WORKING_DURATION_BEFORE_LAST_ACTIVITY_MS - 1)).toBe(
+      false,
+    );
+    expect(hasReachedLastActivityThreshold(undefined)).toBe(false);
   });
 });

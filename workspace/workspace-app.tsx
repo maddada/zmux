@@ -13,8 +13,10 @@ import type {
   ExtensionToWorkspacePanelMessage,
   WorkspacePanelAutoFocusRequest,
   WorkspacePanelHydrateMessage,
+  WorkspaceWelcomeModalMode,
   WorkspacePanelPane,
   WorkspacePanelSessionStateMessage,
+  WorkspacePanelShowToastMessage,
 } from "../shared/workspace-panel-contract";
 import { stripWorkspacePanelTransientFields } from "../shared/workspace-panel-contract";
 import { getVisiblePrimaryTitle, getVisibleTerminalTitle } from "../shared/session-grid-contract";
@@ -33,6 +35,7 @@ import {
 import { destroyCachedTerminalRuntime, getTerminalRuntimeCacheKey } from "./terminal-runtime-cache";
 import { TerminalPane } from "./terminal-pane";
 import { T3Pane } from "./t3-pane";
+import { WorkspaceWelcomeModal } from "./workspace-welcome-modal";
 
 type MessageSource = Pick<Window, "addEventListener" | "removeEventListener">;
 
@@ -71,6 +74,8 @@ type WorkspaceAutoFocusGuard = {
   requestId: number;
   sessionId: string;
 };
+
+type WorkspaceToastState = WorkspacePanelShowToastMessage;
 
 const AUTO_FOCUS_ACTIVATION_GUARD_MS = 400;
 const AUTO_RELOAD_ON_LAG = true;
@@ -161,8 +166,10 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const [localPaneOrder, setLocalPaneOrder] = useState<string[] | undefined>();
   const [draggedPaneId, setDraggedPaneId] = useState<string | undefined>();
   const [dropTargetPaneId, setDropTargetPaneId] = useState<string | undefined>();
+  const [welcomeModalMode, setWelcomeModalMode] = useState<WorkspaceWelcomeModalMode>();
   const [paneMeasuredBoundsVersion, setPaneMeasuredBoundsVersion] = useState(0);
   const [, setTerminalPortalVersion] = useState(0);
+  const [workspaceToast, setWorkspaceToast] = useState<WorkspaceToastState | undefined>();
   const focusRequestSequenceRef = useRef(0);
   const debuggingModeRef = useRef<boolean | undefined>(undefined);
   const lagAutoReloadRequestedRef = useRef(false);
@@ -183,7 +190,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const presentedFocusedSessionIdRef = useRef<string | undefined>(undefined);
   const paneMeasuredBoundsRef = useRef(new Map<string, WorkspacePaneMeasuredBounds>());
   const lastVisibleLayoutBySessionIdRef = useRef(
-    new Map<string, { gridColumn: string; gridRow: string }>(),
+    new Map<string, { gridColumn: string; gridRow: string; layoutKey: string }>(),
   );
   const terminalPortalTargetsRef = useRef(new Map<string, HTMLDivElement>());
   const terminalPortalRefCallbacksRef = useRef(
@@ -203,11 +210,28 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     serverState && (serverState.type === "hydrate" || serverState.type === "sessionState")
       ? serverState
       : undefined;
+  const isWelcomeModalOpen = welcomeModalMode !== undefined;
   debuggingModeRef.current = workspaceState?.debuggingMode;
   workspaceStateRef.current = workspaceState;
 
+  useEffect(() => {
+    if (!workspaceState?.shouldShowWelcomeModal) {
+      return;
+    }
+
+    setWelcomeModalMode("required");
+  }, [workspaceState?.shouldShowWelcomeModal]);
+
   const postToExtension = (message: Record<string, unknown>) => {
     vscode.postMessage(message);
+  };
+
+  const postWorkspaceReproLog = (event: string, payload?: Record<string, unknown>) => {
+    postToExtension({
+      details: payload ? safeSerializeWorkspaceDebugDetails(payload) : undefined,
+      event,
+      type: "workspaceDebugLog",
+    });
   };
 
   const postWorkspaceDebugLog = (
@@ -286,7 +310,9 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     const applyWorkspaceStateMessage = (
       message: WorkspacePanelHydrateMessage | WorkspacePanelSessionStateMessage,
     ) => {
+      const signatureStartedAt = performance.now();
       const stableMessageSignature = JSON.stringify(stripWorkspacePanelTransientFields(message));
+      const signatureDurationMs = performance.now() - signatureStartedAt;
       const isDuplicateStableState =
         lastAppliedWorkspaceMessageSignatureRef.current === stableMessageSignature;
       const shouldApplyAutoFocusRequest =
@@ -294,6 +320,18 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         lastAppliedAutoFocusRequestIdRef.current !== message.autoFocusRequest.requestId;
 
       if (isDuplicateStableState && !shouldApplyAutoFocusRequest) {
+        postWorkspaceReproLog("repro.workspace.applyMessageIgnoredDuplicate", {
+          activeGroupId: message.activeGroupId,
+          focusedSessionId: message.focusedSessionId,
+          historyBytesBySessionId: message.panes.flatMap((pane) =>
+            pane.kind !== "terminal"
+              ? []
+              : [{ historyBytes: pane.snapshot?.history?.length ?? 0, sessionId: pane.sessionId }],
+          ),
+          paneIds: message.panes.map((pane) => pane.sessionId),
+          signatureDurationMs: Math.round(signatureDurationMs * 100) / 100,
+          type: message.type,
+        });
         postWorkspaceDebugLog(message.debuggingMode, "message.ignoredDuplicate", {
           activeGroupId: message.activeGroupId,
           bootId: workspaceBootIdRef.current,
@@ -322,10 +360,27 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
             : undefined,
         type: message.type,
       });
+      postWorkspaceReproLog("repro.workspace.applyMessageReceived", {
+        activeGroupId: message.activeGroupId,
+        focusedSessionId: message.focusedSessionId,
+        historyBytesBySessionId: message.panes.flatMap((pane) =>
+          pane.kind !== "terminal"
+            ? []
+            : [{ historyBytes: pane.snapshot?.history?.length ?? 0, sessionId: pane.sessionId }],
+        ),
+        paneIds: message.panes.map((pane) => pane.sessionId),
+        signatureDurationMs: Math.round(signatureDurationMs * 100) / 100,
+        type: message.type,
+      });
       if (
         pendingFocusRequestRef.current &&
         message.focusedSessionId === pendingFocusRequestRef.current.sessionId
       ) {
+        postWorkspaceReproLog("repro.workspace.pendingFocusMatched", {
+          durationMs: Math.round(performance.now() - pendingFocusRequestRef.current.startedAt),
+          requestId: pendingFocusRequestRef.current.requestId,
+          sessionId: pendingFocusRequestRef.current.sessionId,
+        });
         postWorkspaceDebugLog(message.debuggingMode, "focus.messageMatchedPendingRequest", {
           bootId: workspaceBootIdRef.current,
           durationMs: Math.round(performance.now() - pendingFocusRequestRef.current.startedAt),
@@ -396,6 +451,20 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         return;
       }
 
+      if (nextMessage.type === "showWelcomeModal") {
+        setWelcomeModalMode(nextMessage.mode ?? "optional");
+        return;
+      }
+
+      if (nextMessage.type === "showToast") {
+        if (nextMessage.expiresAt <= Date.now()) {
+          return;
+        }
+
+        setWorkspaceToast(nextMessage);
+        return;
+      }
+
       if (nextMessage.type !== "hydrate" && nextMessage.type !== "sessionState") {
         return;
       }
@@ -442,6 +511,32 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       window.removeEventListener("message", handleIframeFocus);
     };
   }, [messageSource, vscode]);
+
+  useEffect(() => {
+    if (!workspaceToast) {
+      return;
+    }
+
+    const remainingMs = workspaceToast.expiresAt - Date.now();
+    if (remainingMs <= 0) {
+      setWorkspaceToast(undefined);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setWorkspaceToast((currentToast) =>
+        currentToast?.expiresAt === workspaceToast.expiresAt &&
+        currentToast.title === workspaceToast.title &&
+        currentToast.message === workspaceToast.message
+          ? undefined
+          : currentToast,
+      );
+    }, remainingMs);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [workspaceToast]);
 
   const panes = useMemo(() => workspaceState?.panes ?? [], [workspaceState]);
   const workspacePaneIdsKey = panes.map((pane) => pane.sessionId).join("|");
@@ -492,19 +587,31 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
 
     return nextLayoutBySessionId;
   }, [visiblePanes, workspaceState?.viewMode]);
+  const presentedFocusedSessionId = localFocusedSessionId ?? workspaceState?.focusedSessionId;
+  presentedFocusedSessionIdRef.current = presentedFocusedSessionId;
+  const visiblePaneIds = useMemo(() => visiblePanes.map((pane) => pane.sessionId), [visiblePanes]);
+  const visiblePaneIdsKey = visiblePaneIds.join("|");
+  const activeGroupLayoutKey = useMemo(
+    () =>
+      [
+        workspaceState?.activeGroupId ?? "no-group",
+        workspaceState?.viewMode ?? "grid",
+        visiblePaneIdsKey,
+      ].join("::"),
+    [visiblePaneIdsKey, workspaceState?.activeGroupId, workspaceState?.viewMode],
+  );
   useEffect(() => {
     for (const [sessionId, layout] of visiblePaneLayoutBySessionId.entries()) {
       if (!activeGroupSessionIdSet.has(sessionId)) {
         continue;
       }
 
-      lastVisibleLayoutBySessionIdRef.current.set(sessionId, layout);
+      lastVisibleLayoutBySessionIdRef.current.set(sessionId, {
+        ...layout,
+        layoutKey: activeGroupLayoutKey,
+      });
     }
-  }, [activeGroupSessionIdSet, visiblePaneLayoutBySessionId]);
-  const presentedFocusedSessionId = localFocusedSessionId ?? workspaceState?.focusedSessionId;
-  presentedFocusedSessionIdRef.current = presentedFocusedSessionId;
-  const visiblePaneIds = useMemo(() => visiblePanes.map((pane) => pane.sessionId), [visiblePanes]);
-  const visiblePaneIdsKey = visiblePaneIds.join("|");
+  }, [activeGroupLayoutKey, activeGroupSessionIdSet, visiblePaneLayoutBySessionId]);
   const reorderablePaneIds = useMemo(
     () => visiblePanes.filter((pane) => pane.kind === "terminal").map((pane) => pane.sessionId),
     [visiblePanes],
@@ -550,7 +657,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       }
 
       const cachedLayout = lastVisibleLayoutBySessionIdRef.current.get(pane.sessionId);
-      if (!cachedLayout) {
+      if (!cachedLayout || cachedLayout.layoutKey !== activeGroupLayoutKey) {
         continue;
       }
 
@@ -564,7 +671,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     }
 
     return nextStyles;
-  }, [activeGroupSessionIdSet, orderedPanes]);
+  }, [activeGroupLayoutKey, activeGroupSessionIdSet, orderedPanes]);
   const hiddenPaneParkingStyles = useMemo(() => {
     const paneGap = workspaceState?.layoutAppearance.paneGap ?? 12;
     const hiddenTerminalPanes = orderedPanes.filter(
@@ -572,7 +679,8 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         pane.kind === "terminal" &&
         !pane.isVisible &&
         (!activeGroupSessionIdSet.has(pane.sessionId) ||
-          !lastVisibleLayoutBySessionIdRef.current.has(pane.sessionId)),
+          lastVisibleLayoutBySessionIdRef.current.get(pane.sessionId)?.layoutKey !==
+            activeGroupLayoutKey),
     );
     const nextStyles = new Map<string, CSSProperties>();
 
@@ -591,6 +699,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
 
     return nextStyles;
   }, [
+    activeGroupLayoutKey,
     activeGroupSessionIdSet,
     orderedPanes,
     paneMeasuredBoundsVersion,
@@ -639,6 +748,8 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         return [
           {
             hiddenMode: inPlaceStyle ? "in-place" : "parked",
+            lastVisibleLayoutKey: lastVisibleLayoutBySessionIdRef.current.get(pane.sessionId)
+              ?.layoutKey,
             measuredBounds,
             inPlaceGridColumn:
               typeof inPlaceStyle?.gridColumn === "string" ? inPlaceStyle.gridColumn : undefined,
@@ -653,8 +764,15 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           },
         ];
       }),
+      activeGroupLayoutKey,
     });
-  }, [hiddenPaneInPlaceStyles, hiddenPaneParkingStyles, orderedPanes, workspaceState]);
+  }, [
+    activeGroupLayoutKey,
+    hiddenPaneInPlaceStyles,
+    hiddenPaneParkingStyles,
+    orderedPanes,
+    workspaceState,
+  ]);
 
   useEffect(() => {
     if (!workspaceState) {
@@ -737,6 +855,11 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     postWorkspaceDebugLog(workspaceState?.debuggingMode, "focus.requested", {
       requestId,
       sessionId,
+    });
+    postWorkspaceReproLog("repro.workspace.requestFocusSession", {
+      requestId,
+      sessionId,
+      visiblePaneIds,
     });
     setLocalFocusedSessionId(sessionId);
     postToExtension({
@@ -1136,7 +1259,14 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       }
       style={workspaceShellStyle}
     >
-      {/* Lag notice UI intentionally disabled. Startup lag is handled by automatic workarea reload. */}
+      {workspaceToast ? (
+        <div aria-live="polite" className="workspace-toast" role="status">
+          <div className="workspace-toast-copy">
+            <strong>{workspaceToast.title}</strong>
+            <span>{workspaceToast.message}</span>
+          </div>
+        </div>
+      ) : null}
       {orderedPanes.map((pane) => (
         <WorkspacePaneView
           debugLog={(event, payload) =>
@@ -1264,11 +1394,21 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       {visiblePanes.length === 0 ? (
         <div className="workspace-empty-state">No sessions in this group.</div>
       ) : null}
+      <WorkspaceWelcomeModal
+        isOpen={isWelcomeModalOpen}
+        mode={welcomeModalMode ?? "optional"}
+        onClose={() => setWelcomeModalMode(undefined)}
+        onComplete={() => {
+          setWelcomeModalMode(undefined);
+          postToExtension({ type: "completeWelcome" });
+        }}
+      />
     </main>
   );
 };
 
 type WorkspacePaneViewProps = {
+  autoFocusRequest?: WorkspacePanelAutoFocusRequest;
   debugLog: (event: string, payload?: Record<string, unknown>) => void;
   fallbackLayoutStyle?: CSSProperties;
   isFocused: boolean;
@@ -1289,6 +1429,7 @@ type WorkspacePaneViewProps = {
 };
 
 const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
+  autoFocusRequest,
   debugLog,
   fallbackLayoutStyle,
   isFocused,

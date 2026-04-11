@@ -4,10 +4,13 @@ import {
   clampCompletionSoundSetting,
   type CompletionSoundSetting,
 } from "../../shared/completion-sound";
+import { DEFAULT_FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE } from "../find-previous-session-prompt";
 import {
   clampAgentManagerZoomPercent,
   clampSidebarThemeSetting,
   DEFAULT_AGENT_MANAGER_ZOOM_PERCENT,
+  normalizeTerminalEngine,
+  type TerminalEngine,
   type SidebarThemeSetting,
   type SidebarThemeVariant,
 } from "../../shared/session-grid-contract";
@@ -36,6 +39,8 @@ export const AGENTS_SETTING = "agents";
 export const GIT_TEXT_GENERATION_PROVIDER_SETTING = "gitTextGenerationProvider";
 export const GIT_TEXT_GENERATION_CUSTOM_COMMAND_SETTING = "gitTextGenerationCustomCommand";
 export const GIT_TEXT_GENERATION_AGENT_ID_SETTING = "gitTextGenerationAgentId";
+export const FIND_PREVIOUS_SESSION_AGENT_ID_SETTING = "findPreviousSessionAgentId";
+export const FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE_SETTING = "findPreviousSessionPromptTemplate";
 export const GIT_SKIP_SUGGESTED_COMMIT_CONFIRMATION_SETTING = "gitSkipSuggestedCommitConfirmation";
 export const TERMINAL_FONT_FAMILY_SETTING = "terminalFontFamily";
 export const TERMINAL_FONT_SIZE_SETTING = "terminalFontSize";
@@ -43,9 +48,11 @@ export const TERMINAL_LINE_HEIGHT_SETTING = "terminalLineHeight";
 export const TERMINAL_LETTER_SPACING_SETTING = "terminalLetterSpacing";
 export const TERMINAL_CURSOR_STYLE_SETTING = "terminalCursorStyle";
 export const TERMINAL_CURSOR_BLINK_SETTING = "terminalCursorBlink";
+export const TERMINAL_ENGINE_SETTING = "terminalEngine";
 export const TERMINAL_SCROLL_TO_BOTTOM_WHEN_TYPING_SETTING = "terminalScrollToBottomWhenTyping";
 export const MIN_TERMINAL_FONT_SIZE = 8;
 export const MAX_TERMINAL_FONT_SIZE = 32;
+export const DEFAULT_TERMINAL_FONT_SIZE = 13;
 export const WORKSPACE_PANE_GAP_SETTING = "workspacePaneGap";
 export const WORKSPACE_ACTIVE_PANE_BORDER_COLOR_SETTING = "workspaceActivePaneBorderColor";
 export const COMPLETION_BELL_ENABLED_KEY = "VSmux.completionBellEnabled";
@@ -118,6 +125,14 @@ export function getGitTextGenerationCustomCommandConfigurationKey(): string {
 
 export function getGitTextGenerationAgentIdConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${GIT_TEXT_GENERATION_AGENT_ID_SETTING}`;
+}
+
+export function getFindPreviousSessionAgentIdConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${FIND_PREVIOUS_SESSION_AGENT_ID_SETTING}`;
+}
+
+export function getFindPreviousSessionPromptTemplateConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE_SETTING}`;
 }
 
 export function getGitSkipSuggestedCommitConfirmationConfigurationKey(): string {
@@ -216,7 +231,7 @@ export function getAutoOpenSidebarViewsOnStartup(): boolean {
   return (
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<boolean>(AUTO_OPEN_SIDEBAR_VIEWS_ON_STARTUP_SETTING, false) ?? false
+      .get<boolean>(AUTO_OPEN_SIDEBAR_VIEWS_ON_STARTUP_SETTING, true) ?? true
   );
 }
 
@@ -284,6 +299,28 @@ export function getDefaultAgentCommand(agentId: DefaultSidebarAgentId): string |
   return getDefaultAgentCommands()[agentId] ?? undefined;
 }
 
+export function getFindPreviousSessionAgentId(): string {
+  const defaultAgentId = "codex";
+  const value =
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<string>(FIND_PREVIOUS_SESSION_AGENT_ID_SETTING, defaultAgentId) ?? defaultAgentId;
+
+  return value.trim() || defaultAgentId;
+}
+
+export function getFindPreviousSessionPromptTemplate(): string {
+  const value =
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<string>(
+        FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE_SETTING,
+        DEFAULT_FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE,
+      ) ?? DEFAULT_FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE;
+
+  return value.trim() || DEFAULT_FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE;
+}
+
 export function getGitSkipSuggestedCommitConfirmation(): boolean {
   return (
     vscode.workspace
@@ -306,12 +343,18 @@ export function getTerminalFontSize(): number {
   const value =
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<number>(TERMINAL_FONT_SIZE_SETTING, 12) ?? 12;
+      .get<number>(TERMINAL_FONT_SIZE_SETTING, DEFAULT_TERMINAL_FONT_SIZE) ??
+    DEFAULT_TERMINAL_FONT_SIZE;
   return clampTerminalFontSize(value);
 }
 
 export function clampTerminalFontSize(value: number): number {
-  return clampNumber(value, MIN_TERMINAL_FONT_SIZE, MAX_TERMINAL_FONT_SIZE, 12);
+  return clampNumber(
+    value,
+    MIN_TERMINAL_FONT_SIZE,
+    MAX_TERMINAL_FONT_SIZE,
+    DEFAULT_TERMINAL_FONT_SIZE,
+  );
 }
 
 export async function setTerminalFontSize(fontSize: number): Promise<void> {
@@ -337,8 +380,8 @@ export function getTerminalLetterSpacing(): number {
   const value =
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<number>(TERMINAL_LETTER_SPACING_SETTING, 0) ?? 0;
-  return clampNumber(value, -2, 8, 0);
+      .get<number>(TERMINAL_LETTER_SPACING_SETTING, 1.1) ?? 1.1;
+  return clampNumber(value, -2, 8, 1.1);
 }
 
 export function getTerminalCursorStyle(): "bar" | "block" | "underline" {
@@ -357,11 +400,19 @@ export function getTerminalCursorBlink(): boolean {
   );
 }
 
+export function getDefaultTerminalEngine(): TerminalEngine {
+  const value =
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<string>(TERMINAL_ENGINE_SETTING, "xterm") ?? "xterm";
+  return normalizeTerminalEngine(value);
+}
+
 export function getTerminalScrollToBottomWhenTyping(): boolean {
   return (
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<boolean>(TERMINAL_SCROLL_TO_BOTTOM_WHEN_TYPING_SETTING, false) ?? false
+      .get<boolean>(TERMINAL_SCROLL_TO_BOTTOM_WHEN_TYPING_SETTING, true) ?? true
   );
 }
 
@@ -369,8 +420,8 @@ export function getWorkspacePaneGap(): number {
   const value =
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<number>(WORKSPACE_PANE_GAP_SETTING, 12) ?? 12;
-  return clampNumber(value, 0, 48, 12);
+      .get<number>(WORKSPACE_PANE_GAP_SETTING, 10) ?? 10;
+  return clampNumber(value, 0, 48, 10);
 }
 
 export function getWorkspaceActivePaneBorderColor(): string {

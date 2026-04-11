@@ -156,6 +156,9 @@ export const acquireCachedTerminalRuntime = (
       },
       fontPreset: "none",
       fontSize: options.terminalAppearance.fontSize,
+      // Match xterm.js sizing more closely so the configured font size
+      // does not render noticeably smaller on the ghostty/restty path.
+      fontSizeMode: "em",
       fontSources: getResttyFontSources(options.terminalAppearance.fontFamily),
       ptyTransport: transportController?.transport,
       renderer: TERMINAL_PREFERRED_RENDERER,

@@ -41,6 +41,33 @@ importers:
       '@tabler/icons-react':
         specifier: ^3.40.0
         version: 3.40.0(react@19.2.4)
+      '@xterm/addon-attach':
+        specifier: 0.13.0-beta.197
+        version: 0.13.0-beta.197(@xterm/xterm@6.1.0-beta.197)
+      '@xterm/addon-fit':
+        specifier: 0.12.0-beta.197
+        version: 0.12.0-beta.197(@xterm/xterm@6.1.0-beta.197)
+      '@xterm/addon-search':
+        specifier: 0.17.0-beta.197
+        version: 0.17.0-beta.197(@xterm/xterm@6.1.0-beta.197)
+      '@xterm/addon-serialize':
+        specifier: 0.15.0-beta.197
+        version: 0.15.0-beta.197(@xterm/xterm@6.1.0-beta.197)
+      '@xterm/addon-unicode11':
+        specifier: 0.10.0-beta.197
+        version: 0.10.0-beta.197(@xterm/xterm@6.1.0-beta.197)
+      '@xterm/addon-web-fonts':
+        specifier: 0.2.0-beta.111
+        version: 0.2.0-beta.111(@xterm/xterm@6.1.0-beta.197)
+      '@xterm/addon-webgl':
+        specifier: 0.20.0-beta.196
+        version: 0.20.0-beta.196(@xterm/xterm@6.1.0-beta.197)
+      '@xterm/headless':
+        specifier: 6.1.0-beta.197
+        version: 6.1.0-beta.197
+      '@xterm/xterm':
+        specifier: 6.1.0-beta.197
+        version: 6.1.0-beta.197
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -1876,6 +1903,47 @@ packages:
     resolution: {integrity: sha512-OTm2XdMt2YkpSn2Nx7z2EJtSuhRHsTPYsSK59hr3v8jRArK+2UEoju4Jumn1CmpgoBLGI6ReHLJ/czYltNUW3g==}
     engines: {node: '>= 20'}
     hasBin: true
+
+  '@xterm/addon-attach@0.13.0-beta.197':
+    resolution: {integrity: sha512-3rJVIqN8+JoB9Z/DZLtokEEX82wf85Og5pYE9YBlcXuiPNUM5t0TSuF24ZbForHGrhPYkCKC0UHAWvUhqgb7bA==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.197
+
+  '@xterm/addon-fit@0.12.0-beta.197':
+    resolution: {integrity: sha512-EoYQVIWp90XmNXBfrEocz5tk44JLMdHL9+Asd57Bj9DuERLLszA8pkF3wbuR5C7555g3sRTMTHlzYQ3gv9xbOw==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.197
+
+  '@xterm/addon-search@0.17.0-beta.197':
+    resolution: {integrity: sha512-F2hAFAheDDElC/25UcacZTx65JYnjoD6hhMVcLBbXrYhf0io1mtOZTVG5oxeitx1vpdLH1JGMmwFpHUSPspZzQ==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.197
+
+  '@xterm/addon-serialize@0.15.0-beta.197':
+    resolution: {integrity: sha512-uJEsQj0DDhDISLqusG/KP5Ely2N6IGw2NGTG8jiFClr6pr6TF1sMxdBTgPoNSwfnLMOORzEe92Fv9VMd7FqTKw==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.197
+
+  '@xterm/addon-unicode11@0.10.0-beta.197':
+    resolution: {integrity: sha512-/8zKqf+7R+r6p+/7R7y4ztXwfzDXIqtUp9agxLxAFHLsmCzgqhWX8VL3lOUISK6GR5OLZi15wfOopMTUiDugqQ==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.197
+
+  '@xterm/addon-web-fonts@0.2.0-beta.111':
+    resolution: {integrity: sha512-47ItV5iWSlmfg482lp3fWzAgx0fKriqZjOM1THf9z78bpuGgt7NPrJ/5SVwdDTUm79uCHu3wTgjjnn5bxpeJsQ==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.197
+
+  '@xterm/addon-webgl@0.20.0-beta.196':
+    resolution: {integrity: sha512-5nYgVRwHFVihNNFAARbePZyxi3yAd4VAnF44FaGIjYWCIkA/N27Nl7NwSEX5nHedEbRY/ZfVq/zGFKQBetZlEw==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.197
+
+  '@xterm/headless@6.1.0-beta.197':
+    resolution: {integrity: sha512-/yFl1fl20Rdons0Ng356caGWO/Qeubxr3zWE3PHUaIRuQ5hFng83lhGbNRZMMZJO/OXArXlaxbeuFWYGbYWhGg==}
+
+  '@xterm/xterm@6.1.0-beta.197':
+    resolution: {integrity: sha512-vzoc8sBcsvFpziSgeVGKZQDT1T/9MmEUKfUDpVqc3slDv7o0SiQCjvPeOF8y1++5vx2xmUn8lfcLnbfdtigtSQ==}
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -6860,6 +6928,38 @@ snapshots:
       keytar: 7.9.0
     transitivePeerDependencies:
       - supports-color
+
+  '@xterm/addon-attach@0.13.0-beta.197(@xterm/xterm@6.1.0-beta.197)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.197
+
+  '@xterm/addon-fit@0.12.0-beta.197(@xterm/xterm@6.1.0-beta.197)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.197
+
+  '@xterm/addon-search@0.17.0-beta.197(@xterm/xterm@6.1.0-beta.197)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.197
+
+  '@xterm/addon-serialize@0.15.0-beta.197(@xterm/xterm@6.1.0-beta.197)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.197
+
+  '@xterm/addon-unicode11@0.10.0-beta.197(@xterm/xterm@6.1.0-beta.197)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.197
+
+  '@xterm/addon-web-fonts@0.2.0-beta.111(@xterm/xterm@6.1.0-beta.197)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.197
+
+  '@xterm/addon-webgl@0.20.0-beta.196(@xterm/xterm@6.1.0-beta.197)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.197
+
+  '@xterm/headless@6.1.0-beta.197': {}
+
+  '@xterm/xterm@6.1.0-beta.197': {}
 
   accepts@2.0.0:
     dependencies:

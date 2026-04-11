@@ -21,6 +21,7 @@ import {
   type SidebarSessionItem,
   type SidebarSessionStateMessage,
   type SidebarToExtensionMessage,
+  type TerminalEngine,
   type TerminalViewMode,
   type T3SessionRecord,
   type VisibleSessionCount,
@@ -101,6 +102,7 @@ import {
   isBrowserSidebarSessionId,
   normalizeSidebarBrowserUrl,
 } from "../live-browser-tabs";
+import { renderFindPreviousSessionPrompt } from "../find-previous-session-prompt";
 import { dispatchSidebarMessage } from "./sidebar-message-dispatch";
 import { shouldSkipSessionForGroupFullReload } from "./full-reload";
 import { finalizeRestoredPreviousSession } from "./restore-previous-session";
@@ -126,6 +128,7 @@ import {
   persistSessionAgentLaunches,
   type StoredSessionAgentLaunch,
 } from "../native-terminal-workspace-session-agent-launch";
+import { getSidebarCommandTerminalRunPlan } from "../sidebar-command-run-plan";
 import { quoteShellLiteral } from "../agent-shell-integration-utils";
 import type { ChatHistoryResumeRequest } from "../chat-history-vsmux-bridge";
 import {
@@ -155,7 +158,10 @@ import {
   getClampedSidebarThemeSetting,
   getCreateSessionOnSidebarDoubleClick,
   getDefaultBrowserLaunchUrl,
+  getDefaultTerminalEngine,
   getDebuggingMode,
+  getFindPreviousSessionAgentId,
+  getFindPreviousSessionPromptTemplate,
   getShowCloseButtonOnSessionCards,
   getShowLastInteractionTimeOnSessionCards,
   getShowSidebarActions,
@@ -472,7 +478,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async createSession(): Promise<void> {
-    const sessionRecord = await this.store.createSession();
+    const sessionRecord = await this.createTerminalSession();
     if (!sessionRecord) {
       return;
     }
@@ -711,7 +717,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     if (sessionRecord.kind === "terminal") {
-      await this.backend.restartSession(sessionRecord);
+      const restartedSessionRecord = await this.prepareSessionForTerminalRecreate(sessionRecord);
+      await this.backend.restartSession(restartedSessionRecord);
     }
 
     await this.afterStateChange();
@@ -965,7 +972,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     await this.store.focusGroup(sourceGroup.groupId);
-    const forkedSession = await this.store.createSession();
+    const forkedSession = await this.createTerminalSession();
     if (!forkedSession) {
       return;
     }
@@ -1023,7 +1030,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     this.suppressSessionActivityIndicators(sessionRecord);
     this.retireTerminalPaneRuntimeGeneration(sessionId);
     await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord);
-    await this.backend.restartSession(sessionRecord);
+    const reloadedSessionRecord = await this.prepareSessionForTerminalRecreate(sessionRecord);
+    await this.backend.restartSession(reloadedSessionRecord);
     await this.backend.writeText(sessionId, resumeCommand, true);
     await this.afterStateChange();
   }
@@ -1074,7 +1082,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     for (const plan of fullReloadPlans) {
       this.suppressSessionActivityIndicators(plan.sessionRecord);
       this.bumpTerminalPaneRenderNonce(plan.sessionRecord.sessionId);
-      await this.backend.restartSession(plan.sessionRecord);
+      await this.destroyWorkspaceTerminalRuntimeIfNeeded(plan.sessionRecord);
+      const reloadedSessionRecord = await this.prepareSessionForTerminalRecreate(
+        plan.sessionRecord,
+      );
+      await this.backend.restartSession(reloadedSessionRecord);
       await this.backend.writeText(plan.sessionRecord.sessionId, plan.resumeCommand, true);
     }
 
@@ -1161,6 +1173,44 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await vscode.commands.executeCommand("workbench.action.openSettings", "@ext:maddada.VSmux");
   }
 
+  public async promptFindPreviousSession(): Promise<void> {
+    const query = await vscode.window.showInputBox({
+      ignoreFocusOut: true,
+      placeHolder: "e.g. full reload should not update last active",
+      prompt: "What do you remember talking about in that session?",
+    });
+    const normalizedQuery = query?.trim();
+    if (!normalizedQuery) {
+      return;
+    }
+
+    const agentButton = this.resolveFindPreviousSessionAgent();
+    if (!agentButton) {
+      void vscode.window.showInformationMessage(
+        "VSmux could not find a configured agent for Find a session. Update VSmux.findPreviousSessionAgentId or restore the Codex button.",
+      );
+      return;
+    }
+
+    if (agentButton.agentId === "t3") {
+      void vscode.window.showInformationMessage(
+        "Find a session needs a terminal-based agent. Choose another agent in VSmux.findPreviousSessionAgentId.",
+      );
+      return;
+    }
+
+    const sessionRecord = await this.launchSidebarTerminalAgent(agentButton);
+    if (!sessionRecord) {
+      return;
+    }
+
+    const prompt = renderFindPreviousSessionPrompt(
+      getFindPreviousSessionPromptTemplate(),
+      normalizedQuery,
+    );
+    await this.backend.writeText(sessionRecord.sessionId, prompt, false);
+  }
+
   public async toggleCompletionBell(): Promise<void> {
     await this.context.workspaceState.update(
       COMPLETION_BELL_ENABLED_KEY,
@@ -1201,8 +1251,21 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    const isDebugRun = runMode === "debug";
-    if (commandButton.closeTerminalOnExit && !isDebugRun) {
+    const terminalRunPlan = getSidebarCommandTerminalRunPlan(
+      commandButton.actionType,
+      commandButton.closeTerminalOnExit,
+      runMode,
+    );
+    if (!terminalRunPlan) {
+      return;
+    }
+
+    if (terminalRunPlan.target === "vsmux-terminal") {
+      await this.launchSidebarCommandInWorkspace(commandButton.name, command);
+      return;
+    }
+
+    if (terminalRunPlan.closeOnExit) {
       const terminal = this.createSidebarCommandTerminal(commandButton.name, {
         closeOnExit: true,
         command,
@@ -1213,14 +1276,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     const terminal = this.createSidebarCommandTerminal(commandButton.name, {
-      location: isDebugRun
-        ? {
-            preserveFocus: false,
-            viewColumn: vscode.ViewColumn.Active,
-          }
-        : vscode.TerminalLocation.Panel,
+      location: vscode.TerminalLocation.Panel,
     });
-    terminal.show(!isDebugRun);
+    terminal.show(true);
     terminal.sendText(command, true);
   }
 
@@ -1399,32 +1457,21 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   public async runSidebarAgent(agentId: string): Promise<void> {
     const agentButton = getSidebarAgentButtonById(agentId);
-    if (!agentButton?.command) {
+    const agentCommand = agentButton?.command?.trim();
+    if (!agentButton || !agentCommand) {
       return;
     }
 
     if (agentId === "t3") {
-      await this.createT3Session(agentButton.command);
+      await this.createT3Session(agentCommand);
       return;
     }
 
-    const sessionRecord = await this.store.createSession();
-    if (!sessionRecord) {
-      return;
-    }
-
-    if (agentButton.icon) {
-      this.sidebarAgentIconBySessionId.set(sessionRecord.sessionId, agentButton.icon);
-    }
-    this.sessionAgentLaunchBySessionId.set(sessionRecord.sessionId, {
+    await this.launchSidebarTerminalAgent({
       agentId: agentButton.agentId,
-      command: agentButton.command,
+      command: agentCommand,
+      icon: agentButton.icon,
     });
-    await this.persistSessionAgentLaunchState();
-    await this.refreshSidebarFromCurrentState();
-    await this.backend.createOrAttachSession(sessionRecord);
-    await this.afterStateChange({ sidebarAlreadyRefreshed: true });
-    await this.backend.writeText(sessionRecord.sessionId, agentButton.command, true);
   }
 
   public async resumeChatHistorySession(input: ChatHistoryResumeRequest): Promise<void> {
@@ -1438,7 +1485,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    const sessionRecord = await this.store.createSession();
+    const sessionRecord = await this.createTerminalSession();
     if (!sessionRecord) {
       return;
     }
@@ -1486,7 +1533,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
             t3: archivedSession.sessionRecord.t3,
             title: archivedSession.sessionRecord.title,
           })
-        : await this.store.createSession({
+        : await this.createTerminalSession({
             title: archivedSession.sessionRecord.title,
           });
     if (!restoredSession) {
@@ -1806,7 +1853,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         this.moveSessionToGroup(sessionId, groupId, targetIndex),
       moveSidebarToOtherSide: async () => this.moveSidebarToOtherSide(),
       openBrowser: async () => this.openDefaultBrowserUrl(),
+      openWorkspaceWelcome: async () => {
+        await this.workspacePanel.postMessage({
+          mode: "optional",
+          type: "showWelcomeModal",
+        });
+        await this.workspacePanel.reveal();
+      },
       openSettings: async () => this.openSettings(),
+      promptFindPreviousSession: async () => this.promptFindPreviousSession(),
       promptRenameSession: async (sessionId) => this.promptRenameSession(sessionId),
       refreshDaemonSessions: async () => this.refreshDaemonSessions(),
       refreshGitState: async () => this.refreshGitState(),
@@ -2525,6 +2580,106 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     this.pendingT3SessionIds.add(sessionRecord.sessionId);
     await this.afterStateChange();
     void this.finishCreatingT3Session(sessionRecord.sessionId, startupCommand);
+  }
+
+  private async createTerminalSession(options?: {
+    terminalEngine?: TerminalEngine;
+    title?: string;
+  }): Promise<SessionRecord | undefined> {
+    return this.store.createSession({
+      terminalEngine: options?.terminalEngine ?? getDefaultTerminalEngine(),
+      title: options?.title,
+    });
+  }
+
+  private resolveFindPreviousSessionAgent():
+    | {
+        agentId: string;
+        command: string;
+        icon?: SidebarAgentIcon;
+      }
+    | undefined {
+    const configuredAgentId = getFindPreviousSessionAgentId();
+    const candidates = [
+      getSidebarAgentButtonById(configuredAgentId),
+      configuredAgentId === "codex" ? undefined : getSidebarAgentButtonById("codex"),
+    ];
+
+    for (const candidate of candidates) {
+      const command = candidate?.command?.trim();
+      if (!candidate || !command) {
+        continue;
+      }
+
+      return {
+        agentId: candidate.agentId,
+        command,
+        icon: candidate.icon,
+      };
+    }
+
+    return undefined;
+  }
+
+  private async launchSidebarTerminalAgent(agentButton: {
+    agentId: string;
+    command: string;
+    icon?: SidebarAgentIcon;
+  }): Promise<SessionRecord | undefined> {
+    const sessionRecord = await this.createTerminalSession();
+    if (!sessionRecord) {
+      return undefined;
+    }
+
+    if (agentButton.icon) {
+      this.sidebarAgentIconBySessionId.set(sessionRecord.sessionId, agentButton.icon);
+    }
+    this.sessionAgentLaunchBySessionId.set(sessionRecord.sessionId, {
+      agentId: agentButton.agentId,
+      command: agentButton.command,
+    });
+    await this.persistSessionAgentLaunchState();
+    await this.refreshSidebarFromCurrentState();
+    await this.backend.createOrAttachSession(sessionRecord);
+    await this.afterStateChange({ sidebarAlreadyRefreshed: true });
+    await this.backend.writeText(sessionRecord.sessionId, agentButton.command, true);
+    return sessionRecord;
+  }
+
+  private async launchSidebarCommandInWorkspace(name: string, command: string): Promise<void> {
+    const sessionRecord = await this.createTerminalSession({ title: name });
+    if (!sessionRecord) {
+      return;
+    }
+
+    await this.refreshSidebarFromCurrentState();
+    await this.backend.createOrAttachSession(sessionRecord);
+    await this.workspacePanel.reveal();
+    this.enqueueWorkspaceAutoFocus(sessionRecord.sessionId, "sidebar");
+    await this.afterStateChange({ sidebarAlreadyRefreshed: true });
+    await this.backend.writeText(sessionRecord.sessionId, command, true);
+  }
+
+  private async prepareSessionForTerminalRecreate(
+    sessionRecord: SessionRecord,
+  ): Promise<SessionRecord> {
+    if (!isTerminalSession(sessionRecord)) {
+      return sessionRecord;
+    }
+
+    const nextTerminalEngine = getDefaultTerminalEngine();
+    if (sessionRecord.terminalEngine === nextTerminalEngine) {
+      return sessionRecord;
+    }
+
+    await this.store.setTerminalSessionEngine(sessionRecord.sessionId, nextTerminalEngine);
+    const refreshedSessionRecord = this.store.getSession(sessionRecord.sessionId);
+    return refreshedSessionRecord && isTerminalSession(refreshedSessionRecord)
+      ? refreshedSessionRecord
+      : {
+          ...sessionRecord,
+          terminalEngine: nextTerminalEngine,
+        };
   }
 
   private async disposeSurface(sessionRecord: SessionRecord): Promise<void> {

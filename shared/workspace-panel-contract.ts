@@ -36,6 +36,8 @@ export type WorkspacePanelAutoFocusRequest = {
   source: "sidebar" | "reload";
 };
 
+export type WorkspaceWelcomeModalMode = "optional" | "required";
+
 export type WorkspacePanelTerminalPane = {
   kind: "terminal";
   isVisible: boolean;
@@ -65,6 +67,7 @@ export type WorkspacePanelHydrateMessage = {
   focusedSessionId?: string;
   layoutAppearance: WorkspacePanelLayoutAppearance;
   panes: WorkspacePanelPane[];
+  shouldShowWelcomeModal?: boolean;
   terminalAppearance: WorkspacePanelTerminalAppearance;
   viewMode: TerminalViewMode;
   visibleCount: number;
@@ -87,11 +90,25 @@ export type WorkspacePanelDestroyTerminalRuntimeMessage = {
   type: "destroyTerminalRuntime";
 };
 
+export type WorkspacePanelShowWelcomeMessage = {
+  mode?: WorkspaceWelcomeModalMode;
+  type: "showWelcomeModal";
+};
+
+export type WorkspacePanelShowToastMessage = {
+  type: "showToast";
+  expiresAt: number;
+  message: string;
+  title: string;
+};
+
 export type ExtensionToWorkspacePanelMessage =
   | WorkspacePanelHydrateMessage
   | WorkspacePanelSessionStateMessage
   | WorkspacePanelTerminalPresentationChangedMessage
-  | WorkspacePanelDestroyTerminalRuntimeMessage;
+  | WorkspacePanelDestroyTerminalRuntimeMessage
+  | WorkspacePanelShowWelcomeMessage
+  | WorkspacePanelShowToastMessage;
 
 export type WorkspacePanelReadyMessage = {
   type: "ready";
@@ -135,8 +152,13 @@ export type WorkspacePanelReloadMessage = {
   type: "reloadWorkspacePanel";
 };
 
+export type WorkspacePanelCompleteWelcomeMessage = {
+  type: "completeWelcome";
+};
+
 export type WorkspacePanelToExtensionMessage =
   | WorkspacePanelReadyMessage
+  | WorkspacePanelCompleteWelcomeMessage
   | WorkspacePanelFocusSessionMessage
   | WorkspacePanelCloseSessionMessage
   | WorkspacePanelFullReloadSessionMessage
@@ -149,6 +171,8 @@ export function stripWorkspacePanelTransientFields(
   message: ExtensionToWorkspacePanelMessage,
 ): ExtensionToWorkspacePanelMessage {
   if (
+    message.type === "showWelcomeModal" ||
+    message.type === "showToast" ||
     message.type === "terminalPresentationChanged" ||
     message.type === "destroyTerminalRuntime" ||
     !message.autoFocusRequest

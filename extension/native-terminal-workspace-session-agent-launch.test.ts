@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vite-plus/test";
 import {
   buildCopyResumeCommandText,
+  buildManualResumePrefillAction,
   buildDetachedResumeAction,
   buildForkAgentCommand,
   buildResumeAgentCommand,
@@ -454,5 +455,27 @@ describe("buildDetachedResumeAction", () => {
       shouldExecute: false,
       text: "codex --profile fast",
     });
+  });
+});
+
+describe("buildManualResumePrefillAction", () => {
+  test("should prefill a quoted visible title without executing", () => {
+    expect(buildManualResumePrefillAction("Bug Fixing")).toEqual({
+      shouldExecute: false,
+      text: "'Bug Fixing'\u0001",
+    });
+  });
+
+  test("should prefer the visible terminal title for manual restore prefills", () => {
+    expect(buildManualResumePrefillAction("Session 12", "  ✦ Recent sessions polish  ")).toEqual({
+      shouldExecute: false,
+      text: "'Recent sessions polish'\u0001",
+    });
+  });
+
+  test("should return undefined when no visible restore title is available", () => {
+    expect(
+      buildManualResumePrefillAction("Session 12", "/Users/madda/dev/_active/agent-tiler"),
+    ).toBeUndefined();
   });
 });

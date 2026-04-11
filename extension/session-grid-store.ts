@@ -7,6 +7,7 @@ import {
   type SessionGridDirection,
   type SessionGroupRecord,
   type SessionRecord,
+  type TerminalEngine,
   type T3SessionMetadata,
   type TerminalViewMode,
   type VisibleSessionCount,
@@ -31,6 +32,7 @@ import {
   setSessionFavoriteInSimpleWorkspace,
   setSessionTitleInSimpleWorkspace,
   setSessionSleepingInSimpleWorkspace,
+  setTerminalSessionEngineInSimpleWorkspace,
   setT3SessionMetadataInSimpleWorkspace,
   setViewModeInSimpleWorkspace,
   setVisibleCountInSimpleWorkspace,
@@ -210,6 +212,22 @@ export class SessionGridStore {
 
   public async setSessionTitle(sessionId: string, title: string): Promise<boolean> {
     const result = setSessionTitleInSimpleWorkspace(this.snapshot, sessionId, title);
+    this.snapshot = result.snapshot;
+    if (result.changed) {
+      await this.persist();
+    }
+    return result.changed;
+  }
+
+  public async setTerminalSessionEngine(
+    sessionId: string,
+    terminalEngine: TerminalEngine,
+  ): Promise<boolean> {
+    const result = setTerminalSessionEngineInSimpleWorkspace(
+      this.snapshot,
+      sessionId,
+      terminalEngine,
+    );
     this.snapshot = result.snapshot;
     if (result.changed) {
       await this.persist();

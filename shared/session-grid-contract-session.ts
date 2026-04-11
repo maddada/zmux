@@ -15,6 +15,7 @@ import {
   type SidebarTheme,
   type SidebarThemeSetting,
   type SidebarThemeVariant,
+  type TerminalEngine,
   type TerminalSessionRecord,
   type T3SessionRecord,
   type BrowserSessionRecord,
@@ -23,6 +24,7 @@ import {
 } from "./session-grid-contract-core";
 
 const LEADING_TERMINAL_TITLE_STATUS_MARKER_PATTERN = /^[\s\u2800-\u28ff·•⋅◦✳*✦◇🤖🔔]+/u;
+const DEFAULT_TERMINAL_ENGINE: TerminalEngine = "ghostty";
 
 export function clampVisibleSessionCount(value: number): VisibleSessionCount {
   if (value <= 1) {
@@ -266,8 +268,13 @@ export function createSessionRecord(
     row: position.row,
     sessionId,
     slotIndex,
+    terminalEngine: normalizeTerminalEngine(options?.terminalEngine),
     title,
   };
+}
+
+export function normalizeTerminalEngine(value: string | undefined): TerminalEngine {
+  return value === "xterm" ? "xterm" : DEFAULT_TERMINAL_ENGINE;
 }
 
 export function getTerminalSessionSurfaceTitle(

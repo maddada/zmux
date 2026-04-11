@@ -237,6 +237,9 @@ export type SidebarToExtensionMessage =
       type: "openBrowser";
     }
   | {
+      type: "openWorkspaceWelcome";
+    }
+  | {
       type: "createSessionInGroup";
       groupId: string;
     }
@@ -319,6 +322,9 @@ export type SidebarToExtensionMessage =
   | {
       historyId: string;
       type: "deletePreviousSession";
+    }
+  | {
+      type: "promptFindPreviousSession";
     }
   | {
       type: "clearGeneratedPreviousSessions";

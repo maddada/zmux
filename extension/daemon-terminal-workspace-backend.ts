@@ -204,6 +204,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       sessionId: sessionRecord.sessionId,
       sessionStateFilePath: this.getSessionAgentStateFilePath(sessionRecord.sessionId),
       shell: getDefaultShell(),
+      terminalEngine: sessionRecord.terminalEngine,
       workspaceId: this.options.workspaceId,
     });
     const snapshot = createOrAttachResult.session;

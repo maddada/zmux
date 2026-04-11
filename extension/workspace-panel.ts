@@ -292,6 +292,9 @@ function isWorkspaceMessage(candidate: unknown): candidate is WorkspacePanelToEx
   if (message.type === "reloadWorkspacePanel") {
     return true;
   }
+  if (message.type === "completeWelcome") {
+    return true;
+  }
   if (
     message.type === "focusSession" ||
     message.type === "closeSession" ||

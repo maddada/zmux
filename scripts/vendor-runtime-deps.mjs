@@ -8,7 +8,7 @@ const repoRoot = path.resolve(__dirname, "..");
 const outNodeModulesDir = path.join(repoRoot, "out", "extension", "node_modules");
 const require = createRequire(import.meta.url);
 
-const runtimePackages = ["ws", "@lydell/node-pty"];
+const runtimePackages = ["ws", "@lydell/node-pty", "@xterm/addon-serialize", "@xterm/headless"];
 
 async function main() {
   await rm(outNodeModulesDir, { force: true, recursive: true });

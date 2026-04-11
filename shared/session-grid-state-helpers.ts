@@ -5,6 +5,7 @@ import {
   getSessionGridLayoutVisibleCount,
   getSlotPosition,
   isSessionGridFocusModeActive,
+  normalizeTerminalEngine,
   type SessionGridDirection,
   type SessionGridSnapshot,
   type SessionRecord,
@@ -258,6 +259,9 @@ export function normalizeSessionRecord(session: SessionRecord): SessionRecord {
     alias,
     displayId,
     kind: "terminal",
+    terminalEngine: normalizeTerminalEngine(
+      session.kind === "terminal" ? session.terminalEngine : undefined,
+    ),
     title,
   };
 }

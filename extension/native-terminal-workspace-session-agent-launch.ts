@@ -20,6 +20,8 @@ export type DetachedResumeAction = {
   text: string;
 };
 
+const MOVE_CURSOR_TO_LINE_START_CONTROL = "\u0001";
+
 export function buildResumeAgentCommand(
   agentLaunch: StoredSessionAgentLaunch | undefined,
   agentIconId: SidebarAgentIcon | undefined,
@@ -142,6 +144,23 @@ export function buildDetachedResumeAction(
     default:
       return undefined;
   }
+}
+
+export function buildManualResumePrefillAction(
+  sessionTitle: string | undefined,
+  terminalTitle?: string,
+): DetachedResumeAction | undefined {
+  const resumeTitle = resolveResumeTitle(sessionTitle, terminalTitle);
+  if (!resumeTitle) {
+    return undefined;
+  }
+
+  return {
+    shouldExecute: false,
+    // Best-effort shell navigation: Ctrl+A moves the cursor to the start of the input line
+    // in common readline-style shells after we prefill the quoted session name.
+    text: `${quoteForSingleShellArgument(resumeTitle)}${MOVE_CURSOR_TO_LINE_START_CONTROL}`,
+  };
 }
 
 export function loadStoredSessionAgentLaunches(

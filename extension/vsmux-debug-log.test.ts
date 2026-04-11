@@ -30,7 +30,12 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { disposeVSmuxDebugLog, logVSmuxDebug, resetVSmuxDebugLog } from "./vsmux-debug-log";
+import {
+  disposeVSmuxDebugLog,
+  logVSmuxDebug,
+  logVSmuxReproTrace,
+  resetVSmuxDebugLog,
+} from "./vsmux-debug-log";
 
 describe("logVSmuxDebug", () => {
   beforeEach(() => {
@@ -60,5 +65,18 @@ describe("logVSmuxDebug", () => {
     logVSmuxDebug("daemon.runtime.ensureDaemonProcess.start");
 
     expect(appendLineMock).not.toHaveBeenCalled();
+  });
+
+  test("should always write repro traces and include the project name", () => {
+    debuggingModeRef.current = false;
+
+    logVSmuxReproTrace("repro.controller.focusSession.start", {
+      sessionId: "session-9",
+    });
+
+    expect(appendLineMock).toHaveBeenCalledTimes(1);
+    expect(appendLineMock.mock.calls[0]?.[0]).toMatch(
+      /^\d{4}-\d{2}-\d{2}T.* \[workspace:agent-tiler\] repro\.controller\.focusSession\.start {"projectName":"agent-tiler","sessionId":"session-9"}$/,
+    );
   });
 });

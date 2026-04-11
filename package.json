@@ -57,6 +57,15 @@
     "@fontsource-variable/inter": "^5.2.8",
     "@lydell/node-pty": "1.2.0-beta.3",
     "@tabler/icons-react": "^3.40.0",
+    "@xterm/addon-attach": "0.13.0-beta.197",
+    "@xterm/addon-fit": "0.12.0-beta.197",
+    "@xterm/addon-search": "0.17.0-beta.197",
+    "@xterm/addon-serialize": "0.15.0-beta.197",
+    "@xterm/addon-unicode11": "0.10.0-beta.197",
+    "@xterm/addon-web-fonts": "0.2.0-beta.111",
+    "@xterm/addon-webgl": "0.20.0-beta.196",
+    "@xterm/headless": "6.1.0-beta.197",
+    "@xterm/xterm": "6.1.0-beta.197",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "ghostty-web": "^0.4.0",
@@ -264,14 +273,14 @@
         {
           "type": "webview",
           "id": "VSmux.sessions",
-          "name": "VSmux Sessions"
+          "name": "Sessions"
         },
         {
           "type": "webview",
           "id": "VSmuxSearch.conversations",
-          "name": "VSmux Search",
+          "name": "Sessions Search",
           "icon": "chat-history/media/icon.svg",
-          "contextualTitle": "VSmux Search"
+          "contextualTitle": "Sessions Search"
         }
       ]
     },
@@ -313,7 +322,7 @@
         "VSmux.autoOpenSidebarViewsOnStartup": {
           "title": "Auto Open Sidebar Views On Startup",
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "When enabled, VS Code startup automatically reveals the VSmux sidebar and reopens the VSmux Sessions view if it is not already open."
         },
         "VSmux.sidebarTheme": {
@@ -373,15 +382,15 @@
           "title": "Terminal Font Family",
           "type": "string",
           "default": "\"MesloLGL Nerd Font Mono\", Menlo, Monaco, \"Courier New\", monospace",
-          "description": "Font family used by VSmux Ghostty terminals in the workspace webview."
+          "description": "Font family used by VSmux workspace terminals."
         },
         "VSmux.terminalFontSize": {
           "title": "Terminal Font Size",
           "type": "number",
           "minimum": 8,
           "maximum": 32,
-          "default": 12,
-          "description": "Font size used by VSmux Ghostty terminals."
+          "default": 13,
+          "description": "Font size used by VSmux workspace terminals."
         },
         "VSmux.terminalLineHeight": {
           "title": "Terminal Line Height",
@@ -389,15 +398,15 @@
           "minimum": 0.8,
           "maximum": 2,
           "default": 1,
-          "description": "Line height multiplier used by VSmux Ghostty terminals."
+          "description": "Line height multiplier used by VSmux workspace terminals."
         },
         "VSmux.terminalLetterSpacing": {
           "title": "Terminal Letter Spacing",
           "type": "number",
           "minimum": -2,
           "maximum": 8,
-          "default": 0,
-          "description": "Letter spacing used by VSmux Ghostty terminals."
+          "default": 1.1,
+          "description": "Letter spacing used by VSmux workspace terminals."
         },
         "VSmux.terminalCursorStyle": {
           "title": "Terminal Cursor Style",
@@ -413,7 +422,7 @@
             "Block",
             "Underline"
           ],
-          "description": "Cursor style used by VSmux Ghostty terminals."
+          "description": "Cursor style used by VSmux workspace terminals."
         },
         "VSmux.terminalCursorBlink": {
           "title": "Terminal Cursor Blink",
@@ -421,10 +430,28 @@
           "default": true,
           "description": "Whether the VSmux terminal cursor blinks."
         },
+        "VSmux.terminalEngine": {
+          "title": "Terminal Engine",
+          "type": "string",
+          "default": "xterm",
+          "enum": [
+            "ghostty",
+            "xterm"
+          ],
+          "enumItemLabels": [
+            "Ghostty (Beta)",
+            "xterm.js"
+          ],
+          "enumDescriptions": [
+            "Nearly stable, but Codex terminal reloads can still hit bugs. If that happens, use the refresh button.",
+            "Stable and the default. Recommended for everyday use."
+          ],
+          "description": "Choose the default engine for new VSmux terminal sessions. xterm.js is the stable default; Ghostty is still beta and may occasionally need a refresh after reloads."
+        },
         "VSmux.terminalScrollToBottomWhenTyping": {
           "title": "Scroll To Bottom When Typing",
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "When enabled, typing more than 3 characters in very quick succession automatically scrolls the active VSmux terminal to the bottom."
         },
         "VSmux.workspacePaneGap": {
@@ -432,7 +459,7 @@
           "type": "number",
           "minimum": 0,
           "maximum": 48,
-          "default": 12,
+          "default": 10,
           "description": "Uniform gap in pixels used both between visible panes and around the outer edge of the VSmux workspace."
         },
         "VSmux.workspaceActivePaneBorderColor": {
@@ -643,6 +670,20 @@
           "description": "Deprecated. Use VSmux.gitTextGenerationProvider and VSmux.gitTextGenerationCustomCommand instead.",
           "deprecationMessage": "Use VSmux.gitTextGenerationProvider and VSmux.gitTextGenerationCustomCommand instead."
         },
+        "VSmux.findPreviousSessionAgentId": {
+          "title": "Find Previous Session Agent Id",
+          "type": "string",
+          "scope": "application",
+          "default": "codex",
+          "description": "Agent button ID used by the Previous Sessions modal when launching Find a session. Defaults to codex."
+        },
+        "VSmux.findPreviousSessionPromptTemplate": {
+          "title": "Find Previous Session Prompt Template",
+          "type": "string",
+          "scope": "application",
+          "default": "Help me find a previous AI agent session where I talked about: {query}\n\nPlease search the local session history and transcript files available on this machine.\nUse session index files and transcript logs together when possible so you can recover both the session ID and the latest user-set name.\n\nPlease return:\n- the best matching session ID\n- the latest session or thread name if you can find one\n- the file path you used to identify it\n- a short reason it matches\n\nIf there are multiple strong matches, list the top few and prefer the most recent ones.",
+          "description": "Prompt staged inside the selected agent when using Find a session from Previous Sessions. Use {query} or {topic} for the text entered in the VS Code input box."
+        },
         "VSmux.agentOrder": {
           "title": "Agent Order",
           "type": "array",
@@ -849,6 +890,7 @@
   ],
   "icon": "media/VSmux-marketplace-icon.png",
   "engines": {
+    "node": "24.14.1",
     "vscode": "^1.100.0"
   },
   "packageManager": "pnpm@10.14.0",

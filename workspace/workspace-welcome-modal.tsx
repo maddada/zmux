@@ -1,0 +1,204 @@
+import {
+  IconArrowLeft,
+  IconArrowRight,
+  IconBolt,
+  IconBulb,
+  IconRocket,
+  IconSparkles,
+  IconTerminal2,
+  IconWorld,
+} from "@tabler/icons-react";
+import { createPortal } from "react-dom";
+import { useEffect, useId, useState, type ComponentType } from "react";
+import type { WorkspaceWelcomeModalMode } from "../shared/workspace-panel-contract";
+
+export type WorkspaceWelcomeModalProps = {
+  isOpen: boolean;
+  mode: WorkspaceWelcomeModalMode;
+  onClose: () => void;
+  onComplete: () => void;
+};
+
+type WelcomePage = {
+  bullets: string[];
+  icon: ComponentType<{ className?: string; size?: number; stroke?: number }>;
+  kicker: string;
+  title: string;
+};
+
+const WELCOME_PAGES: WelcomePage[] = [
+  {
+    bullets: [
+      "VSmux lets you manage multiple CLI coding agent sessions without leaving your editor.",
+      "It is built for people who like working with several agents in parallel while staying close to their code, prompts, and Git flow.",
+      "It works especially well when you want agents, browser pages, and terminal work all visible in one place.",
+      "If you like jumping between multiple sessions or worktrees quickly, VSmux is built for that style of work.",
+    ],
+    icon: IconSparkles,
+    kicker: "Welcome",
+    title: "What is VSmux?",
+  },
+  {
+    bullets: [
+      "Use T3 Code if you like GUIs. It also supports splitting.",
+      'You can add any CLI agent you want from the overflow menu. Submit an issue or PR and we can add "indicators" support for it.',
+      "Your agents can keep running even if you restart or close VS Code, up to the configured background timeout. The default is 5 minutes.",
+    ],
+    icon: IconTerminal2,
+    kicker: "Page 2",
+    title: "Agents",
+  },
+  {
+    bullets: [
+      "Actions are quick buttons for things like Dev, Build, Test, and Setup.",
+      "Terminal actions open a fresh VS Code terminal and run your command there.",
+      "Right-click a terminal action and choose Debug Action to launch it inside VSmux instead.",
+      "Browser actions open a URL in a VS Code browser tab and show it inside the Browsers group.",
+      "Right-click an action to configure it or remove it.",
+    ],
+    icon: IconBolt,
+    kicker: "Page 3",
+    title: "Actions",
+  },
+  {
+    bullets: [
+      "You can add a browser page from the overflow menu.",
+      "Running browser pages are grouped per project, so you can manage them alongside your agent sessions.",
+      "The Browsers section gives you a quick way to jump back into the pages you are actively using for that workspace.",
+    ],
+    icon: IconWorld,
+    kicker: "Page 4",
+    title: "Browsers",
+  },
+  {
+    bullets: [
+      "You can sleep sessions, then click them later to wake them up if you want them to stay in the sidebar.",
+      "You can paste long text into the rename input and VSmux will turn it into a cleaner session name.",
+      "You can right-click agent and action buttons to configure, edit, or remove them.",
+      "You can reopen this guide any time from Help in the sidebar overflow menu.",
+    ],
+    icon: IconBulb,
+    kicker: "Page 5",
+    title: "Tips & Tricks",
+  },
+];
+
+export function WorkspaceWelcomeModal({
+  isOpen,
+  mode,
+  onClose: _onClose,
+  onComplete,
+}: WorkspaceWelcomeModalProps) {
+  const [pageIndex, setPageIndex] = useState(0);
+  const titleId = useId();
+  const isLastPage = pageIndex === WELCOME_PAGES.length - 1;
+  const canGoBack = pageIndex > 0;
+  const page = WELCOME_PAGES[pageIndex];
+  const PageIcon = page.icon;
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    setPageIndex(0);
+  }, [isOpen, mode]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  return createPortal(
+    <div className="workspace-welcome-root" role="presentation">
+      <div aria-hidden="true" className="workspace-welcome-backdrop" />
+      <div
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="workspace-welcome-modal"
+        data-mode={mode}
+        role="dialog"
+      >
+        <div className="workspace-welcome-progress" aria-hidden="true">
+          {WELCOME_PAGES.map((welcomePage, index) => (
+            <span
+              className="workspace-welcome-progress-dot"
+              data-active={String(index === pageIndex)}
+              key={welcomePage.title}
+            />
+          ))}
+        </div>
+        <div className="workspace-welcome-hero">
+          <div className="workspace-welcome-hero-icon-shell">
+            <PageIcon
+              aria-hidden="true"
+              className="workspace-welcome-hero-icon"
+              size={28}
+              stroke={1.8}
+            />
+          </div>
+          <div className="workspace-welcome-hero-copy">
+            <div className="workspace-welcome-kicker">{page.kicker}</div>
+            <div className="workspace-welcome-title" id={titleId}>
+              {page.title}
+            </div>
+          </div>
+        </div>
+        <div className="workspace-welcome-body">
+          <ul className="workspace-welcome-list">
+            {page.bullets.map((bullet) => (
+              <li className="workspace-welcome-list-item" key={bullet}>
+                <span className="workspace-welcome-list-icon">
+                  {pageIndex === 0 ? (
+                    <IconSparkles aria-hidden="true" size={14} stroke={1.9} />
+                  ) : (
+                    <IconRocket aria-hidden="true" size={14} stroke={1.9} />
+                  )}
+                </span>
+                <span>{bullet}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="workspace-welcome-footer">
+          <div className="workspace-welcome-actions">
+            {canGoBack ? (
+              <button
+                className="workspace-welcome-button workspace-welcome-button-secondary"
+                onClick={() =>
+                  setPageIndex((currentPageIndex) => Math.max(0, currentPageIndex - 1))
+                }
+                type="button"
+              >
+                <IconArrowLeft aria-hidden="true" size={15} stroke={1.9} />
+                Back
+              </button>
+            ) : null}
+            {isLastPage ? (
+              <button
+                className="workspace-welcome-button workspace-welcome-button-primary"
+                onClick={onComplete}
+                type="button"
+              >
+                Let&apos;s start!
+              </button>
+            ) : (
+              <button
+                className="workspace-welcome-button workspace-welcome-button-primary"
+                onClick={() =>
+                  setPageIndex((currentPageIndex) =>
+                    Math.min(WELCOME_PAGES.length - 1, currentPageIndex + 1),
+                  )
+                }
+                type="button"
+              >
+                Next
+                <IconArrowRight aria-hidden="true" size={15} stroke={1.9} />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}

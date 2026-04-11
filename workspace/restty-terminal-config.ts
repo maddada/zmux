@@ -1,4 +1,5 @@
 import { parseGhosttyTheme, type GhosttyTheme, type ResttyFontSource } from "restty";
+import mesloBoldUrl from "./fonts/MesloLGLNerdFontMono-Bold.ttf";
 import mesloRegularUrl from "./fonts/MesloLGLNerdFontMono-Regular.ttf";
 
 const GENERIC_FONT_FAMILIES = new Set([
@@ -17,14 +18,12 @@ const GENERIC_FONT_FAMILIES = new Set([
   "ui-serif",
 ]);
 
-const DEFAULT_TERMINAL_FONT_FAMILIES = [
-  "MesloLGL Nerd Font Mono",
-  "Menlo",
-  "Monaco",
-  "Courier New",
+const FONT_VARIANTS = [
+  { label: "Regular", suffixes: ["regular", "book", "roman"] },
+  { label: "Bold", suffixes: ["bold"] },
+  { label: "Italic", suffixes: ["italic", "oblique"] },
+  { label: "Bold Italic", suffixes: ["bold italic", "italic bold", "bold oblique"] },
 ] as const;
-
-const DEFAULT_LOCAL_FONT_MATCHERS = ["MesloLGL Nerd Font Mono", "MesloLGL Nerd Font"] as const;
 
 const fallbackTheme = {
   background: "#080808",
@@ -51,27 +50,10 @@ const fallbackTheme = {
 };
 
 export function getResttyFontSources(fontFamily: string | undefined): ResttyFontSource[] {
-  const fallbackSources: ResttyFontSource[] = [
-    {
-      label: "Meslo fallback",
-      type: "url",
-      url: mesloRegularUrl,
-    },
-  ];
+  const configuredFamilies = getConfiguredFontFamilies(fontFamily);
+  const configuredSources = configuredFamilies.flatMap(createLocalFontSourcesForFamily);
 
-  if (usesBundledDefaultFontStack(fontFamily)) {
-    return fallbackSources;
-  }
-
-  return [
-    {
-      label: "Configured font",
-      matchers: getConfiguredFontMatchers(fontFamily),
-      required: false,
-      type: "local",
-    },
-    ...fallbackSources,
-  ];
+  return [...configuredSources, ...getBundledMesloFallbackSources()];
 }
 
 export function getResttyTheme(): GhosttyTheme | undefined {
@@ -103,18 +85,35 @@ export function getResttyTheme(): GhosttyTheme | undefined {
   return parseGhosttyTheme(themeSource);
 }
 
-function getConfiguredFontMatchers(fontFamily: string | undefined): string[] {
-  const families = getConfiguredFontFamilies(fontFamily);
-  return families.length > 0 ? families : [...DEFAULT_LOCAL_FONT_MATCHERS];
+function createLocalFontSourcesForFamily(family: string): ResttyFontSource[] {
+  const baseMatchers = createFamilyMatchers(family);
+  return FONT_VARIANTS.map((variant) => ({
+    label: `${family} ${variant.label}`,
+    matchers: createVariantMatchers(baseMatchers, variant.suffixes),
+    required: false,
+    type: "local" as const,
+  }));
 }
 
-function usesBundledDefaultFontStack(fontFamily: string | undefined): boolean {
-  const families = getConfiguredFontFamilies(fontFamily);
-  if (families.length === 0) {
-    return true;
+function createFamilyMatchers(family: string): string[] {
+  const trimmedFamily = family.trim();
+  const compactFamily = trimmedFamily.replace(/[\s_-]+/g, "");
+  return dedupeMatchers([trimmedFamily, compactFamily]);
+}
+
+function createVariantMatchers(
+  baseMatchers: readonly string[],
+  suffixes: readonly string[],
+): string[] {
+  const nextMatchers = [...baseMatchers];
+  for (const suffix of suffixes) {
+    for (const baseMatcher of baseMatchers) {
+      nextMatchers.push(`${baseMatcher} ${suffix}`.trim());
+      nextMatchers.push(`${baseMatcher}${suffix.replace(/\s+/g, "")}`.trim());
+    }
   }
 
-  return familiesMatch(families, DEFAULT_TERMINAL_FONT_FAMILIES);
+  return dedupeMatchers(nextMatchers);
 }
 
 function getConfiguredFontFamilies(fontFamily: string | undefined): string[] {
@@ -137,12 +136,35 @@ function getConfiguredFontFamilies(fontFamily: string | undefined): string[] {
   );
 }
 
-function familiesMatch(left: readonly string[], right: readonly string[]): boolean {
-  if (left.length !== right.length) {
-    return false;
+function getBundledMesloFallbackSources(): ResttyFontSource[] {
+  return [
+    {
+      label: "Meslo fallback regular",
+      type: "url",
+      url: mesloRegularUrl,
+    },
+    {
+      label: "Meslo fallback bold",
+      type: "url",
+      url: mesloBoldUrl,
+    },
+  ];
+}
+
+function dedupeMatchers(matchers: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const matcher of matchers) {
+    const normalizedMatcher = matcher.trim().toLowerCase();
+    if (!normalizedMatcher || seen.has(normalizedMatcher)) {
+      continue;
+    }
+
+    seen.add(normalizedMatcher);
+    deduped.push(matcher.trim());
   }
 
-  return left.every((family, index) => family.toLowerCase() === right[index]?.toLowerCase());
+  return deduped;
 }
 
 function getCssColor(

@@ -359,7 +359,7 @@ export function CommandsPanel({
                   type="button"
                 >
                   <IconBug aria-hidden="true" className="session-context-menu-icon" size={14} />
-                  Debug Aaction
+                  Debug Action
                 </button>
               ) : null}
               <button

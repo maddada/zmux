@@ -9,6 +9,7 @@ import {
   getVisibleTerminalTitle,
   isGeneratedSessionAlias,
 } from "../shared/session-grid-contract";
+import { normalizeSessionRecord } from "../shared/session-grid-state-helpers";
 import {
   shouldPreferTerminalTitleForAgentIcon,
   type SidebarAgentIcon,
@@ -167,6 +168,10 @@ function normalizePreviousSessionHistory(
   return candidate
     .filter(isPreviousSessionHistoryEntry)
     .filter((entry) => entry.sessionRecord.kind !== "browser")
+    .map((entry) => ({
+      ...entry,
+      sessionRecord: normalizeSessionRecord(entry.sessionRecord),
+    }))
     .sort((left, right) => Date.parse(right.closedAt) - Date.parse(left.closedAt))
     .slice(0, PREVIOUS_SESSION_HISTORY_LIMIT);
 }

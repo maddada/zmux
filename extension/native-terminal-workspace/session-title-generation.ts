@@ -1,7 +1,7 @@
 import type { GitTextGenerationSettings } from "../../shared/git-text-generation-provider";
 import { generateSessionTitle } from "../git/text-generation";
 
-export const SESSION_RENAME_SUMMARY_THRESHOLD = 40;
+export const SESSION_RENAME_SUMMARY_THRESHOLD = 50;
 export const GENERATED_SESSION_TITLE_MAX_LENGTH = 39;
 
 type ResolveRenameTitleInput = {

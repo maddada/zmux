@@ -99,6 +99,18 @@ describe("shouldBypassSidebarMessageQueue", () => {
     ).toBe(true);
   });
 
+  test("should bypass sidebar repro log messages", () => {
+    expect(
+      shouldBypassSidebarMessageQueue({
+        details: {
+          sessionId: "session-7",
+        },
+        event: "repro.sidebarSessionFocusRequested",
+        type: "sidebarDebugLog",
+      }),
+    ).toBe(true);
+  });
+
   test("should keep renameSession messages queued", () => {
     expect(
       shouldBypassSidebarMessageQueue({

@@ -1,7 +1,10 @@
 import * as vscode from "vscode";
 import { appendFile, mkdir } from "node:fs/promises";
 import * as path from "node:path";
-import { formatVscodeWorkspaceLogPrefix } from "../shared/vscode-workspace-log-context";
+import {
+  formatVscodeWorkspaceLogPrefix,
+  getVscodeWorkspaceLogLabel,
+} from "../shared/vscode-workspace-log-context";
 
 const SETTINGS_SECTION = "VSmux";
 const DEBUGGING_MODE_SETTING = "debuggingMode";
@@ -60,6 +63,12 @@ export function logVSmuxDebug(event: string, details?: unknown): void {
   queueDebugLogFileAppend(`${line}\n`);
 }
 
+export function logVSmuxReproTrace(event: string, details?: unknown): void {
+  const line = buildLogLine(event, enrichLogDetails(details));
+  getOutputChannel().appendLine(line);
+  queueDebugLogFileAppend(`${line}\n`);
+}
+
 export function disposeVSmuxDebugLog(): void {
   outputChannel?.dispose();
   outputChannel = undefined;
@@ -86,6 +95,26 @@ function safeSerialize(details: unknown): string {
       unserializable: true,
     });
   }
+}
+
+function buildLogLine(event: string, details?: unknown): string {
+  const suffix = details === undefined ? "" : ` ${safeSerialize(details)}`;
+  return `${new Date().toISOString()} ${formatVscodeWorkspaceLogPrefix()} ${event}${suffix}`;
+}
+
+function enrichLogDetails(details: unknown): unknown {
+  const projectName = getVscodeWorkspaceLogLabel();
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return {
+      details,
+      projectName,
+    };
+  }
+
+  return {
+    projectName,
+    ...details,
+  };
 }
 
 function queueDebugLogFileAppend(text: string): void {

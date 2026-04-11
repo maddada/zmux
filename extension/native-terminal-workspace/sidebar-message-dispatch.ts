@@ -38,7 +38,9 @@ export type SidebarMessageHandlers = {
   moveSessionToGroup: (sessionId: string, groupId: string, targetIndex?: number) => Promise<void>;
   moveSidebarToOtherSide: () => Promise<void>;
   openBrowser: () => Promise<void>;
+  openWorkspaceWelcome: () => Promise<void>;
   openSettings: () => Promise<void>;
+  promptFindPreviousSession: () => Promise<void>;
   promptRenameSession: (sessionId: string) => Promise<void>;
   refreshSidebarHydrate: () => Promise<void>;
   renameGroup: (groupId: string, title: string) => Promise<void>;
@@ -101,6 +103,9 @@ export async function dispatchSidebarMessage(
     case "openBrowser":
       await handlers.openBrowser();
       return;
+    case "openWorkspaceWelcome":
+      await handlers.openWorkspaceWelcome();
+      return;
     case "createSessionInGroup":
       await handlers.createSessionInGroup(message.groupId);
       return;
@@ -112,6 +117,9 @@ export async function dispatchSidebarMessage(
       return;
     case "openSettings":
       await handlers.openSettings();
+      return;
+    case "promptFindPreviousSession":
+      await handlers.promptFindPreviousSession();
       return;
     case "toggleCompletionBell":
       await handlers.toggleCompletionBell();
