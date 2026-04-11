@@ -186,6 +186,7 @@ function createWorkspaceStoryMessage(
       letterSpacing: 0,
       lineHeight: 1,
       scrollToBottomWhenTyping: false,
+      xtermFrontendScrollback: 75_000,
     },
     type: "hydrate",
     viewMode: activeGroup?.viewMode ?? "grid",

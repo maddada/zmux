@@ -211,6 +211,68 @@ describe("getEffectiveSessionActivity", () => {
     expect(activity.activity).toBe("working");
     vi.useRealTimers();
   });
+
+  test("should show OpenCode working immediately without startup suppression", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const session = createSessionRecord(1, 0);
+
+    const activity = getEffectiveSessionActivity(
+      {
+        cancelPendingCompletionSound: vi.fn(),
+        getActivitySuppressedUntil: () => Date.now() + INITIAL_ACTIVITY_SUPPRESSION_MS,
+        getSessionSnapshot: () => ({
+          ...createSnapshot(session.sessionId, "working"),
+          agentName: "opencode",
+        }),
+        getT3ActivityState: () => ({ activity: "idle" as const, isRunning: false }),
+        lastKnownActivityBySessionId: new Map<string, TerminalSessionSnapshot["agentStatus"]>(),
+        queueCompletionSound: vi.fn(),
+        workingStartedAtBySessionId: new Map<string, number>(),
+        workspaceId: "workspace-1",
+      },
+      session,
+      {
+        ...createSnapshot(session.sessionId, "working"),
+        agentName: "opencode",
+      },
+    );
+
+    expect(activity.activity).toBe("working");
+    expect(activity.agentName).toBe("opencode");
+    vi.useRealTimers();
+  });
+
+  test("should show OpenCode attention even without an observed working duration", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const session = createSessionRecord(1, 0);
+
+    const activity = getEffectiveSessionActivity(
+      {
+        cancelPendingCompletionSound: vi.fn(),
+        getActivitySuppressedUntil: () => Date.now() + INITIAL_ACTIVITY_SUPPRESSION_MS,
+        getSessionSnapshot: () => ({
+          ...createSnapshot(session.sessionId, "attention"),
+          agentName: "opencode",
+        }),
+        getT3ActivityState: () => ({ activity: "idle" as const, isRunning: false }),
+        lastKnownActivityBySessionId: new Map<string, TerminalSessionSnapshot["agentStatus"]>(),
+        queueCompletionSound: vi.fn(),
+        workingStartedAtBySessionId: new Map<string, number>(),
+        workspaceId: "workspace-1",
+      },
+      session,
+      {
+        ...createSnapshot(session.sessionId, "attention"),
+        agentName: "opencode",
+      },
+    );
+
+    expect(activity.activity).toBe("attention");
+    expect(activity.agentName).toBe("opencode");
+    vi.useRealTimers();
+  });
 });
 
 describe("hasReachedLastActivityThreshold", () => {

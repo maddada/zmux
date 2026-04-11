@@ -45,6 +45,7 @@ export async function createAgentShellIntegration(
   const opencodeConfigDir = path.join(hooksDir, "opencode");
   const opencodePluginDir = path.join(opencodeConfigDir, "plugin");
   const opencodePluginPath = path.join(opencodePluginDir, OPENCODE_PLUGIN_FILE_NAME);
+  const opencodePluginLogPath = path.join(opencodeConfigDir, "vsmux-opencode-plugin.log");
   const zshDotDir = path.join(integrationRoot, "zsh");
 
   await mkdir(binDir, { recursive: true });
@@ -93,7 +94,7 @@ export async function createAgentShellIntegration(
 
   await writeFileIfChanged(
     opencodePluginPath,
-    getOpenCodePluginContent(notifyPath, process.execPath),
+    getOpenCodePluginContent(notifyPath, process.execPath, opencodePluginLogPath),
     0o644,
   );
   await writeFileIfChanged(path.join(zshDotDir, ".zshenv"), getZshEnvShimContent(), 0o644);

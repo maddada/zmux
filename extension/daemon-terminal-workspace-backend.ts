@@ -8,6 +8,8 @@ import {
 } from "../shared/session-grid-contract";
 import { getVisibleTerminalTitle } from "../shared/session-grid-contract-session";
 import type { TerminalSessionSnapshot } from "../shared/terminal-host-protocol";
+import { ensureAgentShellIntegration, type AgentShellIntegration } from "./agent-shell-integration";
+import { createAgentShellIntegrationEnvironmentRequest } from "./agent-shell-integration-environment";
 import {
   DaemonTerminalRuntime,
   type DaemonTerminalConnection,
@@ -35,6 +37,7 @@ import {
 import { indexWorkspaceTerminalSnapshotsBySessionId } from "./terminal-daemon-session-scope";
 import { getWorkspaceStorageKey } from "./terminal-workspace-environment";
 import { logVSmuxDebug } from "./vsmux-debug-log";
+import { getXtermHeadlessScrollback } from "./native-terminal-workspace/settings";
 
 const POLL_INTERVAL_MS = 500;
 const AGENT_STATE_DIR_NAME = "terminal-session-state";
@@ -46,6 +49,7 @@ export type DaemonTerminalWorkspaceBackendOptions = {
 };
 
 export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
+  private agentShellIntegration: AgentShellIntegration | undefined;
   private readonly changeSessionsEmitter = new vscode.EventEmitter<void>();
   private readonly changeSessionActivityEmitter =
     new vscode.EventEmitter<TerminalWorkspaceBackendActivityChange>();
@@ -71,6 +75,9 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   }
 
   public async initialize(sessionRecords: readonly SessionRecord[]): Promise<void> {
+    this.agentShellIntegration = await ensureAgentShellIntegration(
+      path.join(this.options.context.globalStorageUri.fsPath, "terminal-host-daemon"),
+    );
     this.syncSessions(sessionRecords);
     await this.runtime.ensureReady();
     await this.runtime.configure(this.getIdleShutdownTimeoutMs());
@@ -203,8 +210,10 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       rows: 34,
       sessionId: sessionRecord.sessionId,
       sessionStateFilePath: this.getSessionAgentStateFilePath(sessionRecord.sessionId),
+      ...createAgentShellIntegrationEnvironmentRequest(this.agentShellIntegration),
       shell: getDefaultShell(),
       terminalEngine: sessionRecord.terminalEngine,
+      xtermHeadlessScrollback: getXtermHeadlessScrollback(),
       workspaceId: this.options.workspaceId,
     });
     const snapshot = createOrAttachResult.session;

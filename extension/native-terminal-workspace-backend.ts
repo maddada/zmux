@@ -12,6 +12,7 @@ import type {
   TerminalSessionSnapshot,
 } from "../shared/terminal-host-protocol";
 import { ensureAgentShellIntegration, type AgentShellIntegration } from "./agent-shell-integration";
+import { applyAgentShellIntegrationEnvironment } from "./agent-shell-integration-environment";
 import {
   createManagedTerminalEnvironment,
   getManagedTerminalIdentity,
@@ -1640,20 +1641,17 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   }
 
   private createTerminalEnvironment(sessionId: string): Record<string, string> {
-    const environment = createManagedTerminalEnvironment(
-      this.options.workspaceId,
-      sessionId,
-      this.getSessionAgentStateFilePath(sessionId),
+    return applyAgentShellIntegrationEnvironment(
+      createManagedTerminalEnvironment(
+        this.options.workspaceId,
+        sessionId,
+        this.getSessionAgentStateFilePath(sessionId),
+      ),
+      {
+        shellIntegrationBinDir: this.agentShellIntegration?.binDir,
+        shellIntegrationZdotDir: this.agentShellIntegration?.zshDotDir,
+      },
     );
-
-    if (this.agentShellIntegration) {
-      environment.PATH = `${this.agentShellIntegration.binDir}${path.delimiter}${process.env.PATH ?? ""}`;
-      if (process.platform !== "win32") {
-        environment.ZDOTDIR = this.agentShellIntegration.zshDotDir;
-      }
-    }
-
-    return environment;
   }
 
   private getSessionSurfaceTitle(sessionId: string): string | undefined {

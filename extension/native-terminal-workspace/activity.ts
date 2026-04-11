@@ -65,8 +65,10 @@ export function getEffectiveSessionActivity(
 
   const sessionId = sessionRecord.sessionId;
   const now = Date.now();
+  const shouldTrustNativeAgentStatus = isTrustedNativeAgentStatus(sessionSnapshot.agentName);
   const activitySuppressedUntil = context.getActivitySuppressedUntil?.(sessionRecord);
   if (
+    !shouldTrustNativeAgentStatus &&
     activitySuppressedUntil !== undefined &&
     Number.isFinite(activitySuppressedUntil) &&
     now < activitySuppressedUntil
@@ -97,8 +99,10 @@ export function getEffectiveSessionActivity(
     const workingDurationMs =
       workingStartedAt === undefined ? undefined : Math.max(0, now - workingStartedAt);
     if (
+      !shouldTrustNativeAgentStatus &&
       workingStartedAt === undefined ||
-      (workingDurationMs ?? 0) < MIN_WORKING_DURATION_BEFORE_ATTENTION_MS
+      (!shouldTrustNativeAgentStatus &&
+        (workingDurationMs ?? 0) < MIN_WORKING_DURATION_BEFORE_ATTENTION_MS)
     ) {
       context.workingStartedAtBySessionId.delete(sessionId);
       return {
@@ -123,6 +127,10 @@ export function getEffectiveSessionActivity(
     agentName: sessionSnapshot.agentName,
     workingDurationMs,
   };
+}
+
+function isTrustedNativeAgentStatus(agentName: string | undefined): boolean {
+  return agentName?.trim().toLowerCase() === "opencode";
 }
 
 export async function syncKnownSessionActivities(

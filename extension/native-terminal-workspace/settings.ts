@@ -49,10 +49,15 @@ export const TERMINAL_LETTER_SPACING_SETTING = "terminalLetterSpacing";
 export const TERMINAL_CURSOR_STYLE_SETTING = "terminalCursorStyle";
 export const TERMINAL_CURSOR_BLINK_SETTING = "terminalCursorBlink";
 export const TERMINAL_ENGINE_SETTING = "terminalEngine";
+export const XTERM_HEADLESS_SCROLLBACK_SETTING = "xtermHeadlessScrollback";
 export const TERMINAL_SCROLL_TO_BOTTOM_WHEN_TYPING_SETTING = "terminalScrollToBottomWhenTyping";
 export const MIN_TERMINAL_FONT_SIZE = 8;
 export const MAX_TERMINAL_FONT_SIZE = 32;
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
+export const MIN_XTERM_HEADLESS_SCROLLBACK = 100;
+export const MAX_XTERM_HEADLESS_SCROLLBACK = 100_000;
+export const DEFAULT_XTERM_HEADLESS_SCROLLBACK = 50_000;
+export const XTERM_FRONTEND_SCROLLBACK_MULTIPLIER = 1.5;
 export const WORKSPACE_PANE_GAP_SETTING = "workspacePaneGap";
 export const WORKSPACE_ACTIVE_PANE_BORDER_COLOR_SETTING = "workspaceActivePaneBorderColor";
 export const COMPLETION_BELL_ENABLED_KEY = "VSmux.completionBellEnabled";
@@ -231,7 +236,7 @@ export function getAutoOpenSidebarViewsOnStartup(): boolean {
   return (
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<boolean>(AUTO_OPEN_SIDEBAR_VIEWS_ON_STARTUP_SETTING, true) ?? true
+      .get<boolean>(AUTO_OPEN_SIDEBAR_VIEWS_ON_STARTUP_SETTING, false) ?? false
   );
 }
 
@@ -406,6 +411,34 @@ export function getDefaultTerminalEngine(): TerminalEngine {
       .getConfiguration(SETTINGS_SECTION)
       .get<string>(TERMINAL_ENGINE_SETTING, "xterm") ?? "xterm";
   return normalizeTerminalEngine(value);
+}
+
+export function getXtermHeadlessScrollback(): number {
+  const value =
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<number>(XTERM_HEADLESS_SCROLLBACK_SETTING, DEFAULT_XTERM_HEADLESS_SCROLLBACK) ??
+    DEFAULT_XTERM_HEADLESS_SCROLLBACK;
+  return clampXtermHeadlessScrollback(value);
+}
+
+export function clampXtermHeadlessScrollback(value: number): number {
+  return clampNumber(
+    value,
+    MIN_XTERM_HEADLESS_SCROLLBACK,
+    MAX_XTERM_HEADLESS_SCROLLBACK,
+    DEFAULT_XTERM_HEADLESS_SCROLLBACK,
+  );
+}
+
+export function getXtermFrontendScrollback(headlessScrollback = getXtermHeadlessScrollback()): number {
+  return Math.min(
+    MAX_XTERM_HEADLESS_SCROLLBACK,
+    Math.max(
+      MIN_XTERM_HEADLESS_SCROLLBACK,
+      Math.round(headlessScrollback * XTERM_FRONTEND_SCROLLBACK_MULTIPLIER),
+    ),
+  );
 }
 
 export function getTerminalScrollToBottomWhenTyping(): boolean {

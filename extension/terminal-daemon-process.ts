@@ -6,6 +6,7 @@ import * as pty from "@lydell/node-pty";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { createManagedTerminalEnvironment } from "./native-managed-terminal";
+import { applyAgentShellIntegrationEnvironment } from "./agent-shell-integration-environment";
 import {
   createPendingAttachQueue,
   createTerminalReplayChunks,
@@ -103,12 +104,15 @@ const DAEMON_OWNER_STARTUP_GRACE_MS = 30_000;
 const MAX_HISTORY_BYTES = 8 * 1024 * 1024;
 const SESSION_ATTACH_READY_TIMEOUT_MS = 15_000;
 const REPLAY_CHUNK_BYTES = 128 * 1024;
+const MAX_XTERM_HEADLESS_SCROLLBACK = 100_000;
+const DEFAULT_XTERM_HEADLESS_SCROLLBACK = 50_000;
 const INFO_FILE_NAME = "daemon-info.json";
 const DAEMON_DEBUG_LOG_FILE_NAME = "terminal-daemon-debug.log";
 const DAEMON_DEBUG_EVENT_ALLOWLIST = new Set<string>([
   "daemon.start",
   "daemon.startSkippedExisting",
   "daemon.shutdown",
+  "daemon.sessionCreateEnvironment",
   "daemon.sessionSocketRejected",
   "daemon.sessionSocketAccepted",
   "daemon.sessionAttachmentStarted",
@@ -465,15 +469,38 @@ async function handleAcknowledgeAttentionRequest(
 function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSession {
   const sessionKey = createTerminalDaemonSessionKey(request.workspaceId, request.sessionId);
   const terminalEngine = normalizeTerminalEngine(request.terminalEngine);
+  const environment = createPtyEnvironment(
+    request.workspaceId,
+    request.sessionId,
+    request.sessionStateFilePath,
+    {
+      shellIntegrationBinDir: request.shellIntegrationBinDir,
+      shellIntegrationZdotDir: request.shellIntegrationZdotDir,
+    },
+  );
+  void logDaemonDebug("daemon.sessionCreateEnvironment", {
+    hasShellIntegrationBinDir: Boolean(request.shellIntegrationBinDir),
+    hasShellIntegrationZdotDir: Boolean(request.shellIntegrationZdotDir),
+    pathPrefix: environment.PATH?.split(path.delimiter).at(0),
+    sessionId: request.sessionId,
+    shell: request.shell,
+    workspaceId: request.workspaceId,
+    zdotdir: environment.ZDOTDIR,
+  });
   const spawnedPty = pty.spawn(request.shell, [], {
     cols: request.cols,
     cwd: request.cwd,
     encoding: null,
-    env: createPtyEnvironment(request.workspaceId, request.sessionId, request.sessionStateFilePath),
+    env: environment,
     name: "xterm-256color",
     rows: request.rows,
   });
-  const xtermState = createXtermSessionState(terminalEngine, request.cols, request.rows);
+  const xtermState = createXtermSessionState(
+    terminalEngine,
+    request.cols,
+    request.rows,
+    request.xtermHeadlessScrollback,
+  );
 
   const session: ManagedSession = {
     cols: request.cols,
@@ -1136,11 +1163,18 @@ function createPtyEnvironment(
   workspaceId: string,
   sessionId: string,
   sessionStateFilePath: string,
+  shellIntegrationRequest: {
+    shellIntegrationBinDir?: string;
+    shellIntegrationZdotDir?: string;
+  },
 ): Record<string, string> {
-  const environment = {
-    ...process.env,
-    ...createManagedTerminalEnvironment(workspaceId, sessionId, sessionStateFilePath),
-  } as Record<string, string>;
+  const environment = applyAgentShellIntegrationEnvironment(
+    {
+      ...process.env,
+      ...createManagedTerminalEnvironment(workspaceId, sessionId, sessionStateFilePath),
+    } as Record<string, string>,
+    shellIntegrationRequest,
+  );
 
   if (!environment.LANG || !environment.LANG.includes("UTF-8")) {
     environment.LANG = "en_US.UTF-8";
@@ -1390,6 +1424,7 @@ function createXtermSessionState(
   terminalEngine: TerminalEngine,
   cols: number,
   rows: number,
+  xtermHeadlessScrollback: number,
 ):
   | {
       headlessTerminal: HeadlessTerminal;
@@ -1404,7 +1439,7 @@ function createXtermSessionState(
     allowProposedApi: true,
     cols,
     rows,
-    scrollback: 200_000,
+    scrollback: clampXtermHeadlessScrollback(xtermHeadlessScrollback),
   });
   const serializeAddon = new SerializeAddon();
   headlessTerminal.loadAddon(serializeAddon);
@@ -1440,4 +1475,12 @@ function createSessionReplayPayloads(
 
   const serializedState = serializeSessionHistory(session);
   return serializedState.length > 0 ? [Buffer.from(serializedState, "utf8")] : [];
+}
+
+function clampXtermHeadlessScrollback(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_XTERM_HEADLESS_SCROLLBACK;
+  }
+
+  return Math.max(100, Math.min(MAX_XTERM_HEADLESS_SCROLLBACK, Math.round(value)));
 }

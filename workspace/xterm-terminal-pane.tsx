@@ -34,6 +34,7 @@ const VISIBLE_REFIT_DELAY_MS = 1_000;
 const POST_RECONNECT_HEIGHT_NUDGE_PX = 100;
 const NUDGE_RESTORE_TIMEOUT_MS = 250;
 const SCROLL_TO_BOTTOM_BUTTON_MARGIN_PX = 200;
+const SCROLL_ANCHOR_BOTTOM_THRESHOLD_ROWS = 1;
 const SOCKET_RECONNECT_BASE_DELAY_MS = 250;
 const SOCKET_RECONNECT_MAX_DELAY_MS = 2_000;
 const SOCKET_ACTIVITY_IDLE_SUMMARY_MS = 1_000;
@@ -76,6 +77,7 @@ export type XtermTerminalPaneProps = {
   onActivate: (source: "focusin" | "pointer") => void;
   pane: WorkspacePanelTerminalPane;
   refreshRequestId: number;
+  scrollToBottomRequestId?: number;
   terminalAppearance: WorkspacePanelTerminalAppearance;
 };
 
@@ -145,6 +147,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   onActivate,
   pane,
   refreshRequestId,
+  scrollToBottomRequestId,
   terminalAppearance,
 }) => {
   const terminalAppearanceDependencies = getTerminalAppearanceDependencies(terminalAppearance);
@@ -157,11 +160,15 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   const fitRef = useRef<FitAddon | null>(null);
   const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const handledRefreshRequestIdRef = useRef(refreshRequestId);
+  const handledScrollToBottomRequestIdRef = useRef<number | undefined>(undefined);
   const isVisibleRef = useRef(isVisible);
   const isFocusedRef = useRef(isFocused);
   const isTerminalOpenRef = useRef(false);
   const lastMeasuredSizeRef = useRef<{ height: number; width: number } | undefined>(undefined);
   const nudgeTerminalHeightRef = useRef<((afterNudge?: () => void) => void) | null>(null);
+  const preserveTerminalBottomLockRef = useRef<(<T>(applyLayoutChange: () => T) => T) | null>(
+    null,
+  );
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const streamAttachAddonRef = useRef<AttachAddon | null>(null);
@@ -173,6 +180,15 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   const [searchRegex, setSearchRegex] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResultsState>(SEARCH_RESULTS_EMPTY);
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
+
+  const withPreservedTerminalBottomLock = <T,>(applyLayoutChange: () => T): T => {
+    const preserveTerminalBottomLock = preserveTerminalBottomLockRef.current;
+    if (!preserveTerminalBottomLock) {
+      return applyLayoutChange();
+    }
+
+    return preserveTerminalBottomLock(applyLayoutChange);
+  };
 
   useEffect(() => {
     debugLogRef.current = debugLog;
@@ -199,6 +215,23 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     };
     logWorkspaceDebug(debuggingModeRef.current, event, decoratedPayload);
     debugLogRef.current?.(event, decoratedPayload);
+  };
+
+  const scrollTerminalToBottom = () => {
+    const terminal = terminalRef.current;
+    if (!terminal || !isTerminalOpenRef.current) {
+      return false;
+    }
+
+    terminal.focus();
+    terminal.scrollToBottom();
+    nudgeTerminalHeightRef.current?.(() => {
+      terminal.scrollToBottom();
+      requestAnimationFrame(() => {
+        updateScrollToBottomButtonVisibilityRef.current?.();
+      });
+    });
+    return true;
   };
 
   const ensureWebFontsLoaded = async (
@@ -279,7 +312,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       ...getTerminalAppearanceOptions(terminalAppearance),
       fontWeight: "400",
       fontWeightBold: "700",
-      scrollback: 200_000,
+      scrollback: terminalAppearance.xtermFrontendScrollback,
       theme: getTerminalTheme(),
     });
     terminalRef.current = terminal;
@@ -381,6 +414,29 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       pendingSocketMessages = [];
     };
 
+    const shouldKeepTerminalAtBottom = (): boolean => {
+      if (!isTerminalOpenRef.current) {
+        return false;
+      }
+
+      const activeBuffer = terminal.buffer.active;
+      if (!activeBuffer) {
+        return false;
+      }
+
+      return activeBuffer.baseY - activeBuffer.viewportY <= SCROLL_ANCHOR_BOTTOM_THRESHOLD_ROWS;
+    };
+
+    const preserveTerminalBottomLock = <T,>(applyLayoutChange: () => T): T => {
+      const shouldKeepAtBottom = shouldKeepTerminalAtBottom();
+      const result = applyLayoutChange();
+      if (shouldKeepAtBottom) {
+        terminal.scrollToBottom();
+      }
+      return result;
+    };
+    preserveTerminalBottomLockRef.current = preserveTerminalBottomLock;
+
     const copySelectionToClipboard = () => {
       const selection = terminal.getSelection();
       if (!selection) {
@@ -426,9 +482,11 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         height: Math.round(bounds.height),
         width: Math.round(bounds.width),
       };
-      fit.fit();
-      sendSocketMessage(createTerminalResizeMessage(pane.sessionId, terminal.cols, terminal.rows));
-      terminal.refresh(0, terminal.rows - 1);
+      preserveTerminalBottomLock(() => {
+        fit.fit();
+        sendSocketMessage(createTerminalResizeMessage(pane.sessionId, terminal.cols, terminal.rows));
+        terminal.refresh(0, terminal.rows - 1);
+      });
     };
 
     const clearPendingNudgeRestore = () => {
@@ -880,10 +938,12 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       lastMeasuredSizeRef.current = nextMeasuredSize;
       cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
-        fit.fit();
-        sendSocketMessage(
-          createTerminalResizeMessage(pane.sessionId, terminal.cols, terminal.rows),
-        );
+        preserveTerminalBottomLock(() => {
+          fit.fit();
+          sendSocketMessage(
+            createTerminalResizeMessage(pane.sessionId, terminal.cols, terminal.rows),
+          );
+        });
       });
     });
     resizeObserver.observe(containerRef.current);
@@ -936,6 +996,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       isTerminalOpenRef.current = false;
       lastMeasuredSizeRef.current = undefined;
       nudgeTerminalHeightRef.current = null;
+      preserveTerminalBottomLockRef.current = null;
       setShowScrollToBottomButton(false);
     };
   }, [
@@ -954,8 +1015,10 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     }
 
     const timeoutId = window.setTimeout(() => {
-      fitRef.current?.fit();
-      terminalRef.current?.refresh(0, Math.max(0, (terminalRef.current?.rows ?? 1) - 1));
+      withPreservedTerminalBottomLock(() => {
+        fitRef.current?.fit();
+        terminalRef.current?.refresh(0, Math.max(0, (terminalRef.current?.rows ?? 1) - 1));
+      });
       updateScrollToBottomButtonVisibilityRef.current?.();
     }, VISIBLE_REFIT_DELAY_MS);
 
@@ -985,7 +1048,9 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     }
 
     requestAnimationFrame(() => {
-      fitRef.current?.fit();
+      withPreservedTerminalBottomLock(() => {
+        fitRef.current?.fit();
+      });
       updateScrollToBottomButtonVisibilityRef.current?.();
     });
   }, [isVisible, refreshRequestId]);
@@ -1001,18 +1066,26 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         return;
       }
 
-      terminal.options = {
-        ...getTerminalAppearanceOptions(terminalAppearance),
-        theme: getTerminalTheme(),
-      };
-      if (isVisibleRef.current) {
-        fitRef.current?.fit();
-      } else {
-        lastMeasuredSizeRef.current = undefined;
-      }
+      withPreservedTerminalBottomLock(() => {
+        terminal.options = {
+          ...getTerminalAppearanceOptions(terminalAppearance),
+          scrollback: terminalAppearance.xtermFrontendScrollback,
+          theme: getTerminalTheme(),
+        };
+        if (isVisibleRef.current) {
+          fitRef.current?.fit();
+        } else {
+          lastMeasuredSizeRef.current = undefined;
+        }
+      });
       updateScrollToBottomButtonVisibilityRef.current?.();
     });
-  }, [isVisible, terminalAppearanceFontLoadKey, ...terminalAppearanceDependencies]);
+  }, [
+    isVisible,
+    terminalAppearance.xtermFrontendScrollback,
+    terminalAppearanceFontLoadKey,
+    ...terminalAppearanceDependencies,
+  ]);
 
   useEffect(() => {
     if (!isSearchOpen) {
@@ -1039,6 +1112,53 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       setSearchResults(SEARCH_RESULTS_EMPTY);
     }
   }, [isSearchOpen, searchCaseSensitive, searchQuery, searchRegex]);
+
+  useEffect(() => {
+    if (
+      scrollToBottomRequestId === undefined ||
+      handledScrollToBottomRequestIdRef.current === scrollToBottomRequestId ||
+      !isVisible
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 12;
+
+    const tryScrollToBottom = () => {
+      if (cancelled || !isVisibleRef.current) {
+        return;
+      }
+
+      attempts += 1;
+      const didScroll = scrollTerminalToBottom();
+      if (didScroll) {
+        handledScrollToBottomRequestIdRef.current = scrollToBottomRequestId;
+        reportDebug("terminal.scrollToBottomRequestApplied", {
+          attempts,
+          requestId: scrollToBottomRequestId,
+        });
+        return;
+      }
+
+      if (attempts >= maxAttempts) {
+        reportDebug("terminal.scrollToBottomRequestTimedOut", {
+          attempts,
+          requestId: scrollToBottomRequestId,
+        });
+        return;
+      }
+
+      requestAnimationFrame(tryScrollToBottom);
+    };
+
+    tryScrollToBottom();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isVisible, scrollToBottomRequestId]);
 
   useEffect(() => {
     if (
@@ -1207,14 +1327,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
           className="terminal-pane-scroll-to-bottom"
           onClick={(event) => {
             event.stopPropagation();
-            terminalRef.current?.focus();
-            terminalRef.current?.scrollToBottom();
-            nudgeTerminalHeightRef.current?.(() => {
-              terminalRef.current?.scrollToBottom();
-              requestAnimationFrame(() => {
-                updateScrollToBottomButtonVisibilityRef.current?.();
-              });
-            });
+            scrollTerminalToBottom();
           }}
           type="button"
         >
