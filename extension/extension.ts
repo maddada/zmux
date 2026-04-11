@@ -6,6 +6,7 @@ import { maybeAutoOpenSidebarViewsOnStartup } from "./auto-open-sidebar-views";
 import { DebuggingStatusIndicator } from "./debugging-status-indicator";
 import { NativeTerminalWorkspaceController, SESSIONS_VIEW_ID } from "./native-terminal-workspace";
 import { initializeVSmuxDebugLog } from "./vsmux-debug-log";
+import { closeWorkspacePanelTabs } from "./workspace-panel";
 
 export function activate(context: vscode.ExtensionContext): void {
   initializeVSmuxDebugLog(context);
@@ -56,6 +57,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   void (async () => {
     try {
+      await closeWorkspacePanelTabs();
       await workspace.initialize();
       await maybeAutoOpenSidebarViewsOnStartup(workspace);
     } catch (error) {

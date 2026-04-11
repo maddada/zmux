@@ -18,6 +18,25 @@ type WorkspacePanelOptions = {
 };
 
 type WorkspaceRenderableMessage = WorkspacePanelHydrateMessage | WorkspacePanelSessionStateMessage;
+
+export async function closeWorkspacePanelTabs(
+  tabGroups: readonly vscode.TabGroup[] = vscode.window.tabGroups.all,
+): Promise<number> {
+  const workspaceTabs = tabGroups.flatMap((group) =>
+    group.tabs.filter((tab) => getTabWebviewViewType(tab.input) === WORKSPACE_PANEL_TYPE),
+  );
+  if (workspaceTabs.length === 0) {
+    return 0;
+  }
+
+  await vscode.window.tabGroups.close(workspaceTabs, true);
+  logVSmuxDebug("workspace.panel.closedRestoredTabs", {
+    closedTabCount: workspaceTabs.length,
+    viewColumns: workspaceTabs.map((tab) => tab.group.viewColumn),
+  });
+  return workspaceTabs.length;
+}
+
 export class WorkspacePanelManager implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private latestMessage: ExtensionToWorkspacePanelMessage | undefined;
@@ -28,12 +47,12 @@ export class WorkspacePanelManager implements vscode.Disposable {
     this.disposables.push(
       vscode.window.registerWebviewPanelSerializer(WORKSPACE_PANEL_TYPE, {
         deserializeWebviewPanel: async (webviewPanel) => {
-          if (!(await this.tryAdoptPanel(webviewPanel))) {
-            return;
-          }
-          this.panel = webviewPanel;
-          this.configurePanel(webviewPanel);
-          await this.postBufferedMessages(webviewPanel.webview);
+          logVSmuxDebug("workspace.panel.disposingRestoredPanel", {
+            active: webviewPanel.active,
+            viewColumn: webviewPanel.viewColumn,
+            visible: webviewPanel.visible,
+          });
+          webviewPanel.dispose();
         },
       }),
     );
@@ -120,18 +139,6 @@ export class WorkspacePanelManager implements vscode.Disposable {
     this.panel = panel;
     this.configurePanel(panel);
     return panel;
-  }
-
-  private async tryAdoptPanel(panel: vscode.WebviewPanel): Promise<boolean> {
-    if (!this.panel || this.panel === panel) {
-      return true;
-    }
-
-    if (panel.active || panel.visible) {
-      this.panel.reveal(panel.viewColumn ?? vscode.ViewColumn.Active, false);
-    }
-    panel.dispose();
-    return false;
   }
 
   private configurePanel(panel: vscode.WebviewPanel): void {
@@ -316,6 +323,24 @@ function isWorkspaceMessage(candidate: unknown): candidate is WorkspacePanelToEx
 
 function getNonce(): string {
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
+function getTabWebviewViewType(input: unknown): string | undefined {
+  const webviewInputConstructor = getOptionalVscodeConstructor("TabInputWebview");
+  if (
+    typeof webviewInputConstructor !== "function" ||
+    !(input instanceof webviewInputConstructor)
+  ) {
+    return undefined;
+  }
+
+  return (input as vscode.TabInputWebview).viewType;
+}
+
+function getOptionalVscodeConstructor(name: string): Function | undefined {
+  const candidate =
+    name in (vscode as object) ? (vscode as unknown as Record<string, unknown>)[name] : undefined;
+  return typeof candidate === "function" ? candidate : undefined;
 }
 
 export { WORKSPACE_PANEL_TYPE };

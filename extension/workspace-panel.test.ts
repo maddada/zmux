@@ -38,13 +38,18 @@ type MockPanelOptions = {
 
 let registeredSerializer: Serializer | undefined;
 let createdPanels: MockWebviewPanel[] = [];
-const { executeCommandMock } = vi.hoisted(() => ({
+let nextCreatedPanelOptions: MockPanelOptions | undefined;
+const { closeTabGroupsMock, executeCommandMock } = vi.hoisted(() => ({
+  closeTabGroupsMock: vi.fn(async () => true),
   executeCommandMock: vi.fn(async () => undefined),
 }));
 
 vi.mock("vscode", () => ({
   Uri: {
     joinPath: (...parts: unknown[]) => parts,
+  },
+  TabInputWebview: class TabInputWebview {
+    public constructor(public readonly viewType: string) {}
   },
   commands: {
     executeCommand: executeCommandMock,
@@ -60,7 +65,8 @@ vi.mock("vscode", () => ({
       dispose: vi.fn(),
     })),
     createWebviewPanel: vi.fn((_viewType: string, _title: string, viewColumn: number) => {
-      const panel = createMockPanel({ viewColumn });
+      const panel = createMockPanel({ ...nextCreatedPanelOptions, viewColumn });
+      nextCreatedPanelOptions = undefined;
       createdPanels.push(panel);
       return panel;
     }),
@@ -68,6 +74,10 @@ vi.mock("vscode", () => ({
       registeredSerializer = serializer;
       return createDisposable();
     }),
+    tabGroups: {
+      all: [],
+      close: closeTabGroupsMock,
+    },
   },
   workspace: {
     getConfiguration: vi.fn(() => ({
@@ -76,34 +86,97 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { WorkspacePanelManager } from "./workspace-panel";
+import * as vscode from "vscode";
+import { closeWorkspacePanelTabs, WorkspacePanelManager } from "./workspace-panel";
 
 describe("WorkspacePanelManager", () => {
   beforeEach(() => {
     createdPanels = [];
     registeredSerializer = undefined;
     executeCommandMock.mockClear();
+    closeTabGroupsMock.mockClear();
+    nextCreatedPanelOptions = undefined;
+    (vscode.window.tabGroups.all as unknown as unknown[]) = [];
   });
 
-  test("should dispose duplicate restored workspace panels", async () => {
+  test("should close restored VSmux workspace tabs on startup", async () => {
+    const closedCount = await closeWorkspacePanelTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            group: { viewColumn: 1 },
+            input: new vscode.TabInputWebview("vsmux.workspace"),
+            isActive: true,
+            label: "VSmux",
+          },
+          {
+            group: { viewColumn: 1 },
+            input: new vscode.TabInputWebview("workbench.welcomePage"),
+            isActive: false,
+            label: "Welcome",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+      {
+        isActive: false,
+        tabs: [
+          {
+            group: { viewColumn: 2 },
+            input: new vscode.TabInputWebview("vsmux.workspace"),
+            isActive: false,
+            label: "VSmux",
+          },
+        ],
+        viewColumn: 2,
+      } as never,
+    ]);
+
+    expect(closedCount).toBe(2);
+    expect(closeTabGroupsMock).toHaveBeenCalledWith(
+      [expect.objectContaining({ label: "VSmux" }), expect.objectContaining({ label: "VSmux" })],
+      true,
+    );
+  });
+
+  test("should skip tab closing when no restored VSmux workspace tabs exist", async () => {
+    const closedCount = await closeWorkspacePanelTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            group: { viewColumn: 1 },
+            input: new vscode.TabInputWebview("workbench.welcomePage"),
+            isActive: true,
+            label: "Welcome",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(closedCount).toBe(0);
+    expect(closeTabGroupsMock).not.toHaveBeenCalled();
+  });
+
+  test("should dispose restored workspace panels instead of adopting them", async () => {
     const manager = new WorkspacePanelManager({
       context: createMockContext(),
       onMessage: vi.fn(),
     });
-    const firstPanel = createMockPanel({ viewColumn: 1 });
-    const duplicatePanel = createMockPanel({ active: true, viewColumn: 2, visible: true });
+    const restoredPanel = createMockPanel({ active: true, viewColumn: 2, visible: true });
 
-    await registeredSerializer?.deserializeWebviewPanel(firstPanel);
-    await registeredSerializer?.deserializeWebviewPanel(duplicatePanel);
+    await registeredSerializer?.deserializeWebviewPanel(restoredPanel);
+    await manager.reveal();
 
-    expect(firstPanel.dispose).not.toHaveBeenCalled();
-    expect(firstPanel.reveal).toHaveBeenCalledWith(2, false);
-    expect(duplicatePanel.dispose).toHaveBeenCalledTimes(1);
+    expect(restoredPanel.dispose).toHaveBeenCalledTimes(1);
+    expect(createdPanels).toHaveLength(1);
 
     manager.dispose();
   });
 
-  test("should reuse the restored panel when revealing the workspace", async () => {
+  test("should create a fresh workspace panel after discarding a restored one", async () => {
     const manager = new WorkspacePanelManager({
       context: createMockContext(),
       onMessage: vi.fn(),
@@ -113,8 +186,8 @@ describe("WorkspacePanelManager", () => {
     await registeredSerializer?.deserializeWebviewPanel(restoredPanel);
     await manager.reveal();
 
-    expect(createdPanels).toHaveLength(0);
-    expect(restoredPanel.reveal).toHaveBeenCalledWith(1, false);
+    expect(restoredPanel.dispose).toHaveBeenCalledTimes(1);
+    expect(createdPanels).toHaveLength(1);
 
     manager.dispose();
   });
@@ -124,17 +197,19 @@ describe("WorkspacePanelManager", () => {
       context: createMockContext(),
       onMessage: vi.fn(),
     });
-    const restoredPanel = createMockPanel({
+    nextCreatedPanelOptions = {
       onHtmlAssigned: (panel) => {
         panel.webview.messageListeners[0]?.({ type: "ready" });
       },
-      viewColumn: 3,
-    });
+    };
 
-    await registeredSerializer?.deserializeWebviewPanel(restoredPanel);
+    await manager.reveal();
 
-    expect(restoredPanel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(1);
-    expect(restoredPanel.webview.messageListeners).toHaveLength(1);
+    const createdPanel = createdPanels[0];
+
+    expect(createdPanel).toBeDefined();
+    expect(createdPanel?.webview.onDidReceiveMessage).toHaveBeenCalledTimes(1);
+    expect(createdPanel?.webview.messageListeners).toHaveLength(1);
 
     manager.dispose();
   });
