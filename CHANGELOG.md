@@ -2,6 +2,13 @@
 
 All notable user-facing changes are documented in this file.
 
+## 3.1.0 - 2026-04-11
+
+- Session and history search is much more capable now, with inline session search in the sidebar plus clearer previous-session search prompts when you need to find older work quickly.
+- The workspace terminal stack is more powerful and more stable, with improved daemon shell integration, xterm-based terminal support, stronger scrollback handling, and better session helpers under the hood.
+- T3 embedding is more reliable now thanks to authenticated embed bootstrap and authorization fixes for embedded proxy requests.
+- Session restore, title detection, pane controls, and sidebar interactions have all been refined, making recovery and day-to-day workspace navigation feel smoother.
+
 ## 3.0.0 - 2026-04-09
 
 - VSmux 3.0 is a major stability step for the workspace runtime, with stronger pane visibility handling, more stable terminal host ownership, cleaner reload behavior, and better runtime reuse across session changes.

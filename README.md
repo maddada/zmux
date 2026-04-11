@@ -6,11 +6,11 @@ For VS Code: https://marketplace.visualstudio.com/items?itemName=maddada.VSmux
 
 For Cursor and Others: https://open-vsx.org/extension/maddada/VSmux
 
-## Latest Release: 3.0.0
+## Latest Release: 3.1.0
 
-- Workspace runtime stability is much stronger now, with better pane visibility, host ownership, reload handling, and runtime reuse.
-- Previous sessions are easier to recover thanks to type-to-search and a more usable history modal.
-- Titles, tooltips, headers, drag indicators, and activity timing all feel more polished across the sidebar and workspace.
+- Session search is more capable now, with inline sidebar search and better previous-session search prompts.
+- The terminal/runtime stack is stronger, with improved daemon shell integration, xterm support, scrollback behavior, and session helpers.
+- T3 embedding, session restore, pane controls, and sidebar interactions all feel more polished and reliable.
 
 Full release notes: [CHANGELOG.md](/Users/madda/dev/_active/agent-tiler/CHANGELOG.md)
 
