@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vite-plus/test";
 import { createDisconnectedSessionSnapshot } from "./terminal-workspace-environment";
 import {
   applyPersistedSessionStateToDisconnectedSnapshot,
+  createPersistedSessionActivityChange,
   hasMeaningfulAgentPresentationChange,
 } from "./daemon-terminal-workspace-backend";
 
@@ -59,5 +60,31 @@ describe("hasMeaningfulAgentPresentationChange", () => {
         agentStatusChanged: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("createPersistedSessionActivityChange", () => {
+  test("should mark completion activity when persisted state is attention", () => {
+    expect(
+      createPersistedSessionActivityChange("session-00", {
+        agentName: "opencode",
+        agentStatus: "attention",
+      }),
+    ).toEqual({
+      didComplete: true,
+      sessionId: "session-00",
+    });
+  });
+
+  test("should leave non-completion activity unmarked", () => {
+    expect(
+      createPersistedSessionActivityChange("session-00", {
+        agentName: "opencode",
+        agentStatus: "working",
+      }),
+    ).toEqual({
+      didComplete: false,
+      sessionId: "session-00",
+    });
   });
 });

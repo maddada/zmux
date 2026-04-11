@@ -505,13 +505,25 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     }
 
     this.lastTerminalActivityAtBySessionId.set(sessionId, nextActivityAtMs);
+    const activityChange = createPersistedSessionActivityChange(sessionId, persistedState.state);
     logVSmuxDebug("backend.daemon.sessionActivity.updated", {
+      didComplete: activityChange.didComplete === true,
       nextActivityAt: formatDebugActivityAt(nextActivityAtMs),
       previousActivityAt: formatDebugActivityAt(previousActivityAtMs),
       sessionId,
     });
-    this.changeSessionActivityEmitter.fire({ sessionId });
+    this.changeSessionActivityEmitter.fire(activityChange);
   }
+}
+
+export function createPersistedSessionActivityChange(
+  sessionId: string,
+  persistedState: PersistedSessionState,
+): TerminalWorkspaceBackendActivityChange {
+  return {
+    didComplete: persistedState.agentStatus === "attention",
+    sessionId,
+  };
 }
 
 function formatDebugActivityAt(value: number | undefined): string | undefined {

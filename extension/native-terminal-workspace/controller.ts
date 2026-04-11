@@ -368,8 +368,8 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           await this.refreshSidebar();
         })();
       }),
-      this.backend.onDidChangeSessionActivity(({ sessionId }) => {
-        this.syncSessionActivityState(sessionId, false);
+      this.backend.onDidChangeSessionActivity(({ didComplete, sessionId }) => {
+        this.syncSessionActivityState(sessionId, didComplete === true);
         void this.postSessionPresentationMessage(sessionId);
       }),
       this.backend.onDidChangeSessionPresentation(({ sessionId, title }) => {
@@ -1113,16 +1113,20 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     let failedResumeCount = 0;
     for (const plan of fullReloadPlans) {
-      const didResume = await this.runProgrammaticTerminalResume(plan.sessionRecord, plan.resumeAction, {
-        beforeWrite: async () => {
-          this.bumpTerminalPaneRenderNonce(plan.sessionRecord.sessionId);
-          await this.destroyWorkspaceTerminalRuntimeIfNeeded(plan.sessionRecord);
-          const reloadedSessionRecord = await this.prepareSessionForTerminalRecreate(
-            plan.sessionRecord,
-          );
-          await this.backend.restartSession(reloadedSessionRecord);
+      const didResume = await this.runProgrammaticTerminalResume(
+        plan.sessionRecord,
+        plan.resumeAction,
+        {
+          beforeWrite: async () => {
+            this.bumpTerminalPaneRenderNonce(plan.sessionRecord.sessionId);
+            await this.destroyWorkspaceTerminalRuntimeIfNeeded(plan.sessionRecord);
+            const reloadedSessionRecord = await this.prepareSessionForTerminalRecreate(
+              plan.sessionRecord,
+            );
+            await this.backend.restartSession(reloadedSessionRecord);
+          },
         },
-      });
+      );
       if (!didResume) {
         failedResumeCount += 1;
       }
@@ -1255,12 +1259,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     );
     const didReachAgentPromptTarget = await this.waitForSessionAgentPromptTarget(
       sessionRecord.sessionId,
-      agentButton.agentId
+      agentButton.agentId,
     );
     if (!didReachAgentPromptTarget) {
       await vscode.env.clipboard.writeText(prompt);
       void vscode.window.showWarningMessage(
-        'VSmux launched the agent but could not confirm it was ready for pasted input. The prompt was copied to your clipboard instead.'
+        "VSmux launched the agent but could not confirm it was ready for pasted input. The prompt was copied to your clipboard instead.",
       );
       return;
     }
@@ -1619,7 +1623,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       );
     }
 
-    const restoredTerminalTitle = getVisibleTerminalTitle(archivedSession.sidebarItem.terminalTitle);
+    const restoredTerminalTitle = getVisibleTerminalTitle(
+      archivedSession.sidebarItem.terminalTitle,
+    );
     if (restoredTerminalTitle && restoredSession.kind === "terminal") {
       this.terminalTitleBySessionId.set(restoredSession.sessionId, restoredTerminalTitle);
     }
@@ -2889,12 +2895,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     return Boolean(
       this.getProgrammaticResumeAction(sessionRecord) ??
-        buildDetachedResumeAction(
-          this.sessionAgentLaunchBySessionId.get(sessionRecord.sessionId),
-          this.getSidebarAgentIconForSession(sessionRecord.sessionId),
-          sessionRecord.title,
-          this.terminalTitleBySessionId.get(sessionRecord.sessionId),
-        ),
+      buildDetachedResumeAction(
+        this.sessionAgentLaunchBySessionId.get(sessionRecord.sessionId),
+        this.getSidebarAgentIconForSession(sessionRecord.sessionId),
+        sessionRecord.title,
+        this.terminalTitleBySessionId.get(sessionRecord.sessionId),
+      ),
     );
   }
 
@@ -4143,7 +4149,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private getT3PaneHtmlCacheKey(sessionRecord: T3SessionRecord): string {
-    if (this.pendingT3SessionIds.has(sessionRecord.sessionId) || isPendingT3Metadata(sessionRecord.t3)) {
+    if (
+      this.pendingT3SessionIds.has(sessionRecord.sessionId) ||
+      isPendingT3Metadata(sessionRecord.t3)
+    ) {
       return `pending:${sessionRecord.sessionId}`;
     }
 

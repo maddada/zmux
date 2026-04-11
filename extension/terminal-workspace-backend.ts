@@ -18,6 +18,7 @@ export type TerminalWorkspaceBackendPresentationChange = {
 };
 
 export type TerminalWorkspaceBackendActivityChange = {
+  didComplete?: boolean;
   sessionId: string;
 };
 
