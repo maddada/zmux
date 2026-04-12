@@ -163,6 +163,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   const isVisibleRef = useRef(isVisible);
   const isFocusedRef = useRef(isFocused);
   const isTerminalOpenRef = useRef(false);
+  const needsReconnectRecoveryOnVisibleRef = useRef(false);
   const applyViewportGeometryRef = useRef<
     ((options?: { force?: boolean; refresh?: boolean }) => boolean) | null
   >(null);
@@ -731,6 +732,30 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
             refresh: true,
           });
           scheduleWebglActivation();
+          if (needsReconnectRecoveryOnVisibleRef.current) {
+            needsReconnectRecoveryOnVisibleRef.current = false;
+            const reconnectRecoveryCols = terminal.cols;
+            const reconnectRecoveryRows = terminal.rows;
+            if (reconnectRecoveryCols > 0 && reconnectRecoveryRows > 0) {
+              preserveTerminalBottomLock(() => {
+                terminal.resize(reconnectRecoveryCols, reconnectRecoveryRows + 1);
+              });
+              window.requestAnimationFrame(() => {
+                if (didDispose || !isVisibleRef.current) {
+                  needsReconnectRecoveryOnVisibleRef.current = true;
+                  return;
+                }
+
+                preserveTerminalBottomLock(() => {
+                  terminal.resize(reconnectRecoveryCols, reconnectRecoveryRows);
+                });
+                applyViewportGeometry({
+                  force: true,
+                  refresh: true,
+                });
+              });
+            }
+          }
 
           if (!didCompleteFirstVisiblePaint) {
             didCompleteFirstVisiblePaint = true;
@@ -827,6 +852,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         }
 
         if (!isVisibleRef.current) {
+          needsReconnectRecoveryOnVisibleRef.current = true;
           lastMeasuredSizeRef.current = undefined;
           return;
         }
@@ -1186,6 +1212,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       webglAddon = null;
       terminal.dispose();
       isTerminalOpenRef.current = false;
+      needsReconnectRecoveryOnVisibleRef.current = false;
       applyViewportGeometryRef.current = null;
       ensureTerminalVisibleReadyRef.current = null;
       fontMetricsRef.current = null;
