@@ -1,36 +1,36 @@
 .terminal-pane-root {
-  background: #121212;
+  background: #000;
   height: 100%;
   position: relative;
   width: 100%;
 }
 
 .terminal-pane-canvas {
-  background: #121212;
+  background: #000;
   height: 100%;
   width: 100%;
 }
 
 .terminal-pane-runtime-host {
-  background: #121212;
+  background: #000;
   height: 100%;
   width: 100%;
 }
 
 .terminal-pane-canvas > .pane {
-  background: #121212;
+  background: #000;
   height: 100%;
   width: 100%;
 }
 
 .terminal-pane-runtime-host > .pane {
-  background: #121212;
+  background: #000;
   height: 100%;
   width: 100%;
 }
 
 .terminal-pane-canvas .pane-canvas {
-  background: #121212;
+  background: #000;
   display: block;
   height: 100%;
   width: 100%;

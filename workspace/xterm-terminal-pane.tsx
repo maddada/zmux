@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { IconArrowBigDownFilled } from "@tabler/icons-react";
 import { AttachAddon } from "@xterm/addon-attach";
-import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { loadFonts } from "@xterm/addon-web-fonts";
@@ -26,13 +25,10 @@ import {
 } from "./terminal-appearance";
 import { getTerminalTheme } from "./terminal-theme";
 import { logWorkspaceDebug } from "./workspace-debug";
+import { getXtermViewportDimensions, measureTerminalFont } from "./xterm-font-metrics";
 import "./terminal-pane.css";
 
 const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
-const POST_RECONNECT_REFIT_DELAY_MS = 1_000;
-const VISIBLE_REFIT_DELAY_MS = 1_000;
-const POST_RECONNECT_HEIGHT_NUDGE_PX = 100;
-const NUDGE_RESTORE_TIMEOUT_MS = 250;
 const SCROLL_TO_BOTTOM_BUTTON_MARGIN_PX = 200;
 const SCROLL_ANCHOR_BOTTOM_THRESHOLD_ROWS = 1;
 const SOCKET_RECONNECT_BASE_DELAY_MS = 250;
@@ -156,18 +152,22 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   const terminalAppearanceFontLoadKey = getTerminalAppearanceFontLoadKey(
     terminalAppearance.fontFamily,
   );
+  const terminalAppearanceOptions = getTerminalAppearanceOptions(terminalAppearance);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const debugLogRef = useRef(debugLog);
   const debuggingModeRef = useRef(debuggingMode);
-  const fitRef = useRef<FitAddon | null>(null);
+  const fontMetricsRef = useRef<ReturnType<typeof measureTerminalFont> | null>(null);
   const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const handledRefreshRequestIdRef = useRef(refreshRequestId);
   const handledScrollToBottomRequestIdRef = useRef<number | undefined>(undefined);
   const isVisibleRef = useRef(isVisible);
   const isFocusedRef = useRef(isFocused);
   const isTerminalOpenRef = useRef(false);
+  const applyViewportGeometryRef = useRef<
+    ((options?: { force?: boolean; refresh?: boolean }) => boolean) | null
+  >(null);
+  const ensureTerminalVisibleReadyRef = useRef<(() => void) | null>(null);
   const lastMeasuredSizeRef = useRef<{ height: number; width: number } | undefined>(undefined);
-  const nudgeTerminalHeightRef = useRef<((afterNudge?: () => void) => void) | null>(null);
   const preserveTerminalBottomLockRef = useRef<(<T>(applyLayoutChange: () => T) => T) | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -179,6 +179,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchRegex, setSearchRegex] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResultsState>(SEARCH_RESULTS_EMPTY);
+  const [isTerminalSurfaceReady, setIsTerminalSurfaceReady] = useState(false);
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
 
   const withPreservedTerminalBottomLock = <T,>(applyLayoutChange: () => T): T => {
@@ -225,11 +226,8 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
 
     terminal.focus();
     terminal.scrollToBottom();
-    nudgeTerminalHeightRef.current?.(() => {
-      terminal.scrollToBottom();
-      requestAnimationFrame(() => {
-        updateScrollToBottomButtonVisibilityRef.current?.();
-      });
+    requestAnimationFrame(() => {
+      updateScrollToBottomButtonVisibilityRef.current?.();
     });
     return true;
   };
@@ -259,6 +257,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         terminalWebFontLoadPromiseByKey.set(loadKey, loadPromise);
       }
       await loadPromise;
+      await document.fonts?.ready;
       reportDebug("terminal.webFontsLoadSuccess", {
         families,
         fontFamily,
@@ -303,13 +302,14 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   };
 
   useEffect(() => {
-    if (!containerRef.current) {
+    const container = containerRef.current;
+    if (!container) {
       return;
     }
 
     const terminal = new Terminal({
       allowProposedApi: true,
-      ...getTerminalAppearanceOptions(terminalAppearance),
+      ...terminalAppearanceOptions,
       fontWeight: "400",
       fontWeightBold: "700",
       scrollback: terminalAppearance.xtermFrontendScrollback,
@@ -317,9 +317,6 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     });
     terminalRef.current = terminal;
 
-    const fit = new FitAddon();
-    fitRef.current = fit;
-    terminal.loadAddon(fit);
     const searchAddon = new SearchAddon({
       highlightLimit: 1_000,
     });
@@ -334,11 +331,9 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     let didDispose = false;
     let websocket: WebSocket | undefined;
     let readySent = false;
-    let nudgeRestoreTimeoutId: number | undefined;
-    let nudgeToken = 0;
     let pendingSocketMessages: string[] = [];
-    let pendingReconnectRefitAfterData = false;
-    let reconnectRefitTimeoutId: number | undefined;
+    let pendingReconnectLayoutAfterData = false;
+    let reconnectLayoutFrame = 0;
     let reconnectSocketTimeoutId: number | undefined;
     let reconnectSocketAttempt = 0;
     let suppressPasteEvent = false;
@@ -353,6 +348,15 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     let socketIdleSummaryTimeoutId: number | undefined;
     let socketLargestFlushBytes = 0;
     let socketResizeCount = 0;
+    let initialAppearanceReady = false;
+    let pendingVisibleStartup = false;
+    let didCompleteFirstVisiblePaint = false;
+    let pendingVisibleStartupOuterFrame = 0;
+    let pendingVisibleStartupInnerFrame = 0;
+    let pendingWebglActivationOuterFrame = 0;
+    let pendingWebglActivationInnerFrame = 0;
+    let webglAddon: WebglAddon | null = null;
+    let webglUnavailable = false;
 
     const searchResultsDisposable = searchAddon.onDidChangeResults((event) => {
       setSearchResults({
@@ -463,41 +467,6 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       void pasteClipboardText();
     };
 
-    const refitTerminal = () => {
-      if (!isTerminalOpenRef.current) {
-        return;
-      }
-
-      const container = containerRef.current;
-      if (!container) {
-        return;
-      }
-
-      const bounds = container.getBoundingClientRect();
-      if (bounds.width <= 0 || bounds.height <= 0) {
-        return;
-      }
-
-      lastMeasuredSizeRef.current = {
-        height: Math.round(bounds.height),
-        width: Math.round(bounds.width),
-      };
-      preserveTerminalBottomLock(() => {
-        fit.fit();
-        sendSocketMessage(
-          createTerminalResizeMessage(pane.sessionId, terminal.cols, terminal.rows),
-        );
-        terminal.refresh(0, terminal.rows - 1);
-      });
-    };
-
-    const clearPendingNudgeRestore = () => {
-      if (nudgeRestoreTimeoutId !== undefined) {
-        window.clearTimeout(nudgeRestoreTimeoutId);
-        nudgeRestoreTimeoutId = undefined;
-      }
-    };
-
     const clearSocketIdleSummaryTimeout = () => {
       if (socketIdleSummaryTimeoutId !== undefined) {
         window.clearTimeout(socketIdleSummaryTimeoutId);
@@ -523,6 +492,272 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       socketResizeCount = 0;
       clearSocketIdleSummaryTimeout();
     };
+
+    const measureFontMetrics = () => {
+      const currentContainer = containerRef.current;
+      if (!currentContainer) {
+        return fontMetricsRef.current;
+      }
+
+      const nextMetrics = measureTerminalFont({
+        appearance: terminalAppearanceOptions,
+        container: currentContainer,
+        useDevicePixelAdjustment: rendererMode !== "fallback",
+      });
+      if (nextMetrics) {
+        fontMetricsRef.current = nextMetrics;
+      }
+      return nextMetrics;
+    };
+
+    const applyViewportGeometry = (options?: { force?: boolean; refresh?: boolean }): boolean => {
+      if (!isTerminalOpenRef.current) {
+        return false;
+      }
+
+      const currentContainer = containerRef.current;
+      if (!currentContainer) {
+        return false;
+      }
+
+      const bounds = currentContainer.getBoundingClientRect();
+      if (bounds.width <= 0 || bounds.height <= 0) {
+        lastMeasuredSizeRef.current = undefined;
+        return false;
+      }
+
+      const nextMeasuredSize = {
+        height: Math.round(bounds.height),
+        width: Math.round(bounds.width),
+      };
+      const previousMeasuredSize = lastMeasuredSizeRef.current;
+      if (
+        !options?.force &&
+        previousMeasuredSize &&
+        previousMeasuredSize.width === nextMeasuredSize.width &&
+        previousMeasuredSize.height === nextMeasuredSize.height
+      ) {
+        return false;
+      }
+
+      const currentWindow = currentContainer.ownerDocument.defaultView;
+      const fontMetrics = measureFontMetrics();
+      if (!currentWindow || !fontMetrics) {
+        return false;
+      }
+
+      const nextDimensions = getXtermViewportDimensions({
+        containerHeight: bounds.height,
+        containerWidth: bounds.width,
+        font: fontMetrics,
+        window: currentWindow,
+      });
+      if (!nextDimensions) {
+        return false;
+      }
+
+      lastMeasuredSizeRef.current = nextMeasuredSize;
+      preserveTerminalBottomLock(() => {
+        if (terminal.cols !== nextDimensions.cols || terminal.rows !== nextDimensions.rows) {
+          terminal.resize(nextDimensions.cols, nextDimensions.rows);
+        }
+        if (options?.refresh) {
+          terminal.refresh(0, Math.max(0, terminal.rows - 1));
+        }
+      });
+      updateScrollToBottomButtonVisibility();
+      return true;
+    };
+    applyViewportGeometryRef.current = applyViewportGeometry;
+
+    const clearPendingWebglActivation = () => {
+      if (pendingWebglActivationOuterFrame !== 0) {
+        window.cancelAnimationFrame(pendingWebglActivationOuterFrame);
+        pendingWebglActivationOuterFrame = 0;
+      }
+      if (pendingWebglActivationInnerFrame !== 0) {
+        window.cancelAnimationFrame(pendingWebglActivationInnerFrame);
+        pendingWebglActivationInnerFrame = 0;
+      }
+    };
+
+    const clearPendingVisibleStartup = () => {
+      if (pendingVisibleStartupOuterFrame !== 0) {
+        window.cancelAnimationFrame(pendingVisibleStartupOuterFrame);
+        pendingVisibleStartupOuterFrame = 0;
+      }
+      if (pendingVisibleStartupInnerFrame !== 0) {
+        window.cancelAnimationFrame(pendingVisibleStartupInnerFrame);
+        pendingVisibleStartupInnerFrame = 0;
+      }
+    };
+
+    const enableWebglRenderer = () => {
+      if (
+        didDispose ||
+        webglUnavailable ||
+        webglAddon ||
+        !isTerminalOpenRef.current ||
+        !isVisibleRef.current
+      ) {
+        return;
+      }
+
+      try {
+        const nextWebglAddon = new WebglAddon();
+        nextWebglAddon.onContextLoss(() => {
+          rendererMode = "fallback";
+          webglUnavailable = true;
+          nextWebglAddon.dispose();
+          webglAddon = null;
+          fontMetricsRef.current = measureFontMetrics();
+          if (isVisibleRef.current) {
+            requestAnimationFrame(() => {
+              applyViewportGeometry({
+                force: true,
+                refresh: true,
+              });
+            });
+          }
+        });
+        terminal.loadAddon(nextWebglAddon);
+        webglAddon = nextWebglAddon;
+        rendererMode = "webgl";
+        fontMetricsRef.current = measureFontMetrics();
+      } catch {
+        rendererMode = "fallback";
+        webglUnavailable = true;
+        fontMetricsRef.current = measureFontMetrics();
+      }
+    };
+
+    const scheduleWebglActivation = () => {
+      if (
+        didDispose ||
+        webglUnavailable ||
+        webglAddon ||
+        !isTerminalOpenRef.current ||
+        !isVisibleRef.current
+      ) {
+        return;
+      }
+
+      clearPendingWebglActivation();
+      pendingWebglActivationOuterFrame = window.requestAnimationFrame(() => {
+        pendingWebglActivationOuterFrame = 0;
+        pendingWebglActivationInnerFrame = window.requestAnimationFrame(() => {
+          pendingWebglActivationInnerFrame = 0;
+          if (didDispose || !isVisibleRef.current) {
+            return;
+          }
+
+          enableWebglRenderer();
+          applyViewportGeometry({
+            force: true,
+            refresh: true,
+          });
+        });
+      });
+    };
+
+    const ensureTerminalVisibleReady = () => {
+      if (didDispose || !isVisibleRef.current) {
+        pendingVisibleStartup = true;
+        return;
+      }
+
+      if (!initialAppearanceReady) {
+        pendingVisibleStartup = true;
+        return;
+      }
+
+      const currentContainer = containerRef.current;
+      if (!currentContainer) {
+        return;
+      }
+
+      const currentWindow = currentContainer.ownerDocument.defaultView;
+      const bounds = currentContainer.getBoundingClientRect();
+      if (
+        currentWindow?.document.visibilityState !== "visible" ||
+        bounds.width <= 0 ||
+        bounds.height <= 0
+      ) {
+        pendingVisibleStartup = true;
+        return;
+      }
+
+      pendingVisibleStartup = false;
+      if (!didCompleteFirstVisiblePaint) {
+        setIsTerminalSurfaceReady(false);
+      }
+      clearPendingVisibleStartup();
+      pendingVisibleStartupOuterFrame = window.requestAnimationFrame(() => {
+        pendingVisibleStartupOuterFrame = 0;
+        pendingVisibleStartupInnerFrame = window.requestAnimationFrame(() => {
+          pendingVisibleStartupInnerFrame = 0;
+          if (didDispose || !isVisibleRef.current) {
+            pendingVisibleStartup = true;
+            return;
+          }
+
+          const readyContainer = containerRef.current;
+          if (!readyContainer) {
+            return;
+          }
+
+          const readyWindow = readyContainer.ownerDocument.defaultView;
+          const readyBounds = readyContainer.getBoundingClientRect();
+          if (
+            readyWindow?.document.visibilityState !== "visible" ||
+            readyBounds.width <= 0 ||
+            readyBounds.height <= 0
+          ) {
+            pendingVisibleStartup = true;
+            return;
+          }
+
+          if (!isTerminalOpenRef.current) {
+            terminal.open(readyContainer);
+            isTerminalOpenRef.current = true;
+          }
+
+          if (document.hasFocus() && isFocusedRef.current) {
+            terminal.focus();
+          }
+
+          applyViewportGeometry({
+            force: true,
+            refresh: true,
+          });
+          scheduleWebglActivation();
+
+          if (!didCompleteFirstVisiblePaint) {
+            didCompleteFirstVisiblePaint = true;
+            window.requestAnimationFrame(() => {
+              if (didDispose || !isVisibleRef.current) {
+                return;
+              }
+
+              window.requestAnimationFrame(() => {
+                if (didDispose || !isVisibleRef.current) {
+                  return;
+                }
+
+                applyViewportGeometry({
+                  force: true,
+                  refresh: true,
+                });
+                setIsTerminalSurfaceReady(true);
+              });
+            });
+          } else {
+            setIsTerminalSurfaceReady(true);
+          }
+        });
+      });
+    };
+    ensureTerminalVisibleReadyRef.current = ensureTerminalVisibleReady;
 
     const logSocketConnectionSummary = (reason: "close" | "error" | "idle") => {
       if (!socketOpenedAtMs) {
@@ -576,17 +811,17 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       scheduleSocketIdleSummary();
     };
 
-    const scheduleReconnectRefit = () => {
-      if (!pendingReconnectRefitAfterData) {
+    const scheduleReconnectLayoutRefresh = () => {
+      if (!pendingReconnectLayoutAfterData) {
         return;
       }
 
-      pendingReconnectRefitAfterData = false;
-      if (reconnectRefitTimeoutId !== undefined) {
-        window.clearTimeout(reconnectRefitTimeoutId);
+      pendingReconnectLayoutAfterData = false;
+      if (reconnectLayoutFrame !== 0) {
+        window.cancelAnimationFrame(reconnectLayoutFrame);
       }
-      reconnectRefitTimeoutId = window.setTimeout(() => {
-        reconnectRefitTimeoutId = undefined;
+      reconnectLayoutFrame = window.requestAnimationFrame(() => {
+        reconnectLayoutFrame = 0;
         if (didDispose) {
           return;
         }
@@ -596,58 +831,12 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
           return;
         }
 
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (didDispose) {
-              return;
-            }
-
-            refitTerminal();
-            nudgeTerminalHeight();
-          });
-        });
-      }, POST_RECONNECT_REFIT_DELAY_MS);
-    };
-
-    const nudgeTerminalHeight = (afterNudge?: () => void) => {
-      const container = containerRef.current;
-      if (!container) {
-        return;
-      }
-
-      const bounds = container.getBoundingClientRect();
-      if (bounds.width <= 0 || bounds.height <= 0) {
-        return;
-      }
-
-      clearPendingNudgeRestore();
-      nudgeToken += 1;
-      const currentNudgeToken = nudgeToken;
-      const rowHeightPx = bounds.height / Math.max(1, terminal.rows);
-      const rowNudge = Math.max(1, Math.round(POST_RECONNECT_HEIGHT_NUDGE_PX / rowHeightPx));
-      const restoreFromNudge = () => {
-        if (didDispose || currentNudgeToken !== nudgeToken) {
-          return;
-        }
-
-        clearPendingNudgeRestore();
-        refitTerminal();
-        updateScrollToBottomButtonVisibility();
-        afterNudge?.();
-      };
-
-      terminal.resize(terminal.cols, terminal.rows + rowNudge);
-      terminal.refresh(0, terminal.rows - 1);
-      nudgeRestoreTimeoutId = window.setTimeout(() => {
-        restoreFromNudge();
-      }, NUDGE_RESTORE_TIMEOUT_MS);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          restoreFromNudge();
+        applyViewportGeometry({
+          force: true,
+          refresh: true,
         });
       });
     };
-    nudgeTerminalHeightRef.current = nudgeTerminalHeight;
 
     const connectWebsocket = () => {
       if (connection.mock || websocket || didDispose) {
@@ -677,7 +866,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       sessionSocket.addEventListener("message", (event) => {
         if (typeof event.data === "string") {
           noteSocketBinaryChunk(new TextEncoder().encode(event.data).byteLength);
-          scheduleReconnectRefit();
+          scheduleReconnectLayoutRefresh();
           requestAnimationFrame(() => {
             updateScrollToBottomButtonVisibility();
           });
@@ -686,7 +875,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
 
         if (event.data instanceof ArrayBuffer) {
           noteSocketBinaryChunk(event.data.byteLength);
-          scheduleReconnectRefit();
+          scheduleReconnectLayoutRefresh();
           requestAnimationFrame(() => {
             updateScrollToBottomButtonVisibility();
           });
@@ -696,7 +885,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         if (event.data instanceof Blob) {
           void event.data.arrayBuffer().then((buffer) => {
             noteSocketBinaryChunk(buffer.byteLength);
-            scheduleReconnectRefit();
+            scheduleReconnectLayoutRefresh();
             requestAnimationFrame(() => {
               updateScrollToBottomButtonVisibility();
             });
@@ -710,7 +899,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         clearSocketReconnectTimeout();
         resetSocketConnectionMetrics();
         socketOpenedAtMs = performance.now();
-        pendingReconnectRefitAfterData = true;
+        pendingReconnectLayoutAfterData = true;
         sendReadyMessage();
       };
       const scheduleSocketReconnect = (reason: "close" | "error") => {
@@ -736,10 +925,10 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
 
       sessionSocket.onclose = () => {
         logSocketConnectionSummary("close");
-        pendingReconnectRefitAfterData = false;
-        if (reconnectRefitTimeoutId !== undefined) {
-          window.clearTimeout(reconnectRefitTimeoutId);
-          reconnectRefitTimeoutId = undefined;
+        pendingReconnectLayoutAfterData = false;
+        if (reconnectLayoutFrame !== 0) {
+          window.cancelAnimationFrame(reconnectLayoutFrame);
+          reconnectLayoutFrame = 0;
         }
         if (streamAttachAddonRef.current === attachAddon) {
           streamAttachAddonRef.current.dispose();
@@ -753,10 +942,10 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       };
       sessionSocket.onerror = () => {
         logSocketConnectionSummary("error");
-        pendingReconnectRefitAfterData = false;
-        if (reconnectRefitTimeoutId !== undefined) {
-          window.clearTimeout(reconnectRefitTimeoutId);
-          reconnectRefitTimeoutId = undefined;
+        pendingReconnectLayoutAfterData = false;
+        if (reconnectLayoutFrame !== 0) {
+          window.cancelAnimationFrame(reconnectLayoutFrame);
+          reconnectLayoutFrame = 0;
         }
         if (streamAttachAddonRef.current === attachAddon) {
           streamAttachAddonRef.current.dispose();
@@ -770,41 +959,41 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       };
     };
 
-    void ensureWebFontsLoaded(terminalAppearance.fontFamily, "initial").finally(() => {
+    void ensureWebFontsLoaded(terminalAppearanceOptions.fontFamily, "initial").finally(() => {
       if (didDispose || !containerRef.current) {
         return;
       }
 
-      terminal.open(containerRef.current);
-      isTerminalOpenRef.current = true;
-
-      try {
-        const webgl = new WebglAddon();
-        rendererMode = "webgl";
-        webgl.onContextLoss(() => {
-          rendererMode = "fallback";
-          webgl.dispose();
-        });
-        terminal.loadAddon(webgl);
-      } catch {
-        rendererMode = "fallback";
-      }
-
-      if (document.hasFocus() && isFocusedRef.current) {
-        terminal.focus();
-      }
-
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (didDispose) {
-            return;
-          }
-
-          refitTerminal();
-          updateScrollToBottomButtonVisibility();
-          connectWebsocket();
-        });
+      const initialFontMetrics = measureTerminalFont({
+        appearance: terminalAppearanceOptions,
+        container: containerRef.current,
       });
+      if (initialFontMetrics) {
+        fontMetricsRef.current = initialFontMetrics;
+        const currentWindow = containerRef.current.ownerDocument.defaultView;
+        const bounds = containerRef.current.getBoundingClientRect();
+        const initialDimensions = currentWindow
+          ? getXtermViewportDimensions({
+              containerHeight: bounds.height,
+              containerWidth: bounds.width,
+              font: initialFontMetrics,
+              window: currentWindow,
+            })
+          : null;
+        if (initialDimensions) {
+          terminal.resize(initialDimensions.cols, initialDimensions.rows);
+          lastMeasuredSizeRef.current = {
+            height: Math.round(bounds.height),
+            width: Math.round(bounds.width),
+          };
+        }
+      }
+
+      initialAppearanceReady = true;
+      connectWebsocket();
+      if (isVisibleRef.current || pendingVisibleStartup) {
+        ensureTerminalVisibleReady();
+      }
     });
 
     if (connection.mock && pane.snapshot?.history !== undefined) {
@@ -940,15 +1129,12 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       lastMeasuredSizeRef.current = nextMeasuredSize;
       cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
-        preserveTerminalBottomLock(() => {
-          fit.fit();
-          sendSocketMessage(
-            createTerminalResizeMessage(pane.sessionId, terminal.cols, terminal.rows),
-          );
+        applyViewportGeometry({
+          force: true,
         });
       });
     });
-    resizeObserver.observe(containerRef.current);
+    resizeObserver.observe(container);
 
     const onThemeChange = () => {
       terminal.options.theme = getTerminalTheme();
@@ -977,10 +1163,12 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
 
     return () => {
       didDispose = true;
-      if (reconnectRefitTimeoutId !== undefined) {
-        window.clearTimeout(reconnectRefitTimeoutId);
+      if (reconnectLayoutFrame !== 0) {
+        window.cancelAnimationFrame(reconnectLayoutFrame);
+        reconnectLayoutFrame = 0;
       }
-      clearPendingNudgeRestore();
+      clearPendingVisibleStartup();
+      clearPendingWebglActivation();
       clearSocketIdleSummaryTimeout();
       clearSocketReconnectTimeout();
       cancelAnimationFrame(rafId);
@@ -994,11 +1182,16 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       streamAttachAddonRef.current?.dispose();
       streamAttachAddonRef.current = null;
       websocket?.close();
+      webglAddon?.dispose();
+      webglAddon = null;
       terminal.dispose();
       isTerminalOpenRef.current = false;
+      applyViewportGeometryRef.current = null;
+      ensureTerminalVisibleReadyRef.current = null;
+      fontMetricsRef.current = null;
       lastMeasuredSizeRef.current = undefined;
-      nudgeTerminalHeightRef.current = null;
       preserveTerminalBottomLockRef.current = null;
+      setIsTerminalSurfaceReady(false);
       setShowScrollToBottomButton(false);
     };
   }, [
@@ -1008,24 +1201,22 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     connection.workspaceId,
     pane.renderNonce,
     pane.sessionId,
+    terminalAppearance.xtermFrontendScrollback,
     ...terminalAppearanceDependencies,
   ]);
 
   useEffect(() => {
-    if (!isVisible || !isTerminalOpenRef.current || !fitRef.current) {
+    if (!isVisible) {
+      lastMeasuredSizeRef.current = undefined;
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      withPreservedTerminalBottomLock(() => {
-        fitRef.current?.fit();
-        terminalRef.current?.refresh(0, Math.max(0, (terminalRef.current?.rows ?? 1) - 1));
-      });
-      updateScrollToBottomButtonVisibilityRef.current?.();
-    }, VISIBLE_REFIT_DELAY_MS);
+    const frameId = window.requestAnimationFrame(() => {
+      ensureTerminalVisibleReadyRef.current?.();
+    });
 
     return () => {
-      window.clearTimeout(timeoutId);
+      window.cancelAnimationFrame(frameId);
     };
   }, [isVisible, pane.sessionId]);
 
@@ -1050,10 +1241,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     }
 
     requestAnimationFrame(() => {
-      withPreservedTerminalBottomLock(() => {
-        fitRef.current?.fit();
-      });
-      updateScrollToBottomButtonVisibilityRef.current?.();
+      ensureTerminalVisibleReadyRef.current?.();
     });
   }, [isVisible, refreshRequestId]);
 
@@ -1063,19 +1251,24 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       return;
     }
 
-    void ensureWebFontsLoaded(terminalAppearance.fontFamily, "appearance").finally(() => {
+    void ensureWebFontsLoaded(terminalAppearanceOptions.fontFamily, "appearance").finally(() => {
       if (!terminalRef.current) {
         return;
       }
 
       withPreservedTerminalBottomLock(() => {
         terminal.options = {
-          ...getTerminalAppearanceOptions(terminalAppearance),
+          ...terminalAppearanceOptions,
           scrollback: terminalAppearance.xtermFrontendScrollback,
           theme: getTerminalTheme(),
         };
+        fontMetricsRef.current = measureTerminalFont({
+          appearance: terminalAppearanceOptions,
+          container: containerRef.current ?? terminal.element ?? document.body,
+          useDevicePixelAdjustment: true,
+        });
         if (isVisibleRef.current) {
-          fitRef.current?.fit();
+          ensureTerminalVisibleReadyRef.current?.();
         } else {
           lastMeasuredSizeRef.current = undefined;
         }
@@ -1218,7 +1411,11 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         terminalRef.current?.focus();
       }}
     >
-      <div className="terminal-pane-canvas terminal-tab" ref={containerRef} />
+      <div
+        className="terminal-pane-canvas terminal-tab"
+        ref={containerRef}
+        style={{ opacity: isTerminalSurfaceReady ? 1 : 0 }}
+      />
       {isSearchOpen ? (
         <div
           className="terminal-pane-search"
