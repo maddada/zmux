@@ -1,4 +1,4 @@
-import { IconSearch } from "@tabler/icons-react";
+import { IconSearch, IconX } from "@tabler/icons-react";
 import { useEffect, useRef } from "react";
 import type { SidebarPreviousSessionItem } from "../shared/session-grid-contract";
 import { SessionHistoryCard } from "./session-history-card";
@@ -10,6 +10,7 @@ export type SidebarSessionSearchFieldProps = {
 
 export function SidebarSessionSearchField({ query, setQuery }: SidebarSessionSearchFieldProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const hasQuery = query.length > 0;
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -36,12 +37,31 @@ export function SidebarSessionSearchField({ query, setQuery }: SidebarSessionSea
           type="text"
           value={query}
         />
-        <IconSearch
-          aria-hidden="true"
-          className="session-search-input-icon"
-          size={16}
-          stroke={1.9}
-        />
+        {hasQuery ? (
+          <button
+            aria-label="Clear session search"
+            className="session-search-clear-button"
+            onClick={() => {
+              setQuery("");
+              searchInputRef.current?.focus();
+            }}
+            type="button"
+          >
+            <IconX
+              aria-hidden="true"
+              className="session-search-input-icon"
+              size={16}
+              stroke={1.9}
+            />
+          </button>
+        ) : (
+          <IconSearch
+            aria-hidden="true"
+            className="session-search-input-icon"
+            size={16}
+            stroke={1.9}
+          />
+        )}
       </div>
     </div>
   );

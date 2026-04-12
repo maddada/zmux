@@ -67,7 +67,7 @@ describe("getSessionTitleTooltipOptions", () => {
 });
 
 describe("getSessionCardTitleTooltip", () => {
-  test("should keep plain title-only cards overflow-triggered by default", () => {
+  test("should always show the tooltip for unsynced user titles", () => {
     expect(
       getSessionCardTitleTooltip({
         session: {
@@ -83,13 +83,13 @@ describe("getSessionCardTitleTooltip", () => {
         showDebugSessionNumbers: false,
       }),
     ).toEqual({
-      headingText: "A very long session title",
-      tooltip: undefined,
-      tooltipWhen: "overflow",
+      headingText: "A very long session title ∗",
+      tooltip: "A very long session title ∗ (Unsynced title)",
+      tooltipWhen: "always",
     });
   });
 
-  test("should always show the tooltip when extra metadata exists", () => {
+  test("should include the unsynced label ahead of other tooltip metadata", () => {
     expect(
       getSessionCardTitleTooltip({
         session: {
@@ -97,7 +97,7 @@ describe("getSessionCardTitleTooltip", () => {
           agentIcon: "codex",
           alias: "Session 1",
           detail: "OpenAI Codex / repo sweep",
-          isPrimaryTitleTerminalTitle: true,
+          isPrimaryTitleTerminalTitle: false,
           primaryTitle: "A very long session title",
           sessionNumber: 3,
           terminalTitle: undefined,
@@ -106,31 +106,64 @@ describe("getSessionCardTitleTooltip", () => {
       }),
     ).toEqual({
       headingText: "A very long session title ∗",
-      tooltip: "A very long session title ∗\nrepo sweep\nSession number: 3",
+      tooltip: "A very long session title ∗ (Unsynced title)\nrepo sweep\nSession number: 3",
       tooltipWhen: "always",
+    });
+  });
+
+  test("should stop showing the unsynced marker once the terminal title matches", () => {
+    expect(
+      getSessionCardTitleTooltip({
+        session: {
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "Session 1",
+          detail: undefined,
+          isPrimaryTitleTerminalTitle: false,
+          primaryTitle: "A very long session title",
+          sessionNumber: undefined,
+          terminalTitle: "A very long session title",
+        },
+        showDebugSessionNumbers: false,
+      }),
+    ).toEqual({
+      headingText: "A very long session title",
+      tooltip: undefined,
+      tooltipWhen: "overflow",
     });
   });
 });
 
 describe("formatSessionHeadingText", () => {
-  test("should append the terminal title marker when the displayed title comes from the terminal", () => {
+  test("should append the unsynced marker when the displayed title comes from the user title", () => {
     expect(
       formatSessionHeadingText({
         alias: "Session 1",
-        isPrimaryTitleTerminalTitle: true,
+        isPrimaryTitleTerminalTitle: false,
         primaryTitle: "Claude Code",
       }),
     ).toBe("Claude Code ∗");
   });
 
-  test("should keep the raw title unchanged when the displayed title is the user title", () => {
+  test("should keep terminal-derived titles unmarked", () => {
     expect(
       formatSessionHeadingText({
         alias: "Session 1",
-        isPrimaryTitleTerminalTitle: false,
+        isPrimaryTitleTerminalTitle: true,
         primaryTitle: "Bug Fix",
       }),
     ).toBe("Bug Fix");
+  });
+
+  test("should append the unsynced label in tooltip mode", () => {
+    expect(
+      formatSessionHeadingText({
+        alias: "Session 1",
+        includeUnsyncedTitleLabel: true,
+        isPrimaryTitleTerminalTitle: false,
+        primaryTitle: "Bug Fix",
+      }),
+    ).toBe("Bug Fix ∗ (Unsynced title)");
   });
 });
 

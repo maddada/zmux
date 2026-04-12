@@ -31,6 +31,7 @@ const AGENT_SECONDARY_LABELS: Record<SidebarAgentIcon, readonly string[]> = {
 let activeOverflowTooltipId: symbol | undefined;
 let activeOverflowTooltipClose: (() => void) | undefined;
 const TERMINAL_TITLE_MARKER = "∗";
+const UNSYNCED_TITLE_LABEL = "(Unsynced title)";
 
 export type SessionCardContentProps = {
   aliasHeadingRef?: RefObject<HTMLDivElement | null>;
@@ -144,8 +145,17 @@ export function getSessionCardTitleTooltip({
   tooltipWhen: "always" | "overflow";
 } {
   const headingText = formatSessionHeadingText({
+    includeUnsyncedTitleLabel: false,
     isPrimaryTitleTerminalTitle: session.isPrimaryTitleTerminalTitle,
     primaryTitle: session.primaryTitle,
+    terminalTitle: session.terminalTitle,
+    alias: session.alias,
+  });
+  const tooltipHeadingText = formatSessionHeadingText({
+    includeUnsyncedTitleLabel: true,
+    isPrimaryTitleTerminalTitle: session.isPrimaryTitleTerminalTitle,
+    primaryTitle: session.primaryTitle,
+    terminalTitle: session.terminalTitle,
     alias: session.alias,
   });
   const secondaryText = getSessionTooltipSecondaryText(session);
@@ -155,7 +165,7 @@ export function getSessionCardTitleTooltip({
       : undefined;
   const titleTooltip = buildSessionTitleTooltip({
     debugSessionNumberTooltip,
-    headingText,
+    headingText: tooltipHeadingText,
     secondaryText,
   });
   const titleTooltipOptions = getSessionTitleTooltipOptions({
@@ -172,15 +182,30 @@ export function getSessionCardTitleTooltip({
 
 export function formatSessionHeadingText({
   alias,
+  includeUnsyncedTitleLabel = false,
   isPrimaryTitleTerminalTitle,
   primaryTitle,
-}: Pick<SidebarSessionItem, "alias" | "isPrimaryTitleTerminalTitle" | "primaryTitle">): string {
-  const baseHeadingText = primaryTitle?.trim() || alias;
-  if (!isPrimaryTitleTerminalTitle) {
+  terminalTitle,
+}: Pick<
+  SidebarSessionItem,
+  "alias" | "isPrimaryTitleTerminalTitle" | "primaryTitle" | "terminalTitle"
+> & {
+  includeUnsyncedTitleLabel?: boolean;
+}): string {
+  const normalizedPrimaryTitle = primaryTitle?.trim();
+  const normalizedTerminalTitle = terminalTitle?.trim();
+  const baseHeadingText = normalizedPrimaryTitle || alias;
+  if (
+    isPrimaryTitleTerminalTitle ||
+    !normalizedPrimaryTitle ||
+    normalizedPrimaryTitle === normalizedTerminalTitle
+  ) {
     return baseHeadingText;
   }
 
-  return `${baseHeadingText} ${TERMINAL_TITLE_MARKER}`;
+  return includeUnsyncedTitleLabel
+    ? `${baseHeadingText} ${TERMINAL_TITLE_MARKER} ${UNSYNCED_TITLE_LABEL}`
+    : `${baseHeadingText} ${TERMINAL_TITLE_MARKER}`;
 }
 
 export function buildSessionTitleTooltip({
