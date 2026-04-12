@@ -164,8 +164,8 @@ function createT3WorkspaceMessage(): SidebarHydrateMessage {
       },
       commands: [],
       completionBellEnabled: false,
-      completionSound: "ping",
-      completionSoundLabel: "Ping",
+      completionSound: "arcade",
+      completionSoundLabel: "Arcade",
       debuggingMode: false,
       focusedSessionTitle: "T3 Code",
       git: {

@@ -519,7 +519,7 @@
         "VSmux.completionSound": {
           "title": "Completion Sound",
           "type": "string",
-          "default": "ping",
+          "default": "arcade",
           "enum": [
             "arcade",
             "codecompleteafrican",
@@ -541,6 +541,32 @@
             "Shamisen"
           ],
           "description": "Sound played when an agent finishes and the per-project bell is enabled in the VSmux sidebar."
+        },
+        "VSmux.actionCompletionSound": {
+          "title": "Action Completion Sound",
+          "type": "string",
+          "default": "ping",
+          "enum": [
+            "arcade",
+            "codecompleteafrican",
+            "codecompleteafrobeat",
+            "codecompleteedm",
+            "comebacktothecode",
+            "glass",
+            "ping",
+            "shamisen"
+          ],
+          "enumItemLabels": [
+            "Arcade",
+            "African Code Complete",
+            "Afrobeat Code Complete",
+            "EDM Code Complete",
+            "Come Back To The Code",
+            "Glass",
+            "Ping",
+            "Shamisen"
+          ],
+          "description": "Sound played when a sidebar terminal action finishes, closes itself, and has sound playback enabled in its action configuration."
         },
         "VSmux.defaultBrowserLaunchUrl": {
           "title": "Default Browser Launch Url",

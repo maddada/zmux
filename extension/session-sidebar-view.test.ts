@@ -32,6 +32,36 @@ describe("isSidebarMessage", () => {
     ).toBe(false);
   });
 
+  test("should accept saveSidebarCommand messages with a valid icon and hex color", () => {
+    expect(
+      isSidebarMessage({
+        actionType: "terminal",
+        closeTerminalOnExit: false,
+        command: "pnpm dev",
+        icon: "terminal",
+        iconColor: "#d6e0f3",
+        name: "",
+        playCompletionSound: true,
+        type: "saveSidebarCommand",
+      }),
+    ).toBe(true);
+  });
+
+  test("should reject saveSidebarCommand messages with an invalid icon color", () => {
+    expect(
+      isSidebarMessage({
+        actionType: "terminal",
+        closeTerminalOnExit: false,
+        command: "pnpm dev",
+        icon: "terminal",
+        iconColor: "blue",
+        name: "",
+        playCompletionSound: true,
+        type: "saveSidebarCommand",
+      }),
+    ).toBe(false);
+  });
+
   test("should accept forkSession messages with a session id", () => {
     expect(
       isSidebarMessage({

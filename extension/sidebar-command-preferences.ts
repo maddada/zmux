@@ -8,6 +8,11 @@ import {
   type SidebarCommandButton,
   type StoredSidebarCommand,
 } from "../shared/sidebar-commands";
+import {
+  DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
+  normalizeSidebarCommandIconColor,
+  type SidebarCommandIcon,
+} from "../shared/sidebar-command-icons";
 
 const SIDEBAR_COMMANDS_KEY = "VSmux.sidebarCommands";
 const SIDEBAR_COMMAND_ORDER_KEY = "VSmux.sidebarCommandOrder";
@@ -17,7 +22,10 @@ export type SaveSidebarCommandInput = {
   actionType: SidebarActionType;
   closeTerminalOnExit: boolean;
   commandId?: string;
+  icon?: SidebarCommandIcon;
+  iconColor?: string;
   name: string;
+  playCompletionSound: boolean;
   command?: string;
   url?: string;
 };
@@ -43,8 +51,12 @@ export async function saveSidebarCommandPreference(
 ): Promise<void> {
   const name = input.name.trim();
   const command = input.command?.trim();
+  const icon = input.icon;
+  const iconColor = icon
+    ? (normalizeSidebarCommandIconColor(input.iconColor) ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR)
+    : undefined;
   const url = input.url?.trim();
-  if (!name) {
+  if (!name && !icon) {
     return;
   }
 
@@ -69,6 +81,8 @@ export async function saveSidebarCommandPreference(
     commandId,
     isDefault: isDefaultSidebarCommandId(commandId),
     name,
+    playCompletionSound: input.actionType === "terminal" ? input.playCompletionSound : false,
+    ...(icon ? { icon, iconColor } : {}),
     ...(input.actionType === "browser" ? { url } : { command }),
   };
   const existingIndex = storedCommands.findIndex((candidate) => candidate.commandId === commandId);

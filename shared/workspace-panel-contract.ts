@@ -103,10 +103,13 @@ export type WorkspacePanelShowWelcomeMessage = {
 };
 
 export type WorkspacePanelShowToastMessage = {
-  type: "showToast";
+  confirmOnTerminalEnterSessionId?: string;
+  confirmedMessage?: string;
+  confirmedTitle?: string;
   expiresAt: number;
   message: string;
   title: string;
+  type: "showToast";
 };
 
 export type WorkspacePanelCodexWelcomeSettingAppliedMessage = {

@@ -1,5 +1,6 @@
 import type { CompletionSoundSetting } from "./completion-sound";
 import type { SidebarAgentButton, SidebarAgentIcon } from "./sidebar-agents";
+import type { SidebarCommandIcon } from "./sidebar-command-icons";
 import type {
   SidebarActionType,
   SidebarCommandButton,
@@ -55,6 +56,7 @@ export type SidebarSessionItem = {
   sessionId: string;
   sessionNumber?: string;
   primaryTitle?: string;
+  isPrimaryTitleTerminalTitle?: boolean;
   terminalTitle?: string;
   alias: string;
   shortcutLabel: string;
@@ -414,7 +416,10 @@ export type SidebarToExtensionMessage =
       actionType: SidebarActionType;
       closeTerminalOnExit: boolean;
       commandId?: string;
+      icon?: SidebarCommandIcon;
+      iconColor?: string;
       name: string;
+      playCompletionSound: boolean;
       command?: string;
       url?: string;
     }

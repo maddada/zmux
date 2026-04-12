@@ -5,6 +5,7 @@ import {
   normalizeStoredSidebarCommandOrder,
   normalizeStoredSidebarCommands,
 } from "./sidebar-commands";
+import { DEFAULT_SIDEBAR_COMMAND_ICON_COLOR } from "./sidebar-command-icons";
 
 describe("createSidebarCommandButtons", () => {
   test("should expose the default terminal action slots when no actions are configured", () => {
@@ -16,6 +17,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "dev",
         isDefault: true,
         name: "Dev",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -25,6 +27,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "build",
         isDefault: true,
         name: "Build",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -34,6 +37,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "test",
         isDefault: true,
         name: "Test",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -43,6 +47,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "setup",
         isDefault: true,
         name: "Setup",
+        playCompletionSound: true,
         url: undefined,
       },
     ]);
@@ -58,6 +63,7 @@ describe("createSidebarCommandButtons", () => {
           commandId: "dev",
           isDefault: true,
           name: "App",
+          playCompletionSound: true,
         },
         {
           actionType: "browser",
@@ -65,6 +71,7 @@ describe("createSidebarCommandButtons", () => {
           commandId: "custom-docs",
           isDefault: false,
           name: "Docs",
+          playCompletionSound: false,
           url: "https://example.com/docs",
         },
       ]),
@@ -76,6 +83,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "dev",
         isDefault: true,
         name: "App",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -85,6 +93,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "build",
         isDefault: true,
         name: "Build",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -94,6 +103,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "test",
         isDefault: true,
         name: "Test",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -103,6 +113,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "setup",
         isDefault: true,
         name: "Setup",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -112,9 +123,38 @@ describe("createSidebarCommandButtons", () => {
         commandId: "custom-docs",
         isDefault: false,
         name: "Docs",
+        playCompletionSound: false,
         url: "https://example.com/docs",
       },
     ]);
+  });
+
+  test("should preserve configured icon metadata for custom actions", () => {
+    expect(
+      createSidebarCommandButtons([
+        {
+          actionType: "terminal",
+          closeTerminalOnExit: false,
+          command: "pnpm test",
+          commandId: "custom-tests",
+          icon: "bug",
+          iconColor: "#92b4ff",
+          isDefault: false,
+          name: "",
+          playCompletionSound: true,
+        },
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          commandId: "custom-tests",
+          icon: "bug",
+          iconColor: "#92b4ff",
+          name: "",
+          playCompletionSound: true,
+        }),
+      ]),
+    );
   });
 
   test("should respect a stored action order for defaults and custom actions", () => {
@@ -127,6 +167,7 @@ describe("createSidebarCommandButtons", () => {
             commandId: "custom-docs",
             isDefault: false,
             name: "Docs",
+            playCompletionSound: false,
             url: "https://example.com/docs",
           },
         ],
@@ -140,6 +181,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "test",
         isDefault: true,
         name: "Test",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -149,6 +191,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "custom-docs",
         isDefault: false,
         name: "Docs",
+        playCompletionSound: false,
         url: "https://example.com/docs",
       },
       {
@@ -158,6 +201,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "dev",
         isDefault: true,
         name: "Dev",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -167,6 +211,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "build",
         isDefault: true,
         name: "Build",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -176,6 +221,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "setup",
         isDefault: true,
         name: "Setup",
+        playCompletionSound: true,
         url: undefined,
       },
     ]);
@@ -190,6 +236,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "dev",
         isDefault: true,
         name: "Dev",
+        playCompletionSound: true,
         url: undefined,
       },
       {
@@ -199,6 +246,7 @@ describe("createSidebarCommandButtons", () => {
         commandId: "setup",
         isDefault: true,
         name: "Setup",
+        playCompletionSound: true,
         url: undefined,
       },
     ]);
@@ -215,6 +263,7 @@ describe("getFirstBrowserSidebarCommandUrl", () => {
           commandId: "custom-docs",
           isDefault: false,
           name: "Docs",
+          playCompletionSound: false,
           url: "https://example.com/docs",
         },
         {
@@ -223,6 +272,7 @@ describe("getFirstBrowserSidebarCommandUrl", () => {
           commandId: "custom-app",
           isDefault: false,
           name: "App",
+          playCompletionSound: false,
           url: "https://example.com/app",
         },
       ],
@@ -247,6 +297,7 @@ describe("normalizeStoredSidebarCommands", () => {
           commandId: " dev ",
           isDefault: true,
           name: "  Dev server ",
+          playCompletionSound: true,
         },
       ]),
     ).toEqual([
@@ -257,6 +308,7 @@ describe("normalizeStoredSidebarCommands", () => {
         commandId: "dev",
         isDefault: true,
         name: "Dev server",
+        playCompletionSound: true,
       },
     ]);
   });
@@ -269,6 +321,7 @@ describe("normalizeStoredSidebarCommands", () => {
           commandId: " docs ",
           isDefault: false,
           name: " Docs ",
+          playCompletionSound: true,
           url: " https://example.com/docs ",
         },
         {
@@ -276,6 +329,7 @@ describe("normalizeStoredSidebarCommands", () => {
           commandId: "missing-url",
           isDefault: false,
           name: "Broken",
+          playCompletionSound: true,
         },
       ]),
     ).toEqual([
@@ -285,7 +339,37 @@ describe("normalizeStoredSidebarCommands", () => {
         commandId: "docs",
         isDefault: false,
         name: "Docs",
+        playCompletionSound: false,
         url: "https://example.com/docs",
+      },
+    ]);
+  });
+
+  test("should normalize command icons and fall back to the default icon color", () => {
+    expect(
+      normalizeStoredSidebarCommands([
+        {
+          closeTerminalOnExit: false,
+          command: "pnpm dev",
+          commandId: "devtools",
+          icon: "terminal",
+          iconColor: "not-a-color",
+          isDefault: false,
+          name: "",
+          playCompletionSound: true,
+        },
+      ]),
+    ).toEqual([
+      {
+        actionType: "terminal",
+        closeTerminalOnExit: false,
+        command: "pnpm dev",
+        commandId: "devtools",
+        icon: "terminal",
+        iconColor: DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
+        isDefault: false,
+        name: "",
+        playCompletionSound: true,
       },
     ]);
   });

@@ -2,13 +2,21 @@ import { IconX } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useId, useState } from "react";
 import { DEFAULT_BROWSER_ACTION_URL, type SidebarActionType } from "../shared/sidebar-commands";
+import {
+  DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
+  type SidebarCommandIcon,
+} from "../shared/sidebar-command-icons";
+import { CommandIconPicker } from "./command-icon-picker";
 
 export type CommandConfigDraft = {
   actionType: SidebarActionType;
   closeTerminalOnExit: boolean;
   command?: string;
   commandId?: string;
+  icon?: SidebarCommandIcon;
+  iconColor?: string;
   name: string;
+  playCompletionSound: boolean;
   url?: string;
 };
 
@@ -30,9 +38,13 @@ export function CommandConfigModal({
   const [actionType, setActionType] = useState<SidebarActionType>(draft.actionType);
   const [closeTerminalOnExit, setCloseTerminalOnExit] = useState(draft.closeTerminalOnExit);
   const [command, setCommand] = useState(draft.command ?? "");
+  const [icon, setIcon] = useState<SidebarCommandIcon | undefined>(draft.icon);
+  const [iconColor, setIconColor] = useState(draft.iconColor ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR);
   const [name, setName] = useState(draft.name);
+  const [playCompletionSound, setPlayCompletionSound] = useState(draft.playCompletionSound);
   const [url, setUrl] = useState(draft.url ?? "");
   const checkboxId = useId();
+  const soundCheckboxId = useId();
   const descriptionId = useId();
   const titleId = useId();
   const isActionTypeLocked = lockedActionType !== undefined;
@@ -45,7 +57,10 @@ export function CommandConfigModal({
     setActionType(lockedActionType ?? draft.actionType);
     setCloseTerminalOnExit(draft.closeTerminalOnExit);
     setCommand(draft.command ?? "");
+    setIcon(draft.icon);
+    setIconColor(draft.iconColor ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR);
     setName(draft.name);
+    setPlayCompletionSound(draft.playCompletionSound);
     setUrl(
       draft.url ??
         ((lockedActionType ?? draft.actionType) === "browser" ? DEFAULT_BROWSER_ACTION_URL : ""),
@@ -82,7 +97,9 @@ export function CommandConfigModal({
   }
 
   const targetValue = actionType === "browser" ? url.trim() : command.trim();
-  const isSaveDisabled = name.trim().length === 0 || targetValue.length === 0;
+  const trimmedName = name.trim();
+  const isSaveDisabled =
+    targetValue.length === 0 || (trimmedName.length === 0 && icon === undefined);
   const description =
     actionType === "browser"
       ? "This action opens the URL in a VS Code browser tab. The tab is detected and shown in the Browsers group."
@@ -131,7 +148,7 @@ export function CommandConfigModal({
             </label>
           )}
           <label className="command-config-field">
-            <span className="command-config-label">Name</span>
+            <span className="command-config-label">Text</span>
             <input
               autoFocus
               className="group-title-input command-config-input"
@@ -140,6 +157,12 @@ export function CommandConfigModal({
               value={name}
             />
           </label>
+          <CommandIconPicker
+            icon={icon}
+            iconColor={iconColor}
+            onIconChange={setIcon}
+            onIconColorChange={setIconColor}
+          />
           {actionType === "browser" ? (
             <label className="command-config-field">
               <span className="command-config-label">URL</span>
@@ -175,6 +198,18 @@ export function CommandConfigModal({
                   Close terminal after the command finishes
                 </span>
               </label>
+              <label className="command-config-toggle" htmlFor={soundCheckboxId}>
+                <input
+                  checked={playCompletionSound}
+                  className="command-config-checkbox"
+                  id={soundCheckboxId}
+                  onChange={(event) => setPlayCompletionSound(event.currentTarget.checked)}
+                  type="checkbox"
+                />
+                <span className="command-config-toggle-copy">
+                  Play the configured action completion sound when the command finishes
+                </span>
+              </label>
             </>
           )}
         </div>
@@ -191,7 +226,10 @@ export function CommandConfigModal({
                 closeTerminalOnExit: actionType === "terminal" ? closeTerminalOnExit : false,
                 command: actionType === "terminal" ? command.trim() : undefined,
                 commandId: draft.commandId,
-                name: name.trim(),
+                icon,
+                iconColor: icon ? iconColor : undefined,
+                name: trimmedName,
+                playCompletionSound: actionType === "terminal" ? playCompletionSound : false,
                 url: actionType === "browser" ? url.trim() : undefined,
               })
             }

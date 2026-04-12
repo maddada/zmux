@@ -27,7 +27,9 @@ import {
   type T3SessionRecord,
   type VisibleSessionCount,
 } from "../../shared/session-grid-contract";
+import { getDisplaySessionIdsInOrder } from "../../shared/active-sessions-sort";
 import { getSidebarAgentIconById, type SidebarAgentIcon } from "../../shared/sidebar-agents";
+import type { SidebarCommandIcon } from "../../shared/sidebar-command-icons";
 import type { GitTextGenerationSettings } from "../../shared/git-text-generation-provider";
 import {
   createDefaultSidebarGitState,
@@ -163,6 +165,7 @@ import {
   SCRATCH_PAD_CONTENT_KEY,
   SECONDARY_SESSIONS_CONTAINER_ID,
   SIDEBAR_LOCATION_IN_SECONDARY_KEY,
+  getClampedActionCompletionSoundSetting,
   getClampedAgentManagerZoomPercent,
   getClampedCompletionSoundSetting,
   getClampedSidebarThemeSetting,
@@ -697,10 +700,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    const session = this.store
-      .getSnapshot()
-      .groups.flatMap((group) => getOrderedSessions(group.snapshot))
-      .at(targetIndex);
+    const workspaceSnapshot = this.getPresentedWorkspaceSnapshot();
+    const sessionActivityContext = this.createSessionActivityContext();
+    const session = this.getSidebarOrderedWorkspaceSessions(
+      workspaceSnapshot,
+      sessionActivityContext,
+    ).at(targetIndex);
     if (session) {
       await this.focusSession(session.sessionId);
     }
@@ -777,6 +782,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         await this.requestWorkspaceTerminalScrollToBottom(sessionId);
       }
       await this.workspacePanel.postMessage({
+        confirmOnTerminalEnterSessionId: sessionId,
+        confirmedMessage: "Thread name synced into Agent CLI.",
+        confirmedTitle: "Thread renamed",
         expiresAt: Date.now() + WORKSPACE_RENAME_TOAST_DURATION_MS,
         message: "Hit enter to sync the name into Agent CLI",
         title: "Name staged in terminal",
@@ -1352,7 +1360,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         command,
       });
       terminal.show(true);
-      this.disposeTerminalWhenProcessExits(terminal);
+      this.observeSidebarCommandTerminalExit(terminal, {
+        disposeTerminalOnExit: true,
+        playCompletionSound: commandButton.playCompletionSound,
+      });
       return;
     }
 
@@ -1690,7 +1701,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     name: string,
     actionType: "browser" | "terminal",
     closeTerminalOnExit: boolean,
+    playCompletionSound: boolean,
     command?: string,
+    icon?: SidebarCommandIcon,
+    iconColor?: string,
     url?: string,
   ): Promise<void> {
     await saveSidebarCommandPreference(this.context, {
@@ -1698,7 +1712,10 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       closeTerminalOnExit,
       command,
       commandId,
+      icon,
+      iconColor,
       name,
+      playCompletionSound,
       url,
     });
     await this.refreshSidebar("hydrate");
@@ -1974,13 +1991,26 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         this.setSidebarSectionCollapsed(section, collapsed),
       saveSidebarAgent: async (agentId, name, command, icon) =>
         this.saveSidebarAgent(agentId, name, command, icon),
-      saveSidebarCommand: async (commandId, name, actionType, closeTerminalOnExit, command, url) =>
+      saveSidebarCommand: async (
+        commandId,
+        name,
+        actionType,
+        closeTerminalOnExit,
+        playCompletionSound,
+        command,
+        icon,
+        iconColor,
+        url,
+      ) =>
         this.saveSidebarCommand(
           commandId,
           name,
           actionType,
           closeTerminalOnExit === true,
+          playCompletionSound === true,
           command,
+          icon,
+          iconColor,
           url,
         ),
       setSidebarGitCommitConfirmationEnabled: async (enabled) =>
@@ -3061,6 +3091,46 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     });
   }
 
+  private getSidebarOrderedWorkspaceSessions(
+    workspaceSnapshot: GroupedSessionWorkspaceSnapshot,
+    sessionActivityContext: Parameters<typeof getEffectiveSessionActivity>[0],
+  ): SessionRecord[] {
+    const workspaceGroupIds = workspaceSnapshot.groups.map((group) => group.groupId);
+    const sessionIdsByGroup = Object.fromEntries(
+      workspaceSnapshot.groups.map((group) => [
+        group.groupId,
+        getOrderedSessions(group.snapshot).map((sessionRecord) => sessionRecord.sessionId),
+      ]),
+    );
+    const sessionsById = Object.fromEntries(
+      workspaceSnapshot.groups.flatMap((group) =>
+        getOrderedSessions(group.snapshot)
+          .map((sessionRecord) =>
+            this.createSidebarSessionItem(sessionRecord, workspaceSnapshot, sessionActivityContext),
+          )
+          .filter((session): session is SidebarSessionItem => session !== undefined)
+          .map((session) => [session.sessionId, session] as const),
+      ),
+    );
+    const sessionRecordById = new Map(
+      workspaceSnapshot.groups.flatMap((group) =>
+        getOrderedSessions(group.snapshot).map(
+          (sessionRecord) => [sessionRecord.sessionId, sessionRecord] as const,
+        ),
+      ),
+    );
+    const sortMode = getSidebarActiveSessionsSortMode(this.context, this.workspaceId);
+
+    return getDisplaySessionIdsInOrder({
+      sessionIdsByGroup,
+      sessionsById,
+      sortMode,
+      workspaceGroupIds,
+    })
+      .map((sessionId) => sessionRecordById.get(sessionId))
+      .filter((sessionRecord): sessionRecord is SessionRecord => sessionRecord !== undefined);
+  }
+
   private suppressSessionActivityIndicators(sessionRecord: SessionRecord): void {
     if (sessionRecord.kind !== "terminal") {
       return;
@@ -3619,17 +3689,36 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     });
   }
 
-  private disposeTerminalWhenProcessExits(terminal: vscode.Terminal): void {
+  private observeSidebarCommandTerminalExit(
+    terminal: vscode.Terminal,
+    options: {
+      disposeTerminalOnExit: boolean;
+      playCompletionSound: boolean;
+    },
+  ): void {
     const interval = setInterval(() => {
       if (!terminal.exitStatus) {
         return;
       }
 
       clearInterval(interval);
-      void playCloseTerminalOnExitSound().finally(() => {
-        terminal.dispose();
+      void this.handleSidebarCommandTerminalExit(options.playCompletionSound).finally(() => {
+        if (options.disposeTerminalOnExit) {
+          terminal.dispose();
+        }
       });
     }, COMMAND_TERMINAL_EXIT_POLL_MS);
+  }
+
+  private async handleSidebarCommandTerminalExit(playCompletionSound: boolean): Promise<void> {
+    if (!playCompletionSound) {
+      return;
+    }
+
+    await playCloseTerminalOnExitSound({
+      extensionUri: this.context.extensionUri,
+      sound: getClampedActionCompletionSoundSetting(),
+    });
   }
 
   private getActiveSnapshot(): SessionGridSnapshot {

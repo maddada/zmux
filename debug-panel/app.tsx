@@ -3,6 +3,7 @@ import type {
   NativeTerminalDebugHydrateMessage,
   NativeTerminalDebugPanelState,
 } from "../shared/native-terminal-debug-contract";
+import { DEFAULT_COMPLETION_SOUND, getCompletionSoundLabel } from "../shared/completion-sound";
 import { createDefaultSidebarGitState } from "../shared/sidebar-git";
 import {
   Field,
@@ -49,8 +50,8 @@ const EMPTY_STATE: NativeTerminalDebugPanelState = {
       agents: [],
       commands: [],
       completionBellEnabled: false,
-      completionSound: "ping",
-      completionSoundLabel: "Ping",
+      completionSound: DEFAULT_COMPLETION_SOUND,
+      completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),
       debuggingMode: false,
       focusedSessionTitle: undefined,
       git: createDefaultSidebarGitState(),

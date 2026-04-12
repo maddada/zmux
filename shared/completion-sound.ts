@@ -43,7 +43,7 @@ export const COMPLETION_SOUND_OPTIONS = [
 
 export type CompletionSoundSetting = (typeof COMPLETION_SOUND_OPTIONS)[number]["value"];
 
-export const DEFAULT_COMPLETION_SOUND: CompletionSoundSetting = "ping";
+export const DEFAULT_COMPLETION_SOUND: CompletionSoundSetting = "arcade";
 
 export function clampCompletionSoundSetting(value: string | undefined): CompletionSoundSetting {
   return (

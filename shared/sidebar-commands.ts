@@ -1,3 +1,10 @@
+import {
+  DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
+  isSidebarCommandIcon,
+  normalizeSidebarCommandIconColor,
+  type SidebarCommandIcon,
+} from "./sidebar-command-icons";
+
 export const DEFAULT_SIDEBAR_COMMANDS = [
   {
     commandId: "dev",
@@ -29,8 +36,11 @@ export type SidebarCommandButton = {
   closeTerminalOnExit: boolean;
   command?: string;
   commandId: string;
+  icon?: SidebarCommandIcon;
+  iconColor?: string;
   isDefault: boolean;
   name: string;
+  playCompletionSound: boolean;
   url?: string;
 };
 
@@ -38,8 +48,11 @@ export type StoredSidebarCommand = {
   actionType: SidebarActionType;
   closeTerminalOnExit: boolean;
   commandId: string;
+  icon?: SidebarCommandIcon;
+  iconColor?: string;
   isDefault: boolean;
   name: string;
+  playCompletionSound: boolean;
   command?: string;
   url?: string;
 };
@@ -62,6 +75,7 @@ export function createDefaultSidebarCommandButtons(): SidebarCommandButton[] {
     commandId: command.commandId,
     isDefault: true,
     name: command.name,
+    playCompletionSound: true,
     url: undefined,
   }));
 }
@@ -117,15 +131,23 @@ export function normalizeStoredSidebarCommands(candidate: unknown): StoredSideba
     const partialItem = item as Partial<StoredSidebarCommand> & {
       actionType?: string;
       command?: string;
+      icon?: string;
+      iconColor?: string;
+      playCompletionSound?: unknown;
       url?: string;
     };
     const commandId = partialItem.commandId?.trim();
-    const name = partialItem.name?.trim();
+    const name = partialItem.name?.trim() ?? "";
     const actionType = normalizeActionType(partialItem.actionType);
+    const icon = isSidebarCommandIcon(partialItem.icon) ? partialItem.icon : undefined;
+    const iconColor = icon
+      ? (normalizeSidebarCommandIconColor(partialItem.iconColor) ??
+        DEFAULT_SIDEBAR_COMMAND_ICON_COLOR)
+      : undefined;
     const isDefault =
       partialItem.isDefault === true || (commandId ? isDefaultSidebarCommandId(commandId) : false);
 
-    if (!commandId || !name || seenCommandIds.has(commandId)) {
+    if (!commandId || seenCommandIds.has(commandId) || (name.length === 0 && !icon)) {
       continue;
     }
 
@@ -141,6 +163,8 @@ export function normalizeStoredSidebarCommands(candidate: unknown): StoredSideba
         commandId,
         isDefault,
         name,
+        playCompletionSound: false,
+        ...(icon ? { icon, iconColor } : {}),
         url,
       });
       seenCommandIds.add(commandId);
@@ -159,6 +183,11 @@ export function normalizeStoredSidebarCommands(candidate: unknown): StoredSideba
       commandId,
       isDefault,
       name,
+      playCompletionSound:
+        typeof partialItem.playCompletionSound === "boolean"
+          ? partialItem.playCompletionSound
+          : true,
+      ...(icon ? { icon, iconColor } : {}),
     });
     seenCommandIds.add(commandId);
   }
@@ -199,6 +228,7 @@ function defaultAction(command: (typeof DEFAULT_SIDEBAR_COMMANDS)[number]): Side
     commandId: command.commandId,
     isDefault: true,
     name: command.name,
+    playCompletionSound: true,
     url: undefined,
   };
 }
@@ -212,6 +242,8 @@ function normalizeStoredCommandButton(command: StoredSidebarCommand): SidebarCom
         commandId: command.commandId,
         isDefault: command.isDefault,
         name: command.name,
+        playCompletionSound: false,
+        ...(command.icon ? { icon: command.icon, iconColor: command.iconColor } : {}),
         url: command.url,
       }
     : {
@@ -221,6 +253,8 @@ function normalizeStoredCommandButton(command: StoredSidebarCommand): SidebarCom
         commandId: command.commandId,
         isDefault: command.isDefault,
         name: command.name,
+        playCompletionSound: command.playCompletionSound,
+        ...(command.icon ? { icon: command.icon, iconColor: command.iconColor } : {}),
         url: undefined,
       };
 }

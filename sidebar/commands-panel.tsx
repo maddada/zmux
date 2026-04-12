@@ -17,10 +17,12 @@ import type {
   SidebarCommandButton,
   SidebarCommandRunMode,
 } from "../shared/sidebar-commands";
+import { getSidebarCommandIconLabel } from "../shared/sidebar-command-icons";
 import { GitActionRow } from "./git-action-row";
 import { SectionHeader } from "./section-header";
 import { useSidebarStore } from "./sidebar-store";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
+import { SidebarCommandIconGlyph } from "./sidebar-command-icon";
 import { CommandConfigModal, type CommandConfigDraft } from "./command-config-modal";
 import type { WebviewApi } from "./webview-api";
 
@@ -181,7 +183,10 @@ export function CommandsPanel({
       closeTerminalOnExit: command.closeTerminalOnExit,
       command: command.command,
       commandId: command.commandId,
+      icon: command.icon,
+      iconColor: command.iconColor,
       name: command.name,
+      playCompletionSound: command.playCompletionSound,
       url: command.url,
     });
   };
@@ -220,7 +225,10 @@ export function CommandsPanel({
       closeTerminalOnExit: false,
       command: createActionType === "browser" ? undefined : "",
       commandId: undefined,
+      icon: undefined,
+      iconColor: undefined,
       name: "",
+      playCompletionSound: createActionType === "browser" ? false : true,
       url: createActionType === "browser" ? undefined : "",
     });
   }, [createActionType, createRequestId]);
@@ -400,7 +408,10 @@ export function CommandsPanel({
               closeTerminalOnExit: draft.closeTerminalOnExit,
               command: draft.command,
               commandId: draft.commandId,
+              icon: draft.icon,
+              iconColor: draft.iconColor,
               name: draft.name,
+              playCompletionSound: draft.playCompletionSound,
               type: "saveSidebarCommand",
               url: draft.url,
             });
@@ -426,6 +437,9 @@ function SortableCommandButton({
   onContextMenu,
   onRun,
 }: SortableCommandButtonProps) {
+  const trimmedName = command.name.trim();
+  const isIconOnly = trimmedName.length === 0 && command.icon !== undefined;
+
   const sortable = useSortable({
     accept: "sidebar-command",
     data: createCommandDragData(command.commandId),
@@ -444,22 +458,24 @@ function SortableCommandButton({
             aria-label={
               isConfigured(command)
                 ? runActionAriaLabel(command)
-                : `Configure ${command.name} action`
+                : `Configure ${getCommandSubject(command)}`
             }
             className="command-button"
             data-configured={String(isConfigured(command))}
             data-default={String(command.isDefault)}
             data-dragging={String(Boolean(sortable.isDragging))}
             data-empty-space-blocking="true"
+            data-has-icon={String(command.icon !== undefined)}
+            data-icon-only={String(isIconOnly)}
             onClick={onRun}
             onContextMenu={onContextMenu}
             ref={sortable.ref}
             type="button"
           >
             <span aria-hidden="true" className="command-button-kind-badge">
-              <ActionKindIcon actionType={command.actionType} />
+              <ActionButtonIcon command={command} />
             </span>
-            <span className="command-button-label">{command.name}</span>
+            {trimmedName ? <span className="command-button-label">{trimmedName}</span> : null}
           </button>
         }
       />
@@ -472,14 +488,26 @@ function SortableCommandButton({
   );
 }
 
-type ActionKindIconProps = {
-  actionType: SidebarCommandButton["actionType"];
+type ActionButtonIconProps = {
+  command: SidebarCommandButton;
 };
 
-function ActionKindIcon({ actionType }: ActionKindIconProps) {
+function ActionButtonIcon({ command }: ActionButtonIconProps) {
+  if (command.icon) {
+    return (
+      <SidebarCommandIconGlyph
+        className="command-button-kind-icon command-button-leading-icon"
+        color={command.iconColor}
+        icon={command.icon}
+        size={15}
+        stroke={1.8}
+      />
+    );
+  }
+
   const className = "command-button-kind-icon";
 
-  if (actionType === "browser") {
+  if (command.actionType === "browser") {
     return <IconWorld aria-hidden="true" className={className} size={15} stroke={1.8} />;
   }
 
@@ -557,16 +585,32 @@ function isConfigured(command: SidebarCommandButton): boolean {
   return command.actionType === "browser" ? Boolean(command.url) : Boolean(command.command);
 }
 
+function getCommandSubject(command: SidebarCommandButton): string {
+  const trimmedName = command.name.trim();
+  if (trimmedName.length > 0) {
+    return trimmedName;
+  }
+
+  if (command.icon) {
+    return getSidebarCommandIconLabel(command.icon);
+  }
+
+  return command.actionType === "browser" ? "browser action" : "terminal action";
+}
+
 function getActionTooltip(command: SidebarCommandButton): string {
+  const subject = getCommandSubject(command);
+
   if (!isConfigured(command)) {
-    return `Configure ${command.name}`;
+    return `Configure ${subject}`;
   }
 
   return command.actionType === "browser"
-    ? `${command.name}: ${command.url}`
-    : `${command.name}: ${command.command}`;
+    ? `${subject}: ${command.url}`
+    : `${subject}: ${command.command}`;
 }
 
 function runActionAriaLabel(command: SidebarCommandButton): string {
-  return command.actionType === "browser" ? `Open ${command.name}` : `Run ${command.name}`;
+  const subject = getCommandSubject(command);
+  return command.actionType === "browser" ? `Open ${subject}` : `Run ${subject}`;
 }

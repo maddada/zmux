@@ -82,6 +82,38 @@ describe("dispatchSidebarMessage", () => {
     expect(handlers.runSidebarCommand).toHaveBeenCalledWith("build", "debug");
   });
 
+  test("should route saveSidebarCommand icon metadata to the matching handler", async () => {
+    const handlers = createHandlers();
+
+    await dispatchSidebarMessage(
+      {
+        actionType: "terminal",
+        closeTerminalOnExit: false,
+        command: "pnpm dev",
+        commandId: "dev",
+        icon: "terminal",
+        iconColor: "#d6e0f3",
+        name: "",
+        playCompletionSound: true,
+        type: "saveSidebarCommand",
+      },
+      handlers,
+    );
+
+    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
+    expect(handlers.saveSidebarCommand).toHaveBeenCalledWith(
+      "dev",
+      "",
+      "terminal",
+      false,
+      true,
+      "pnpm dev",
+      "terminal",
+      "#d6e0f3",
+      undefined,
+    );
+  });
+
   test("should route forkSession to the matching handler", async () => {
     const handlers = createHandlers();
 

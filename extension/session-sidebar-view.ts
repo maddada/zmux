@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import * as vscode from "vscode";
 import { COMPLETION_SOUND_OPTIONS, getCompletionSoundFileName } from "../shared/completion-sound";
 import { isSidebarCommandRunMode } from "../shared/sidebar-commands";
+import {
+  isSidebarCommandIcon,
+  normalizeSidebarCommandIconColor,
+} from "../shared/sidebar-command-icons";
 import type {
   ExtensionToSidebarMessage,
   SidebarToExtensionMessage,
@@ -397,6 +401,10 @@ export function isSidebarMessage(candidate: unknown): candidate is SidebarToExte
         ["browser", "terminal"].includes(message.actionType) &&
         typeof message.closeTerminalOnExit === "boolean" &&
         (message.command === undefined || typeof message.command === "string") &&
+        (message.icon === undefined || isSidebarCommandIcon(message.icon)) &&
+        (message.iconColor === undefined ||
+          normalizeSidebarCommandIconColor(message.iconColor) !== undefined) &&
+        typeof message.playCompletionSound === "boolean" &&
         (message.url === undefined || typeof message.url === "string")
       );
 

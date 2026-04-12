@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createDefaultSidebarAgentButtons } from "../shared/sidebar-agents";
 import { createDefaultSidebarCommandButtons } from "../shared/sidebar-commands";
+import { DEFAULT_COMPLETION_SOUND, getCompletionSoundLabel } from "../shared/completion-sound";
 import { createDefaultSidebarGitState } from "../shared/sidebar-git";
 import {
   createDefaultSidebarSectionCollapseState,
@@ -63,8 +64,8 @@ export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
       collapsedSections: createDefaultSidebarSectionCollapseState(),
       commands: createDefaultSidebarCommandButtons(),
       completionBellEnabled: false,
-      completionSound: "ping",
-      completionSoundLabel: "Ping",
+      completionSound: DEFAULT_COMPLETION_SOUND,
+      completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),
       debuggingMode: false,
       focusedSessionTitle: undefined,
       git: createDefaultSidebarGitState(),
@@ -423,6 +424,7 @@ function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSess
     left.isSleeping === right.isSleeping &&
     left.isRunning === right.isRunning &&
     left.isVisible === right.isVisible &&
+    left.isPrimaryTitleTerminalTitle === right.isPrimaryTitleTerminalTitle &&
     left.kind === right.kind &&
     left.lastInteractionAt === right.lastInteractionAt &&
     left.primaryTitle === right.primaryTitle &&

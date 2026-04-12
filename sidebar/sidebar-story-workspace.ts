@@ -264,8 +264,12 @@ export function reduceSidebarStoryWorkspace(
           message.actionType === "terminal" ? message.closeTerminalOnExit : false,
         command: message.actionType === "terminal" ? message.command : undefined,
         commandId: nextCommandId,
+        icon: message.icon,
+        iconColor: message.icon ? message.iconColor : undefined,
         isDefault: existingIndex >= 0 ? nextCommands[existingIndex]?.isDefault === true : false,
         name: message.name,
+        playCompletionSound:
+          message.actionType === "terminal" ? message.playCompletionSound : false,
         url: message.actionType === "browser" ? message.url : undefined,
       };
 

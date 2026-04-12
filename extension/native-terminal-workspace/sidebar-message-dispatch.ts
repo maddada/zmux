@@ -6,6 +6,7 @@ import type {
 import type { TerminalViewMode } from "../../shared/session-grid-contract";
 import type { SidebarActionType, SidebarCommandRunMode } from "../../shared/sidebar-commands";
 import type { SidebarAgentIcon } from "../../shared/sidebar-agents";
+import type { SidebarCommandIcon } from "../../shared/sidebar-command-icons";
 import type { SidebarGitAction } from "../../shared/sidebar-git";
 
 export type SidebarMessageHandlers = {
@@ -70,7 +71,10 @@ export type SidebarMessageHandlers = {
     name: string,
     actionType: SidebarActionType,
     closeTerminalOnExit?: boolean,
+    playCompletionSound?: boolean,
     command?: string,
+    icon?: SidebarCommandIcon,
+    iconColor?: string,
     url?: string,
   ) => Promise<void>;
   syncSidebarAgentOrder: (agentIds: readonly string[]) => Promise<void>;
@@ -175,7 +179,10 @@ export async function dispatchSidebarMessage(
         message.name,
         message.actionType,
         message.closeTerminalOnExit,
+        message.playCompletionSound,
         message.command,
+        message.icon,
+        message.iconColor,
         message.url,
       );
       return;

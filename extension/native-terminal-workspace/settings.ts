@@ -33,6 +33,7 @@ export const SHOW_SIDEBAR_BROWSERS_SETTING = "showSidebarBrowsers";
 export const SHOW_SIDEBAR_GIT_BUTTON_SETTING = "showSidebarGitButton";
 export const DEBUGGING_MODE_SETTING = "debuggingMode";
 export const COMPLETION_SOUND_SETTING = "completionSound";
+export const ACTION_COMPLETION_SOUND_SETTING = "actionCompletionSound";
 export const DEFAULT_BROWSER_LAUNCH_URL_SETTING = "defaultBrowserLaunchUrl";
 export const DEFAULT_AGENT_COMMANDS_SETTING = "defaultAgentCommands";
 export const AGENTS_SETTING = "agents";
@@ -106,6 +107,10 @@ export function getShowCloseButtonOnSessionCardsConfigurationKey(): string {
 
 export function getCompletionSoundConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${COMPLETION_SOUND_SETTING}`;
+}
+
+export function getActionCompletionSoundConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${ACTION_COMPLETION_SOUND_SETTING}`;
 }
 
 export function getShowLastInteractionTimeOnSessionCardsConfigurationKey(): string {
@@ -269,7 +274,15 @@ export function getClampedCompletionSoundSetting(): CompletionSoundSetting {
   const value =
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<string>(COMPLETION_SOUND_SETTING, "ping") ?? "ping";
+      .get<string>(COMPLETION_SOUND_SETTING, "arcade") ?? "arcade";
+  return clampCompletionSoundSetting(value);
+}
+
+export function getClampedActionCompletionSoundSetting(): CompletionSoundSetting {
+  const value =
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<string>(ACTION_COMPLETION_SOUND_SETTING, "ping") ?? "ping";
   return clampCompletionSoundSetting(value);
 }
 
@@ -431,7 +444,9 @@ export function clampXtermHeadlessScrollback(value: number): number {
   );
 }
 
-export function getXtermFrontendScrollback(headlessScrollback = getXtermHeadlessScrollback()): number {
+export function getXtermFrontendScrollback(
+  headlessScrollback = getXtermHeadlessScrollback(),
+): number {
   return Math.min(
     MAX_XTERM_HEADLESS_SCROLLBACK,
     Math.max(

@@ -295,6 +295,11 @@
   width: 100%;
 }
 
+.command-button[data-icon-only="true"] {
+  min-width: 36px;
+  padding: 0;
+}
+
 .agent-button[data-icon-only="true"] {
   min-width: 30px;
   padding: 0;
@@ -407,6 +412,15 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
   display: block;
   height: 15px;
   width: 15px;
+}
+
+.command-button-leading-icon {
+  display: block;
+}
+
+.command-button[data-has-icon="true"] .command-button-kind-badge,
+.command-button[data-icon-only="true"] .command-button-kind-badge {
+  display: inline-flex;
 }
 
 @container (min-width: 80px) {

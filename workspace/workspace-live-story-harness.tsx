@@ -248,7 +248,7 @@ function createLiveStoryWorkspace(
       agents: [],
       commands: [],
       completionBellEnabled: false,
-      completionSound: "ping",
+      completionSound: "arcade",
       debuggingMode: false,
       scratchPadContent: "",
       showCloseButtonOnSessionCards: true,
