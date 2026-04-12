@@ -109,6 +109,12 @@ export type WorkspacePanelShowToastMessage = {
   title: string;
 };
 
+export type WorkspacePanelCodexWelcomeSettingAppliedMessage = {
+  type: "codexWelcomeSettingApplied";
+  setting: "statusLine" | "terminalTitle";
+  status: "alreadySet" | "updated";
+};
+
 export type ExtensionToWorkspacePanelMessage =
   | WorkspacePanelHydrateMessage
   | WorkspacePanelSessionStateMessage
@@ -116,7 +122,8 @@ export type ExtensionToWorkspacePanelMessage =
   | WorkspacePanelDestroyTerminalRuntimeMessage
   | WorkspacePanelScrollTerminalToBottomMessage
   | WorkspacePanelShowWelcomeMessage
-  | WorkspacePanelShowToastMessage;
+  | WorkspacePanelShowToastMessage
+  | WorkspacePanelCodexWelcomeSettingAppliedMessage;
 
 export type WorkspacePanelReadyMessage = {
   type: "ready";
@@ -164,9 +171,19 @@ export type WorkspacePanelCompleteWelcomeMessage = {
   type: "completeWelcome";
 };
 
+export type WorkspacePanelApplyCodexTerminalTitleMessage = {
+  type: "applyCodexTerminalTitle";
+};
+
+export type WorkspacePanelApplyCodexStatusLineMessage = {
+  type: "applyCodexStatusLine";
+};
+
 export type WorkspacePanelToExtensionMessage =
   | WorkspacePanelReadyMessage
   | WorkspacePanelCompleteWelcomeMessage
+  | WorkspacePanelApplyCodexTerminalTitleMessage
+  | WorkspacePanelApplyCodexStatusLineMessage
   | WorkspacePanelFocusSessionMessage
   | WorkspacePanelCloseSessionMessage
   | WorkspacePanelFullReloadSessionMessage
@@ -181,6 +198,7 @@ export function stripWorkspacePanelTransientFields(
   if (
     message.type === "showWelcomeModal" ||
     message.type === "showToast" ||
+    message.type === "codexWelcomeSettingApplied" ||
     message.type === "scrollTerminalToBottom" ||
     message.type === "terminalPresentationChanged" ||
     message.type === "destroyTerminalRuntime" ||

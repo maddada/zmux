@@ -314,6 +314,52 @@ describe("WorkspacePanelManager", () => {
     manager.dispose();
   });
 
+  test("should forward apply codex terminal title messages from the workspace webview", async () => {
+    const onMessage = vi.fn();
+    const manager = new WorkspacePanelManager({
+      context: createMockContext(),
+      onMessage,
+    });
+
+    await manager.reveal();
+
+    const panel = createdPanels[0];
+    expect(panel).toBeDefined();
+
+    panel.webview.messageListeners[0]?.({
+      type: "applyCodexTerminalTitle",
+    });
+
+    expect(onMessage).toHaveBeenCalledWith({
+      type: "applyCodexTerminalTitle",
+    });
+
+    manager.dispose();
+  });
+
+  test("should forward apply codex status line messages from the workspace webview", async () => {
+    const onMessage = vi.fn();
+    const manager = new WorkspacePanelManager({
+      context: createMockContext(),
+      onMessage,
+    });
+
+    await manager.reveal();
+
+    const panel = createdPanels[0];
+    expect(panel).toBeDefined();
+
+    panel.webview.messageListeners[0]?.({
+      type: "applyCodexStatusLine",
+    });
+
+    expect(onMessage).toHaveBeenCalledWith({
+      type: "applyCodexStatusLine",
+    });
+
+    manager.dispose();
+  });
+
   test("should keep accepting legacy session reorder messages from the workspace webview", async () => {
     const onMessage = vi.fn();
     const manager = new WorkspacePanelManager({

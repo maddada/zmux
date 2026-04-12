@@ -107,6 +107,10 @@ import {
   normalizeSidebarBrowserUrl,
 } from "../live-browser-tabs";
 import { renderFindPreviousSessionPrompt } from "../find-previous-session-prompt";
+import {
+  writeCodexWelcomeStatusLine,
+  writeCodexWelcomeTerminalTitle,
+} from "../codex-terminal-title-config";
 import { dispatchSidebarMessage } from "./sidebar-message-dispatch";
 import { shouldSkipSessionForGroupFullReload } from "./full-reload";
 import { finalizeRestoredPreviousSession } from "./restore-previous-session";
@@ -329,6 +333,16 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
         if (message.type === "reloadWorkspacePanel") {
           await this.reloadWorkspacePanel("webview-lag-notice", message.sessionId);
+          return;
+        }
+
+        if (message.type === "applyCodexTerminalTitle") {
+          await this.applyCodexTerminalTitleFromWelcome();
+          return;
+        }
+
+        if (message.type === "applyCodexStatusLine") {
+          await this.applyCodexStatusLineFromWelcome();
           return;
         }
 
@@ -1996,6 +2010,52 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private async publishAgentManagerXSnapshot(): Promise<void> {
     this.agentManagerXBridge.updateSnapshot(await this.createAgentManagerXWorkspaceSnapshot());
+  }
+
+  private async applyCodexTerminalTitleFromWelcome(): Promise<void> {
+    try {
+      const result = await writeCodexWelcomeTerminalTitle();
+      await this.workspacePanel.postMessage({
+        setting: "terminalTitle",
+        status: result.changed ? "updated" : "alreadySet",
+        type: "codexWelcomeSettingApplied",
+      });
+      await this.workspacePanel.postMessage({
+        expiresAt: Date.now() + WORKSPACE_RENAME_TOAST_DURATION_MS,
+        message: result.changed
+          ? `Saved to ${result.configPath}`
+          : `Already set in ${result.configPath}`,
+        title: result.changed ? "Codex terminal title updated" : "Codex terminal title already set",
+        type: "showToast",
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Could not update the Codex terminal title setting. ${getErrorMessage(error)}`,
+      );
+    }
+  }
+
+  private async applyCodexStatusLineFromWelcome(): Promise<void> {
+    try {
+      const result = await writeCodexWelcomeStatusLine();
+      await this.workspacePanel.postMessage({
+        setting: "statusLine",
+        status: result.changed ? "updated" : "alreadySet",
+        type: "codexWelcomeSettingApplied",
+      });
+      await this.workspacePanel.postMessage({
+        expiresAt: Date.now() + WORKSPACE_RENAME_TOAST_DURATION_MS,
+        message: result.changed
+          ? `Saved to ${result.configPath}`
+          : `Already set in ${result.configPath}`,
+        title: result.changed ? "Codex status line updated" : "Codex status line already set",
+        type: "showToast",
+      });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Could not update the Codex status line setting. ${getErrorMessage(error)}`,
+      );
+    }
   }
 
   private getProgrammaticResumeAction(

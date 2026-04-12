@@ -1,4 +1,5 @@
 import {
+  IconCheck,
   IconArrowLeft,
   IconArrowRight,
   IconBolt,
@@ -13,13 +14,32 @@ import { useEffect, useId, useState, type ComponentType } from "react";
 import type { WorkspaceWelcomeModalMode } from "../shared/workspace-panel-contract";
 
 export type WorkspaceWelcomeModalProps = {
+  codexSettingConfirmation?: {
+    setting: "statusLine" | "terminalTitle";
+    status: "alreadySet" | "updated";
+  };
   isOpen: boolean;
   mode: WorkspaceWelcomeModalMode;
+  onApplyCodexTerminalTitle: () => void;
+  onApplyCodexStatusLine: () => void;
   onClose: () => void;
   onComplete: () => void;
 };
 
+type WelcomePageActionButton = {
+  buttonLabel: string;
+  onClick: "statusLine" | "terminalTitle";
+};
+
+type WelcomePageAction = {
+  buttons: WelcomePageActionButton[];
+  description: string;
+  eyebrow: string;
+  snippet?: string[];
+};
+
 type WelcomePage = {
+  action?: WelcomePageAction;
   bullets: string[];
   icon: ComponentType<{ className?: string; size?: number; stroke?: number }>;
   kicker: string;
@@ -49,6 +69,34 @@ const WELCOME_PAGES: WelcomePage[] = [
     title: "Agents",
   },
   {
+    action: {
+      buttons: [
+        {
+          buttonLabel: "Set terminal title",
+          onClick: "terminalTitle",
+        },
+        {
+          buttonLabel: "Set status line",
+          onClick: "statusLine",
+        },
+      ],
+      description:
+        "Recommended in your `<user>/.codex/config.toml`. If you prefer, the buttons below can apply either setting for the active Codex profile automatically.",
+      eyebrow: "Codex",
+      snippet: [
+        "[tui]",
+        'terminal_title = ["spinner", "thread"]',
+        'status_line = ["thread-title", "model-with-reasoning", "current-dir", "context-usage", "used-tokens", "weekly-limit"]',
+      ],
+    },
+    bullets: [
+      "These settings keep Codex and VSmux aligned so session titles stay recognizable, which makes multi-agent work and resuming the right session much easier.",
+    ],
+    icon: IconTerminal2,
+    kicker: "Page 3",
+    title: "Codex Setup",
+  },
+  {
     bullets: [
       "Actions are quick buttons for things like Dev, Build, Test, and Setup.",
       "Terminal actions open a fresh VS Code terminal and run your command there.",
@@ -57,7 +105,7 @@ const WELCOME_PAGES: WelcomePage[] = [
       "Right-click an action to configure it or remove it.",
     ],
     icon: IconBolt,
-    kicker: "Page 3",
+    kicker: "Page 4",
     title: "Actions",
   },
   {
@@ -67,7 +115,7 @@ const WELCOME_PAGES: WelcomePage[] = [
       "The Browsers section gives you a quick way to jump back into the pages you are actively using for that workspace.",
     ],
     icon: IconWorld,
-    kicker: "Page 4",
+    kicker: "Page 5",
     title: "Browsers",
   },
   {
@@ -78,14 +126,17 @@ const WELCOME_PAGES: WelcomePage[] = [
       "You can reopen this guide any time from Help in the sidebar overflow menu.",
     ],
     icon: IconBulb,
-    kicker: "Page 5",
+    kicker: "Page 6",
     title: "Tips & Tricks",
   },
 ];
 
 export function WorkspaceWelcomeModal({
+  codexSettingConfirmation,
   isOpen,
   mode,
+  onApplyCodexTerminalTitle,
+  onApplyCodexStatusLine,
   onClose: _onClose,
   onComplete,
 }: WorkspaceWelcomeModalProps) {
@@ -95,6 +146,7 @@ export function WorkspaceWelcomeModal({
   const canGoBack = pageIndex > 0;
   const page = WELCOME_PAGES[pageIndex];
   const PageIcon = page.icon;
+  const snippetText = page.action?.snippet?.join("\n");
 
   useEffect(() => {
     if (!isOpen) {
@@ -103,6 +155,17 @@ export function WorkspaceWelcomeModal({
 
     setPageIndex(0);
   }, [isOpen, mode]);
+
+  const confirmationMessage =
+    codexSettingConfirmation?.setting === "terminalTitle"
+      ? codexSettingConfirmation.status === "updated"
+        ? "Terminal title set"
+        : "Terminal title already set"
+      : codexSettingConfirmation?.setting === "statusLine"
+        ? codexSettingConfirmation.status === "updated"
+          ? "Status line set"
+          : "Status line already set"
+        : undefined;
 
   if (!isOpen) {
     return null;
@@ -144,6 +207,41 @@ export function WorkspaceWelcomeModal({
           </div>
         </div>
         <div className="workspace-welcome-body">
+          {page.action ? (
+            <div className="workspace-welcome-callout">
+              <div className="workspace-welcome-callout-eyebrow">{page.action.eyebrow}</div>
+              <div className="workspace-welcome-callout-description">{page.action.description}</div>
+              {snippetText ? (
+                <div className="workspace-welcome-callout-snippet-shell">
+                  <pre className="workspace-welcome-callout-snippet">
+                    <code>{snippetText}</code>
+                  </pre>
+                </div>
+              ) : null}
+              <div className="workspace-welcome-callout-actions">
+                {page.action.buttons.map((button) => (
+                  <button
+                    className="workspace-welcome-button workspace-welcome-button-primary workspace-welcome-callout-button"
+                    key={button.buttonLabel}
+                    onClick={
+                      button.onClick === "terminalTitle"
+                        ? onApplyCodexTerminalTitle
+                        : onApplyCodexStatusLine
+                    }
+                    type="button"
+                  >
+                    {button.buttonLabel}
+                  </button>
+                ))}
+              </div>
+              {confirmationMessage ? (
+                <div className="workspace-welcome-callout-confirmation">
+                  <IconCheck aria-hidden="true" size={14} stroke={2.2} />
+                  {confirmationMessage}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <ul className="workspace-welcome-list">
             {page.bullets.map((bullet) => (
               <li className="workspace-welcome-list-item" key={bullet}>

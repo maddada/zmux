@@ -78,6 +78,10 @@ type WorkspaceAutoFocusGuard = {
 
 type WorkspaceToastState = WorkspacePanelShowToastMessage;
 type WorkspaceTerminalScrollRequestState = WorkspacePanelScrollTerminalToBottomMessage;
+type WorkspaceCodexSettingConfirmationState = {
+  setting: "statusLine" | "terminalTitle";
+  status: "alreadySet" | "updated";
+};
 
 const AUTO_FOCUS_ACTIVATION_GUARD_MS = 400;
 const AUTO_RELOAD_ON_LAG = true;
@@ -182,6 +186,9 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const [workspaceToast, setWorkspaceToast] = useState<WorkspaceToastState | undefined>();
   const [terminalScrollRequest, setTerminalScrollRequest] = useState<
     WorkspaceTerminalScrollRequestState | undefined
+  >();
+  const [codexSettingConfirmation, setCodexSettingConfirmation] = useState<
+    WorkspaceCodexSettingConfirmationState | undefined
   >();
   const focusRequestSequenceRef = useRef(0);
   const debuggingModeRef = useRef<boolean | undefined>(undefined);
@@ -488,6 +495,14 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         return;
       }
 
+      if (nextMessage.type === "codexWelcomeSettingApplied") {
+        setCodexSettingConfirmation({
+          setting: nextMessage.setting,
+          status: nextMessage.status,
+        });
+        return;
+      }
+
       if (nextMessage.type === "scrollTerminalToBottom") {
         setTerminalScrollRequest(nextMessage);
         return;
@@ -561,6 +576,22 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       window.clearTimeout(timeout);
     };
   }, [workspaceToast]);
+
+  useEffect(() => {
+    if (!codexSettingConfirmation) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setCodexSettingConfirmation((currentConfirmation) =>
+        currentConfirmation === codexSettingConfirmation ? undefined : currentConfirmation,
+      );
+    }, 1800);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [codexSettingConfirmation]);
 
   const panes = useMemo(() => workspaceState?.panes ?? [], [workspaceState]);
   const workspacePaneIdsKey = panes.map((pane) => pane.sessionId).join("|");
@@ -1428,6 +1459,13 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       <WorkspaceWelcomeModal
         isOpen={isWelcomeModalOpen}
         mode={welcomeModalMode ?? "optional"}
+        codexSettingConfirmation={codexSettingConfirmation}
+        onApplyCodexTerminalTitle={() => {
+          postToExtension({ type: "applyCodexTerminalTitle" });
+        }}
+        onApplyCodexStatusLine={() => {
+          postToExtension({ type: "applyCodexStatusLine" });
+        }}
         onClose={() => setWelcomeModalMode(undefined)}
         onComplete={() => {
           setWelcomeModalMode(undefined);
