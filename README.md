@@ -6,11 +6,11 @@ For VS Code: https://marketplace.visualstudio.com/items?itemName=maddada.VSmux
 
 For Cursor and Others: https://open-vsx.org/extension/maddada/VSmux
 
-## Latest Release: 3.3.0
+## Latest Release: 3.4.0
 
-- Startup and workspace recovery are more reliable, with steadier webview initialization and blank-tab fixes.
-- Pane controls and reconnect behavior are more capable, including rename, fork, sleep, and better hidden-pane recovery.
-- The sidebar is more polished, and terminal font presets now make workspace appearance easier to tune.
+- Inline session search now supports keyboard selection for faster result picking.
+- Session rename and lifecycle handling are more reliable across workspace state changes.
+- Bundled dpcode server and terminal assets make the embedded runtime path more dependable.
 
 Full release notes: [CHANGELOG.md](/Users/madda/dev/_active/agent-tiler/CHANGELOG.md)
 

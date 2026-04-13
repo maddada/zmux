@@ -12,6 +12,7 @@ docs/*
 .brv/
 .agents/skills/byterover/
 .codex
+.tmp/
 .tmp/managed-t3-home/
 .tmp/managed-t3-home-node/
 .tmp/managed-t3-home-ws/

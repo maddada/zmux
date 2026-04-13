@@ -2,6 +2,13 @@
 
 All notable user-facing changes are documented in this file.
 
+## 3.4.0 - 2026-04-13
+
+- Inline session search is easier to use now, with keyboard selection so you can move through search results without leaving the keyboard.
+- Session rename behavior is smarter and more reliable, with improved lifecycle tracking so workspace state stays in sync more cleanly while sessions change.
+- Runtime packaging is more self-contained now, with bundled dpcode server and terminal assets to make the embedded runtime path more dependable.
+- Conversation/history surfaces are a bit leaner internally, including cleanup of an unused sidebar wrapper in the chat-history flow.
+
 ## 3.3.0 - 2026-04-13
 
 - VSmux startup and workspace recovery are more reliable now, with fixes for blank startup tabs, steadier webview initialization, and better handling around workspace message timing.
