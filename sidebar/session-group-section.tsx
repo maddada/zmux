@@ -618,6 +618,29 @@ export function SessionGroupSection({
             >
               <button
                 className="session-context-menu-item"
+                onClick={() => {
+                  setContextMenuPosition(undefined);
+                  setIsEditing(true);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <IconPencil aria-hidden="true" className="session-context-menu-icon" size={14} />
+                Rename
+              </button>
+              {canFullReloadGroup ? (
+                <button
+                  className="session-context-menu-item"
+                  onClick={requestFullReloadGroup}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconRefresh aria-hidden="true" className="session-context-menu-icon" size={14} />
+                  Full reload
+                </button>
+              ) : null}
+              <button
+                className="session-context-menu-item"
                 onClick={() => requestSetGroupSleeping(!allSessionsSleeping)}
                 role="menuitem"
                 type="button"
@@ -633,29 +656,7 @@ export function SessionGroupSection({
                 )}
                 {allSessionsSleeping ? "Wake" : "Sleep"}
               </button>
-              {canFullReloadGroup ? (
-                <button
-                  className="session-context-menu-item"
-                  onClick={requestFullReloadGroup}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconRefresh aria-hidden="true" className="session-context-menu-icon" size={14} />
-                  Full reload
-                </button>
-              ) : null}
-              <button
-                className="session-context-menu-item"
-                onClick={() => {
-                  setContextMenuPosition(undefined);
-                  setIsEditing(true);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <IconPencil aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Rename
-              </button>
+              <div className="session-context-menu-divider" role="separator" />
               <button
                 className="session-context-menu-item session-context-menu-item-danger"
                 disabled={!canClose}
