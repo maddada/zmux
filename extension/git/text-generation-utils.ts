@@ -19,25 +19,32 @@ export function buildGitTextGenerationShellCommand(
   prompt: string,
   outputFilePath: string,
   purpose: GitTextGenerationPurpose,
+  platform = process.platform,
 ): string {
   const effort = getGitTextGenerationEffort(purpose);
 
   if (settings.provider === "claude") {
-    return buildCommandLine("claude", ["--model", "haiku", "--effort", effort, "-p", prompt]);
+    return buildCommandLine(
+      "claude",
+      ["--model", "haiku", "--effort", effort, "-p", prompt],
+      platform,
+    );
   }
 
   if (settings.provider === "custom") {
-    return buildCustomGitTextGenerationShellCommand(settings.customCommand, prompt, outputFilePath);
+    return buildCustomGitTextGenerationShellCommand(
+      settings.customCommand,
+      prompt,
+      outputFilePath,
+      platform,
+    );
   }
 
-  return buildCommandLine("codex", [
-    "-m",
-    "gpt-5.4-mini",
-    "-c",
-    `model_reasoning_effort="${effort}"`,
-    "exec",
-    "-",
-  ]);
+  return buildCommandLine(
+    "codex",
+    ["-m", "gpt-5.4-mini", "-c", `model_reasoning_effort="${effort}"`, "exec", "-"],
+    platform,
+  );
 }
 
 export function getGitTextGenerationEffort(purpose: GitTextGenerationPurpose): "low" | "medium" {
@@ -90,6 +97,7 @@ function buildCustomGitTextGenerationShellCommand(
   customCommand: string,
   prompt: string,
   outputFilePath: string,
+  platform: NodeJS.Platform,
 ): string {
   const trimmedCommand = customCommand.trim();
   if (!trimmedCommand) {
@@ -100,11 +108,11 @@ function buildCustomGitTextGenerationShellCommand(
 
   const usesPromptPlaceholder = trimmedCommand.includes("{prompt}");
   let command = trimmedCommand
-    .replaceAll("{outputFile}", quoteShellLiteral(outputFilePath))
-    .replaceAll("{prompt}", quoteShellLiteral(prompt));
+    .replaceAll("{outputFile}", quoteShellLiteralForPlatform(outputFilePath, platform))
+    .replaceAll("{prompt}", quoteShellLiteralForPlatform(prompt, platform));
 
   if (!usesPromptPlaceholder) {
-    command = `${command} ${quoteShellLiteral(prompt)}`;
+    command = `${command} ${quoteShellLiteralForPlatform(prompt, platform)}`;
   }
 
   return command;
@@ -180,14 +188,29 @@ function clampGeneratedSessionTitleLength(value: string): string {
   return value.slice(0, GENERATED_SESSION_TITLE_MAX_LENGTH).trim();
 }
 
-function buildCommandLine(command: string, args: readonly string[]): string {
+function buildCommandLine(
+  command: string,
+  args: readonly string[],
+  platform: NodeJS.Platform,
+): string {
   if (args.length === 0) {
-    return `exec ${command}`;
+    return platform === "win32" ? command : `exec ${command}`;
   }
 
-  return `exec ${command} ${args.map(formatShellArgument).join(" ")}`;
+  const commandLine = `${command} ${args.map((value) => formatShellArgument(value, platform)).join(" ")}`;
+  return platform === "win32" ? commandLine : `exec ${commandLine}`;
 }
 
-function formatShellArgument(value: string): string {
-  return /^[a-z0-9._-]+$/i.test(value) && !value.includes("/") ? value : quoteShellLiteral(value);
+function formatShellArgument(value: string, platform: NodeJS.Platform): string {
+  return /^[a-z0-9._-]+$/i.test(value) && !value.includes("/")
+    ? value
+    : quoteShellLiteralForPlatform(value, platform);
+}
+
+function quoteShellLiteralForPlatform(value: string, platform: NodeJS.Platform): string {
+  if (platform === "win32") {
+    return `'${value.replaceAll("'", "''")}'`;
+  }
+
+  return quoteShellLiteral(value);
 }

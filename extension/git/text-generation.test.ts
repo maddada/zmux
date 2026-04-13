@@ -14,6 +14,7 @@ describe("buildGitTextGenerationShellCommand", () => {
         "prompt text",
         "/tmp/commitmessage.txt",
         "commit-message",
+        "darwin",
       ),
     ).toBe(`exec codex -m gpt-5.4-mini -c 'model_reasoning_effort="medium"' exec -`);
   });
@@ -25,6 +26,7 @@ describe("buildGitTextGenerationShellCommand", () => {
         "prompt text",
         "/tmp/commitmessage.txt",
         "pull-request",
+        "darwin",
       ),
     ).toBe("exec claude --model haiku --effort medium -p 'prompt text'");
   });
@@ -36,8 +38,21 @@ describe("buildGitTextGenerationShellCommand", () => {
         "prompt text",
         "/tmp/sessiontitle.txt",
         "session-title",
+        "darwin",
       ),
     ).toBe(`exec codex -m gpt-5.4-mini -c 'model_reasoning_effort="low"' exec -`);
+  });
+
+  test("should omit exec for codex when running through windows powershell", () => {
+    expect(
+      buildGitTextGenerationShellCommand(
+        { customCommand: "", provider: "codex" },
+        "prompt text",
+        "C:\\temp\\sessiontitle.txt",
+        "session-title",
+        "win32",
+      ),
+    ).toBe(`codex -m gpt-5.4-mini -c 'model_reasoning_effort="low"' exec -`);
   });
 
   test("should expand custom command placeholders", () => {
@@ -50,8 +65,24 @@ describe("buildGitTextGenerationShellCommand", () => {
         "prompt text",
         "/tmp/commitmessage.txt",
         "commit-message",
+        "darwin",
       ),
     ).toBe("my-generator --out '/tmp/commitmessage.txt' --prompt 'prompt text'");
+  });
+
+  test("should escape custom command placeholders for windows powershell", () => {
+    expect(
+      buildGitTextGenerationShellCommand(
+        {
+          customCommand: "my-generator --out {outputFile} --prompt {prompt}",
+          provider: "custom",
+        },
+        "prompt it's long",
+        "C:\\temp\\session title.txt",
+        "session-title",
+        "win32",
+      ),
+    ).toBe("my-generator --out 'C:\\temp\\session title.txt' --prompt 'prompt it''s long'");
   });
 });
 
