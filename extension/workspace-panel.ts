@@ -6,6 +6,7 @@ import type {
   WorkspacePanelToExtensionMessage,
 } from "../shared/workspace-panel-contract";
 import { stripWorkspacePanelTransientFields } from "../shared/workspace-panel-contract";
+import { getManagedT3WebDistPath } from "./managed-t3-paths";
 import { logVSmuxDebug } from "./vsmux-debug-log";
 
 const WORKSPACE_PANEL_TYPE = "vsmux.workspace";
@@ -119,6 +120,11 @@ export class WorkspacePanelManager implements vscode.Disposable {
       return this.panel;
     }
 
+    const packagedEmbedRoot = vscode.Uri.joinPath(
+      this.options.context.extensionUri,
+      "out",
+      "t3-embed",
+    );
     const panel = vscode.window.createWebviewPanel(
       WORKSPACE_PANEL_TYPE,
       WORKSPACE_PANEL_TITLE,
@@ -128,14 +134,8 @@ export class WorkspacePanelManager implements vscode.Disposable {
         retainContextWhenHidden: false,
         localResourceRoots: [
           vscode.Uri.joinPath(this.options.context.extensionUri, "out", "workspace"),
-          vscode.Uri.joinPath(
-            this.options.context.extensionUri,
-            "forks",
-            "dpcode-embed",
-            "apps",
-            "web",
-            "dist",
-          ),
+          packagedEmbedRoot,
+          vscode.Uri.file(getManagedT3WebDistPath(this.options.context)),
         ],
       },
     );

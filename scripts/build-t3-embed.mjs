@@ -3,13 +3,15 @@ import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const repoRoot = process.cwd();
-const embedRoot = resolve(repoRoot, "forks", "dpcode-embed");
+const embedRoot = process.env.VSMUX_T3_REPO_ROOT?.trim() || resolve(repoRoot, "..", "dpcode-embed");
 const vendorWebRoot = resolve(embedRoot, "apps", "web");
 const distRoot = resolve(vendorWebRoot, "dist");
 const packagedDistRoot = resolve(repoRoot, "out", "t3-embed");
 
 if (!existsSync(vendorWebRoot)) {
-  throw new Error("Missing forks/dpcode-embed/apps/web. Sync the local DP Code vendor first.");
+  throw new Error(
+    `Missing ${vendorWebRoot}. Sync the sibling dpcode-embed checkout or set VSMUX_T3_REPO_ROOT.`,
+  );
 }
 
 run("bun", ["install"], { cwd: embedRoot });

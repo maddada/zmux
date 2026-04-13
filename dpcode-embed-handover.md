@@ -2,13 +2,13 @@
 
 ## Purpose
 
-This note captures how the embedded `dpcode-embed` runtime is wired into VSmux today, what broke on Windows, what was changed to fix it, and the safest way to upgrade `forks/dpcode-embed` later without breaking macOS or Windows.
+This note captures how the embedded `dpcode-embed` runtime is wired into VSmux today, what broke on Windows, what was changed to fix it, and the safest way to upgrade the sibling `../dpcode-embed` checkout later without breaking macOS or Windows.
 
 Current embedded repo revision:
 
-- `forks/dpcode-embed` at `0eb29471e3b2ff9b0f64ab1e6a5fab090953be69`
+- `../dpcode-embed` at `0eb29471e3b2ff9b0f64ab1e6a5fab090953be69`
 
-Current upstream engine expectations from `forks/dpcode-embed/package.json`:
+Current upstream engine expectations from `../dpcode-embed/package.json`:
 
 - Bun: `^1.3.9`
 - Node: `^24.13.1`
@@ -17,10 +17,10 @@ Current upstream engine expectations from `forks/dpcode-embed/package.json`:
 
 ### Where the extension expects things
 
-- Source repo: `forks/dpcode-embed`
-- Managed server source entrypoint: `forks/dpcode-embed/apps/server/src/index.ts`
-- Windows managed server build output: `forks/dpcode-embed/apps/server/dist/index.mjs`
-- Web build output: `forks/dpcode-embed/apps/web/dist`
+- Source repo: `../dpcode-embed`
+- Managed server source entrypoint: `../dpcode-embed/apps/server/src/index.ts`
+- Windows managed server build output: `../dpcode-embed/apps/server/dist/index.mjs`
+- Web build output: `../dpcode-embed/apps/web/dist`
 - Packaged web assets copied into extension output: `out/t3-embed`
 
 ### Files that matter in VSmux
@@ -35,9 +35,9 @@ Current upstream engine expectations from `forks/dpcode-embed/package.json`:
 ### Runtime behavior by platform
 
 - macOS/Linux: VSmux launches DP Code with Bun from source:
-  - `bun forks/dpcode-embed/apps/server/src/index.ts --mode desktop --host 127.0.0.1 --port 3774 --no-browser`
+  - `bun ../dpcode-embed/apps/server/src/index.ts --mode desktop --host 127.0.0.1 --port 3774 --no-browser`
 - Windows: VSmux launches DP Code with Node from built output:
-  - `node forks/dpcode-embed/apps/server/dist/index.mjs --mode desktop --host 127.0.0.1 --port 3774 --no-browser`
+  - `node ../dpcode-embed/apps/server/dist/index.mjs --mode desktop --host 127.0.0.1 --port 3774 --no-browser`
 
 The Windows split exists because the Bun-driven startup path was unreliable there. If you remove that split, expect Windows regressions.
 
@@ -53,7 +53,7 @@ Managed runtime repo root is resolved in this order:
 
 1. `VSMUX_T3_REPO_ROOT`
 2. VS Code setting `VSmux.t3RepoRoot`
-3. Auto-detected repo candidates from workspace folders, sibling `agent-tiler`, extension path, and cwd
+3. Auto-detected repo candidates from workspace folders, a sibling `dpcode-embed` checkout, extension path, and cwd
 
 If the wrong checkout is being used, fix the setting or env var first. Do not work around it by copying random files into the installed extension folder.
 
@@ -67,7 +67,7 @@ There were two separate failures:
 The main startup causes on Windows were:
 
 - wrong repo root selected
-- missing `forks/dpcode-embed/node_modules`
+- missing `../dpcode-embed/node_modules`
 - Bun too old
 - missing `apps/server/dist/index.mjs`
 - supervisor launch path still carrying old assumptions
@@ -83,9 +83,9 @@ Use these steps when Windows breaks again or after pulling a newer `dpcode-embed
 From the VSmux repo root:
 
 ```powershell
-git -C forks\dpcode-embed fetch --all --prune
-git -C forks\dpcode-embed status
-git -C forks\dpcode-embed pull --ff-only
+git -C ..\dpcode-embed fetch --all --prune
+git -C ..\dpcode-embed status
+git -C ..\dpcode-embed pull --ff-only
 ```
 
 ### 2. Confirm tool versions first
@@ -103,14 +103,14 @@ Minimums that matter right now:
 ### 3. Install embedded repo dependencies
 
 ```powershell
-Set-Location forks\dpcode-embed
+Set-Location ..\dpcode-embed
 bun install
-Set-Location ..\..
+Set-Location ..\agent-tiler
 ```
 
 ### 4. Build the embedded web assets
 
-This copies `forks/dpcode-embed/apps/web/dist` into `out/t3-embed`, which is what the packaged extension serves.
+This copies `../dpcode-embed/apps/web/dist` into `out/t3-embed`, which is what the packaged extension serves.
 
 ```powershell
 pnpm run t3:embed:build
@@ -121,9 +121,9 @@ pnpm run t3:embed:build
 This is required on Windows because VSmux launches `apps/server/dist/index.mjs`.
 
 ```powershell
-Set-Location forks\dpcode-embed\apps\server
+Set-Location ..\dpcode-embed\apps\server
 bun run build
-Set-Location ..\..\..\..
+Set-Location ..\..\..\agent-tiler
 ```
 
 ### 6. Rebuild and reinstall the VSIX
@@ -144,10 +144,10 @@ Without a reload, the running extension host may still be using old JS and old i
 
 Before assuming a code bug, check these paths exist:
 
-- `forks/dpcode-embed/node_modules`
-- `forks/dpcode-embed/apps/web/dist/index.html`
+- `../dpcode-embed/node_modules`
+- `../dpcode-embed/apps/web/dist/index.html`
 - `out/t3-embed/index.html`
-- `forks/dpcode-embed/apps/server/dist/index.mjs` on Windows
+- `../dpcode-embed/apps/server/dist/index.mjs` on Windows
 
 If the UI loads but sending messages fails, check for websocket errors against:
 
@@ -175,11 +175,11 @@ If startup keeps timing out, inspect `supervisor.json` before guessing.
 
 ## Upgrade Playbook For The Next DP Code Version
 
-When updating `forks/dpcode-embed`, follow this order.
+When updating `../dpcode-embed`, follow this order.
 
 ### 1. Pull the new upstream revision
 
-- fast-forward or merge in the new DP Code version into `forks/dpcode-embed`
+- fast-forward or merge in the new DP Code version into `../dpcode-embed`
 - record the new commit in this handover doc
 
 ### 2. Re-check the server startup contract

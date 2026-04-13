@@ -5,8 +5,6 @@ node_modules/
 dist/
 out/
 forks/ghostty-web/dist/
-forks/t3code-embed/
-forks/dpcode-embed/
 installer/
 .collaborator
 docs/*

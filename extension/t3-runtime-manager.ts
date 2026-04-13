@@ -1,7 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -13,29 +11,18 @@ import {
   formatT3RpcFailure,
   parseT3RpcIncomingMessage,
 } from "./t3-rpc-protocol";
+import {
+  getManagedT3EntrypointPath as getResolvedManagedT3EntrypointPath,
+  getManagedT3RepoRoot,
+  getManagedT3WebDistPath,
+  getManagedT3WindowsEntrypointPath as getResolvedManagedT3WindowsEntrypointPath,
+} from "./managed-t3-paths";
 import { getDefaultShell, getDefaultWorkspaceCwd } from "./terminal-workspace-helpers";
 
 const DEFAULT_MODEL = "gpt-5-codex";
 const LEGACY_T3_COMMAND = "npx --yes t3";
 const DEFAULT_T3_COMMAND = LEGACY_T3_COMMAND;
-const DEFAULT_MANAGED_T3_REPO_ROOT = "/Users/madda/dev/_active/agent-tiler";
 const MINIMUM_MANAGED_T3_BUN_VERSION = "1.3.9";
-const MANAGED_T3_ENTRYPOINT_SEGMENTS = [
-  "forks",
-  "dpcode-embed",
-  "apps",
-  "server",
-  "src",
-  "index.ts",
-] as const;
-const MANAGED_T3_WINDOWS_ENTRYPOINT_SEGMENTS = [
-  "forks",
-  "dpcode-embed",
-  "apps",
-  "server",
-  "dist",
-  "index.mjs",
-] as const;
 const T3_HOST = "127.0.0.1";
 const T3_PORT = 3774;
 const START_TIMEOUT_MS = 30_000;
@@ -50,7 +37,6 @@ const LEASES_DIR_NAME = "leases";
 const SUPERVISOR_STATE_FILE = "supervisor.json";
 const SUPERVISOR_LAUNCH_LOCK_FILE = "supervisor-launch.lock";
 const AUTH_STATE_FILE = "auth-state.json";
-const MANAGED_T3_REPO_ROOT_SETTING = "VSmux.t3RepoRoot";
 type ManagedT3EntrypointResolution = {
   entrypoint: string;
   repoRoot: string;
@@ -607,9 +593,9 @@ export class T3RuntimeManager implements vscode.Disposable {
     await stat(entrypoint).catch(() => {
       throw new Error(
         [
-          "The updated T3 runtime source is missing from the main repo checkout.",
+          "The managed DP Code runtime source is missing.",
           `Expected: ${entrypoint}`,
-          `Sync forks/dpcode-embed in ${repoRoot} and reinstall the main-branch VSIX.`,
+          `Sync the sibling dpcode-embed checkout at ${repoRoot} and reinstall the main-branch VSIX.`,
         ].join(" "),
       );
     });
@@ -1082,21 +1068,17 @@ function shellQuote(value: string): string {
 function getManagedT3EntrypointPath(
   context?: Pick<vscode.ExtensionContext, "extensionPath">,
 ): string {
-  return resolveManagedT3Entrypoint(context).entrypoint;
+  return getResolvedManagedT3EntrypointPath(context);
 }
 
 function getManagedT3WindowsEntrypointPath(
   context?: Pick<vscode.ExtensionContext, "extensionPath">,
 ): string {
-  return join(getManagedT3RepoRoot(context), ...MANAGED_T3_WINDOWS_ENTRYPOINT_SEGMENTS);
-}
-
-function getManagedT3RepoRoot(context?: Pick<vscode.ExtensionContext, "extensionPath">): string {
-  return resolveManagedT3Entrypoint(context).repoRoot;
+  return getResolvedManagedT3WindowsEntrypointPath(context);
 }
 
 function getManagedT3EmbedRoot(context?: Pick<vscode.ExtensionContext, "extensionPath">): string {
-  return join(getManagedT3RepoRoot(context), "forks", "dpcode-embed");
+  return getManagedT3RepoRoot(context);
 }
 
 async function getManagedRuntimeBuildTimestamp(
@@ -1123,6 +1105,7 @@ async function getManagedRuntimeBuildTimestamp(
     addCandidate(join(root, "t3-embed", "index.html"));
   }
 
+  addCandidate(join(getManagedT3WebDistPath(context), "index.html"));
   addCandidate(getManagedT3WindowsEntrypointPath(context));
   addCandidate(getManagedT3EntrypointPath(context));
 
@@ -1141,96 +1124,11 @@ async function getManagedRuntimeBuildTimestamp(
 function resolveManagedT3Entrypoint(
   context?: Pick<vscode.ExtensionContext, "extensionPath">,
 ): ManagedT3EntrypointResolution {
-  const overrideRoot = process.env.VSMUX_T3_REPO_ROOT?.trim();
-  if (overrideRoot) {
-    return {
-      entrypoint: join(overrideRoot, ...MANAGED_T3_ENTRYPOINT_SEGMENTS),
-      repoRoot: overrideRoot,
-    };
-  }
-
-  const configuredRoot = getConfiguredManagedT3RepoRoot();
-  if (configuredRoot) {
-    return {
-      entrypoint: join(configuredRoot, ...MANAGED_T3_ENTRYPOINT_SEGMENTS),
-      repoRoot: configuredRoot,
-    };
-  }
-
-  const repoRootCandidates = getManagedT3RepoRootCandidates(context);
-  const repoRoot =
-    repoRootCandidates.find((candidate) => hasManagedT3Entrypoint(candidate)) ??
-    getDefaultManagedT3RepoRootCandidate(context) ??
-    DEFAULT_MANAGED_T3_REPO_ROOT;
+  const repoRoot = getManagedT3RepoRoot(context);
   return {
-    entrypoint: join(repoRoot, ...MANAGED_T3_ENTRYPOINT_SEGMENTS),
+    entrypoint: getManagedT3EntrypointPath(context),
     repoRoot,
   };
-}
-
-function getManagedT3RepoRootCandidates(
-  context?: Pick<vscode.ExtensionContext, "extensionPath">,
-): string[] {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  const addWithParents = (candidate: string | undefined): void => {
-    const trimmedCandidate = candidate?.trim();
-    if (!trimmedCandidate) {
-      return;
-    }
-
-    let current = trimmedCandidate;
-    while (!seen.has(current)) {
-      seen.add(current);
-      candidates.push(current);
-      const parent = dirname(current);
-      if (parent === current) {
-        break;
-      }
-      current = parent;
-    }
-  };
-
-  for (const folder of vscode.workspace.workspaceFolders ?? []) {
-    addWithParents(folder.uri.fsPath);
-    addWithParents(join(dirname(folder.uri.fsPath), "agent-tiler"));
-  }
-  addWithParents(context?.extensionPath);
-  if (context?.extensionPath) {
-    addWithParents(join(dirname(dirname(context.extensionPath)), "agent-tiler"));
-  }
-  addWithParents(process.cwd());
-  addWithParents(join(dirname(process.cwd()), "agent-tiler"));
-  addWithParents(join(homedir(), "dev", "_active", "agent-tiler"));
-  addWithParents(DEFAULT_MANAGED_T3_REPO_ROOT);
-  return candidates;
-}
-
-function hasManagedT3Entrypoint(repoRoot: string): boolean {
-  return existsSync(join(repoRoot, ...MANAGED_T3_ENTRYPOINT_SEGMENTS));
-}
-
-function getDefaultManagedT3RepoRootCandidate(
-  context?: Pick<vscode.ExtensionContext, "extensionPath">,
-): string | undefined {
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (workspaceFolder) {
-    return join(dirname(workspaceFolder), "agent-tiler");
-  }
-
-  if (context?.extensionPath) {
-    return join(dirname(dirname(context.extensionPath)), "agent-tiler");
-  }
-
-  return join(dirname(process.cwd()), "agent-tiler");
-}
-
-function getConfiguredManagedT3RepoRoot(): string | undefined {
-  const configured = vscode.workspace
-    .getConfiguration()
-    .get<string>(MANAGED_T3_REPO_ROOT_SETTING)
-    ?.trim();
-  return configured && configured.length > 0 ? configured : undefined;
 }
 
 function getListeningProcessId(port: number): number | undefined {

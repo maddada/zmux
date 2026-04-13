@@ -146,15 +146,15 @@ describe("T3RuntimeManager", () => {
         resolveStartupCommand: (startupCommand: string) => string;
       }
     ).resolveStartupCommand("npx --yes t3");
-    expect(startupCommand).toContain(join(repoRoot, "forks", "t3code-embed", "upstream"));
+    expect(startupCommand).toContain(join(repoRoot, "apps", "server", "src", "index.ts"));
   });
 
-  test("should prefer a sibling agent-tiler checkout over the open VSmux workspace", async () => {
+  test("should prefer a sibling dpcode-embed checkout over the open VSmux workspace", async () => {
     const parentDir = await mkdtemp(join(tmpdir(), "vsmux-parent-"));
     const workspaceRoot = join(parentDir, "VSmux");
-    const agentTilerRoot = join(parentDir, "agent-tiler");
+    const dpcodeRoot = join(parentDir, "dpcode-embed");
     await mkdir(workspaceRoot, { recursive: true });
-    await createManagedRepoFixture(agentTilerRoot);
+    await createManagedRepoFixture(dpcodeRoot);
     workspaceState.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }];
     const manager = new T3RuntimeManager({
       extensionPath: join(workspaceRoot, "out"),
@@ -174,8 +174,8 @@ describe("T3RuntimeManager", () => {
         resolveStartupCommand: (startupCommand: string) => string;
       }
     ).resolveStartupCommand("npx --yes t3");
-    expect(startupCommand).toContain(join(agentTilerRoot, "forks", "t3code-embed", "upstream"));
-    expect(startupCommand).not.toContain(join(workspaceRoot, "forks", "t3code-embed", "upstream"));
+    expect(startupCommand).toContain(join(dpcodeRoot, "apps", "server", "src", "index.ts"));
+    expect(startupCommand).not.toContain(join(workspaceRoot, "apps", "server", "src", "index.ts"));
   });
 
   test("should honor the configured T3 repo root when provided", async () => {
@@ -200,7 +200,7 @@ describe("T3RuntimeManager", () => {
         resolveStartupCommand: (startupCommand: string) => string;
       }
     ).resolveStartupCommand("npx --yes t3");
-    expect(startupCommand).toContain(join(repoRoot, "forks", "t3code-embed", "upstream"));
+    expect(startupCommand).toContain(join(repoRoot, "apps", "server", "src", "index.ts"));
   });
 
   test("should reattach a restored thread to the project that already owns it", async () => {
@@ -345,49 +345,18 @@ describe("T3RuntimeManager", () => {
 
 async function createManagedRepoFixture(targetRoot?: string): Promise<string> {
   const repoRoot = targetRoot ?? (await mkdtemp(join(tmpdir(), "vsmux-managed-t3-")));
-  const entrypoint = join(
-    repoRoot,
-    "forks",
-    "t3code-embed",
-    "upstream",
-    "apps",
-    "server",
-    "src",
-    "bin.ts",
-  );
-  await mkdir(join(repoRoot, "forks", "t3code-embed", "upstream", "apps", "server", "src"), {
-    recursive: true,
-  });
+  const entrypoint = join(repoRoot, "apps", "server", "src", "index.ts");
+  await mkdir(join(repoRoot, "apps", "server", "src"), { recursive: true });
   await writeFile(entrypoint, "export {};\n", "utf8");
   return repoRoot;
 }
 
 async function createManagedDpRepoFixture(targetRoot?: string): Promise<string> {
   const repoRoot = targetRoot ?? (await mkdtemp(join(tmpdir(), "vsmux-managed-dp-")));
-  const sourceEntrypoint = join(
-    repoRoot,
-    "forks",
-    "dpcode-embed",
-    "apps",
-    "server",
-    "src",
-    "index.ts",
-  );
-  const windowsEntrypoint = join(
-    repoRoot,
-    "forks",
-    "dpcode-embed",
-    "apps",
-    "server",
-    "dist",
-    "index.mjs",
-  );
-  await mkdir(join(repoRoot, "forks", "dpcode-embed", "apps", "server", "src"), {
-    recursive: true,
-  });
-  await mkdir(join(repoRoot, "forks", "dpcode-embed", "apps", "server", "dist"), {
-    recursive: true,
-  });
+  const sourceEntrypoint = join(repoRoot, "apps", "server", "src", "index.ts");
+  const windowsEntrypoint = join(repoRoot, "apps", "server", "dist", "index.mjs");
+  await mkdir(join(repoRoot, "apps", "server", "src"), { recursive: true });
+  await mkdir(join(repoRoot, "apps", "server", "dist"), { recursive: true });
   await writeFile(sourceEntrypoint, "export {};\n", "utf8");
   await writeFile(windowsEntrypoint, "export {};\n", "utf8");
   return repoRoot;

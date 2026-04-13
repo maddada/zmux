@@ -18,7 +18,6 @@
     "media/**",
     "chat-history/media/**",
     "chat-history/dist/**",
-    "forks/dpcode-embed/apps/web/dist/**",
     "out/workspace/**",
     "out/**"
   ],
@@ -329,7 +328,7 @@
           "title": "T3 Repo Root",
           "type": "string",
           "default": "",
-          "description": "Absolute path to the checkout that contains forks/dpcode-embed. Use this when the managed DP Code runtime source lives outside the current VSmux workspace."
+          "description": "Absolute path to the dpcode-embed checkout. Use this when the managed DP Code runtime source lives outside the default sibling path."
         },
         "VSmux.sidebarTheme": {
           "title": "Sidebar Theme",

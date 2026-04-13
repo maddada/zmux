@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { T3SessionRecord } from "../../shared/session-grid-contract";
+import { getManagedT3WebDistPath } from "../managed-t3-paths";
 import type { T3RuntimeManager } from "../t3-runtime-manager";
 import type { WorkspaceAssetServer } from "../workspace-asset-server";
 
@@ -12,7 +13,7 @@ export function getEmbeddedT3Root(context: vscode.ExtensionContext): vscode.Uri 
     return packagedRoot;
   }
 
-  return vscode.Uri.joinPath(context.extensionUri, "forks", "dpcode-embed", "apps", "web", "dist");
+  return vscode.Uri.file(getManagedT3WebDistPath(context));
 }
 
 export async function createT3IframeSource(

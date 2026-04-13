@@ -5,11 +5,13 @@ import {
   type OutgoingHttpHeaders,
   type ServerResponse,
 } from "node:http";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { connect } from "node:net";
 import * as path from "node:path";
 import type { Duplex } from "node:stream";
 import * as vscode from "vscode";
+import { getManagedT3WebDistPath } from "./managed-t3-paths";
 
 type AssetScope = "workspace" | "t3-embed";
 
@@ -38,8 +40,11 @@ export class WorkspaceAssetServer implements vscode.Disposable {
   private t3ProxyAuthorizationToken: string | undefined;
 
   public constructor(context: vscode.ExtensionContext) {
+    const packagedEmbedRoot = path.join(context.extensionPath, "out", "t3-embed");
     this.roots = {
-      "t3-embed": path.join(context.extensionPath, "forks", "dpcode-embed", "apps", "web", "dist"),
+      "t3-embed": existsSync(path.join(packagedEmbedRoot, "index.html"))
+        ? packagedEmbedRoot
+        : getManagedT3WebDistPath(context),
       workspace: path.join(context.extensionPath, "out", "workspace"),
     };
     this.server.on("upgrade", (request, socket, head) => {
