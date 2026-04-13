@@ -147,7 +147,7 @@ function getDefaultManagedT3RepoRootCandidate(context?: ManagedT3Context): strin
   return join(dirname(process.cwd()), MANAGED_T3_REPO_DIRECTORY_NAME);
 }
 
-function getConfiguredManagedT3RepoRoot(): string | undefined {
+export function getConfiguredManagedT3RepoRoot(): string | undefined {
   const configured = vscode.workspace
     .getConfiguration()
     .get<string>(MANAGED_T3_REPO_ROOT_SETTING)

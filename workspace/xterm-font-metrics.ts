@@ -15,6 +15,7 @@ function getFontMeasurementCacheKey(
   return JSON.stringify([
     appearance.fontFamily,
     appearance.fontSize,
+    appearance.fontWeight,
     appearance.letterSpacing,
     appearance.lineHeight,
     devicePixelRatio,
@@ -54,6 +55,7 @@ export function measureTerminalFont(options: {
   style.whiteSpace = "pre";
   style.fontFamily = appearance.fontFamily;
   style.fontSize = `${appearance.fontSize}px`;
+  style.fontWeight = String(appearance.fontWeight);
   style.lineHeight = "normal";
   measurementElement.textContent = "X";
   parent.append(measurementElement);

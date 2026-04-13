@@ -3,7 +3,9 @@ import {
   CASCADIA_CODE_TERMINAL_FONT_FAMILY,
   CROSS_PLATFORM_MONO_TERMINAL_FONT_FAMILY,
   DEFAULT_TERMINAL_FONT_PRESET,
+  DROID_SANS_MONO_TERMINAL_FONT_FAMILY,
   FIRA_CODE_TERMINAL_FONT_FAMILY,
+  JETBRAINS_MONO_TERMINAL_FONT_FAMILY,
   MENLO_TERMINAL_FONT_FAMILY,
   MESLO_TERMINAL_FONT_FAMILY,
   MONOSPACE_TERMINAL_FONT_FAMILY,
@@ -15,10 +17,11 @@ import {
 } from "./terminal-font-preset";
 
 describe("normalizeTerminalFontPreset", () => {
-  test("should keep Monospace as the default preset", () => {
+  test("should keep JetBrains Mono as the default preset", () => {
     expect(normalizeTerminalFontPreset(undefined)).toBe(DEFAULT_TERMINAL_FONT_PRESET);
     expect(normalizeTerminalFontPreset("monospace")).toBe("Monospace");
     expect(normalizeTerminalFontPreset(MONOSPACE_TERMINAL_FONT_FAMILY)).toBe("Monospace");
+    expect(DEFAULT_TERMINAL_FONT_PRESET).toBe("JetBrains Mono");
   });
 
   test("should map configured preset labels", () => {
@@ -26,6 +29,9 @@ describe("normalizeTerminalFontPreset", () => {
     expect(normalizeTerminalFontPreset("ui-monospace")).toBe("UI Monospace");
     expect(normalizeTerminalFontPreset("Meslo")).toBe("Meslo");
     expect(normalizeTerminalFontPreset("Cross Platform Mono")).toBe("Cross Platform Mono");
+    expect(normalizeTerminalFontPreset("Consolas")).toBe("Consolas (Windows Default)");
+    expect(normalizeTerminalFontPreset("Monaco")).toBe("Monaco (macOS Default)");
+    expect(normalizeTerminalFontPreset("Droid Sans Mono")).toBe("Droid Sans Mono (Linux Default)");
     expect(normalizeTerminalFontPreset("Fira Code")).toBe("Fira Code");
   });
 
@@ -34,6 +40,9 @@ describe("normalizeTerminalFontPreset", () => {
     expect(normalizeTerminalFontPreset(MESLO_TERMINAL_FONT_FAMILY)).toBe("Meslo");
     expect(normalizeTerminalFontPreset(CROSS_PLATFORM_MONO_TERMINAL_FONT_FAMILY)).toBe(
       "Cross Platform Mono",
+    );
+    expect(normalizeTerminalFontPreset(DROID_SANS_MONO_TERMINAL_FONT_FAMILY)).toBe(
+      "Droid Sans Mono (Linux Default)",
     );
     expect(normalizeTerminalFontPreset(CASCADIA_CODE_TERMINAL_FONT_FAMILY)).toBe("Cascadia Code");
     expect(normalizeTerminalFontPreset(MENLO_TERMINAL_FONT_FAMILY)).toBe("Menlo");
@@ -47,9 +56,10 @@ describe("terminal font preset helpers", () => {
       "UI Monospace",
       "Meslo",
       "Cross Platform Mono",
-      "Consolas",
+      "Consolas (Windows Default)",
       "Menlo",
-      "Monaco",
+      "Monaco (macOS Default)",
+      "Droid Sans Mono (Linux Default)",
       "Liberation Mono",
       "DejaVu Sans Mono",
       "Courier New",
@@ -68,6 +78,7 @@ describe("terminal font preset helpers", () => {
   test("should return a fallback-backed font family for every preset", () => {
     for (const preset of TERMINAL_FONT_PRESETS) {
       const fontFamily = getTerminalFontFamilyForPreset(preset.preset);
+      expect(fontFamily).toContain('"MesloLGL Nerd Font Mono"');
       expect(fontFamily).toContain("monospace");
     }
   });
@@ -75,5 +86,8 @@ describe("terminal font preset helpers", () => {
   test("should detect the preset from the resolved font family", () => {
     expect(getTerminalFontPresetFromFontFamily(MONOSPACE_TERMINAL_FONT_FAMILY)).toBe("Monospace");
     expect(getTerminalFontPresetFromFontFamily(FIRA_CODE_TERMINAL_FONT_FAMILY)).toBe("Fira Code");
+    expect(getTerminalFontPresetFromFontFamily(JETBRAINS_MONO_TERMINAL_FONT_FAMILY)).toBe(
+      "JetBrains Mono",
+    );
   });
 });

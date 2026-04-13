@@ -149,6 +149,25 @@ describe("T3RuntimeManager", () => {
     expect(startupCommand).toContain(join(repoRoot, "apps", "server", "src", "index.ts"));
   });
 
+  test("should prefer the bundled runtime when no explicit managed checkout is configured", async () => {
+    const extensionRoot = await createBundledRuntimeFixture();
+    const manager = new T3RuntimeManager({
+      extensionPath: extensionRoot,
+      globalStorageUri: { fsPath: join(extensionRoot, ".tmp", "storage") },
+    } as never);
+
+    const startupCommand = (
+      manager as never as {
+        resolveStartupCommand: (startupCommand: string) => string;
+      }
+    ).resolveStartupCommand("npx --yes t3");
+
+    expect(startupCommand).toContain(
+      join(extensionRoot, "out", "dpcode-server", "dist", "index.mjs"),
+    );
+    expect(startupCommand).toContain("--mode desktop --host 127.0.0.1 --port 3774 --no-browser");
+  });
+
   test("should prefer a sibling dpcode-embed checkout over the open VSmux workspace", async () => {
     const parentDir = await mkdtemp(join(tmpdir(), "vsmux-parent-"));
     const workspaceRoot = join(parentDir, "VSmux");
@@ -201,6 +220,27 @@ describe("T3RuntimeManager", () => {
       }
     ).resolveStartupCommand("npx --yes t3");
     expect(startupCommand).toContain(join(repoRoot, "apps", "server", "src", "index.ts"));
+  });
+
+  test("should prefer an explicit managed checkout over the bundled runtime", async () => {
+    const repoRoot = await createManagedRepoFixture();
+    const extensionRoot = await createBundledRuntimeFixture();
+    workspaceState.configuration["VSmux.t3RepoRoot"] = repoRoot;
+    const manager = new T3RuntimeManager({
+      extensionPath: extensionRoot,
+      globalStorageUri: { fsPath: join(extensionRoot, ".tmp", "storage") },
+    } as never);
+
+    const startupCommand = (
+      manager as never as {
+        resolveStartupCommand: (startupCommand: string) => string;
+      }
+    ).resolveStartupCommand("npx --yes t3");
+
+    expect(startupCommand).toContain(join(repoRoot, "apps", "server", "src", "index.ts"));
+    expect(startupCommand).not.toContain(
+      join(extensionRoot, "out", "dpcode-server", "dist", "index.mjs"),
+    );
   });
 
   test("should reattach a restored thread to the project that already owns it", async () => {
@@ -360,6 +400,16 @@ async function createManagedDpRepoFixture(targetRoot?: string): Promise<string> 
   await writeFile(sourceEntrypoint, "export {};\n", "utf8");
   await writeFile(windowsEntrypoint, "export {};\n", "utf8");
   return repoRoot;
+}
+
+async function createBundledRuntimeFixture(targetRoot?: string): Promise<string> {
+  const extensionRoot = targetRoot ?? (await mkdtemp(join(tmpdir(), "vsmux-bundled-runtime-")));
+  const bundledEntrypoint = join(extensionRoot, "out", "dpcode-server", "dist", "index.mjs");
+  const bundledNodeModules = join(extensionRoot, "out", "dpcode-server", "node_modules");
+  await mkdir(join(extensionRoot, "out", "dpcode-server", "dist"), { recursive: true });
+  await mkdir(bundledNodeModules, { recursive: true });
+  await writeFile(bundledEntrypoint, "export {};\n", "utf8");
+  return extensionRoot;
 }
 
 function escapeRegExp(value: string): string {

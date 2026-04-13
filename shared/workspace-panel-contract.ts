@@ -1,5 +1,6 @@
 import type {
   GroupedSessionWorkspaceSnapshot,
+  SessionLifecycleState,
   SidebarSessionActivityState,
   TerminalViewMode,
   TerminalSessionRecord,
@@ -21,6 +22,7 @@ export type WorkspacePanelTerminalAppearance = {
   cursorStyle: WorkspacePanelTerminalCursorStyle;
   fontFamily: string;
   fontSize: number;
+  fontWeight: number;
   letterSpacing: number;
   lineHeight: number;
   scrollToBottomWhenTyping: boolean;
@@ -42,6 +44,7 @@ export type WorkspaceWelcomeModalMode = "optional" | "required";
 
 export type WorkspacePanelTerminalPane = {
   activity?: SidebarSessionActivityState;
+  lifecycleState?: SessionLifecycleState;
   kind: "terminal";
   isVisible: boolean;
   visibleSlotIndex?: number;
@@ -54,6 +57,7 @@ export type WorkspacePanelTerminalPane = {
 
 export type WorkspacePanelT3Pane = {
   activity?: SidebarSessionActivityState;
+  lifecycleState?: SessionLifecycleState;
   kind: "t3";
   isVisible: boolean;
   visibleSlotIndex?: number;
@@ -86,6 +90,8 @@ export type WorkspacePanelSessionStateMessage = Omit<WorkspacePanelHydrateMessag
 };
 
 export type WorkspacePanelTerminalPresentationChangedMessage = {
+  activity?: SidebarSessionActivityState;
+  lifecycleState?: SessionLifecycleState;
   sessionId: string;
   snapshot?: TerminalSessionSnapshot;
   terminalTitle?: string;

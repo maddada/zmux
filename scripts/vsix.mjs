@@ -136,7 +136,9 @@ function findPackageBinaryPath(packagePrefix, relativePath) {
 function resolveVsixPath(installerDir, extensionName, extensionVersion, mode) {
   const baseName = `${extensionName}-${extensionVersion}`;
   if (mode === "install") {
-    return join(installerDir, `${baseName}-${Date.now()}.vsix`);
+    const installPath = join(installerDir, `${baseName}.install.vsix`);
+    rmSync(installPath, { force: true });
+    return installPath;
   }
 
   const defaultPath = join(installerDir, `${baseName}.vsix`);
@@ -230,42 +232,48 @@ if (!vsceCli) {
   fail("Could not find the local @vscode/vsce CLI. Run pnpm install and retry.");
 }
 
-run(pnpmCli, ["run", "compile"], {
-  env: {
-    ...process.env,
-    ...(profileBuild ? { VSMUX_PROFILE_BUILD: "1" } : {}),
-  },
-});
-
-run(
-  process.execPath,
-  [
-    vsceCli,
-    "package",
-    "--no-dependencies",
-    "--skip-license",
-    "--allow-unused-files-pattern",
-    "--out",
-    vsixPath,
-  ],
-  {
+try {
+  run(pnpmCli, ["run", "build:extension"], {
     env: {
       ...process.env,
-      VSMUX_SKIP_PREPUBLISH: "1",
+      ...(profileBuild ? { VSMUX_PROFILE_BUILD: "1" } : {}),
     },
-  },
-);
+  });
 
-if (mode === "package") {
-  process.exit(0);
-}
-
-const vscodeCli = resolveCodeCli();
-
-if (!vscodeCli) {
-  fail(
-    "Could not find an editor CLI. Install the 'code' or 'cursor' command, or set VSMUX_CODE_CLI to the editor binary path.",
+  run(
+    process.execPath,
+    [
+      vsceCli,
+      "package",
+      "--no-dependencies",
+      "--skip-license",
+      "--allow-unused-files-pattern",
+      "--out",
+      vsixPath,
+    ],
+    {
+      env: {
+        ...process.env,
+        VSMUX_SKIP_PREPUBLISH: "1",
+      },
+    },
   );
-}
 
-run(vscodeCli, ["--install-extension", vsixPath, "--force"]);
+  if (mode === "package") {
+    process.exit(0);
+  }
+
+  const vscodeCli = resolveCodeCli();
+
+  if (!vscodeCli) {
+    fail(
+      "Could not find an editor CLI. Install the 'code' or 'cursor' command, or set VSMUX_CODE_CLI to the editor binary path.",
+    );
+  }
+
+  run(vscodeCli, ["--install-extension", vsixPath, "--force"]);
+} finally {
+  if (mode === "install") {
+    rmSync(vsixPath, { force: true });
+  }
+}

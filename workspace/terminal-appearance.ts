@@ -3,7 +3,13 @@ import type { WorkspacePanelTerminalAppearance } from "../shared/workspace-panel
 
 export type TerminalAppearanceOptions = Pick<
   ITerminalOptions,
-  "cursorBlink" | "cursorStyle" | "fontFamily" | "fontSize" | "letterSpacing" | "lineHeight"
+  | "cursorBlink"
+  | "cursorStyle"
+  | "fontFamily"
+  | "fontSize"
+  | "fontWeight"
+  | "letterSpacing"
+  | "lineHeight"
 >;
 
 const FALLBACK_TERMINAL_FONT_FAMILY = "monospace";
@@ -13,6 +19,7 @@ export type TerminalAppearanceDependencies = readonly [
   cursorStyle: WorkspacePanelTerminalAppearance["cursorStyle"],
   fontFamily: string,
   fontSize: number,
+  fontWeight: number,
   letterSpacing: number,
   lineHeight: number,
   scrollToBottomWhenTyping: boolean,
@@ -30,6 +37,7 @@ export function getNormalizedTerminalAppearance(
     cursorStyle: appearance.cursorStyle,
     fontFamily: normalizeTerminalFontFamily(appearance.fontFamily),
     fontSize: appearance.fontSize,
+    fontWeight: appearance.fontWeight,
     letterSpacing: appearance.letterSpacing,
     lineHeight: appearance.lineHeight,
   };
@@ -50,6 +58,7 @@ export function getTerminalAppearanceDependencies(
     normalizedAppearance.cursorStyle,
     normalizedAppearance.fontFamily,
     normalizedAppearance.fontSize,
+    normalizedAppearance.fontWeight,
     normalizedAppearance.letterSpacing,
     normalizedAppearance.lineHeight,
     appearance.scrollToBottomWhenTyping,

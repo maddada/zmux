@@ -311,6 +311,7 @@ function createWorkspaceMessage(
       cursorStyle: "bar",
       fontFamily: "monospace",
       fontSize: 12,
+      fontWeight: 400,
       letterSpacing: 0,
       lineHeight: 1,
       scrollToBottomWhenTyping: false,

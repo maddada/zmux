@@ -25,6 +25,7 @@ export const SETTINGS_SECTION = "VSmux";
 export const BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING = "backgroundSessionTimeoutMinutes";
 export const AUTO_OPEN_SIDEBAR_VIEWS_ON_STARTUP_SETTING = "autoOpenSidebarViewsOnStartup";
 export const SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING = "sendRenameCommandOnSidebarRename";
+export const AUTO_SUBMIT_RENAME_COMMAND_ON_AUTO_NAME_SETTING = "autoSubmitRenameCommandOnAutoName";
 export const CREATE_SESSION_ON_SIDEBAR_DOUBLE_CLICK_SETTING = "createSessionOnSidebarDoubleClick";
 export const SIDEBAR_THEME_SETTING = "sidebarTheme";
 export const AGENT_MANAGER_ZOOM_SETTING = "agentManagerZoom";
@@ -50,6 +51,7 @@ export const FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE_SETTING = "findPreviousSessio
 export const GIT_SKIP_SUGGESTED_COMMIT_CONFIRMATION_SETTING = "gitSkipSuggestedCommitConfirmation";
 export const TERMINAL_FONT_FAMILY_SETTING = "terminalFontFamily";
 export const TERMINAL_FONT_SIZE_SETTING = "terminalFontSize";
+export const TERMINAL_FONT_WEIGHT_SETTING = "terminalFontWeight";
 export const TERMINAL_LINE_HEIGHT_SETTING = "terminalLineHeight";
 export const TERMINAL_LETTER_SPACING_SETTING = "terminalLetterSpacing";
 export const TERMINAL_CURSOR_STYLE_SETTING = "terminalCursorStyle";
@@ -59,6 +61,7 @@ export const TERMINAL_SCROLL_TO_BOTTOM_WHEN_TYPING_SETTING = "terminalScrollToBo
 export const MIN_TERMINAL_FONT_SIZE = 8;
 export const MAX_TERMINAL_FONT_SIZE = 32;
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
+export const DEFAULT_TERMINAL_FONT_WEIGHT = 400;
 export const MIN_XTERM_HEADLESS_SCROLLBACK = 100;
 export const MAX_XTERM_HEADLESS_SCROLLBACK = 100_000;
 export const DEFAULT_XTERM_HEADLESS_SCROLLBACK = 50_000;
@@ -241,6 +244,14 @@ export function getSendRenameCommandOnSidebarRename(): boolean {
   );
 }
 
+export function getAutoSubmitRenameCommandOnAutoName(): boolean {
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<boolean>(AUTO_SUBMIT_RENAME_COMMAND_ON_AUTO_NAME_SETTING, true) ?? true
+  );
+}
+
 export function getAutoOpenSidebarViewsOnStartup(): boolean {
   return (
     vscode.workspace
@@ -368,6 +379,19 @@ export function getTerminalFontSize(): number {
       .get<number>(TERMINAL_FONT_SIZE_SETTING, DEFAULT_TERMINAL_FONT_SIZE) ??
     DEFAULT_TERMINAL_FONT_SIZE;
   return clampTerminalFontSize(value);
+}
+
+export function getTerminalFontWeight(): number {
+  const value =
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<number>(TERMINAL_FONT_WEIGHT_SETTING, DEFAULT_TERMINAL_FONT_WEIGHT) ??
+    DEFAULT_TERMINAL_FONT_WEIGHT;
+  return clampTerminalFontWeight(value);
+}
+
+export function clampTerminalFontWeight(value: number): number {
+  return clampNumber(value, 100, 900, DEFAULT_TERMINAL_FONT_WEIGHT);
 }
 
 export function clampTerminalFontSize(value: number): number {

@@ -12,6 +12,20 @@
   src: url("./fonts/MesloLGLNerdFontMono-Bold.ttf") format("truetype");
 }
 
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  src: url("./fonts/JetBrainsMono[wght].ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: italic;
+  font-weight: 100 800;
+  src: url("./fonts/JetBrainsMono-Italic[wght].ttf") format("truetype");
+}
+
 :root {
   color-scheme: dark;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
@@ -615,9 +629,13 @@ body {
   width: 10px;
 }
 
-.workspace-pane-title-indicator[data-activity="working"] {
+.workspace-pane-title-indicator[data-lifecycle-state="running"] {
   --workspace-pane-title-indicator-color: #cf944a;
   animation: workspace-pane-title-indicator-pulse 1.35s ease-in-out infinite;
+}
+
+.workspace-pane-title-indicator[data-lifecycle-state="error"] {
+  --workspace-pane-title-indicator-color: #ff6b6b;
 }
 
 @keyframes workspace-pane-title-indicator-pulse {

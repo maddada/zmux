@@ -1,33 +1,47 @@
-export const MONOSPACE_TERMINAL_FONT_FAMILY = "monospace";
-export const UI_MONOSPACE_TERMINAL_FONT_FAMILY = "ui-monospace, monospace";
+const BUNDLED_NERD_FONT_FALLBACK = '"MesloLGL Nerd Font Mono"';
+
+function withBundledNerdFontFallback(stack: string): string {
+  return `${stack}, ${BUNDLED_NERD_FONT_FALLBACK}, monospace`;
+}
+
+export const MONOSPACE_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback("monospace");
+export const UI_MONOSPACE_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback("ui-monospace");
 export const MESLO_TERMINAL_FONT_FAMILY =
   '"MesloLGL Nerd Font Mono", Menlo, Monaco, "Courier New", monospace';
-export const CROSS_PLATFORM_MONO_TERMINAL_FONT_FAMILY =
-  'Consolas, Menlo, Monaco, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace';
-export const CONSOLAS_TERMINAL_FONT_FAMILY = "Consolas, monospace";
-export const MENLO_TERMINAL_FONT_FAMILY = "Menlo, monospace";
-export const MONACO_TERMINAL_FONT_FAMILY = "Monaco, monospace";
-export const LIBERATION_MONO_TERMINAL_FONT_FAMILY = '"Liberation Mono", monospace';
-export const DEJAVU_SANS_MONO_TERMINAL_FONT_FAMILY = '"DejaVu Sans Mono", monospace';
-export const COURIER_NEW_TERMINAL_FONT_FAMILY = '"Courier New", monospace';
-export const CASCADIA_MONO_TERMINAL_FONT_FAMILY = '"Cascadia Mono", monospace';
-export const CASCADIA_CODE_TERMINAL_FONT_FAMILY = '"Cascadia Code", monospace';
-export const JETBRAINS_MONO_TERMINAL_FONT_FAMILY = '"JetBrains Mono", monospace';
-export const FIRA_CODE_TERMINAL_FONT_FAMILY = '"Fira Code", monospace';
-export const SOURCE_CODE_PRO_TERMINAL_FONT_FAMILY = '"Source Code Pro", monospace';
-export const IBM_PLEX_MONO_TERMINAL_FONT_FAMILY = '"IBM Plex Mono", monospace';
-export const ROBOTO_MONO_TERMINAL_FONT_FAMILY = '"Roboto Mono", monospace';
-export const NOTO_SANS_MONO_TERMINAL_FONT_FAMILY = '"Noto Sans Mono", monospace';
-export const UBUNTU_MONO_TERMINAL_FONT_FAMILY = '"Ubuntu Mono", monospace';
+export const CROSS_PLATFORM_MONO_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback(
+  'Consolas, Menlo, Monaco, "Liberation Mono", "DejaVu Sans Mono", "Courier New"',
+);
+export const CONSOLAS_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('Consolas, "Courier New"');
+export const MENLO_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback("Menlo");
+export const MONACO_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('Monaco, "Courier New"');
+export const DROID_SANS_MONO_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback(
+  '"Droid Sans Mono", "monospace"',
+);
+export const LIBERATION_MONO_TERMINAL_FONT_FAMILY =
+  withBundledNerdFontFallback('"Liberation Mono"');
+export const DEJAVU_SANS_MONO_TERMINAL_FONT_FAMILY =
+  withBundledNerdFontFallback('"DejaVu Sans Mono"');
+export const COURIER_NEW_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('"Courier New"');
+export const CASCADIA_MONO_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('"Cascadia Mono"');
+export const CASCADIA_CODE_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('"Cascadia Code"');
+export const JETBRAINS_MONO_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('"JetBrains Mono"');
+export const FIRA_CODE_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('"Fira Code"');
+export const SOURCE_CODE_PRO_TERMINAL_FONT_FAMILY =
+  withBundledNerdFontFallback('"Source Code Pro"');
+export const IBM_PLEX_MONO_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('"IBM Plex Mono"');
+export const ROBOTO_MONO_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('"Roboto Mono"');
+export const NOTO_SANS_MONO_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('"Noto Sans Mono"');
+export const UBUNTU_MONO_TERMINAL_FONT_FAMILY = withBundledNerdFontFallback('"Ubuntu Mono"');
 
 export const TERMINAL_FONT_PRESETS = [
   { preset: "Monospace", fontFamily: MONOSPACE_TERMINAL_FONT_FAMILY },
   { preset: "UI Monospace", fontFamily: UI_MONOSPACE_TERMINAL_FONT_FAMILY },
   { preset: "Meslo", fontFamily: MESLO_TERMINAL_FONT_FAMILY },
   { preset: "Cross Platform Mono", fontFamily: CROSS_PLATFORM_MONO_TERMINAL_FONT_FAMILY },
-  { preset: "Consolas", fontFamily: CONSOLAS_TERMINAL_FONT_FAMILY },
+  { preset: "Consolas (Windows Default)", fontFamily: CONSOLAS_TERMINAL_FONT_FAMILY },
   { preset: "Menlo", fontFamily: MENLO_TERMINAL_FONT_FAMILY },
-  { preset: "Monaco", fontFamily: MONACO_TERMINAL_FONT_FAMILY },
+  { preset: "Monaco (macOS Default)", fontFamily: MONACO_TERMINAL_FONT_FAMILY },
+  { preset: "Droid Sans Mono (Linux Default)", fontFamily: DROID_SANS_MONO_TERMINAL_FONT_FAMILY },
   { preset: "Liberation Mono", fontFamily: LIBERATION_MONO_TERMINAL_FONT_FAMILY },
   { preset: "DejaVu Sans Mono", fontFamily: DEJAVU_SANS_MONO_TERMINAL_FONT_FAMILY },
   { preset: "Courier New", fontFamily: COURIER_NEW_TERMINAL_FONT_FAMILY },
@@ -44,7 +58,7 @@ export const TERMINAL_FONT_PRESETS = [
 
 export type TerminalFontPreset = (typeof TERMINAL_FONT_PRESETS)[number]["preset"];
 
-export const DEFAULT_TERMINAL_FONT_PRESET: TerminalFontPreset = "Monospace";
+export const DEFAULT_TERMINAL_FONT_PRESET: TerminalFontPreset = "JetBrains Mono";
 
 const normalizeComparableValue = (value: string): string =>
   value
@@ -61,6 +75,9 @@ const TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE = new Map<string, TerminalFontPre
 );
 
 TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE.set("ui-monospace", "UI Monospace");
+TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE.set("consolas", "Consolas (Windows Default)");
+TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE.set("monaco", "Monaco (macOS Default)");
+TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE.set("droid sans mono", "Droid Sans Mono (Linux Default)");
 
 export function normalizeTerminalFontPreset(value: string | undefined): TerminalFontPreset {
   const normalizedValue = normalizeComparableValue(value ?? "");

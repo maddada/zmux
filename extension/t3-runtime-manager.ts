@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import * as vscode from "vscode";
 import type { T3SessionMetadata } from "../shared/session-grid-contract";
 import {
@@ -12,6 +13,7 @@ import {
   parseT3RpcIncomingMessage,
 } from "./t3-rpc-protocol";
 import {
+  getConfiguredManagedT3RepoRoot,
   getManagedT3EntrypointPath as getResolvedManagedT3EntrypointPath,
   getManagedT3RepoRoot,
   getManagedT3WebDistPath,
@@ -37,10 +39,20 @@ const LEASES_DIR_NAME = "leases";
 const SUPERVISOR_STATE_FILE = "supervisor.json";
 const SUPERVISOR_LAUNCH_LOCK_FILE = "supervisor-launch.lock";
 const AUTH_STATE_FILE = "auth-state.json";
-type ManagedT3EntrypointResolution = {
-  entrypoint: string;
-  repoRoot: string;
-};
+
+type ManagedT3RuntimeSource =
+  | {
+      kind: "bundled";
+      entrypoint: string;
+      nodeModulesPath: string;
+      root: string;
+    }
+  | {
+      kind: "external";
+      entrypoint: string;
+      nodeModulesPath: string;
+      repoRoot: string;
+    };
 
 type T3ModelSelection = {
   model: string;
@@ -290,8 +302,11 @@ export class T3RuntimeManager implements vscode.Disposable {
     const origin = getT3Origin();
     const resolvedStartupCommand = this.resolveStartupCommand(startupCommand);
     await this.ensureRuntimeStorage();
-    await this.ensureManagedRuntimeEntrypoint();
-    await this.ensureManagedRuntimeDependencies();
+    if (shouldResolveManagedRuntime(startupCommand)) {
+      const runtimeSource = resolveManagedT3RuntimeSource(this.context);
+      await this.ensureManagedRuntimeEntrypoint(runtimeSource);
+      await this.ensureManagedRuntimeDependencies(runtimeSource);
+    }
     const hasManagedSupervisor = await this.hasActiveManagedSupervisor(resolvedStartupCommand);
     if (await isOriginResponsive(origin)) {
       if (hasManagedSupervisor) {
@@ -588,55 +603,73 @@ export class T3RuntimeManager implements vscode.Disposable {
     await mkdir(this.getLeaseDirectoryPath(), { recursive: true });
   }
 
-  private async ensureManagedRuntimeEntrypoint(): Promise<void> {
-    const { entrypoint, repoRoot } = resolveManagedT3Entrypoint(this.context);
+  private async ensureManagedRuntimeEntrypoint(
+    runtimeSource = resolveManagedT3RuntimeSource(this.context),
+  ): Promise<void> {
+    const repoRoot =
+      runtimeSource.kind === "external" ? runtimeSource.repoRoot : runtimeSource.root;
+    const entrypoint = runtimeSource.entrypoint;
     await stat(entrypoint).catch(() => {
       throw new Error(
-        [
-          "The managed DP Code runtime source is missing.",
-          `Expected: ${entrypoint}`,
-          `Sync the sibling dpcode-embed checkout at ${repoRoot} and reinstall the main-branch VSIX.`,
-        ].join(" "),
+        runtimeSource.kind === "external"
+          ? [
+              "The managed DP Code runtime source is missing.",
+              `Expected: ${entrypoint}`,
+              `Sync the sibling dpcode-embed checkout at ${repoRoot} and reinstall the main-branch VSIX.`,
+            ].join(" ")
+          : [
+              "The bundled DP Code runtime is missing.",
+              `Expected: ${entrypoint}`,
+              "Rebuild and reinstall the VSIX so the packaged runtime assets are included.",
+            ].join(" "),
       );
     });
   }
 
-  private async ensureManagedRuntimeDependencies(): Promise<void> {
-    const repoRoot = getManagedT3RepoRoot(this.context);
-    const embedRoot = getManagedT3EmbedRoot(this.context);
-    const bunVersion = getBunRuntimeVersion();
-    if (bunVersion && compareSemverStrings(bunVersion, MINIMUM_MANAGED_T3_BUN_VERSION) < 0) {
-      throw new Error(
-        [
-          `Managed DP Code requires Bun ${MINIMUM_MANAGED_T3_BUN_VERSION} or newer.`,
-          `Found: ${bunVersion}.`,
-          `Upgrade Bun, then run 'bun install' in ${embedRoot} and 'pnpm run t3:embed:build' in ${repoRoot}.`,
-        ].join(" "),
-      );
-    }
-
-    const nodeModulesPath = join(embedRoot, "node_modules");
+  private async ensureManagedRuntimeDependencies(
+    runtimeSource = resolveManagedT3RuntimeSource(this.context),
+  ): Promise<void> {
+    const nodeModulesPath = runtimeSource.nodeModulesPath;
     await stat(nodeModulesPath).catch(() => {
       throw new Error(
-        [
-          "Managed DP Code dependencies are missing.",
-          `Expected: ${nodeModulesPath}`,
-          `Run 'bun install' in ${embedRoot}, then run 'pnpm run t3:embed:build' in ${repoRoot}.`,
-        ].join(" "),
+        runtimeSource.kind === "external"
+          ? [
+              "Managed DP Code dependencies are missing.",
+              `Expected: ${nodeModulesPath}`,
+              `Run 'bun install' in ${runtimeSource.repoRoot}, then run 'pnpm run t3:embed:build'.`,
+            ].join(" ")
+          : [
+              "Bundled DP Code dependencies are missing.",
+              `Expected: ${nodeModulesPath}`,
+              "Rebuild and reinstall the VSIX so the packaged runtime dependencies are included.",
+            ].join(" "),
       );
     });
 
-    if (process.platform === "win32") {
-      const windowsEntrypoint = getManagedT3WindowsEntrypointPath(this.context);
-      await stat(windowsEntrypoint).catch(() => {
+    if (runtimeSource.kind === "external") {
+      const bunVersion = getBunRuntimeVersion();
+      if (bunVersion && compareSemverStrings(bunVersion, MINIMUM_MANAGED_T3_BUN_VERSION) < 0) {
         throw new Error(
           [
-            "Managed DP Code server build output is missing on Windows.",
-            `Expected: ${windowsEntrypoint}`,
-            `Run 'bun run build' in ${join(embedRoot, "apps", "server")}, then reinstall the main-branch VSIX.`,
+            `Managed DP Code requires Bun ${MINIMUM_MANAGED_T3_BUN_VERSION} or newer.`,
+            `Found: ${bunVersion}.`,
+            `Upgrade Bun, then run 'bun install' in ${runtimeSource.repoRoot} and 'pnpm run t3:embed:build'.`,
           ].join(" "),
         );
-      });
+      }
+
+      if (process.platform === "win32") {
+        const windowsEntrypoint = getManagedT3WindowsEntrypointPath(this.context);
+        await stat(windowsEntrypoint).catch(() => {
+          throw new Error(
+            [
+              "Managed DP Code server build output is missing on Windows.",
+              `Expected: ${windowsEntrypoint}`,
+              `Run 'bun run build' in ${join(runtimeSource.repoRoot, "apps", "server")}, then reinstall the main-branch VSIX.`,
+            ].join(" "),
+          );
+        });
+      }
     }
   }
 
@@ -875,7 +908,7 @@ export class T3RuntimeManager implements vscode.Disposable {
       return trimmedCommand;
     }
 
-    return createManagedStartupCommand(this.context);
+    return createManagedStartupCommand(resolveManagedT3RuntimeSource(this.context));
   }
 }
 
@@ -883,21 +916,28 @@ function getT3Origin(): string {
   return `http://${T3_HOST}:${String(T3_PORT)}`;
 }
 
-function createManagedStartupCommand(
-  context?: Pick<vscode.ExtensionContext, "extensionPath">,
-): string {
-  const entrypoint = shellQuote(
-    process.platform === "win32"
-      ? getManagedT3WindowsEntrypointPath(context)
-      : getManagedT3EntrypointPath(context),
-  );
-  if (process.platform === "win32") {
-    const nodePath = shellQuote(getNodeRuntimePath());
-    return `& ${nodePath} ${entrypoint} --mode desktop --host ${T3_HOST} --port ${String(T3_PORT)} --no-browser`;
+function createManagedStartupCommand(runtimeSource: ManagedT3RuntimeSource): string {
+  const entrypoint = shellQuote(runtimeSource.entrypoint);
+  if (runtimeSource.kind === "bundled" || process.platform === "win32") {
+    return createNodeStartupCommand(entrypoint);
   }
 
   const bunPath = shellQuote(getBunRuntimePath());
   return `${bunPath} ${entrypoint} --mode desktop --host ${T3_HOST} --port ${String(T3_PORT)} --no-browser`;
+}
+
+function createNodeStartupCommand(entrypoint: string): string {
+  const nodePath = shellQuote(getNodeRuntimePath());
+  if (process.platform === "win32") {
+    return `& ${nodePath} ${entrypoint} --mode desktop --host ${T3_HOST} --port ${String(T3_PORT)} --no-browser`;
+  }
+
+  return `${nodePath} ${entrypoint} --mode desktop --host ${T3_HOST} --port ${String(T3_PORT)} --no-browser`;
+}
+
+function shouldResolveManagedRuntime(startupCommand: string): boolean {
+  const trimmedCommand = startupCommand.trim();
+  return trimmedCommand.length === 0 || trimmedCommand === LEGACY_T3_COMMAND;
 }
 
 function getNodeRuntimePath(): string {
@@ -1077,8 +1117,34 @@ function getManagedT3WindowsEntrypointPath(
   return getResolvedManagedT3WindowsEntrypointPath(context);
 }
 
-function getManagedT3EmbedRoot(context?: Pick<vscode.ExtensionContext, "extensionPath">): string {
-  return getManagedT3RepoRoot(context);
+function getBundledT3ServerRootCandidates(
+  context?: Pick<vscode.ExtensionContext, "extensionPath">,
+): string[] {
+  const candidates = new Set<string>();
+  if (context?.extensionPath) {
+    candidates.add(join(context.extensionPath, "out", "dpcode-server"));
+    candidates.add(join(context.extensionPath, "dpcode-server"));
+    candidates.add(join(dirname(context.extensionPath), "out", "dpcode-server"));
+  }
+  candidates.add(join(process.cwd(), "out", "dpcode-server"));
+  candidates.add(join(process.cwd(), "dpcode-server"));
+  candidates.add(join(dirname(process.cwd()), "out", "dpcode-server"));
+  return [...candidates];
+}
+
+function getBundledT3ServerRoot(
+  context?: Pick<vscode.ExtensionContext, "extensionPath">,
+): string | undefined {
+  return getBundledT3ServerRootCandidates(context).find((candidate) =>
+    existsSync(join(candidate, "dist", "index.mjs")),
+  );
+}
+
+function getBundledT3ServerEntrypointPath(
+  context?: Pick<vscode.ExtensionContext, "extensionPath">,
+): string | undefined {
+  const bundledRoot = getBundledT3ServerRoot(context);
+  return bundledRoot ? join(bundledRoot, "dist", "index.mjs") : undefined;
 }
 
 async function getManagedRuntimeBuildTimestamp(
@@ -1103,8 +1169,11 @@ async function getManagedRuntimeBuildTimestamp(
     addCandidate(join(root, "workspace", "t3-frame-host.js"));
     addCandidate(join(root, "out", "t3-embed", "index.html"));
     addCandidate(join(root, "t3-embed", "index.html"));
+    addCandidate(join(root, "out", "dpcode-server", "dist", "index.mjs"));
+    addCandidate(join(root, "dpcode-server", "dist", "index.mjs"));
   }
 
+  addCandidate(getBundledT3ServerEntrypointPath(context));
   addCandidate(join(getManagedT3WebDistPath(context), "index.html"));
   addCandidate(getManagedT3WindowsEntrypointPath(context));
   addCandidate(getManagedT3EntrypointPath(context));
@@ -1121,12 +1190,41 @@ async function getManagedRuntimeBuildTimestamp(
   return latestTimestamp;
 }
 
-function resolveManagedT3Entrypoint(
+function resolveManagedT3RuntimeSource(
   context?: Pick<vscode.ExtensionContext, "extensionPath">,
-): ManagedT3EntrypointResolution {
+): ManagedT3RuntimeSource {
+  const explicitRepoRoot =
+    process.env.VSMUX_T3_REPO_ROOT?.trim() || getConfiguredManagedT3RepoRoot();
+  if (explicitRepoRoot) {
+    return {
+      entrypoint:
+        process.platform === "win32"
+          ? join(explicitRepoRoot, "apps", "server", "dist", "index.mjs")
+          : join(explicitRepoRoot, "apps", "server", "src", "index.ts"),
+      kind: "external",
+      nodeModulesPath: join(explicitRepoRoot, "node_modules"),
+      repoRoot: explicitRepoRoot,
+    };
+  }
+
+  const bundledRoot = getBundledT3ServerRoot(context);
+  if (bundledRoot) {
+    return {
+      entrypoint: join(bundledRoot, "dist", "index.mjs"),
+      kind: "bundled",
+      nodeModulesPath: join(bundledRoot, "node_modules"),
+      root: bundledRoot,
+    };
+  }
+
   const repoRoot = getManagedT3RepoRoot(context);
   return {
-    entrypoint: getManagedT3EntrypointPath(context),
+    entrypoint:
+      process.platform === "win32"
+        ? join(repoRoot, "apps", "server", "dist", "index.mjs")
+        : join(repoRoot, "apps", "server", "src", "index.ts"),
+    kind: "external",
+    nodeModulesPath: join(repoRoot, "node_modules"),
     repoRoot,
   };
 }
