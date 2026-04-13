@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
@@ -7,7 +7,7 @@ const validModes = new Set(["package", "install"]);
 const profileBuildFlag = "--profile-build";
 
 function fail(message) {
-  console.error(message);
+  void message;
   process.exit(1);
 }
 
@@ -23,12 +23,21 @@ function quoteCmdArg(value) {
   return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, "$1$1")}"`;
 }
 
+function quotePowerShellArg(value) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 function run(command, args, options = {}) {
   const useCmdShim = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
   const result = useCmdShim
     ? spawnSync(
-        process.env.ComSpec ?? "cmd.exe",
-        ["/d", "/s", "/c", [quoteCmdArg(command), ...args.map(quoteCmdArg)].join(" ")],
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `& ${quotePowerShellArg(command)} ${args.map(quotePowerShellArg).join(" ")}`,
+        ],
         {
           cwd: repoRoot,
           stdio: "inherit",
@@ -51,20 +60,77 @@ function run(command, args, options = {}) {
   }
 }
 
-function commandExists(command) {
-  const which = process.platform === "win32" ? "where.exe" : "which";
-  const result = spawnSync(which, [command], {
-    cwd: repoRoot,
-    stdio: "ignore",
-  });
+function getPathEntries() {
+  const pathValue = process.env.PATH ?? process.env.Path ?? process.env.path ?? "";
+  return pathValue
+    .split(delimiter)
+    .map((entry) => entry.trim().replace(/^"(.*)"$/u, "$1"))
+    .filter(Boolean);
+}
 
-  return result.status === 0;
+function resolveFromPath(command) {
+  const candidateNames =
+    process.platform === "win32" && !/[.][^\\/.]+$/u.test(command)
+      ? [`${command}.cmd`, `${command}.exe`, `${command}.bat`, command]
+      : [command];
+
+  for (const entry of getPathEntries()) {
+    for (const candidateName of candidateNames) {
+      const candidatePath = join(entry, candidateName);
+      if (existsSync(candidatePath)) {
+        return candidatePath;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function resolveCommand(command) {
+  if (command.includes("/") || command.includes("\\")) {
+    return existsSync(command) ? command : undefined;
+  }
+
+  const localBinDir = join(repoRoot, "node_modules", ".bin");
+  const localCandidates =
+    process.platform === "win32"
+      ? [
+          join(localBinDir, `${command}.cmd`),
+          join(localBinDir, `${command}.exe`),
+          join(localBinDir, `${command}.bat`),
+        ]
+      : [join(localBinDir, command)];
+
+  for (const candidate of localCandidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return resolveFromPath(command);
 }
 
 function findFirstAvailableCommand(candidates) {
-  return candidates.find((candidate) =>
-    candidate.includes("/") ? existsSync(candidate) : commandExists(candidate),
-  );
+  for (const candidate of candidates) {
+    const resolved = resolveCommand(candidate);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return undefined;
+}
+
+function findPackageBinaryPath(packagePrefix, relativePath) {
+  const pnpmDir = join(repoRoot, "node_modules", ".pnpm");
+  if (!existsSync(pnpmDir)) {
+    return undefined;
+  }
+
+  const entries = new Set(readdirSync(pnpmDir));
+
+  const match = [...entries].find((entry) => entry.startsWith(packagePrefix));
+  return match ? join(pnpmDir, match, ...relativePath) : undefined;
 }
 
 function resolveVsixPath(installerDir, extensionName, extensionVersion, mode) {
@@ -81,7 +147,6 @@ function resolveVsixPath(installerDir, extensionName, extensionVersion, mode) {
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "EPERM") {
       const fallbackPath = join(installerDir, `${baseName}-${Date.now()}.vsix`);
-      console.warn(`Existing VSIX is locked, using ${fallbackPath} instead.`);
       return fallbackPath;
     }
 
@@ -148,6 +213,8 @@ const extensionName = packageJson.default.name;
 const extensionVersion = packageJson.default.version;
 const extensionPublisher = packageJson.default.publisher;
 const installerDir = join(repoRoot, "installer");
+const pnpmCli = resolveCommand("pnpm");
+const vsceCli = findPackageBinaryPath("@vscode+vsce@", ["node_modules", "@vscode", "vsce", "vsce"]);
 
 if (!existsSync(installerDir)) {
   mkdirSync(installerDir, { recursive: true });
@@ -155,7 +222,15 @@ if (!existsSync(installerDir)) {
 
 const vsixPath = resolveVsixPath(installerDir, extensionName, extensionVersion, mode);
 
-run("pnpm", ["run", "compile"], {
+if (!pnpmCli) {
+  fail("Could not find pnpm. Install pnpm and retry.");
+}
+
+if (!vsceCli) {
+  fail("Could not find the local @vscode/vsce CLI. Run pnpm install and retry.");
+}
+
+run(pnpmCli, ["run", "compile"], {
   env: {
     ...process.env,
     ...(profileBuild ? { VSMUX_PROFILE_BUILD: "1" } : {}),
@@ -163,10 +238,9 @@ run("pnpm", ["run", "compile"], {
 });
 
 run(
-  "vp",
+  process.execPath,
   [
-    "exec",
-    "vsce",
+    vsceCli,
     "package",
     "--no-dependencies",
     "--skip-license",
@@ -182,12 +256,6 @@ run(
   },
 );
 
-console.log(`Packaged VSIX: ${vsixPath}`);
-
-if (profileBuild) {
-  console.log("Profiling build enabled: webview bundles are unminified with source maps.");
-}
-
 if (mode === "package") {
   process.exit(0);
 }
@@ -201,5 +269,3 @@ if (!vscodeCli) {
 }
 
 run(vscodeCli, ["--install-extension", vsixPath, "--force"]);
-
-console.log(`Installed ${extensionPublisher}.${extensionName} with ${vscodeCli} from ${vsixPath}`);

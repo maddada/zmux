@@ -58,7 +58,11 @@ await mkdir(sessionStateDir, { recursive: true });
 try {
   daemonProcess = spawn(
     process.execPath,
-    [path.join(process.cwd(), "out", "extension", "terminal-daemon-process.js"), "--state-dir", daemonStateDir],
+    [
+      path.join(process.cwd(), "out", "extension", "terminal-daemon-process.js"),
+      "--state-dir",
+      daemonStateDir,
+    ],
     {
       stdio: "ignore",
     },
@@ -70,7 +74,6 @@ try {
   await startLiveServer();
   await primeLiveSessions();
 
-  console.log(`[storybook-live-server] live server: http://127.0.0.1:${String(LIVE_SERVER_PORT)}`);
   await waitForExit();
 } finally {
   await cleanup();
@@ -156,7 +159,6 @@ async function primeLiveSessions() {
   }
 
   for (const session of liveSessions) {
-    console.log(`[storybook-live-server] creating ${session.sessionId} -> ${session.command}`);
     await sendRequest({
       cols: 120,
       cwd: process.cwd(),

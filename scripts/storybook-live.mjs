@@ -17,10 +17,6 @@ const serverProcess = spawn(
 );
 serverProcess.unref();
 
-console.log(`[storybook-live] started PTY sidecar pid=${String(serverProcess.pid)}`);
-console.log(`[storybook-live] use this fullscreen URL: ${LIVE_IFRAME_URL}`);
-console.log(`[storybook-live] manager UI: ${LIVE_MANAGER_URL}`);
-
 const storybookProcess = spawn(
   "pnpm",
   ["exec", "storybook", "dev", "--ci", "--no-open", "--exact-port", "-p", String(STORYBOOK_PORT)],

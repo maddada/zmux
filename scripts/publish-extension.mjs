@@ -12,7 +12,7 @@ const extensionVersion = packageJson.default.version;
 const tagName = `v${extensionVersion}`;
 
 function fail(message) {
-  console.error(message);
+  void message;
   process.exit(1);
 }
 
@@ -115,5 +115,3 @@ run("vp", [
 
 run("git", ["tag", "-a", tagName, "-m", `Release ${tagName}`]);
 run("git", ["push", "origin", branchName, "--follow-tags"]);
-
-console.log(`Published ${extensionVersion} and pushed ${tagName} to origin.`);
