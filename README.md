@@ -16,11 +16,14 @@ Full release notes: [CHANGELOG.md](/Users/madda/dev/_active/agent-tiler/CHANGELO
 
 ---
 
+## Screenshot
+
 <img width="3322" alt="2026-04-05_Code_06-12-27@2x" src="https://github.com/user-attachments/assets/e97e339e-b139-44ca-806b-0fcabe764eb0" />
+<br/><br/><br/>
 
----
+## Demo video:
 
-Early version video showing the core experience of VSmux (will create a new video soon showing all of the new stuff): https://x.com/i/status/2034602427442503890
+https://github.com/user-attachments/assets/5b41df9a-bb2e-45f3-b8bd-ed3d6b7e2968
 
 ---
 
