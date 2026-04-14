@@ -4,6 +4,7 @@ logs/
 node_modules/
 dist/
 out/
+storybook-static/
 forks/ghostty-web/dist/
 installer/
 .collaborator
