@@ -140,9 +140,11 @@ export function syncGroupOrderInWorkspace(
   };
 }
 
-export function createGroupInWorkspace(
-  snapshot: GroupedSessionWorkspaceSnapshot,
-): { changed: boolean; groupId?: string; snapshot: GroupedSessionWorkspaceSnapshot } {
+export function createGroupInWorkspace(snapshot: GroupedSessionWorkspaceSnapshot): {
+  changed: boolean;
+  groupId?: string;
+  snapshot: GroupedSessionWorkspaceSnapshot;
+} {
   const normalizedSnapshot = normalizeGroupedSessionWorkspaceSnapshot(snapshot);
   if (normalizedSnapshot.groups.length >= MAX_GROUP_COUNT) {
     return { changed: false, snapshot: normalizedSnapshot };

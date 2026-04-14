@@ -288,7 +288,12 @@ describe("buildProgrammaticResumeAction", () => {
         "Project overview question",
       ),
     ).toEqual({
-      steps: [{ data: buildExpectedOpenCodeResumeCommand("oc", "Project overview question"), shouldExecute: true }],
+      steps: [
+        {
+          data: buildExpectedOpenCodeResumeCommand("oc", "Project overview question"),
+          shouldExecute: true,
+        },
+      ],
     });
   });
 

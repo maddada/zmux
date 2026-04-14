@@ -18,8 +18,6 @@ describe("normalizeGitTextGenerationProvider", () => {
   });
 
   test("should fall back for unsupported values", () => {
-    expect(normalizeGitTextGenerationProvider("cursor")).toBe(
-      DEFAULT_GIT_TEXT_GENERATION_PROVIDER,
-    );
+    expect(normalizeGitTextGenerationProvider("cursor")).toBe(DEFAULT_GIT_TEXT_GENERATION_PROVIDER);
   });
 });

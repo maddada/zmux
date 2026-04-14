@@ -186,7 +186,11 @@ function buildShellInvocation(
   return replaceShell ? `exec ${commandLine}` : commandLine;
 }
 
-function getShellCommandArgs(shellPath: string, command: string, interactiveShell = false): string[] {
+function getShellCommandArgs(
+  shellPath: string,
+  command: string,
+  interactiveShell = false,
+): string[] {
   const shellName = basename(shellPath).toLowerCase();
 
   if (process.platform === "win32") {

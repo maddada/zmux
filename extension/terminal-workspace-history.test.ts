@@ -6,8 +6,7 @@ import {
 
 describe("terminal title history parsing", () => {
   test("should extract the latest terminal title from vt history", () => {
-    const history =
-      "\u001b]0;Claude Code\u0007hello\u001b]2;Codex \u2838\u0007world";
+    const history = "\u001b]0;Claude Code\u0007hello\u001b]2;Codex \u2838\u0007world";
 
     expect(extractLatestTerminalTitleFromVtHistory(history)).toBe("Codex ⠸");
   });

@@ -176,7 +176,9 @@ function findOscTerminator(
 function getTerminalTitleStreamCarryover(history: string): string {
   const lastOscStart = history.lastIndexOf(OSC_PREFIX);
   if (lastOscStart >= 0 && !findOscTerminator(history, lastOscStart + OSC_PREFIX.length)) {
-    return history.slice(Math.max(0, lastOscStart, history.length - MAX_TITLE_STREAM_CARRYOVER_CHARS));
+    return history.slice(
+      Math.max(0, lastOscStart, history.length - MAX_TITLE_STREAM_CARRYOVER_CHARS),
+    );
   }
 
   if (history.endsWith(OSC_PREFIX)) {

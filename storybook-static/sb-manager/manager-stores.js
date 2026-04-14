@@ -9,7 +9,7 @@ import {
   experimental_getTestProviderStore,
   experimental_useTestProviderStore,
   internal_checklistStore,
-  internal_universalChecklistStore
+  internal_universalChecklistStore,
 } from "storybook/manager-api";
 export {
   experimental_getStatusStore,
@@ -19,5 +19,5 @@ export {
   internal_checklistStore,
   internal_fullStatusStore,
   internal_fullTestProviderStore,
-  internal_universalChecklistStore
+  internal_universalChecklistStore,
 };

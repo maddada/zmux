@@ -12,7 +12,10 @@ describe("getTerminalHistoryReplay", () => {
   });
 
   test("should apply replayed history once it is included", () => {
-    const replay = getTerminalHistoryReplay(createSessionSnapshot({ history: "prompt\r\noutput\r\n" }), false);
+    const replay = getTerminalHistoryReplay(
+      createSessionSnapshot({ history: "prompt\r\noutput\r\n" }),
+      false,
+    );
 
     expect(replay).toEqual({
       didApplyHistory: true,

@@ -1,103 +1,103 @@
 - generic [active] [ref=e1]:
-  - generic [ref=e9]:
-    - generic [ref=e10]:
-      - generic [ref=e11]:
-        - generic [ref=e13]: Actions
-        - button "Open sidebar menu" [ref=e17] [cursor=pointer]:
-          - img [ref=e18]
-      - generic [ref=e23]:
-        - button "Configure Dev action" [ref=e24] [cursor=pointer]:
-          - img [ref=e26]
-          - generic [ref=e28]: Dev
-        - button "Configure Build action" [ref=e29] [cursor=pointer]:
-          - img [ref=e31]
-          - generic [ref=e33]: Build
-        - button "Configure Test action" [ref=e34] [cursor=pointer]:
-          - img [ref=e36]
-          - generic [ref=e38]: Test
-        - button "Configure Setup action" [ref=e39] [cursor=pointer]:
-          - img [ref=e41]
-          - generic [ref=e43]: Setup
-        - 'button "Code Mode: switch back to normal VS Code layout while keeping VSmux sessions available" [ref=e44] [cursor=pointer]':
-          - img [ref=e46]
-          - generic [ref=e50]: Code
-    - generic [ref=e51]:
-      - generic [ref=e52]:
-        - generic [ref=e54]: Agents
-        - button "Show scratch pad" [ref=e57] [cursor=pointer]:
-          - img [ref=e58]
-      - generic [ref=e62]:
-        - button "Launch T3 Code" [ref=e63] [cursor=pointer]:
-          - img [ref=e65]
-        - button "Launch Codex" [ref=e66] [cursor=pointer]:
-          - img [ref=e68]
-        - button "Launch Claude" [ref=e69] [cursor=pointer]:
-          - img [ref=e71]
-        - button "Launch OpenCode" [ref=e72] [cursor=pointer]:
-          - img [ref=e74]
-        - button "Launch Gemini" [ref=e75] [cursor=pointer]:
-          - img [ref=e77]
-    - generic [ref=e78]:
-      - generic [ref=e79]:
-        - generic [ref=e81]: Sessions
-        - button "Show previous sessions" [ref=e84] [cursor=pointer]:
-          - img [ref=e85]
-      - generic [ref=e88]:
-        - generic [ref=e89] [cursor=pointer]:
-          - button "Main" [ref=e93]:
-            - generic [ref=e94]: Main
-          - generic [ref=e95]:
-            - button "show title in 2nd row Rename session" [ref=e97]:
-              - generic [ref=e98]:
-                - generic [ref=e100]: show title in 2nd row
-                - generic [ref=e101]:
-                  - button "Rename session":
-                    - img
-            - button "layout drift fix Rename session" [ref=e103]:
-              - generic [ref=e104]:
-                - generic [ref=e106]: layout drift fix
-                - generic [ref=e107]:
-                  - button "Rename session":
-                    - img
-            - button "Harbor Vale Rename session" [ref=e109]:
-              - generic [ref=e110]:
-                - generic [ref=e112]: Harbor Vale
-                - generic [ref=e113]:
-                  - button "Rename session":
-                    - img
-        - generic [ref=e114] [cursor=pointer]:
-          - button "Group 2" [ref=e118]:
-            - generic [ref=e119]: Group 2
-          - generic [ref=e120]:
-            - button "tooltip & show an indicator on the active card Rename session" [ref=e122]:
-              - generic [ref=e123]:
-                - generic [ref=e125]: tooltip & show an indicator on the active card
-                - generic [ref=e126]:
-                  - button "Rename session":
-                    - img
-            - button "Indigo Grove Rename session" [ref=e128]:
-              - generic [ref=e129]:
-                - generic [ref=e131]: Indigo Grove
-                - generic [ref=e132]:
-                  - button "Rename session":
-                    - img
-        - generic [ref=e133] [cursor=pointer]:
-          - generic [ref=e136]:
-            - button "Group 4" [ref=e137]:
-              - generic [ref=e138]: Group 4
-            - generic [ref=e139]:
-              - button "Open layout options for Group 4" [ref=e141]:
-                - img [ref=e142]
-              - button "Open visible session options for Group 4" [ref=e146]:
-                - img [ref=e147]:
-                  - generic [ref=e148]: "1"
-            - button "Create a session in Group 4" [ref=e149]:
-              - img [ref=e150]
-          - button "Amber Lattice Rename session" [ref=e153]:
-            - generic [ref=e154]:
-              - generic [ref=e156]: Amber Lattice
-              - generic [ref=e157]:
-                - button "Rename session":
-                  - img
-  - status [ref=e158]
-  - status [ref=e159]: Draggable item session-4 was dropped over droppable target session-4
+    - generic [ref=e9]:
+        - generic [ref=e10]:
+            - generic [ref=e11]:
+                - generic [ref=e13]: Actions
+                - button "Open sidebar menu" [ref=e17] [cursor=pointer]:
+                    - img [ref=e18]
+            - generic [ref=e23]:
+                - button "Configure Dev action" [ref=e24] [cursor=pointer]:
+                    - img [ref=e26]
+                    - generic [ref=e28]: Dev
+                - button "Configure Build action" [ref=e29] [cursor=pointer]:
+                    - img [ref=e31]
+                    - generic [ref=e33]: Build
+                - button "Configure Test action" [ref=e34] [cursor=pointer]:
+                    - img [ref=e36]
+                    - generic [ref=e38]: Test
+                - button "Configure Setup action" [ref=e39] [cursor=pointer]:
+                    - img [ref=e41]
+                    - generic [ref=e43]: Setup
+                - 'button "Code Mode: switch back to normal VS Code layout while keeping VSmux sessions available" [ref=e44] [cursor=pointer]':
+                    - img [ref=e46]
+                    - generic [ref=e50]: Code
+        - generic [ref=e51]:
+            - generic [ref=e52]:
+                - generic [ref=e54]: Agents
+                - button "Show scratch pad" [ref=e57] [cursor=pointer]:
+                    - img [ref=e58]
+            - generic [ref=e62]:
+                - button "Launch T3 Code" [ref=e63] [cursor=pointer]:
+                    - img [ref=e65]
+                - button "Launch Codex" [ref=e66] [cursor=pointer]:
+                    - img [ref=e68]
+                - button "Launch Claude" [ref=e69] [cursor=pointer]:
+                    - img [ref=e71]
+                - button "Launch OpenCode" [ref=e72] [cursor=pointer]:
+                    - img [ref=e74]
+                - button "Launch Gemini" [ref=e75] [cursor=pointer]:
+                    - img [ref=e77]
+        - generic [ref=e78]:
+            - generic [ref=e79]:
+                - generic [ref=e81]: Sessions
+                - button "Show previous sessions" [ref=e84] [cursor=pointer]:
+                    - img [ref=e85]
+            - generic [ref=e88]:
+                - generic [ref=e89] [cursor=pointer]:
+                    - button "Main" [ref=e93]:
+                        - generic [ref=e94]: Main
+                    - generic [ref=e95]:
+                        - button "show title in 2nd row Rename session" [ref=e97]:
+                            - generic [ref=e98]:
+                                - generic [ref=e100]: show title in 2nd row
+                                - generic [ref=e101]:
+                                    - button "Rename session":
+                                        - img
+                        - button "layout drift fix Rename session" [ref=e103]:
+                            - generic [ref=e104]:
+                                - generic [ref=e106]: layout drift fix
+                                - generic [ref=e107]:
+                                    - button "Rename session":
+                                        - img
+                        - button "Harbor Vale Rename session" [ref=e109]:
+                            - generic [ref=e110]:
+                                - generic [ref=e112]: Harbor Vale
+                                - generic [ref=e113]:
+                                    - button "Rename session":
+                                        - img
+                - generic [ref=e114] [cursor=pointer]:
+                    - button "Group 2" [ref=e118]:
+                        - generic [ref=e119]: Group 2
+                    - generic [ref=e120]:
+                        - button "tooltip & show an indicator on the active card Rename session" [ref=e122]:
+                            - generic [ref=e123]:
+                                - generic [ref=e125]: tooltip & show an indicator on the active card
+                                - generic [ref=e126]:
+                                    - button "Rename session":
+                                        - img
+                        - button "Indigo Grove Rename session" [ref=e128]:
+                            - generic [ref=e129]:
+                                - generic [ref=e131]: Indigo Grove
+                                - generic [ref=e132]:
+                                    - button "Rename session":
+                                        - img
+                - generic [ref=e133] [cursor=pointer]:
+                    - generic [ref=e136]:
+                        - button "Group 4" [ref=e137]:
+                            - generic [ref=e138]: Group 4
+                        - generic [ref=e139]:
+                            - button "Open layout options for Group 4" [ref=e141]:
+                                - img [ref=e142]
+                            - button "Open visible session options for Group 4" [ref=e146]:
+                                - img [ref=e147]:
+                                    - generic [ref=e148]: "1"
+                        - button "Create a session in Group 4" [ref=e149]:
+                            - img [ref=e150]
+                    - button "Amber Lattice Rename session" [ref=e153]:
+                        - generic [ref=e154]:
+                            - generic [ref=e156]: Amber Lattice
+                            - generic [ref=e157]:
+                                - button "Rename session":
+                                    - img
+    - status [ref=e158]
+    - status [ref=e159]: Draggable item session-4 was dropped over droppable target session-4

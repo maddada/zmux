@@ -70,9 +70,7 @@ export class TerminalDaemonRingBuffer {
     }
 
     const snapshot = this.snapshot();
-    return Buffer.from(
-      snapshot.subarray(clampedStart - oldestOffset, clampedEnd - oldestOffset),
-    );
+    return Buffer.from(snapshot.subarray(clampedStart - oldestOffset, clampedEnd - oldestOffset));
   }
 
   public getSafeReplayOffset(endOffset = this.total): number {

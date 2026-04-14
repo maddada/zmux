@@ -173,8 +173,7 @@ export function normalizeWorkspaceSessionDisplayIds(groups: readonly SessionGrou
       const normalizedAlias = session.alias.trim();
       return {
         ...session,
-        alias:
-          normalizedAlias === normalizedDisplayId ? claimedDisplayId.displayId : session.alias,
+        alias: normalizedAlias === normalizedDisplayId ? claimedDisplayId.displayId : session.alias,
         displayId: claimedDisplayId.displayId,
       };
     });

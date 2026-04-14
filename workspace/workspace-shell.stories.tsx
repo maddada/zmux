@@ -1,10 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { SidebarStoryArgs } from "../sidebar/sidebar-story-fixtures";
 import { createSidebarStoryMessage } from "../sidebar/sidebar-story-fixtures";
-import {
-  DEFAULT_SIDEBAR_STORY_ARGS,
-  SIDEBAR_STORY_ARG_TYPES,
-} from "../sidebar/sidebar-story-meta";
+import { DEFAULT_SIDEBAR_STORY_ARGS, SIDEBAR_STORY_ARG_TYPES } from "../sidebar/sidebar-story-meta";
 import { WorkspaceStoryHarness } from "./workspace-story-harness";
 
 type WorkspaceShellStoryArgs = SidebarStoryArgs & {

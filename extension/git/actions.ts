@@ -11,7 +11,13 @@ import {
   resolveDefaultBranchName,
   type GitStatusDetails,
 } from "./status";
-import { buildCommandLine, runGitCommand, runGitCommandResult, runGitStdout, runShellCommand } from "./process";
+import {
+  buildCommandLine,
+  runGitCommand,
+  runGitCommandResult,
+  runGitStdout,
+  runShellCommand,
+} from "./process";
 
 const COMMIT_TIMEOUT_MS = 180_000;
 const GITHUB_CLI_TIMEOUT_MS = 60_000;
@@ -202,7 +208,8 @@ async function createPullRequest(
     throw new Error("Create and checkout a branch before creating a PR.");
   }
 
-  const baseBranch = status.defaultBranch ?? (await resolveDefaultBranchName(cwd, status.hasOriginRemote));
+  const baseBranch =
+    status.defaultBranch ?? (await resolveDefaultBranchName(cwd, status.hasOriginRemote));
   if (!baseBranch) {
     throw new Error("Unable to determine a base branch for the pull request.");
   }
@@ -250,7 +257,9 @@ async function createPullRequest(
     );
     if (createResult.exitCode !== 0) {
       throw new Error(
-        createResult.stderr.trim() || createResult.stdout.trim() || "Failed to create pull request.",
+        createResult.stderr.trim() ||
+          createResult.stdout.trim() ||
+          "Failed to create pull request.",
       );
     }
   } finally {
@@ -285,12 +294,19 @@ async function loadCommitContextFromIndex(
   scope: SidebarGitCommitScope,
   env?: NodeJS.ProcessEnv,
 ): Promise<{ scope: SidebarGitCommitScope; stagedPatch: string; stagedSummary: string } | null> {
-  const stagedSummary = (await runGitStdout(cwd, ["diff", "--cached", "--name-status"], 60_000, env)).trim();
+  const stagedSummary = (
+    await runGitStdout(cwd, ["diff", "--cached", "--name-status"], 60_000, env)
+  ).trim();
   if (!stagedSummary) {
     return null;
   }
 
-  const stagedPatch = await runGitStdout(cwd, ["diff", "--cached", "--patch", "--minimal"], 60_000, env);
+  const stagedPatch = await runGitStdout(
+    cwd,
+    ["diff", "--cached", "--patch", "--minimal"],
+    60_000,
+    env,
+  );
   return {
     scope,
     stagedPatch,
@@ -329,7 +345,11 @@ function truncateDebugPreview(value: string, maxLength = 400): string {
 async function loadCommitContextFromWorkingTree(
   cwd: string,
 ): Promise<{ scope: SidebarGitCommitScope; stagedPatch: string; stagedSummary: string } | null> {
-  const statusOutput = await runGitStdout(cwd, ["status", "--porcelain=v1", "--untracked-files=all"]);
+  const statusOutput = await runGitStdout(cwd, [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+  ]);
   const statusEntries = parseWorkingTreeStatusEntries(statusOutput);
   if (statusEntries.length === 0) {
     return null;
@@ -343,7 +363,10 @@ async function loadCommitContextFromWorkingTree(
     untrackedEntries.map((entry) => loadUntrackedFilePatch(cwd, entry.path)),
   );
   const stagedSummary = buildAllChangesSummary(trackedSummary, statusEntries);
-  const stagedPatch = [trackedPatch.trim(), ...untrackedPatchParts.map((part) => part.trim()).filter(Boolean)]
+  const stagedPatch = [
+    trackedPatch.trim(),
+    ...untrackedPatchParts.map((part) => part.trim()).filter(Boolean),
+  ]
     .filter(Boolean)
     .join("\n\n");
   if (!stagedSummary || !stagedPatch) {
@@ -363,9 +386,15 @@ async function resolveAllChangesBaseRef(cwd: string): Promise<string> {
 }
 
 async function loadUntrackedFilePatch(cwd: string, filePath: string): Promise<string> {
-  const result = await runGitCommandResult(cwd, ["diff", "--no-index", "--", "/dev/null", filePath], 60_000);
+  const result = await runGitCommandResult(
+    cwd,
+    ["diff", "--no-index", "--", "/dev/null", filePath],
+    60_000,
+  );
   if (result.exitCode !== 0 && result.exitCode !== 1) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || "Failed to diff untracked file.");
+    throw new Error(
+      result.stderr.trim() || result.stdout.trim() || "Failed to diff untracked file.",
+    );
   }
 
   return result.stdout;
@@ -551,7 +580,9 @@ async function pushCurrentBranch(
   };
 }
 
-async function findCurrentPullRequest(cwd: string): Promise<{ number?: number; url: string } | null> {
+async function findCurrentPullRequest(
+  cwd: string,
+): Promise<{ number?: number; url: string } | null> {
   const result = await runShellCommand(
     buildCommandLine("gh", ["pr", "view", "--json", "number,url"]),
     {

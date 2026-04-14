@@ -204,7 +204,9 @@ export class BrowserSessionManager implements vscode.Disposable {
     return managedTab;
   }
 
-  private async openBrowserTab(sessionRecord: BrowserSessionRecord): Promise<vscode.Tab | undefined> {
+  private async openBrowserTab(
+    sessionRecord: BrowserSessionRecord,
+  ): Promise<vscode.Tab | undefined> {
     const targetViewColumn = getActiveEditorGroupViewColumn() ?? 1;
     const browserTabsBeforeOpen = new Set(this.getBrowserLikeTabs(targetViewColumn));
     await vscode.commands.executeCommand(

@@ -40,9 +40,9 @@ export async function expectNoMessage(
   delayMs = 50,
 ) {
   await delay(delayMs);
-  expect(
-    getSidebarStoryMessages().some((message) => isSubsetMatch(message, expectedMessage)),
-  ).toBe(false);
+  expect(getSidebarStoryMessages().some((message) => isSubsetMatch(message, expectedMessage))).toBe(
+    false,
+  );
 }
 
 export async function dragAndDrop(
