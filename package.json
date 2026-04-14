@@ -44,6 +44,7 @@
   "main": "./out/extension/extension.js",
   "scripts": {
     "build:extension": "pnpm exec concurrently --kill-others-on-fail --prefix none \"pnpm run t3:embed:build\" \"pnpm run sidebar:build\" \"pnpm run debug-panel:build\" \"pnpm run workspace:build\" \"pnpm run chat-history:webview:build\" && tsc -p ./tsconfig.extension.json && node ./scripts/vendor-runtime-deps.mjs",
+    "build:extension:original": "pnpm run t3:embed:build && pnpm run sidebar:build && pnpm run debug-panel:build && pnpm run workspace:build && pnpm run chat-history:webview:build && tsc -p ./tsconfig.extension.json && node ./scripts/vendor-runtime-deps.mjs",
     "vscode:prepublish": "node ./scripts/vscode-prepublish.mjs",
     "sidebar:build": "node ./scripts/vp.mjs build --config vite.sidebar.config.ts",
     "debug-panel:build": "node ./scripts/vp.mjs build --config vite.debug-panel.config.ts",
@@ -64,6 +65,7 @@
     "vsix:package": "node ./scripts/vsix.mjs package",
     "vsix:package:profile": "node ./scripts/vsix.mjs package --profile-build",
     "install": "node ./scripts/vsix.mjs install",
+    "install:original": "node ./scripts/vsix.mjs install --build-script build:extension:original",
     "install:profile": "node ./scripts/vsix.mjs install --profile-build",
     "vsix:publish": "node ./scripts/publish-extension.mjs"
   },

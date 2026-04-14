@@ -19,7 +19,7 @@ import type {
   TerminalSessionSnapshot,
 } from "../shared/terminal-host-protocol";
 import { TERMINAL_HOST_PROTOCOL_VERSION } from "../shared/terminal-host-protocol";
-import { logVSmuxDebug } from "./vsmux-debug-log";
+import { logVSmuxDebug, logVSmuxReproTrace } from "./vsmux-debug-log";
 
 type DaemonInfo = {
   pid: number;
@@ -41,6 +41,10 @@ export type TerminalDaemonState = {
 type PendingRequest = {
   reject: (error: Error) => void;
   resolve: (value: TerminalHostResponse) => void;
+  requestType: TerminalHostRequest["type"];
+  sessionId?: string;
+  socket: WebSocket;
+  workspaceId?: string;
 };
 
 type DaemonLaunchLockPayload = {
@@ -59,6 +63,8 @@ const DAEMON_OWNER_HEARTBEAT_INTERVAL_MS = 5_000;
 const DAEMON_STATE_DIR_NAME = "terminal-daemon";
 const INFO_FILE_NAME = "daemon-info.json";
 const LAUNCH_LOCK_FILE_NAME = "daemon-launch.lock";
+const DAEMON_REQUEST_TRANSPORT_ERROR_CODE = "VSMUX_DAEMON_REQUEST_TRANSPORT_ERROR";
+const SOCKET_OPEN_READY_STATE = resolveSocketOpenReadyState();
 
 export type DaemonTerminalConnection = {
   baseUrl: string;
@@ -69,6 +75,48 @@ export type TerminalCreateOrAttachResponse = {
   didCreateSession: boolean;
   session: TerminalSessionSnapshot;
 };
+
+class DaemonRequestTransportError extends Error {
+  public readonly code = DAEMON_REQUEST_TRANSPORT_ERROR_CODE;
+
+  public constructor(
+    message: string,
+    public readonly requestId: string,
+    public readonly requestType: TerminalHostRequest["type"],
+    public readonly reason: "send_failed" | "socket_closed",
+    public readonly sessionId?: string,
+    public readonly workspaceId?: string,
+  ) {
+    super(message);
+    this.name = "DaemonRequestTransportError";
+  }
+}
+
+function isRetryableDaemonRequestTransportError(
+  error: unknown,
+  requestType: TerminalHostRequest["type"],
+): error is DaemonRequestTransportError {
+  return (
+    error instanceof DaemonRequestTransportError &&
+    error.code === DAEMON_REQUEST_TRANSPORT_ERROR_CODE &&
+    error.requestType === requestType
+  );
+}
+
+function resolveSocketOpenReadyState(): number {
+  const webSocketModule = WebSocket as typeof WebSocket & {
+    WebSocket?: { OPEN?: number };
+    default?: { OPEN?: number };
+  };
+  const openReadyState =
+    webSocketModule.OPEN ?? webSocketModule.WebSocket?.OPEN ?? webSocketModule.default?.OPEN;
+
+  return typeof openReadyState === "number" ? openReadyState : 1;
+}
+
+function isSocketOpen(socket: WebSocket | undefined): socket is WebSocket {
+  return socket !== undefined && socket.readyState === SOCKET_OPEN_READY_STATE;
+}
 
 export class DaemonTerminalRuntime implements vscode.Disposable {
   private controlSocket: WebSocket | undefined;
@@ -100,7 +148,7 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   }
 
   public async ensureReady(): Promise<void> {
-    if (this.daemonInfo && this.controlSocket?.readyState === WebSocket.OPEN) {
+    if (this.daemonInfo && isSocketOpen(this.controlSocket)) {
       return;
     }
 
@@ -156,19 +204,57 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   public async createOrAttach(
     request: Omit<TerminalHostCreateOrAttachRequest, "requestId" | "type">,
   ): Promise<TerminalCreateOrAttachResponse> {
-    await this.ensureReady();
-    const response = await this.sendRequest({
-      ...request,
-      requestId: this.nextRequestId(),
-      type: "createOrAttach",
-    });
-    if (!("session" in response) || !response.session || !("didCreateSession" in response)) {
-      throw new Error("VSmux daemon did not return a session snapshot.");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await this.ensureReady();
+      const requestId = this.nextRequestId();
+      logVSmuxReproTrace("repro.daemonRuntime.createOrAttach.start", {
+        attempt,
+        requestId,
+        sessionId: request.sessionId,
+        workspaceId: request.workspaceId,
+      });
+      try {
+        const response = await this.sendRequest({
+          ...request,
+          requestId,
+          type: "createOrAttach",
+        });
+        if (!("session" in response) || !response.session || !("didCreateSession" in response)) {
+          throw new Error("VSmux daemon did not return a session snapshot.");
+        }
+        logVSmuxReproTrace("repro.daemonRuntime.createOrAttach.complete", {
+          attempt,
+          didCreateSession: response.didCreateSession,
+          requestId,
+          sessionId: request.sessionId,
+          sessionStatus: response.session.status,
+          workspaceId: request.workspaceId,
+        });
+        return {
+          didCreateSession: response.didCreateSession,
+          session: response.session,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const shouldRetry =
+          attempt === 0 && isRetryableDaemonRequestTransportError(error, "createOrAttach");
+        logVSmuxReproTrace("repro.daemonRuntime.createOrAttach.failed", {
+          attempt,
+          error: message,
+          requestId,
+          sessionId: request.sessionId,
+          shouldRetry,
+          workspaceId: request.workspaceId,
+        });
+        if (!shouldRetry) {
+          throw error;
+        }
+
+        this.resetCurrentControlSocket();
+      }
     }
-    return {
-      didCreateSession: response.didCreateSession,
-      session: response.session,
-    };
+
+    throw new Error("VSmux daemon createOrAttach exhausted retries.");
   }
 
   public async listSessions(workspaceId?: string): Promise<TerminalSessionSnapshot[]> {
@@ -437,9 +523,7 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   private async canReachDaemon(daemonInfo: DaemonInfo): Promise<boolean> {
     try {
       const socket = await this.openWebSocket(
-        `ws://127.0.0.1:${String(daemonInfo.port)}/control?token=${encodeURIComponent(
-          daemonInfo.token,
-        )}`,
+        `ws://127.0.0.1:${String(daemonInfo.port)}/control?token=${encodeURIComponent(daemonInfo.token)}`,
       );
       socket.close();
       return true;
@@ -456,7 +540,7 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   }
 
   private async ensureExistingReady(): Promise<DaemonInfo | undefined> {
-    if (this.daemonInfo && this.controlSocket?.readyState === WebSocket.OPEN) {
+    if (this.daemonInfo && isSocketOpen(this.controlSocket)) {
       return this.daemonInfo;
     }
 
@@ -561,24 +645,28 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
 
   private async openControlSocket(daemonInfo: DaemonInfo): Promise<WebSocket> {
     const socket = await this.openWebSocket(
-      `ws://127.0.0.1:${String(daemonInfo.port)}/control?token=${encodeURIComponent(
-        daemonInfo.token,
-      )}`,
+      `ws://127.0.0.1:${String(daemonInfo.port)}/control?token=${encodeURIComponent(daemonInfo.token)}`,
     );
     this.daemonInfo = daemonInfo;
     this.controlSocket = socket;
     this.startOwnerHeartbeat();
 
     socket.on("message", (buffer: WebSocket.RawData) => {
-      this.handleControlMessage(buffer.toString());
+      this.handleControlMessage(socket, buffer.toString());
     });
     socket.on("close", () => {
-      this.stopOwnerHeartbeat();
-      this.controlSocket = undefined;
+      logVSmuxReproTrace("repro.daemonRuntime.controlSocket.closed", {
+        pendingRequestCount: this.pendingRequests.size,
+        workspaceId: this.workspaceId,
+      });
+      this.handleSocketTermination(socket, "closed");
     });
     socket.on("error", () => {
-      this.stopOwnerHeartbeat();
-      this.controlSocket = undefined;
+      logVSmuxReproTrace("repro.daemonRuntime.controlSocket.error", {
+        pendingRequestCount: this.pendingRequests.size,
+        workspaceId: this.workspaceId,
+      });
+      this.handleSocketTermination(socket, "errored");
     });
 
     return socket;
@@ -607,21 +695,62 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
     if (!("requestId" in request)) {
       throw new Error("VSmux daemon requests must include a requestId.");
     }
+    const socket = this.controlSocket;
+    if (!isSocketOpen(socket)) {
+      throw new Error("VSmux daemon control socket is not connected.");
+    }
 
     return new Promise<TerminalHostResponse>((resolve, reject) => {
-      this.pendingRequests.set(request.requestId, { reject, resolve });
-      this.controlSocket?.send(JSON.stringify(request), (error?: Error) => {
+      logVSmuxReproTrace("repro.daemonRuntime.sendRequest.queued", {
+        pendingRequestCount: this.pendingRequests.size + 1,
+        requestId: request.requestId,
+        requestType: request.type,
+        sessionId: "sessionId" in request ? request.sessionId : undefined,
+        workspaceId: "workspaceId" in request ? request.workspaceId : this.workspaceId,
+      });
+      this.pendingRequests.set(request.requestId, {
+        reject,
+        requestType: request.type,
+        resolve,
+        sessionId: "sessionId" in request ? request.sessionId : undefined,
+        socket,
+        workspaceId: "workspaceId" in request ? request.workspaceId : undefined,
+      });
+      socket.send(JSON.stringify(request), (error?: Error) => {
         if (!error) {
+          logVSmuxReproTrace("repro.daemonRuntime.sendRequest.sent", {
+            pendingRequestCount: this.pendingRequests.size,
+            requestId: request.requestId,
+            requestType: request.type,
+            sessionId: "sessionId" in request ? request.sessionId : undefined,
+            workspaceId: "workspaceId" in request ? request.workspaceId : this.workspaceId,
+          });
           return;
         }
 
         this.pendingRequests.delete(request.requestId);
-        reject(error instanceof Error ? error : new Error(String(error)));
+        const transportError = new DaemonRequestTransportError(
+          error instanceof Error ? error.message : String(error),
+          request.requestId,
+          request.type,
+          "send_failed",
+          "sessionId" in request ? request.sessionId : undefined,
+          "workspaceId" in request ? request.workspaceId : undefined,
+        );
+        logVSmuxReproTrace("repro.daemonRuntime.sendRequest.sendFailed", {
+          error: transportError.message,
+          pendingRequestCount: this.pendingRequests.size,
+          requestId: request.requestId,
+          requestType: request.type,
+          sessionId: "sessionId" in request ? request.sessionId : undefined,
+          workspaceId: "workspaceId" in request ? request.workspaceId : this.workspaceId,
+        });
+        reject(transportError);
       });
     });
   }
 
-  private handleControlMessage(rawMessage: string): void {
+  private handleControlMessage(socket: WebSocket, rawMessage: string): void {
     let event: TerminalHostEvent | undefined;
     try {
       event = JSON.parse(rawMessage) as TerminalHostEvent;
@@ -632,10 +761,30 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
     if (event.type === "response") {
       const pendingRequest = this.pendingRequests.get(event.requestId);
       if (!pendingRequest) {
+        logVSmuxReproTrace("repro.daemonRuntime.handleControlMessage.missingPendingRequest", {
+          ok: event.ok,
+          requestId: event.requestId,
+          workspaceId: this.workspaceId,
+        });
+        return;
+      }
+      if (pendingRequest.socket !== socket) {
+        logVSmuxReproTrace("repro.daemonRuntime.handleControlMessage.missingPendingRequest", {
+          ok: event.ok,
+          requestId: event.requestId,
+          staleSocket: true,
+          workspaceId: this.workspaceId,
+        });
         return;
       }
 
       this.pendingRequests.delete(event.requestId);
+      logVSmuxReproTrace("repro.daemonRuntime.handleControlMessage.response", {
+        ok: event.ok,
+        pendingRequestCount: this.pendingRequests.size,
+        requestId: event.requestId,
+        workspaceId: this.workspaceId,
+      });
       if (event.ok) {
         pendingRequest.resolve(event);
       } else {
@@ -646,6 +795,54 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
 
     if (event.type === "sessionState") {
       this.onDidChangeSessionStateEmitter.fire(event.session);
+    }
+  }
+
+  private handleSocketTermination(socket: WebSocket, reason: "closed" | "errored"): void {
+    if (this.controlSocket === socket) {
+      this.stopOwnerHeartbeat();
+      this.controlSocket = undefined;
+    }
+    this.rejectPendingRequestsForSocket(
+      socket,
+      (requestId, pendingRequest) =>
+        new DaemonRequestTransportError(
+          `VSmux daemon control socket ${reason} during ${pendingRequest.requestType}.`,
+          requestId,
+          pendingRequest.requestType,
+          "socket_closed",
+          pendingRequest.sessionId,
+          pendingRequest.workspaceId,
+        ),
+    );
+  }
+
+  private rejectPendingRequestsForSocket(
+    socket: WebSocket,
+    createError: (requestId: string, pendingRequest: PendingRequest) => Error,
+  ): void {
+    for (const [requestId, pendingRequest] of this.pendingRequests.entries()) {
+      if (pendingRequest.socket !== socket) {
+        continue;
+      }
+
+      this.pendingRequests.delete(requestId);
+      pendingRequest.reject(createError(requestId, pendingRequest));
+    }
+  }
+
+  private resetCurrentControlSocket(): void {
+    const socket = this.controlSocket;
+    if (!socket) {
+      return;
+    }
+
+    this.controlSocket = undefined;
+    this.stopOwnerHeartbeat();
+    try {
+      socket.close();
+    } catch {
+      // Ignore redundant close failures while forcing a reconnect.
     }
   }
 
@@ -672,7 +869,7 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   }
 
   private async sendOwnerHeartbeat(): Promise<void> {
-    if (!this.controlSocket || this.controlSocket.readyState !== WebSocket.OPEN) {
+    if (!isSocketOpen(this.controlSocket)) {
       return;
     }
 

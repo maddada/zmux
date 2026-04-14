@@ -10,6 +10,8 @@ const SETTINGS_SECTION = "VSmux";
 const DEBUGGING_MODE_SETTING = "debuggingMode";
 const DEBUG_LOG_FILE_NAME = "vsmux-debug.log";
 const DEBUG_EVENT_PREFIX_ALLOWLIST = [
+  "sidebar.provider.",
+  "sidebar.webview.",
   "workspace.webview.focus.",
   "workspace.webview.terminal.",
   "workspace.webview.workspace.sessionStatePaneSummary",
@@ -26,6 +28,7 @@ const DEBUG_EVENT_PREFIX_ALLOWLIST = [
   "controller.activitySuppression.",
   "controller.refreshWorkspacePanel.",
   "controller.createWorkspacePanelMessage.",
+  "controller.handleSidebarMessage.",
   "controller.focusSession.",
   "controller.focusGroup.",
   "controller.reloadWorkspacePanel.",

@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import * as pty from "@lydell/node-pty";
@@ -115,8 +116,10 @@ const REPLAY_CHUNK_BYTES = 128 * 1024;
 const MAX_XTERM_HEADLESS_SCROLLBACK = 100_000;
 const DEFAULT_XTERM_HEADLESS_SCROLLBACK = 50_000;
 const INFO_FILE_NAME = "daemon-info.json";
+const DEBUG_LOG_FILE_NAME = "terminal-daemon-debug.log";
 const stateDir = getStateDirFromArgs();
 const infoFilePath = path.join(stateDir, INFO_FILE_NAME);
+const debugLogFilePath = path.join(stateDir, DEBUG_LOG_FILE_NAME);
 
 const sessions = new Map<string, ManagedSession>();
 const controlClients = new Set<ControlClient>();
@@ -202,6 +205,14 @@ process.on("SIGINT", () => {
   void shutdown("SIGINT");
 });
 
+process.on("uncaughtException", (error) => {
+  void logDaemonDebug("daemon.uncaughtException", serializeUnknownError(error));
+});
+
+process.on("unhandledRejection", (reason) => {
+  void logDaemonDebug("daemon.unhandledRejection", serializeUnknownError(reason));
+});
+
 function attachControlSocket(socket: WebSocket): void {
   clearLifecycleTimer();
   const client = { socket };
@@ -272,39 +283,60 @@ async function handleControlMessage(client: ControlClient, rawMessage: string): 
     return;
   }
 
-  switch (request.type) {
-    case "authenticate":
-      client.socket.send(JSON.stringify({ type: "authenticated" }));
-      return;
-    case "configure":
-      await handleConfigureRequest(client.socket, request);
-      return;
-    case "heartbeatOwner":
-      await handleHeartbeatOwnerRequest(client, request);
-      return;
-    case "syncSessionLeases":
-      await handleSyncSessionLeasesRequest(client.socket, request);
-      return;
-    case "createOrAttach":
-      await handleCreateOrAttachRequest(client.socket, request);
-      return;
-    case "listSessions":
-      await handleListSessionsRequest(client.socket, request);
-      return;
-    case "write":
-      await handleWriteRequest(client.socket, request);
-      return;
-    case "resize":
-      await handleResizeRequest(client.socket, request);
-      return;
-    case "kill":
-      await handleKillRequest(client.socket, request);
-      return;
-    case "acknowledgeAttention":
-      await handleAcknowledgeAttentionRequest(client.socket, request);
-      return;
-    default:
-      return;
+  try {
+    switch (request.type) {
+      case "authenticate":
+        client.socket.send(JSON.stringify({ type: "authenticated" }));
+        return;
+      case "configure":
+        await handleConfigureRequest(client.socket, request);
+        return;
+      case "heartbeatOwner":
+        await handleHeartbeatOwnerRequest(client, request);
+        return;
+      case "syncSessionLeases":
+        await handleSyncSessionLeasesRequest(client.socket, request);
+        return;
+      case "createOrAttach":
+        await handleCreateOrAttachRequest(client.socket, request);
+        return;
+      case "listSessions":
+        await handleListSessionsRequest(client.socket, request);
+        return;
+      case "write":
+        await handleWriteRequest(client.socket, request);
+        return;
+      case "resize":
+        await handleResizeRequest(client.socket, request);
+        return;
+      case "kill":
+        await handleKillRequest(client.socket, request);
+        return;
+      case "acknowledgeAttention":
+        await handleAcknowledgeAttentionRequest(client.socket, request);
+        return;
+      default:
+        return;
+    }
+  } catch (error) {
+    void logDaemonDebug("daemon.controlRequestFailed", {
+      error: serializeUnknownError(error),
+      request: summarizeRequest(request),
+    });
+    if ("requestId" in request && request.requestId) {
+      try {
+        client.socket.send(
+          JSON.stringify({
+            error: error instanceof Error ? error.message : String(error),
+            ok: false,
+            requestId: request.requestId,
+            type: "response",
+          } satisfies TerminalHostResponse),
+        );
+      } catch {
+        // Ignore follow-up socket send failures after the original request failure.
+      }
+    }
   }
 }
 
@@ -467,14 +499,44 @@ function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSessi
       shellIntegrationZdotDir: request.shellIntegrationZdotDir,
     },
   );
+  const sortedEnvironment = Object.fromEntries(
+    Object.entries(environment).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey)),
+  );
   void logDaemonDebug("daemon.sessionCreateEnvironment", {
+    cwd: request.cwd,
+    cwdExists: existsSync(request.cwd),
+    environment: sortedEnvironment,
     hasShellIntegrationBinDir: Boolean(request.shellIntegrationBinDir),
     hasShellIntegrationZdotDir: Boolean(request.shellIntegrationZdotDir),
     pathPrefix: environment.PATH?.split(path.delimiter).at(0),
+    pathPrefixExists: environment.PATH
+      ? existsSync(environment.PATH.split(path.delimiter).at(0) ?? "")
+      : false,
     sessionId: request.sessionId,
     shell: request.shell,
+    shellArgs: request.shellArgs ?? [],
+    shellExists: existsSync(request.shell),
+    shellIntegrationBinDir: request.shellIntegrationBinDir,
+    shellIntegrationBinDirExists: request.shellIntegrationBinDir
+      ? existsSync(request.shellIntegrationBinDir)
+      : false,
+    shellIntegrationZdotDir: request.shellIntegrationZdotDir,
+    shellIntegrationZdotDirExists: request.shellIntegrationZdotDir
+      ? existsSync(request.shellIntegrationZdotDir)
+      : false,
+    sessionStateFileDir: path.dirname(request.sessionStateFilePath),
+    sessionStateFileDirExists: existsSync(path.dirname(request.sessionStateFilePath)),
+    spawnOptions: {
+      cols: request.cols,
+      cwd: request.cwd,
+      encoding: null,
+      env: sortedEnvironment,
+      name: "xterm-256color",
+      rows: request.rows,
+    },
     workspaceId: request.workspaceId,
     zdotdir: environment.ZDOTDIR,
+    zdotdirExists: environment.ZDOTDIR ? existsSync(environment.ZDOTDIR) : false,
   });
   const spawnedPty = pty.spawn(request.shell, request.shellArgs ?? [], {
     cols: request.cols,
@@ -1062,8 +1124,49 @@ async function expireLeasedSessionsAndMaybeShutdown(): Promise<void> {
 }
 
 async function logDaemonDebug(event: string, details?: unknown): Promise<void> {
-  void event;
-  void details;
+  try {
+    await mkdir(stateDir, { recursive: true });
+    const serializedDetails =
+      details === undefined
+        ? ""
+        : ` ${JSON.stringify(details, (_key, value) => {
+            if (value instanceof Error) {
+              return serializeUnknownError(value);
+            }
+
+            return value;
+          })}`;
+    await appendFile(
+      debugLogFilePath,
+      `${new Date().toISOString()} ${event}${serializedDetails}\n`,
+      "utf8",
+    );
+  } catch {
+    // Ignore daemon debug log failures so they do not interfere with the daemon itself.
+  }
+}
+
+function summarizeRequest(request: TerminalHostRequest): Record<string, unknown> {
+  return {
+    requestId: "requestId" in request ? request.requestId : undefined,
+    sessionId: "sessionId" in request ? request.sessionId : undefined,
+    type: request.type,
+    workspaceId: "workspaceId" in request ? request.workspaceId : undefined,
+  };
+}
+
+function serializeUnknownError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      name: error.name,
+      stack: error.stack,
+    };
+  }
+
+  return {
+    message: String(error),
+  };
 }
 
 function getStateDirFromArgs(): string {

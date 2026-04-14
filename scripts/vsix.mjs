@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 
 const validModes = new Set(["package", "install"]);
 const profileBuildFlag = "--profile-build";
+const buildScriptFlag = "--build-script";
 
 function fail(message) {
   void message;
@@ -203,9 +204,19 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(scriptDir);
 const mode = process.argv[2];
 const profileBuild = process.argv.includes(profileBuildFlag);
+const buildScriptFlagIndex = process.argv.indexOf(buildScriptFlag);
+const requestedBuildScript =
+  buildScriptFlagIndex === -1 ? undefined : process.argv[buildScriptFlagIndex + 1];
+const buildScript = requestedBuildScript?.trim() || "build:extension";
 
 if (!validModes.has(mode)) {
-  fail(`Usage: node ./scripts/vsix.mjs <package|install> [${profileBuildFlag}]`);
+  fail(
+    `Usage: node ./scripts/vsix.mjs <package|install> [${profileBuildFlag}] [${buildScriptFlag} <script>]`,
+  );
+}
+
+if (buildScriptFlagIndex !== -1 && !requestedBuildScript) {
+  fail(`Missing value for ${buildScriptFlag}.`);
 }
 
 const packageJson = await import(new URL("../package.json", import.meta.url), {
@@ -233,7 +244,7 @@ if (!vsceCli) {
 }
 
 try {
-  run(pnpmCli, ["run", "build:extension"], {
+  run(pnpmCli, ["run", buildScript], {
     env: {
       ...process.env,
       ...(profileBuild ? { VSMUX_PROFILE_BUILD: "1" } : {}),
