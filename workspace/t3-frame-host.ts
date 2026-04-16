@@ -190,6 +190,10 @@ document.addEventListener(
 let nextClipboardRequestId = 0;
 const pendingClipboardReads = new Map<number, (payload: T3ClipboardPayload) => void>();
 let pendingPasteFallbackTimer: number | undefined;
+let pendingPrimedClipboardRead: Promise<T3ClipboardPayload> | undefined;
+let lastPrimedClipboardPayload: T3ClipboardPayload | undefined;
+let lastPrimedClipboardPayloadAt = 0;
+let primedClipboardReadToken = 0;
 let currentThreadId = bootstrap.threadId;
 let pendingComposerFocusTimeoutId: number | undefined;
 let composerFocusRequestVersion = 0;
@@ -291,6 +295,7 @@ document.addEventListener(
         activeTarget: summarizeEditableTarget(document.activeElement),
         currentThreadId: getCurrentThreadId(),
       });
+      primeClipboardRead("keydownShortcut");
       schedulePasteFallback();
     }
   },
@@ -345,11 +350,13 @@ document.addEventListener(
 
     const clipboardData = event.clipboardData;
     if (clipboardData?.files.length) {
+      clearPrimedClipboardPayload();
       logPasteTrace("host.paste.nativeFiles", clipboardSummary);
       return;
     }
 
     if ((clipboardData?.getData("text/plain") ?? "").length > 0) {
+      clearPrimedClipboardPayload();
       logPasteTrace("host.paste.nativeText", clipboardSummary);
       return;
     }
@@ -660,7 +667,7 @@ async function pasteFromClipboardBridge() {
   logPasteTrace("host.paste.bridge.start", {
     activeTarget: summarizeEditableTarget(document.activeElement),
   });
-  const payload = await readClipboard();
+  const payload = await resolveClipboardPayloadForPasteBridge();
   logPasteTrace("host.paste.bridge.payload", {
     activeTarget: summarizeEditableTarget(document.activeElement),
     payload: summarizeClipboardPayload(payload),
@@ -687,6 +694,70 @@ async function pasteFromClipboardBridge() {
     payload: summarizeClipboardPayload(payload),
   });
   insertTextIntoActiveTarget(payload.text);
+}
+
+function primeClipboardRead(reason: string): void {
+  if (pendingPrimedClipboardRead) {
+    logPasteTrace("host.paste.bridge.primeSkipped.pending", {
+      activeTarget: summarizeEditableTarget(document.activeElement),
+      reason,
+    });
+    return;
+  }
+
+  logPasteTrace("host.paste.bridge.primeStart", {
+    activeTarget: summarizeEditableTarget(document.activeElement),
+    reason,
+  });
+  const readToken = ++primedClipboardReadToken;
+  pendingPrimedClipboardRead = readClipboard()
+    .then((payload) => {
+      if (readToken !== primedClipboardReadToken) {
+        logPasteTrace("host.paste.bridge.primeDiscarded", {
+          reason,
+        });
+        return payload;
+      }
+      lastPrimedClipboardPayload = payload;
+      lastPrimedClipboardPayloadAt = Date.now();
+      logPasteTrace("host.paste.bridge.primeResolved", {
+        payload: summarizeClipboardPayload(payload),
+        reason,
+      });
+      return payload;
+    })
+    .finally(() => {
+      pendingPrimedClipboardRead = undefined;
+    });
+}
+
+async function resolveClipboardPayloadForPasteBridge(): Promise<T3ClipboardPayload> {
+  if (pendingPrimedClipboardRead) {
+    logPasteTrace("host.paste.bridge.payloadSource", {
+      source: "primedPending",
+    });
+    return pendingPrimedClipboardRead;
+  }
+
+  if (lastPrimedClipboardPayload && Date.now() - lastPrimedClipboardPayloadAt <= 1_500) {
+    const payload = lastPrimedClipboardPayload;
+    clearPrimedClipboardPayload();
+    logPasteTrace("host.paste.bridge.payloadSource", {
+      source: "primedCache",
+    });
+    return payload;
+  }
+
+  logPasteTrace("host.paste.bridge.payloadSource", {
+    source: "freshRead",
+  });
+  return readClipboard();
+}
+
+function clearPrimedClipboardPayload(): void {
+  primedClipboardReadToken += 1;
+  lastPrimedClipboardPayload = undefined;
+  lastPrimedClipboardPayloadAt = 0;
 }
 
 function isEditableTarget(

@@ -12,6 +12,9 @@ declare global {
   };
 
   interface Window {
+    __VSMUX_WORKSPACE_VSCODE__?: {
+      postMessage: (message: unknown) => void;
+    };
     __VSMUX_WORKSPACE_BOOTSTRAP__?:
       | WorkspacePanelHydrateMessage
       | WorkspacePanelSessionStateMessage;
@@ -24,4 +27,6 @@ if (!rootElement) {
 }
 
 const root = createRoot(rootElement);
-root.render(<WorkspaceApp vscode={acquireVsCodeApi()} />);
+const vscodeApi = acquireVsCodeApi();
+window.__VSMUX_WORKSPACE_VSCODE__ = vscodeApi;
+root.render(<WorkspaceApp vscode={vscodeApi} />);

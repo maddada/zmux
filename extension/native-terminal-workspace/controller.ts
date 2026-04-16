@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import {
@@ -220,6 +221,8 @@ import {
   getTerminalLetterSpacing,
   getTerminalLineHeight,
   getT3ZoomPercent,
+  resetT3ZoomPercent,
+  resetTerminalFontSize,
   setShowLastInteractionTimeOnSessionCards,
   setT3ZoomPercent,
   setTerminalFontSize,
@@ -387,6 +390,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           return;
         }
 
+        if (message.type === "resolveClipboardImagePath") {
+          await this.resolveWorkspaceClipboardImagePath(message);
+          return;
+        }
+
         if (message.type === "t3ThreadChanged") {
           await this.handleWorkspaceT3ThreadChanged(
             message.sessionId,
@@ -440,8 +448,18 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
           return;
         }
 
+        if (message.type === "resetTerminalFontSize") {
+          await this.resetTerminalFontSize();
+          return;
+        }
+
         if (message.type === "adjustT3ZoomPercent") {
           await this.adjustT3ZoomPercent(message.delta);
+          return;
+        }
+
+        if (message.type === "resetT3ZoomPercent") {
+          await this.resetT3ZoomPercent();
           return;
         }
 
@@ -1520,10 +1538,22 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   public async adjustTerminalFontSize(delta: -1 | 1): Promise<void> {
     await setTerminalFontSize(getTerminalFontSize() + delta);
+    await this.refreshWorkspacePanel();
+  }
+
+  public async resetTerminalFontSize(): Promise<void> {
+    await resetTerminalFontSize();
+    await this.refreshWorkspacePanel();
   }
 
   public async adjustT3ZoomPercent(delta: -1 | 1): Promise<void> {
     await setT3ZoomPercent(getT3ZoomPercent() + delta * 5);
+    await this.refreshWorkspacePanel();
+  }
+
+  public async resetT3ZoomPercent(): Promise<void> {
+    await resetT3ZoomPercent();
+    await this.refreshWorkspacePanel();
   }
 
   public async runSidebarCommand(
@@ -3177,6 +3207,48 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.afterStateChange();
     void this.finishCreatingT3Session(sessionRecord.sessionId, startupCommand);
     return isT3Session(sessionRecord) ? sessionRecord : undefined;
+  }
+
+  private findBoundT3Session(
+    metadata: T3SessionRecord["t3"],
+    options?: { excludeSessionId?: string },
+  ): T3SessionRecord | undefined {
+    return this.getAllSessionRecords().find((sessionRecord): sessionRecord is T3SessionRecord => {
+      return (
+        isT3Session(sessionRecord) &&
+        !isPendingT3Metadata(sessionRecord.t3) &&
+        sessionRecord.sessionId !== options?.excludeSessionId &&
+        sessionRecord.t3.serverOrigin === metadata.serverOrigin &&
+        sessionRecord.t3.threadId === metadata.threadId
+      );
+    });
+  }
+
+  private async createBoundT3Session(
+    metadata: T3SessionRecord["t3"],
+    title?: string,
+  ): Promise<T3SessionRecord | undefined> {
+    const normalizedTitle = normalizeTerminalTitle(title) ?? "T3 Code";
+    const sessionRecord = await this.store.createSession({
+      kind: "t3",
+      t3: metadata,
+      title: normalizedTitle,
+    });
+    if (!sessionRecord || !isT3Session(sessionRecord)) {
+      return undefined;
+    }
+
+    this.sidebarAgentIconBySessionId.set(sessionRecord.sessionId, "t3");
+    const createdAtMs = Date.parse(sessionRecord.createdAt);
+    this.lastActivityOverrideAtBySessionId.set(
+      sessionRecord.sessionId,
+      Number.isFinite(createdAtMs) ? createdAtMs : Date.now(),
+    );
+    await this.workspacePanel.reveal();
+    this.enqueueWorkspaceAutoFocus(sessionRecord.sessionId, "sidebar");
+    await this.afterStateChange();
+    const refreshedSession = this.store.getSession(sessionRecord.sessionId);
+    return refreshedSession && isT3Session(refreshedSession) ? refreshedSession : sessionRecord;
   }
 
   private async createTerminalSession(options?: {
@@ -4941,7 +5013,61 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     this.t3PaneHtmlBySessionId.delete(sessionId);
   }
 
-  private async reloadT3Session(sessionId: string, reason: string): Promise<void> {
+  private async resolveWorkspaceClipboardImagePath(input: {
+    path: string;
+    requestId: number;
+    sessionId: string;
+    type: "resolveClipboardImagePath";
+  }): Promise<void> {
+    const normalizedPath = normalizeClipboardImagePath(input.path);
+    const responseBase = {
+      path: normalizedPath,
+      requestId: input.requestId,
+      sessionId: input.sessionId,
+      type: "resolveClipboardImagePathResult" as const,
+    };
+
+    if (!looksLikeClipboardImagePath(normalizedPath)) {
+      logVSmuxDebug("controller.resolveClipboardImagePath.unsupported", responseBase);
+      await this.workspacePanel.postMessage({
+        ...responseBase,
+        error: "Clipboard path is not a supported image file.",
+      });
+      return;
+    }
+
+    try {
+      const file = await readFile(normalizedPath);
+      const mimeType = inferClipboardImageMimeType(normalizedPath);
+      logVSmuxDebug("controller.resolveClipboardImagePath.success", {
+        ...responseBase,
+        byteLength: file.byteLength,
+        mimeType,
+      });
+      await this.workspacePanel.postMessage({
+        ...responseBase,
+        buffer: file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength),
+        mimeType,
+        name: path.basename(normalizedPath),
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logVSmuxDebug("controller.resolveClipboardImagePath.error", {
+        ...responseBase,
+        error: errorMessage,
+      });
+      await this.workspacePanel.postMessage({
+        ...responseBase,
+        error: errorMessage,
+      });
+    }
+  }
+
+  private async reloadT3Session(
+    sessionId: string,
+    reason: string,
+    options?: { autoFocus?: boolean },
+  ): Promise<void> {
     const sessionRecord = this.store.getSession(sessionId);
     if (!sessionRecord || !isT3Session(sessionRecord)) {
       logVSmuxDebug("controller.reloadT3Session.ignored", {
@@ -4952,13 +5078,17 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    this.enqueueWorkspaceAutoFocus(sessionId, "reload");
+    const shouldAutoFocus = options?.autoFocus ?? true;
+    if (shouldAutoFocus) {
+      this.enqueueWorkspaceAutoFocus(sessionId, "reload");
+    }
     this.invalidateT3PaneHtml(sessionId);
     this.bumpT3PaneRenderNonce(sessionId);
     logVSmuxDebug("controller.reloadT3Session.start", {
       reason,
       renderNonce: this.getT3PaneRenderNonce(sessionId),
       sessionId,
+      shouldAutoFocus,
       threadId: sessionRecord.t3.threadId,
     });
     await this.refreshWorkspacePanel();
@@ -4967,11 +5097,66 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       reason,
       renderNonce: this.getT3PaneRenderNonce(sessionId),
       sessionId,
+      shouldAutoFocus,
       threadId:
         refreshedSessionRecord && isT3Session(refreshedSessionRecord)
           ? refreshedSessionRecord.t3.threadId
           : undefined,
     });
+  }
+
+  private async preserveT3SessionBindingByCreatingSiblingSession(
+    sessionRecord: T3SessionRecord,
+    threadId: string,
+    title?: string,
+  ): Promise<boolean> {
+    const nextMetadata = {
+      ...sessionRecord.t3,
+      threadId,
+    };
+    const existingSession = this.findBoundT3Session(nextMetadata, {
+      excludeSessionId: sessionRecord.sessionId,
+    });
+    const normalizedTitle = normalizeTerminalTitle(title);
+
+    logVSmuxDebug("controller.t3SessionBinding.threadNavigationDetected", {
+      currentSessionId: sessionRecord.sessionId,
+      currentThreadId: sessionRecord.t3.threadId,
+      nextThreadId: threadId,
+      reusedSessionId: existingSession?.sessionId,
+      title: normalizedTitle,
+    });
+
+    let targetSessionId = existingSession?.sessionId;
+    if (existingSession) {
+      if (normalizedTitle) {
+        await this.applyT3SessionTitle(existingSession.sessionId, normalizedTitle);
+      }
+      await this.focusSession(existingSession.sessionId, "workspace");
+    } else {
+      const createdSession = await this.createBoundT3Session(nextMetadata, normalizedTitle);
+      targetSessionId = createdSession?.sessionId;
+      if (createdSession && !normalizedTitle) {
+        await this.syncT3SessionTitleFromRuntime(createdSession);
+      }
+    }
+
+    await this.reloadT3Session(sessionRecord.sessionId, "thread-switch-restored-binding", {
+      autoFocus: false,
+    });
+
+    if (!targetSessionId) {
+      logVSmuxDebug("controller.t3SessionBinding.threadNavigationIgnored", {
+        reason: "targetSessionUnavailable",
+        sessionId: sessionRecord.sessionId,
+        threadId,
+      });
+      return false;
+    }
+
+    await this.syncKnownSessionActivities(false);
+    await this.afterStateChange();
+    return true;
   }
 
   private async handleWorkspaceT3ThreadChanged(
@@ -5005,19 +5190,20 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     let mutated = false;
 
     if (threadChanged) {
-      const metadataChanged = await this.store.setT3SessionMetadata(sessionId, {
-        ...sessionRecord.t3,
-        threadId: normalizedThreadId,
-      });
-      if (metadataChanged) {
-        mutated = true;
-      }
+      const handledByBindingPreservation =
+        await this.preserveT3SessionBindingByCreatingSiblingSession(
+          sessionRecord,
+          normalizedThreadId,
+          normalizedTitle,
+        );
       logVSmuxDebug("controller.t3SessionTitle.threadChanged", {
+        handledByBindingPreservation,
         nextThreadId: normalizedThreadId,
         previousThreadId: sessionRecord.t3.threadId,
         sessionId,
         title: normalizedTitle,
       });
+      return;
     }
 
     const refreshedSession = this.store.getSession(sessionId);
@@ -5403,4 +5589,49 @@ function sendTerminalText(terminal: vscode.Terminal, data: string, shouldExecute
   }
 
   terminal.sendText(data, shouldExecute);
+}
+
+function normalizeClipboardImagePath(inputPath: string): string {
+  const trimmedPath = inputPath.trim();
+  if (trimmedPath.startsWith("file://")) {
+    try {
+      return decodeURIComponent(new URL(trimmedPath).pathname);
+    } catch {
+      return trimmedPath;
+    }
+  }
+
+  return trimmedPath;
+}
+
+function looksLikeClipboardImagePath(inputPath: string): boolean {
+  return inferClipboardImageMimeType(inputPath) !== undefined;
+}
+
+function inferClipboardImageMimeType(inputPath: string): string | undefined {
+  switch (path.extname(normalizeClipboardImagePath(inputPath)).toLowerCase()) {
+    case ".apng":
+      return "image/apng";
+    case ".avif":
+      return "image/avif";
+    case ".bmp":
+      return "image/bmp";
+    case ".gif":
+      return "image/gif";
+    case ".heic":
+      return "image/heic";
+    case ".heif":
+      return "image/heif";
+    case ".jpeg":
+    case ".jpg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml";
+    case ".webp":
+      return "image/webp";
+    default:
+      return undefined;
+  }
 }

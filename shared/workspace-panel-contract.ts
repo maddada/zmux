@@ -140,6 +140,17 @@ export type WorkspacePanelFlashCompletionSessionMessage = {
   type: "flashCompletionSession";
 };
 
+export type WorkspacePanelResolveClipboardImagePathResultMessage = {
+  buffer?: ArrayBuffer;
+  error?: string;
+  mimeType?: string;
+  name?: string;
+  path: string;
+  requestId: number;
+  sessionId: string;
+  type: "resolveClipboardImagePathResult";
+};
+
 export type ExtensionToWorkspacePanelMessage =
   | WorkspacePanelHydrateMessage
   | WorkspacePanelSessionStateMessage
@@ -149,7 +160,8 @@ export type ExtensionToWorkspacePanelMessage =
   | WorkspacePanelShowWelcomeMessage
   | WorkspacePanelShowToastMessage
   | WorkspacePanelCodexWelcomeSettingAppliedMessage
-  | WorkspacePanelFlashCompletionSessionMessage;
+  | WorkspacePanelFlashCompletionSessionMessage
+  | WorkspacePanelResolveClipboardImagePathResultMessage;
 
 export type WorkspacePanelReadyMessage = {
   type: "ready";
@@ -180,9 +192,17 @@ export type WorkspacePanelAdjustTerminalFontSizeMessage = {
   type: "adjustTerminalFontSize";
 };
 
+export type WorkspacePanelResetTerminalFontSizeMessage = {
+  type: "resetTerminalFontSize";
+};
+
 export type WorkspacePanelAdjustT3ZoomPercentMessage = {
   delta: -1 | 1;
   type: "adjustT3ZoomPercent";
+};
+
+export type WorkspacePanelResetT3ZoomPercentMessage = {
+  type: "resetT3ZoomPercent";
 };
 
 export type WorkspacePanelForkSessionMessage = {
@@ -224,6 +244,13 @@ export type WorkspacePanelReloadT3SessionMessage = {
   type: "reloadT3Session";
 };
 
+export type WorkspacePanelResolveClipboardImagePathMessage = {
+  path: string;
+  requestId: number;
+  sessionId: string;
+  type: "resolveClipboardImagePath";
+};
+
 export type WorkspacePanelT3ThreadChangedMessage = {
   sessionId: string;
   threadId: string;
@@ -254,28 +281,26 @@ export type WorkspacePanelToExtensionMessage =
   | WorkspacePanelFullReloadSessionMessage
   | WorkspacePanelPromptRenameSessionMessage
   | WorkspacePanelAdjustTerminalFontSizeMessage
+  | WorkspacePanelResetTerminalFontSizeMessage
   | WorkspacePanelAdjustT3ZoomPercentMessage
+  | WorkspacePanelResetT3ZoomPercentMessage
   | WorkspacePanelForkSessionMessage
   | WorkspacePanelSetSessionSleepingMessage
   | WorkspacePanelSyncPaneOrderMessage
   | WorkspacePanelSyncSessionOrderMessage
   | WorkspacePanelReloadMessage
   | WorkspacePanelReloadT3SessionMessage
+  | WorkspacePanelResolveClipboardImagePathMessage
   | WorkspacePanelT3ThreadChangedMessage;
 
 export function stripWorkspacePanelTransientFields(
   message: ExtensionToWorkspacePanelMessage,
 ): ExtensionToWorkspacePanelMessage {
-  if (
-    message.type === "showWelcomeModal" ||
-    message.type === "showToast" ||
-    message.type === "codexWelcomeSettingApplied" ||
-    message.type === "flashCompletionSession" ||
-    message.type === "scrollTerminalToBottom" ||
-    message.type === "terminalPresentationChanged" ||
-    message.type === "destroyTerminalRuntime" ||
-    !message.autoFocusRequest
-  ) {
+  if (message.type !== "hydrate" && message.type !== "sessionState") {
+    return message;
+  }
+
+  if (!message.autoFocusRequest) {
     return message;
   }
 

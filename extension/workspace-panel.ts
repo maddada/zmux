@@ -301,6 +301,16 @@ function isWorkspaceMessage(candidate: unknown): candidate is WorkspacePanelToEx
   if (message.type === "reloadT3Session") {
     return typeof message.sessionId === "string" && message.sessionId.length > 0;
   }
+  if (message.type === "resolveClipboardImagePath") {
+    return (
+      typeof message.path === "string" &&
+      message.path.length > 0 &&
+      typeof message.requestId === "number" &&
+      Number.isFinite(message.requestId) &&
+      typeof message.sessionId === "string" &&
+      message.sessionId.length > 0
+    );
+  }
   if (message.type === "completeWelcome") {
     return true;
   }
@@ -338,8 +348,14 @@ function isWorkspaceMessage(candidate: unknown): candidate is WorkspacePanelToEx
   if (message.type === "adjustTerminalFontSize") {
     return message.delta === -1 || message.delta === 1;
   }
+  if (message.type === "resetTerminalFontSize") {
+    return true;
+  }
   if (message.type === "adjustT3ZoomPercent") {
     return message.delta === -1 || message.delta === 1;
+  }
+  if (message.type === "resetT3ZoomPercent") {
+    return true;
   }
   if (message.type === "syncPaneOrder" || message.type === "syncSessionOrder") {
     return (

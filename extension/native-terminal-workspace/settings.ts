@@ -20,6 +20,11 @@ import {
   getTerminalFontFamilyForPreset,
   normalizeTerminalFontPreset,
 } from "../../shared/terminal-font-preset";
+import {
+  clearSharedWorkspaceAppearancePreference,
+  getSharedWorkspaceAppearancePreference,
+  setSharedWorkspaceAppearancePreference,
+} from "../shared-workspace-appearance-preferences";
 
 export const SETTINGS_SECTION = "VSmux";
 export const BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING = "backgroundSessionTimeoutMinutes";
@@ -381,19 +386,26 @@ export function getTerminalFontFamily(): string {
 }
 
 export function getTerminalFontSize(): number {
+  const sharedValue = getSharedWorkspaceAppearancePreference("terminalFontSize");
+  if (sharedValue !== undefined) {
+    return clampTerminalFontSize(sharedValue);
+  }
+
   const value =
-    vscode.workspace
-      .getConfiguration(SETTINGS_SECTION)
-      .get<number>(TERMINAL_FONT_SIZE_SETTING, DEFAULT_TERMINAL_FONT_SIZE) ??
-    DEFAULT_TERMINAL_FONT_SIZE;
+    vscode.workspace.getConfiguration(SETTINGS_SECTION).inspect<number>(TERMINAL_FONT_SIZE_SETTING)
+      ?.globalValue ?? DEFAULT_TERMINAL_FONT_SIZE;
   return clampTerminalFontSize(value);
 }
 
 export function getT3ZoomPercent(): number {
+  const sharedValue = getSharedWorkspaceAppearancePreference("t3ZoomPercent");
+  if (sharedValue !== undefined) {
+    return clampT3ZoomPercent(sharedValue);
+  }
+
   const value =
-    vscode.workspace
-      .getConfiguration(SETTINGS_SECTION)
-      .get<number>(T3_ZOOM_PERCENT_SETTING, DEFAULT_T3_ZOOM_PERCENT) ?? DEFAULT_T3_ZOOM_PERCENT;
+    vscode.workspace.getConfiguration(SETTINGS_SECTION).inspect<number>(T3_ZOOM_PERCENT_SETTING)
+      ?.globalValue ?? DEFAULT_T3_ZOOM_PERCENT;
   return clampT3ZoomPercent(value);
 }
 
@@ -424,23 +436,19 @@ export function clampT3ZoomPercent(value: number): number {
 }
 
 export async function setTerminalFontSize(fontSize: number): Promise<void> {
-  await vscode.workspace
-    .getConfiguration(SETTINGS_SECTION)
-    .update(
-      TERMINAL_FONT_SIZE_SETTING,
-      clampTerminalFontSize(fontSize),
-      vscode.ConfigurationTarget.Workspace,
-    );
+  await setSharedWorkspaceAppearancePreference("terminalFontSize", clampTerminalFontSize(fontSize));
+}
+
+export async function resetTerminalFontSize(): Promise<void> {
+  await clearSharedWorkspaceAppearancePreference("terminalFontSize");
 }
 
 export async function setT3ZoomPercent(zoomPercent: number): Promise<void> {
-  await vscode.workspace
-    .getConfiguration(SETTINGS_SECTION)
-    .update(
-      T3_ZOOM_PERCENT_SETTING,
-      clampT3ZoomPercent(zoomPercent),
-      vscode.ConfigurationTarget.Workspace,
-    );
+  await setSharedWorkspaceAppearancePreference("t3ZoomPercent", clampT3ZoomPercent(zoomPercent));
+}
+
+export async function resetT3ZoomPercent(): Promise<void> {
+  await clearSharedWorkspaceAppearancePreference("t3ZoomPercent");
 }
 
 export function getTerminalLineHeight(): number {

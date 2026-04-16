@@ -1578,10 +1578,20 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
                 type: "adjustTerminalFontSize",
               })
             }
+            onResetTerminalFontSize={() =>
+              postToExtension({
+                type: "resetTerminalFontSize",
+              })
+            }
             onAdjustT3ZoomPercent={(delta) =>
               postToExtension({
                 delta,
                 type: "adjustT3ZoomPercent",
+              })
+            }
+            onResetT3ZoomPercent={() =>
+              postToExtension({
+                type: "resetT3ZoomPercent",
               })
             }
             onFork={() =>
@@ -1746,7 +1756,9 @@ type WorkspacePaneViewProps = {
   onConfirmToastShown: (toast: WorkspacePanelShowToastMessage) => void;
   onFork: () => void;
   onAdjustTerminalFontSize: (delta: -1 | 1) => void;
+  onResetTerminalFontSize: () => void;
   onAdjustT3ZoomPercent: (delta: -1 | 1) => void;
+  onResetT3ZoomPercent: () => void;
   onT3ThreadChanged: (payload: { sessionId: string; threadId: string; title?: string }) => void;
   onRename: () => void;
   onReload: () => void;
@@ -1778,7 +1790,9 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
   onConfirmToastShown,
   onFork,
   onAdjustTerminalFontSize,
+  onResetTerminalFontSize,
   onAdjustT3ZoomPercent,
+  onResetT3ZoomPercent,
   onT3ThreadChanged,
   onRename,
   onBoundsMeasured,
@@ -1933,6 +1947,9 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
               <WorkspacePaneFontSizeControls
                 onAdjustZoom={
                   pane.kind === "terminal" ? onAdjustTerminalFontSize : onAdjustT3ZoomPercent
+                }
+                onResetZoom={
+                  pane.kind === "terminal" ? onResetTerminalFontSize : onResetT3ZoomPercent
                 }
               />
             ) : null}

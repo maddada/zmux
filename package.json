@@ -505,6 +505,7 @@
           "minimum": 8,
           "maximum": 32,
           "default": 13,
+          "scope": "application",
           "description": "Font size used by VSmux workspace terminals."
         },
         "VSmux.t3ZoomPercent": {
@@ -513,7 +514,7 @@
           "minimum": 50,
           "maximum": 200,
           "default": 100,
-          "scope": "window",
+          "scope": "application",
           "description": "Zoom percentage used by embedded VSmux T3 sessions in the current VS Code workspace. 100 is default size."
         },
         "VSmux.terminalFontWeight": {

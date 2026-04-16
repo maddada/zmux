@@ -3,10 +3,12 @@ import { WorkspacePaneActionTooltip } from "./workspace-pane-action-tooltip";
 
 export type WorkspacePaneFontSizeControlsProps = {
   onAdjustZoom: (delta: -1 | 1) => void;
+  onResetZoom: () => void;
 };
 
 export const WorkspacePaneFontSizeControls: React.FC<WorkspacePaneFontSizeControlsProps> = ({
   onAdjustZoom,
+  onResetZoom,
 }) => (
   <>
     <WorkspacePaneActionTooltip tooltip="Zoom Out">
@@ -23,7 +25,18 @@ export const WorkspacePaneFontSizeControls: React.FC<WorkspacePaneFontSizeContro
         onMouseDown={(event) => {
           event.preventDefault();
           event.stopPropagation();
+          if (event.button === 1) {
+            onResetZoom();
+            return;
+          }
+          if (event.button !== 0) {
+            return;
+          }
           onAdjustZoom(-1);
+        }}
+        onAuxClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
         }}
         type="button"
       >
@@ -44,7 +57,18 @@ export const WorkspacePaneFontSizeControls: React.FC<WorkspacePaneFontSizeContro
         onMouseDown={(event) => {
           event.preventDefault();
           event.stopPropagation();
+          if (event.button === 1) {
+            onResetZoom();
+            return;
+          }
+          if (event.button !== 0) {
+            return;
+          }
           onAdjustZoom(1);
+        }}
+        onAuxClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
         }}
         type="button"
       >

@@ -5,12 +5,14 @@ import { type VisibleSessionCount } from "../shared/session-grid-contract";
 import { maybeAutoOpenSidebarViewsOnStartup } from "./auto-open-sidebar-views";
 import { DebuggingStatusIndicator } from "./debugging-status-indicator";
 import { NativeTerminalWorkspaceController, SESSIONS_VIEW_ID } from "./native-terminal-workspace";
+import { initializeSharedWorkspaceAppearancePreferences } from "./shared-workspace-appearance-preferences";
 import { initializeVSmuxDebugLog } from "./vsmux-debug-log";
 import { closeWorkspacePanelTabs } from "./workspace-panel";
 
 export function activate(context: vscode.ExtensionContext): void {
   initializeVSmuxDebugLog(context);
   activateChatHistory(context);
+  initializeSharedWorkspaceAppearancePreferences(context);
   const workspace = new NativeTerminalWorkspaceController(context);
   setChatHistoryVSmuxTarget(workspace);
   const debuggingStatusIndicator = new DebuggingStatusIndicator(workspace);
