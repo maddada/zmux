@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  expandCollapsedGroupsById,
   getBrowserSessionCountsByGroup,
   reconcileCollapsedGroupsById,
 } from "./browser-group-collapse";
@@ -96,6 +97,35 @@ describe("reconcileCollapsedGroupsById", () => {
           "browser-tabs": ["browser-1"],
           "group-1": ["session-1"],
         },
+      }),
+    ).toBe(collapsedGroupsById);
+  });
+});
+
+describe("expandCollapsedGroupsById", () => {
+  test("should expand only the requested groups", () => {
+    expect(
+      expandCollapsedGroupsById({
+        groupIds: ["browser-tabs"],
+        previousCollapsedGroupsById: {
+          "browser-tabs": true,
+          "group-1": true,
+        },
+      }),
+    ).toEqual({
+      "group-1": true,
+    });
+  });
+
+  test("should preserve the same object when nothing changes", () => {
+    const collapsedGroupsById = {
+      "group-1": true,
+    } satisfies Record<string, true>;
+
+    expect(
+      expandCollapsedGroupsById({
+        groupIds: ["browser-tabs"],
+        previousCollapsedGroupsById: collapsedGroupsById,
       }),
     ).toBe(collapsedGroupsById);
   });

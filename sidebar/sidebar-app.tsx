@@ -65,6 +65,7 @@ import {
   moveSessionIdsByDropTarget,
 } from "./sidebar-dnd";
 import {
+  expandCollapsedGroupsById,
   getBrowserSessionCountsByGroup,
   reconcileCollapsedGroupsById,
 } from "./browser-group-collapse";
@@ -248,6 +249,15 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   }, [authoritativeSessionIdsByGroup, browserGroupIds, groupOrder]);
 
   const isSidebarInteractionBlocked = isStartupInteractionBlocked;
+
+  const expandGroups = (groupIds: readonly string[]) => {
+    setCollapsedGroupsById((previous) =>
+      expandCollapsedGroupsById({
+        groupIds,
+        previousCollapsedGroupsById: previous,
+      }),
+    );
+  };
 
   const setGroupCollapsed = (groupId: string, collapsed: boolean) => {
     setCollapsedGroupsById((previous) => {
@@ -1353,6 +1363,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
             }
             isCollapsed={collapsedSections.actions}
             isVisible={shouldShowActionsPanel}
+            onBrowserCommandRun={() => expandGroups(browserGroupIds)}
             onToggleCollapsed={(collapsed) => {
               setSectionCollapsed("actions", collapsed);
               vscode.postMessage({
@@ -1435,6 +1446,9 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
                       key={groupId}
                       onAutoEditHandled={() => undefined}
                       onCollapsedChange={setGroupCollapsed}
+                      onCreateSessionRequested={(requestedGroupId) =>
+                        expandGroups([requestedGroupId])
+                      }
                       orderedSessionIds={displayedBrowserSessionIdsByGroup[groupId] ?? []}
                       selectedSearchSessionId={
                         isSessionSearchSelectionVisible &&

@@ -110,6 +110,7 @@ export type SessionGroupSectionProps = {
   isCollapsed: boolean;
   onAutoEditHandled: () => void;
   onCollapsedChange: (groupId: string, collapsed: boolean) => void;
+  onCreateSessionRequested?: (groupId: string) => void;
   onFocusRequested?: (groupId: string, sessionId: string) => void;
   orderedSessionIds?: readonly string[];
   selectedSearchSessionId?: string;
@@ -168,6 +169,7 @@ export function SessionGroupSection({
   isCollapsed,
   onAutoEditHandled,
   onCollapsedChange,
+  onCreateSessionRequested,
   onFocusRequested,
   orderedSessionIds: orderedSessionIdsProp,
   selectedSearchSessionId,
@@ -242,6 +244,7 @@ export function SessionGroupSection({
   const sessionSummary = getGroupSessionSummary(groupSessions);
   const allSessionsSleeping =
     groupSessions.length > 0 && groupSessions.every((session) => session.isSleeping);
+  const browserTabCount = isBrowserGroup ? groupSessions.length : 0;
   const canFullReloadGroup = groupSessions.length > 0;
   const collapsedIndicatorActivity = sessionSummary.indicatorActivity;
   const hasCollapsedSummary = collapsedIndicatorActivity !== undefined;
@@ -449,6 +452,8 @@ export function SessionGroupSection({
   };
 
   const requestCreateSession = () => {
+    onCreateSessionRequested?.(group.groupId);
+
     if (isBrowserGroup) {
       vscode.postMessage({
         type: "openBrowser",
@@ -649,6 +654,16 @@ export function SessionGroupSection({
                     <span className="group-title section-titlebar-label">{group.title}</span>
                   </button>
                 </div>
+                <div className="group-title-spacer" />
+                {browserTabCount > 0 ? (
+                  <span
+                    aria-label={`${String(browserTabCount)} browser tab${browserTabCount === 1 ? "" : "s"}`}
+                    className="group-browser-tab-count"
+                    title={`${String(browserTabCount)} browser tab${browserTabCount === 1 ? "" : "s"}`}
+                  >
+                    {String(browserTabCount)}
+                  </span>
+                ) : null}
                 <div
                   className="group-header-actions"
                   data-open={String(openControlMenu !== undefined)}

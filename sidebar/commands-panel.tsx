@@ -50,6 +50,7 @@ type CommandsPanelProps = {
   createRequestId: number;
   isCollapsed: boolean;
   isVisible: boolean;
+  onBrowserCommandRun?: () => void;
   onToggleCollapsed: (collapsed: boolean) => void;
   showGitButton: boolean;
   titlebarActions?: ReactNode;
@@ -148,6 +149,7 @@ export function CommandsPanel({
   createRequestId,
   isCollapsed,
   isVisible,
+  onBrowserCommandRun,
   onToggleCollapsed,
   showGitButton,
   titlebarActions,
@@ -249,6 +251,10 @@ export function CommandsPanel({
     ) {
       openCommandEditor(command);
       return;
+    }
+
+    if (command.actionType === "browser") {
+      onBrowserCommandRun?.();
     }
 
     vscode.postMessage({

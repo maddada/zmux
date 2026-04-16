@@ -113,6 +113,42 @@ describe("getLiveBrowserTabs", () => {
     expect(browserTabs).toEqual([]);
   });
 
+  test("should ignore Claude Code editor panels", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("claudeVSCodePanel"),
+            isActive: true,
+            label: "Automate organizer onboarding",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toEqual([]);
+  });
+
+  test("should ignore Claude plan preview panels", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("claudePlanPreview"),
+            isActive: true,
+            label: "Plan Preview",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toEqual([]);
+  });
+
   test("should ignore VS Code diff editors", () => {
     const browserTabs = getLiveBrowserTabs([
       {

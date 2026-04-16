@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import {
   getBrowserTabInputKind,
   getBrowserTabUrl,
-  isBrowserLikeTab,
   normalizeUrl,
 } from "./browser-session-manager/helpers";
 import { T3_PANEL_TYPE } from "./t3-webview-manager/helpers";
@@ -20,6 +19,13 @@ const VSMUX_SEARCH_LABEL_PREFIX = "VSmux Search";
 const EXTENSION_LABEL_FRAGMENT = "Extension:";
 const WORKING_TREE_LABEL_FRAGMENT = "(Working Tree)";
 const INDEX_LABEL_FRAGMENT = "(Index)";
+const IGNORED_WEBVIEW_VIEW_TYPES = new Set([
+  "claudevscodepanel",
+  "claudeplanpreview",
+  "claudevscodesidebar",
+  "claudevscodesidebarsecondary",
+  "claudevscodesessionslist",
+]);
 
 export type LiveBrowserTabEntry = {
   detail?: string;
@@ -160,6 +166,10 @@ function getLiveBrowserTabMetadata(tab: vscode.Tab):
     return undefined;
   }
 
+  if (isIgnoredNonBrowserWebviewViewType(viewType)) {
+    return undefined;
+  }
+
   if (url) {
     return {
       detail: url,
@@ -173,15 +183,6 @@ function getLiveBrowserTabMetadata(tab: vscode.Tab):
     return {
       detail: undefined,
       identity: viewType,
-      url: undefined,
-      viewType,
-    };
-  }
-
-  if (isBrowserLikeTab(tab)) {
-    return {
-      detail: undefined,
-      identity: viewType ?? tab.label,
       url: undefined,
       viewType,
     };
@@ -218,6 +219,14 @@ function isBrowserWebviewViewType(viewType: string): boolean {
     normalizedViewType.includes("browser") ||
     normalizedViewType.includes("preview")
   );
+}
+
+function isIgnoredNonBrowserWebviewViewType(viewType: string | undefined): boolean {
+  if (!viewType) {
+    return false;
+  }
+
+  return IGNORED_WEBVIEW_VIEW_TYPES.has(viewType.toLowerCase());
 }
 
 function isVSmuxLocalAssetUrl(url: string): boolean {

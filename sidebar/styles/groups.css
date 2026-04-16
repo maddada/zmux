@@ -89,8 +89,9 @@
 
 .group-title-wrap {
   align-items: center;
-  display: inline-flex;
+  display: flex;
   min-width: 0;
+  width: 100%;
 }
 
 .group-title-row {
@@ -98,7 +99,7 @@
   display: flex;
   gap: calc(8px * var(--sidebar-density-scale));
   min-width: 0;
-  width: fit-content;
+  width: 100%;
 }
 
 .group-collapse-button {
@@ -182,6 +183,11 @@
   cursor: grabbing;
 }
 
+.group-title-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .group-title {
   text-transform: uppercase;
 }
@@ -260,6 +266,22 @@
   border-color: color-mix(in srgb, var(--app-button-background) 54%, var(--app-border));
   color: var(--app-button-background);
   outline: none;
+}
+
+.group-browser-tab-count {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-button-background) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-button-background) 32%, var(--app-border));
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--app-button-background) 84%, var(--app-foreground) 16%);
+  display: inline-flex;
+  flex: none;
+  font-size: calc(11px * var(--sidebar-density-scale));
+  font-weight: 700;
+  justify-content: center;
+  line-height: 1;
+  min-width: calc(22px * var(--sidebar-density-scale));
+  padding: calc(4px * var(--sidebar-density-scale)) calc(7px * var(--sidebar-density-scale));
 }
 
 .group-layout-controls {

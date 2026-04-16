@@ -59,3 +59,29 @@ export function reconcileCollapsedGroupsById({
 
   return changed ? next : previousCollapsedGroupsById;
 }
+
+export function expandCollapsedGroupsById({
+  groupIds,
+  previousCollapsedGroupsById,
+}: {
+  groupIds: readonly string[];
+  previousCollapsedGroupsById: CollapsedGroupsById;
+}): CollapsedGroupsById {
+  if (groupIds.length === 0) {
+    return previousCollapsedGroupsById;
+  }
+
+  let changed = false;
+  const next = { ...previousCollapsedGroupsById };
+
+  for (const groupId of groupIds) {
+    if (!next[groupId]) {
+      continue;
+    }
+
+    delete next[groupId];
+    changed = true;
+  }
+
+  return changed ? next : previousCollapsedGroupsById;
+}
