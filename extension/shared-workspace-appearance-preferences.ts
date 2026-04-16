@@ -11,19 +11,21 @@ type SharedWorkspaceAppearanceSnapshot = Partial<
 >;
 
 let sharedWorkspaceAppearanceContext: vscode.ExtensionContext | undefined;
+let sharedWorkspaceAppearanceSnapshotCache: SharedWorkspaceAppearanceSnapshot | undefined;
 
 export function initializeSharedWorkspaceAppearancePreferences(
   context: vscode.ExtensionContext,
 ): void {
   sharedWorkspaceAppearanceContext = context;
+  sharedWorkspaceAppearanceSnapshotCache = normalizeSharedWorkspaceAppearanceSnapshot(
+    getStoredSharedWorkspaceAppearanceSnapshot(),
+  );
 }
 
 export function getSharedWorkspaceAppearancePreference(
   key: SharedWorkspaceAppearancePreferenceKey,
 ): number | undefined {
-  return normalizeSharedWorkspaceAppearanceSnapshot(getStoredSharedWorkspaceAppearanceSnapshot())[
-    key
-  ];
+  return getSharedWorkspaceAppearanceSnapshot()[key];
 }
 
 export async function setSharedWorkspaceAppearancePreference(
@@ -36,16 +38,18 @@ export async function setSharedWorkspaceAppearancePreference(
   }
 
   const currentSnapshot = normalizeSharedWorkspaceAppearanceSnapshot(
-    getStoredSharedWorkspaceAppearanceSnapshot(),
+    getSharedWorkspaceAppearanceSnapshot(),
   );
   if (currentSnapshot[key] === value) {
     return;
   }
 
-  await context.globalState.update(getSharedWorkspaceAppearanceStorageKey(), {
+  const nextSnapshot = {
     ...currentSnapshot,
     [key]: value,
-  });
+  };
+  sharedWorkspaceAppearanceSnapshotCache = nextSnapshot;
+  await context.globalState.update(getSharedWorkspaceAppearanceStorageKey(), nextSnapshot);
 }
 
 export async function clearSharedWorkspaceAppearancePreference(
@@ -57,17 +61,30 @@ export async function clearSharedWorkspaceAppearancePreference(
   }
 
   const currentSnapshot = normalizeSharedWorkspaceAppearanceSnapshot(
-    getStoredSharedWorkspaceAppearanceSnapshot(),
+    getSharedWorkspaceAppearanceSnapshot(),
   );
   if (!(key in currentSnapshot)) {
     return;
   }
 
   const { [key]: _removedValue, ...nextSnapshot } = currentSnapshot;
+  sharedWorkspaceAppearanceSnapshotCache = nextSnapshot;
   await context.globalState.update(
     getSharedWorkspaceAppearanceStorageKey(),
     Object.keys(nextSnapshot).length > 0 ? nextSnapshot : undefined,
   );
+}
+
+function getSharedWorkspaceAppearanceSnapshot(): SharedWorkspaceAppearanceSnapshot {
+  if (sharedWorkspaceAppearanceSnapshotCache) {
+    return sharedWorkspaceAppearanceSnapshotCache;
+  }
+
+  const snapshot = normalizeSharedWorkspaceAppearanceSnapshot(
+    getStoredSharedWorkspaceAppearanceSnapshot(),
+  );
+  sharedWorkspaceAppearanceSnapshotCache = snapshot;
+  return snapshot;
 }
 
 function getStoredSharedWorkspaceAppearanceSnapshot(): unknown {
