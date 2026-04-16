@@ -140,6 +140,12 @@ export type WorkspacePanelFlashCompletionSessionMessage = {
   type: "flashCompletionSession";
 };
 
+export type WorkspacePanelClipboardFilePayload = {
+  buffer: ArrayBuffer;
+  name: string;
+  type: string;
+};
+
 export type WorkspacePanelResolveClipboardImagePathResultMessage = {
   buffer?: ArrayBuffer;
   error?: string;
@@ -149,6 +155,16 @@ export type WorkspacePanelResolveClipboardImagePathResultMessage = {
   requestId: number;
   sessionId: string;
   type: "resolveClipboardImagePathResult";
+};
+
+export type WorkspacePanelReadNativeClipboardPayloadResultMessage = {
+  error?: string;
+  files: WorkspacePanelClipboardFilePayload[];
+  requestId: number;
+  sessionId: string;
+  source?: string;
+  text: string;
+  type: "readNativeClipboardPayloadResult";
 };
 
 export type ExtensionToWorkspacePanelMessage =
@@ -161,7 +177,8 @@ export type ExtensionToWorkspacePanelMessage =
   | WorkspacePanelShowToastMessage
   | WorkspacePanelCodexWelcomeSettingAppliedMessage
   | WorkspacePanelFlashCompletionSessionMessage
-  | WorkspacePanelResolveClipboardImagePathResultMessage;
+  | WorkspacePanelResolveClipboardImagePathResultMessage
+  | WorkspacePanelReadNativeClipboardPayloadResultMessage;
 
 export type WorkspacePanelReadyMessage = {
   type: "ready";
@@ -251,6 +268,12 @@ export type WorkspacePanelResolveClipboardImagePathMessage = {
   type: "resolveClipboardImagePath";
 };
 
+export type WorkspacePanelReadNativeClipboardPayloadMessage = {
+  requestId: number;
+  sessionId: string;
+  type: "readNativeClipboardPayload";
+};
+
 export type WorkspacePanelT3ThreadChangedMessage = {
   sessionId: string;
   threadId: string;
@@ -291,6 +314,7 @@ export type WorkspacePanelToExtensionMessage =
   | WorkspacePanelReloadMessage
   | WorkspacePanelReloadT3SessionMessage
   | WorkspacePanelResolveClipboardImagePathMessage
+  | WorkspacePanelReadNativeClipboardPayloadMessage
   | WorkspacePanelT3ThreadChangedMessage;
 
 export function stripWorkspacePanelTransientFields(

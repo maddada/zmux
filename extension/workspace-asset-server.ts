@@ -120,7 +120,27 @@ export class WorkspaceAssetServer implements vscode.Disposable {
 
     const nextPromise = new Promise<number>((resolve, reject) => {
       const server = kind === "local" ? this.localServer : this.sharedServer;
-      server.once("error", (error) => {
+      server.once("error", (error: NodeJS.ErrnoException) => {
+        if (kind === "shared" && error.code === "EADDRINUSE") {
+          void this.probeExistingSharedServer().then((isReusable) => {
+            if (isReusable) {
+              this.sharedPort = T3_SHARED_ACCESS_PORT;
+              resolve(T3_SHARED_ACCESS_PORT);
+              return;
+            }
+
+            reject(
+              new Error(
+                `T3 browser access server failed to bind to port ${String(T3_SHARED_ACCESS_PORT)}.`,
+                {
+                  cause: error,
+                },
+              ),
+            );
+          });
+          return;
+        }
+
         if (kind === "shared") {
           reject(
             new Error(
@@ -154,13 +174,37 @@ export class WorkspaceAssetServer implements vscode.Disposable {
       );
     });
 
+    const trackedPromise = nextPromise.catch((error) => {
+      if (kind === "local") {
+        this.localListenPromise = undefined;
+      } else {
+        this.sharedListenPromise = undefined;
+      }
+      throw error;
+    });
+
     if (kind === "local") {
-      this.localListenPromise = nextPromise;
+      this.localListenPromise = trackedPromise;
     } else {
-      this.sharedListenPromise = nextPromise;
+      this.sharedListenPromise = trackedPromise;
     }
 
-    return nextPromise;
+    return trackedPromise;
+  }
+
+  private async probeExistingSharedServer(): Promise<boolean> {
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${String(T3_SHARED_ACCESS_PORT)}/workspace/t3-frame-host.js`,
+        {
+          method: "GET",
+          signal: AbortSignal.timeout(1_500),
+        },
+      );
+      return response.ok;
+    } catch {
+      return false;
+    }
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {

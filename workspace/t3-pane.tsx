@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useRef } from "react";
 import type {
+  WorkspacePanelClipboardFilePayload,
   WorkspacePanelAutoFocusRequest,
   WorkspacePanelT3Pane,
 } from "../shared/workspace-panel-contract";
@@ -10,11 +11,7 @@ import {
   type CachedT3Runtime,
 } from "./t3-runtime-cache";
 
-type T3ClipboardFilePayload = {
-  buffer: ArrayBuffer;
-  name: string;
-  type: string;
-};
+type T3ClipboardFilePayload = WorkspacePanelClipboardFilePayload;
 
 declare global {
   interface Window {
@@ -468,11 +465,19 @@ export const T3Pane: React.FC<T3PaneProps> = ({
 
   useEffect(() => {
     let nextClipboardImagePathRequestId = 1;
+    let nextNativeClipboardReadRequestId = 1;
     const pendingClipboardImagePathRequests = new Map<
       number,
       {
         reject: (error: Error) => void;
         resolve: (payload: T3ClipboardFilePayload | null) => void;
+      }
+    >();
+    const pendingNativeClipboardReadRequests = new Map<
+      number,
+      {
+        reject: (error: Error) => void;
+        resolve: (payload: { files: T3ClipboardFilePayload[]; text: string } | null) => void;
       }
     >();
 
@@ -511,6 +516,38 @@ export const T3Pane: React.FC<T3PaneProps> = ({
           type: "resolveClipboardImagePath",
         });
       });
+    };
+
+    const readNativeClipboardPayload = async (): Promise<{
+      files: T3ClipboardFilePayload[];
+      text: string;
+    } | null> => {
+      const vscodeApi = window.__VSMUX_WORKSPACE_VSCODE__;
+      if (!vscodeApi) {
+        logPasteTrace("workspace.clipboard.nativeRead.aborted.noVscodeApi", {
+          sessionId: pane.sessionId,
+          threadId: pane.sessionRecord.t3.threadId,
+        });
+        return null;
+      }
+
+      const requestId = nextNativeClipboardReadRequestId++;
+      logPasteTrace("workspace.clipboard.nativeRead.request", {
+        requestId,
+        sessionId: pane.sessionId,
+        threadId: pane.sessionRecord.t3.threadId,
+      });
+
+      return new Promise<{ files: T3ClipboardFilePayload[]; text: string } | null>(
+        (resolve, reject) => {
+          pendingNativeClipboardReadRequests.set(requestId, { reject, resolve });
+          vscodeApi.postMessage({
+            requestId,
+            sessionId: pane.sessionId,
+            type: "readNativeClipboardPayload",
+          });
+        },
+      );
     };
 
     const readClipboardPayload = async (): Promise<{
@@ -585,6 +622,30 @@ export const T3Pane: React.FC<T3PaneProps> = ({
             file: summarizePasteTraceFiles([resolvedFile])[0],
             sessionId: pane.sessionId,
             threadId: pane.sessionRecord.t3.threadId,
+          });
+        }
+      }
+
+      if (files.length === 0 && !text) {
+        const nativeClipboardPayload = await readNativeClipboardPayload().catch(
+          (error: unknown) => {
+            logPasteTrace("workspace.clipboard.nativeRead.error", {
+              error: error instanceof Error ? error.message : String(error),
+              sessionId: pane.sessionId,
+              threadId: pane.sessionRecord.t3.threadId,
+            });
+            return null;
+          },
+        );
+        if (nativeClipboardPayload) {
+          files.push(...nativeClipboardPayload.files);
+          text = nativeClipboardPayload.text;
+          logPasteTrace("workspace.clipboard.nativeRead.applied", {
+            files: summarizePasteTraceFiles(nativeClipboardPayload.files),
+            looksLikeFilePath: looksLikePasteTraceFilesystemPath(nativeClipboardPayload.text),
+            sessionId: pane.sessionId,
+            threadId: pane.sessionRecord.t3.threadId,
+            ...summarizePasteTraceText(nativeClipboardPayload.text),
           });
         }
       }
@@ -697,6 +758,77 @@ export const T3Pane: React.FC<T3PaneProps> = ({
         return;
       }
 
+      if (event.data.type === "readNativeClipboardPayloadResult") {
+        const requestId =
+          typeof event.data.requestId === "number" ? event.data.requestId : undefined;
+        const pendingRequest = requestId
+          ? pendingNativeClipboardReadRequests.get(requestId)
+          : undefined;
+        if (!pendingRequest) {
+          return;
+        }
+
+        pendingNativeClipboardReadRequests.delete(requestId);
+        const resultSessionId =
+          typeof event.data.sessionId === "string" ? event.data.sessionId.trim() : "";
+        if (!resultSessionId || resultSessionId !== pane.sessionId) {
+          pendingRequest.reject(new Error("Native clipboard result targeted a different session."));
+          return;
+        }
+
+        if (typeof event.data.error === "string" && event.data.error.length > 0) {
+          logPasteTrace("workspace.clipboard.nativeRead.resultError", {
+            error: event.data.error,
+            requestId,
+            sessionId: pane.sessionId,
+            source: typeof event.data.source === "string" ? event.data.source : undefined,
+            threadId: pane.sessionRecord.t3.threadId,
+          });
+          pendingRequest.reject(new Error(event.data.error));
+          return;
+        }
+
+        const payloadFiles = Array.isArray(event.data.files)
+          ? event.data.files
+              .map((file): T3ClipboardFilePayload | null => {
+                const resultBuffer =
+                  file?.buffer instanceof ArrayBuffer
+                    ? file.buffer
+                    : ArrayBuffer.isView(file?.buffer)
+                      ? file.buffer.buffer.slice(
+                          file.buffer.byteOffset,
+                          file.buffer.byteOffset + file.buffer.byteLength,
+                        )
+                      : undefined;
+                if (!resultBuffer) {
+                  return null;
+                }
+
+                return {
+                  buffer: resultBuffer,
+                  name: typeof file.name === "string" && file.name.length > 0 ? file.name : "",
+                  type: typeof file.type === "string" && file.type.length > 0 ? file.type : "",
+                };
+              })
+              .filter((file): file is T3ClipboardFilePayload => file !== null)
+          : [];
+        const payloadText = typeof event.data.text === "string" ? event.data.text : "";
+        logPasteTrace("workspace.clipboard.nativeRead.resultSuccess", {
+          files: summarizePasteTraceFiles(payloadFiles),
+          looksLikeFilePath: looksLikePasteTraceFilesystemPath(payloadText),
+          requestId,
+          sessionId: pane.sessionId,
+          source: typeof event.data.source === "string" ? event.data.source : undefined,
+          threadId: pane.sessionRecord.t3.threadId,
+          ...summarizePasteTraceText(payloadText),
+        });
+        pendingRequest.resolve({
+          files: payloadFiles,
+          text: payloadText,
+        });
+        return;
+      }
+
       if (event.data.type === "vsmuxT3DebugLog") {
         const sessionId =
           typeof event.data.sessionId === "string" ? event.data.sessionId.trim() : "";
@@ -802,6 +934,10 @@ export const T3Pane: React.FC<T3PaneProps> = ({
         pendingRequest.reject(new Error("T3 pane clipboard image path resolver disposed."));
       }
       pendingClipboardImagePathRequests.clear();
+      for (const pendingRequest of pendingNativeClipboardReadRequests.values()) {
+        pendingRequest.reject(new Error("T3 pane native clipboard reader disposed."));
+      }
+      pendingNativeClipboardReadRequests.clear();
       window.removeEventListener("message", handleMessage);
     };
   }, [pane.sessionId, pane.sessionRecord.t3.threadId]);

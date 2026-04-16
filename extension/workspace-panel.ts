@@ -311,6 +311,14 @@ function isWorkspaceMessage(candidate: unknown): candidate is WorkspacePanelToEx
       message.sessionId.length > 0
     );
   }
+  if (message.type === "readNativeClipboardPayload") {
+    return (
+      typeof message.requestId === "number" &&
+      Number.isFinite(message.requestId) &&
+      typeof message.sessionId === "string" &&
+      message.sessionId.length > 0
+    );
+  }
   if (message.type === "completeWelcome") {
     return true;
   }

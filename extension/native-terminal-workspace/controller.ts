@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import * as path from "node:path";
+import { promisify } from "node:util";
 import * as vscode from "vscode";
 import {
   createSidebarHudState,
@@ -233,6 +235,10 @@ import { WorkspacePanelManager } from "../workspace-panel";
 import { WorkspaceAssetServer } from "../workspace-asset-server";
 import { resolveT3BrowserAccessLink } from "../t3-browser-access";
 import {
+  readSharedT3BrowserAccessState,
+  writeSharedT3BrowserAccessState,
+} from "../t3-browser-access-state";
+import {
   createPendingT3IframeSource,
   createT3BrowserAccessSource,
   createT3IframeSource,
@@ -254,6 +260,8 @@ const SIMPLE_BROWSER_OPEN_COMMAND = "simpleBrowser.api.open";
 const TOGGLE_MAXIMIZE_EDITOR_GROUP_COMMAND = "workbench.action.toggleMaximizeEditorGroup";
 const FULL_RELOAD_SUPPORTED_AGENTS_LABEL = "Codex, Claude, and OpenCode";
 const SIDEBAR_ORDER_REPRO_TAG = "SIDEBAR_ORDER_REPRO";
+const MAX_NATIVE_CLIPBOARD_OUTPUT_BYTES = 64 * 1024 * 1024;
+const execFileAsync = promisify(execFile);
 
 export { SESSIONS_VIEW_ID } from "./settings";
 
@@ -392,6 +400,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
         if (message.type === "resolveClipboardImagePath") {
           await this.resolveWorkspaceClipboardImagePath(message);
+          return;
+        }
+
+        if (message.type === "readNativeClipboardPayload") {
+          await this.readWorkspaceNativeClipboardPayload(message);
           return;
         }
 
@@ -4870,6 +4883,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
+    await this.publishSharedT3BrowserAccessState(sessionRecord);
     const accessLink = await this.getT3SessionBrowserAccessLink();
     await this.sidebarProvider.postMessage({
       endpointUrl: accessLink.endpointUrl,
@@ -4935,6 +4949,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     requestOrigin: string,
     preferredSessionId?: string,
   ): Promise<string | undefined> {
+    const sharedBrowserAccessState = await readSharedT3BrowserAccessState(this.context);
+    if (sharedBrowserAccessState) {
+      return this.createSharedT3BrowserAccessDocument(requestOrigin, sharedBrowserAccessState);
+    }
+
     const sessionRecord = await this.resolveOrCreateBrowserAccessT3Session(preferredSessionId);
     if (!sessionRecord) {
       return undefined;
@@ -4953,6 +4972,53 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     return createT3BrowserAccessSource(this.context, resolvedSessionRecord, {
       assetServerOrigin: requestOrigin,
       browserBootstrapToken: embedBootstrap.browserBootstrapToken,
+    });
+  }
+
+  private async createSharedT3BrowserAccessDocument(
+    requestOrigin: string,
+    sharedBrowserAccessState: NonNullable<
+      Awaited<ReturnType<typeof readSharedT3BrowserAccessState>>
+    >,
+  ): Promise<string | undefined> {
+    const runtime = this.getOrCreateT3Runtime();
+    const embedBootstrap = await runtime.createEmbedBootstrap(
+      sharedBrowserAccessState.workspaceRoot,
+    );
+    this.workspaceAssetServer.setT3ProxyAuthorizationToken(embedBootstrap.ownerBearerToken);
+    return createT3BrowserAccessSource(
+      this.context,
+      {
+        alias: "",
+        column: 0,
+        createdAt: sharedBrowserAccessState.updatedAt,
+        displayId: "",
+        kind: "t3",
+        row: 0,
+        sessionId: sharedBrowserAccessState.sessionId,
+        slotIndex: 0,
+        t3: {
+          projectId: "",
+          serverOrigin: runtime.getServerOrigin(),
+          threadId: sharedBrowserAccessState.threadId,
+          workspaceRoot: sharedBrowserAccessState.workspaceRoot,
+        },
+        title: sharedBrowserAccessState.sessionTitle,
+      },
+      {
+        assetServerOrigin: requestOrigin,
+        browserBootstrapToken: embedBootstrap.browserBootstrapToken,
+      },
+    );
+  }
+
+  private async publishSharedT3BrowserAccessState(sessionRecord: T3SessionRecord): Promise<void> {
+    await writeSharedT3BrowserAccessState(this.context, {
+      sessionId: sessionRecord.sessionId,
+      sessionTitle: sessionRecord.title,
+      threadId: sessionRecord.t3.threadId,
+      updatedAt: new Date().toISOString(),
+      workspaceRoot: sessionRecord.t3.workspaceRoot,
     });
   }
 
@@ -5059,6 +5125,51 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       await this.workspacePanel.postMessage({
         ...responseBase,
         error: errorMessage,
+      });
+    }
+  }
+
+  private async readWorkspaceNativeClipboardPayload(input: {
+    requestId: number;
+    sessionId: string;
+    type: "readNativeClipboardPayload";
+  }): Promise<void> {
+    const responseBase = {
+      requestId: input.requestId,
+      sessionId: input.sessionId,
+      type: "readNativeClipboardPayloadResult" as const,
+    };
+
+    try {
+      const payload = await readNativeClipboardPayloadFromHost();
+      logVSmuxDebug("controller.readNativeClipboardPayload.success", {
+        ...responseBase,
+        fileCount: payload.files.length,
+        fileNames: payload.files.map((file) => file.name),
+        source: payload.source,
+        textLength: payload.text.length,
+      });
+      await this.workspacePanel.postMessage({
+        ...responseBase,
+        files: payload.files.map((file) => ({
+          buffer: toArrayBuffer(file.buffer),
+          name: file.name,
+          type: file.type,
+        })),
+        source: payload.source,
+        text: payload.text,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logVSmuxDebug("controller.readNativeClipboardPayload.error", {
+        ...responseBase,
+        error: errorMessage,
+      });
+      await this.workspacePanel.postMessage({
+        ...responseBase,
+        error: errorMessage,
+        files: [],
+        text: "",
       });
     }
   }
@@ -5635,3 +5746,150 @@ function inferClipboardImageMimeType(inputPath: string): string | undefined {
       return undefined;
   }
 }
+
+type NativeClipboardFilePayload = {
+  buffer: Uint8Array;
+  name: string;
+  type: string;
+};
+
+type NativeClipboardPayload = {
+  files: NativeClipboardFilePayload[];
+  source: string;
+  text: string;
+};
+
+type MacOSNativeClipboardSnapshot = {
+  filePaths?: unknown;
+  imageBase64?: unknown;
+  imageMimeType?: unknown;
+  imageName?: unknown;
+  text?: unknown;
+};
+
+async function readNativeClipboardPayloadFromHost(): Promise<NativeClipboardPayload> {
+  if (process.platform === "darwin") {
+    return readMacOSNativeClipboardPayload();
+  }
+
+  return {
+    files: [],
+    source: `unsupported-platform:${process.platform}`,
+    text: "",
+  };
+}
+
+async function readMacOSNativeClipboardPayload(): Promise<NativeClipboardPayload> {
+  const { stdout } = await execFileAsync(
+    "swift",
+    ["-e", READ_MACOS_NATIVE_CLIPBOARD_SWIFT_SOURCE],
+    {
+      maxBuffer: MAX_NATIVE_CLIPBOARD_OUTPUT_BYTES,
+    },
+  );
+  const parsed = parseMacOSNativeClipboardSnapshot(stdout);
+  const files: NativeClipboardFilePayload[] = [];
+
+  if (typeof parsed.imageBase64 === "string" && parsed.imageBase64.length > 0) {
+    const imageBuffer = Buffer.from(parsed.imageBase64, "base64");
+    if (imageBuffer.byteLength > 0) {
+      files.push({
+        buffer: imageBuffer,
+        name:
+          typeof parsed.imageName === "string" && parsed.imageName.length > 0
+            ? parsed.imageName
+            : "clipboard-image.png",
+        type:
+          typeof parsed.imageMimeType === "string" && parsed.imageMimeType.length > 0
+            ? parsed.imageMimeType
+            : "image/png",
+      });
+    }
+  }
+
+  if (Array.isArray(parsed.filePaths)) {
+    for (const candidatePath of parsed.filePaths) {
+      if (typeof candidatePath !== "string" || candidatePath.trim().length === 0) {
+        continue;
+      }
+
+      const normalizedPath = normalizeClipboardImagePath(candidatePath);
+      if (!looksLikeClipboardImagePath(normalizedPath)) {
+        continue;
+      }
+
+      try {
+        const fileBuffer = await readFile(normalizedPath);
+        files.push({
+          buffer: fileBuffer,
+          name: path.basename(normalizedPath),
+          type: inferClipboardImageMimeType(normalizedPath) ?? "application/octet-stream",
+        });
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return {
+    files,
+    source: "macos-swift",
+    text: typeof parsed.text === "string" ? parsed.text : "",
+  };
+}
+
+function parseMacOSNativeClipboardSnapshot(output: string): MacOSNativeClipboardSnapshot {
+  const trimmedOutput = output.trim();
+  if (!trimmedOutput) {
+    return {};
+  }
+
+  const parsed = JSON.parse(trimmedOutput) as MacOSNativeClipboardSnapshot;
+  return parsed && typeof parsed === "object" ? parsed : {};
+}
+
+function toArrayBuffer(view: Uint8Array): ArrayBuffer {
+  return Uint8Array.from(view).buffer;
+}
+
+const READ_MACOS_NATIVE_CLIPBOARD_SWIFT_SOURCE = String.raw`
+import AppKit
+import Foundation
+
+let pasteboard = NSPasteboard.general
+var result: [String: Any] = [
+  "filePaths": [],
+  "text": pasteboard.string(forType: .string) ?? "",
+]
+
+if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+  result["filePaths"] = urls.filter { $0.isFileURL }.map { $0.path }
+}
+
+func setImagePayload(_ data: Data, name: String, mimeType: String) {
+  result["imageBase64"] = data.base64EncodedString()
+  result["imageMimeType"] = mimeType
+  result["imageName"] = name
+}
+
+if let pngData = pasteboard.data(forType: .png), !pngData.isEmpty {
+  setImagePayload(pngData, name: "clipboard-image.png", mimeType: "image/png")
+} else if let tiffData = pasteboard.data(forType: .tiff),
+          let bitmap = NSBitmapImageRep(data: tiffData),
+          let pngData = bitmap.representation(using: .png, properties: [:]),
+          !pngData.isEmpty {
+  setImagePayload(pngData, name: "clipboard-image.png", mimeType: "image/png")
+} else if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+          let image = images.first,
+          let tiffData = image.tiffRepresentation,
+          let bitmap = NSBitmapImageRep(data: tiffData),
+          let pngData = bitmap.representation(using: .png, properties: [:]),
+          !pngData.isEmpty {
+  setImagePayload(pngData, name: "clipboard-image.png", mimeType: "image/png")
+}
+
+let json = try JSONSerialization.data(withJSONObject: result, options: [])
+if let output = String(data: json, encoding: .utf8) {
+  print(output)
+}
+`;
