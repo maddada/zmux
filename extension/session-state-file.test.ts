@@ -19,7 +19,9 @@ describe("deletePersistedSessionStateFile", () => {
     await writePersistedSessionStateToFile(filePath, {
       agentName: "claude",
       agentStatus: "attention",
+      hasAutoTitleFromFirstPrompt: true,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
+      pendingFirstPromptAutoRenamePrompt: "rename this session from the first prompt",
       title: "Claude Code",
     });
     await readFile(filePath, "utf8");
@@ -38,7 +40,9 @@ describe("persisted session title normalization", () => {
       serializePersistedSessionState({
         agentName: "claude",
         agentStatus: "working",
+        hasAutoTitleFromFirstPrompt: true,
         lastActivityAt: "2026-04-08T10:00:00.000Z",
+        pendingFirstPromptAutoRenamePrompt: "rename this session from the first prompt",
         title: "  ✦ release audit  ",
       }),
     ).toContain("title=release audit");
@@ -50,14 +54,16 @@ describe("persisted session title normalization", () => {
 
     await writeFile(
       filePath,
-      "status=working\nagent=codex\nlastActivityAt=2026-04-08T10:00:00.000Z\ntitle=  🤖 Copilot fix  \n",
+      "status=working\nagent=codex\nautoTitleFromFirstPrompt=1\nlastActivityAt=2026-04-08T10:00:00.000Z\npendingFirstPromptAutoRenamePrompt=  explain the project and suggest improvements  \ntitle=  🤖 Copilot fix  \n",
       "utf8",
     );
 
     await expect(readPersistedSessionStateFromFile(filePath)).resolves.toEqual({
       agentName: "codex",
       agentStatus: "working",
+      hasAutoTitleFromFirstPrompt: true,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
+      pendingFirstPromptAutoRenamePrompt: "explain the project and suggest improvements",
       title: "Copilot fix",
     });
   });
@@ -85,6 +91,7 @@ describe("persisted session title normalization", () => {
       agentName: "claude",
       agentStatus: "idle",
       lastActivityAt: "2026-04-08T10:00:00.000Z",
+      pendingFirstPromptAutoRenamePrompt: undefined,
       title: undefined,
     });
   });
@@ -95,7 +102,7 @@ describe("persisted session title normalization", () => {
 
     await writeFile(
       filePath,
-      "status=attention\nagent=claude\nlastActivityAt=2026-04-08T10:00:00.000Z\ntitle=Claude Code\n",
+      "status=attention\nagent=claude\nautoTitleFromFirstPrompt=\nlastActivityAt=2026-04-08T10:00:00.000Z\npendingFirstPromptAutoRenamePrompt=rename this session\ntitle=Claude Code\n",
       "utf8",
     );
 
@@ -103,7 +110,9 @@ describe("persisted session title normalization", () => {
     expect(snapshot.state).toEqual({
       agentName: "claude",
       agentStatus: "attention",
+      hasAutoTitleFromFirstPrompt: undefined,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
+      pendingFirstPromptAutoRenamePrompt: "rename this session",
       title: undefined,
     });
     expect(snapshot.updatedAtMs).toEqual(expect.any(Number));

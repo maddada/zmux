@@ -51,6 +51,7 @@ import { createWorkspaceTrace } from "./runtime-trace";
 import {
   readPersistedSessionStateSnapshotFromFile,
   updatePersistedSessionStateFile,
+  type PersistedSessionState,
 } from "./session-state-file";
 import { logVSmuxDebug } from "./vsmux-debug-log";
 import { appendCodeModeDebugLog } from "./code-mode-debug-log";
@@ -623,6 +624,23 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     return this.sessions.get(sessionId);
   }
 
+  public async applyFirstPromptAutoRename(sessionId: string, title: string): Promise<void> {
+    const normalizedTitle = normalizeTerminalTitle(title) ?? title.trim();
+    if (!normalizedTitle) {
+      return;
+    }
+
+    await updatePersistedSessionStateFile(
+      this.getSessionAgentStateFilePath(sessionId),
+      (currentState) => ({
+        ...currentState,
+        hasAutoTitleFromFirstPrompt: true,
+        pendingFirstPromptAutoRenamePrompt: undefined,
+        title: normalizedTitle,
+      }),
+    ).catch(() => undefined);
+  }
+
   public async killSession(sessionId: string): Promise<void> {
     const projection = this.projections.get(sessionId);
     if (!projection) {
@@ -638,6 +656,20 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     if (!isTerminalSession(sessionRecord)) {
       return;
     }
+
+    await updatePersistedSessionStateFile(
+      this.getSessionAgentStateFilePath(sessionRecord.sessionId),
+      (currentState) => {
+        if (!currentState.pendingFirstPromptAutoRenamePrompt) {
+          return currentState;
+        }
+
+        return {
+          ...currentState,
+          pendingFirstPromptAutoRenamePrompt: undefined,
+        };
+      },
+    ).catch(() => undefined);
 
     this.upsertSession(sessionRecord);
     const projection = this.projections.get(sessionRecord.sessionId);
@@ -698,6 +730,12 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     ) {
       this.changeSessionActivityEmitter.fire({ sessionId });
     }
+  }
+
+  public async readPersistedSessionState(sessionId: string): Promise<PersistedSessionState> {
+    return (
+      await readPersistedSessionStateSnapshotFromFile(this.getSessionAgentStateFilePath(sessionId))
+    ).state;
   }
 
   public syncSessions(sessionRecords: readonly SessionRecord[]): void {
@@ -1601,22 +1639,6 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
 
   private logBackendDebug(event: string, details: Record<string, unknown>): void {
     logVSmuxDebug(event, details);
-  }
-
-  private async readPersistedSessionState(sessionId: string): Promise<{
-    agentName?: string;
-    agentStatus: TerminalAgentStatus;
-    lastActivityAt?: string;
-    title?: string;
-    updatedAtMs?: number;
-  }> {
-    const persistedStateSnapshot = await readPersistedSessionStateSnapshotFromFile(
-      this.getSessionAgentStateFilePath(sessionId),
-    );
-    return {
-      ...persistedStateSnapshot.state,
-      updatedAtMs: persistedStateSnapshot.updatedAtMs,
-    };
   }
 
   private updateLastTerminalActivityAt(sessionId: string, nextActivityAt: number): boolean {

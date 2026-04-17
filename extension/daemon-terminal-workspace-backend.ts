@@ -236,6 +236,23 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     return true;
   }
 
+  public async applyFirstPromptAutoRename(sessionId: string, title: string): Promise<void> {
+    const normalizedTitle = normalizeTerminalTitle(title) ?? title.trim();
+    if (!normalizedTitle) {
+      return;
+    }
+
+    await updatePersistedSessionStateFile(
+      this.getSessionAgentStateFilePath(sessionId),
+      (currentState) => ({
+        ...currentState,
+        hasAutoTitleFromFirstPrompt: true,
+        pendingFirstPromptAutoRenamePrompt: undefined,
+        title: normalizedTitle,
+      }),
+    ).catch(() => undefined);
+  }
+
   public getSessionSnapshot(sessionId: string): TerminalSessionSnapshot | undefined {
     return this.sessions.get(sessionId);
   }
@@ -291,7 +308,29 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   }
 
   public async renameSession(sessionRecord: SessionRecord): Promise<void> {
-    void sessionRecord;
+    if (!isTerminalSession(sessionRecord)) {
+      return;
+    }
+
+    await updatePersistedSessionStateFile(
+      this.getSessionAgentStateFilePath(sessionRecord.sessionId),
+      (currentState) => {
+        if (!currentState.pendingFirstPromptAutoRenamePrompt) {
+          return currentState;
+        }
+
+        return {
+          ...currentState,
+          pendingFirstPromptAutoRenamePrompt: undefined,
+        };
+      },
+    ).catch(() => undefined);
+  }
+
+  public async readPersistedSessionState(sessionId: string): Promise<PersistedSessionState> {
+    return (
+      await readPersistedSessionStateSnapshotFromFile(this.getSessionAgentStateFilePath(sessionId))
+    ).state;
   }
 
   public async restartSession(sessionRecord: SessionRecord): Promise<TerminalSessionSnapshot> {

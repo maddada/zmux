@@ -8,7 +8,10 @@ const profileBuildFlag = "--profile-build";
 const buildScriptFlag = "--build-script";
 
 function fail(message) {
-  void message;
+  if (message) {
+    console.error(message);
+  }
+
   process.exit(1);
 }
 

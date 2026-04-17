@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
   detectCodexLifecycleEventFromLogLine,
+  getCodexHookSettingsContent,
   getClaudeHookSettingsContent,
   getPowerShellBootstrapContent,
   parseAgentControlChunk,
+  resolveActiveCodexHooksPath,
 } from "./agent-shell-integration";
 import { getOpenCodePluginContent } from "./agent-shell-integration-content";
 
@@ -152,6 +154,38 @@ describe("getClaudeHookSettingsContent", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("getCodexHookSettingsContent", () => {
+  test("should wire Codex UserPromptSubmit hooks into the shared notifier", () => {
+    const settings = JSON.parse(
+      getCodexHookSettingsContent("/tmp/vsmux-notify.js", "/usr/local/bin/node", "linux"),
+    ) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string; type: string }> }>>;
+    };
+
+    expect(settings.hooks.UserPromptSubmit).toEqual([
+      {
+        hooks: [
+          {
+            command: "ELECTRON_RUN_AS_NODE=1 '/usr/local/bin/node' '/tmp/vsmux-notify.js'",
+            type: "command",
+          },
+        ],
+      },
+    ]);
+    expect(settings.hooks.Stop).toBeUndefined();
+  });
+});
+
+describe("resolveActiveCodexHooksPath", () => {
+  test("should follow the active CODEX_HOME directory", () => {
+    expect(
+      resolveActiveCodexHooksPath({
+        CODEX_HOME: "/Users/test/.codex-profiles/personal",
+      } as NodeJS.ProcessEnv),
+    ).toBe("/Users/test/.codex-profiles/personal/hooks.json");
   });
 });
 

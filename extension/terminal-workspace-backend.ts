@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { SessionRecord } from "../shared/session-grid-contract";
 import type { TerminalSessionSnapshot } from "../shared/terminal-host-protocol";
+import type { PersistedSessionState } from "./session-state-file";
 
 export type TerminalCreateOrAttachResult = {
   didCreateTerminal: boolean;
@@ -33,10 +34,12 @@ export type TerminalWorkspaceBackend = vscode.Disposable & {
   initialize: (sessionRecords: readonly SessionRecord[]) => Promise<void>;
   acknowledgeAttention: (sessionId: string) => Promise<boolean>;
   createOrAttachSession: (sessionRecord: SessionRecord) => Promise<TerminalCreateOrAttachResult>;
+  applyFirstPromptAutoRename: (sessionId: string, title: string) => Promise<void>;
   focusSession: (sessionId: string) => Promise<boolean>;
   getSessionSnapshot: (sessionId: string) => TerminalSessionSnapshot | undefined;
   killSession: (sessionId: string) => Promise<void>;
   persistLastTerminalActivityAt: (sessionId: string, activityAt: number) => Promise<void>;
+  readPersistedSessionState: (sessionId: string) => Promise<PersistedSessionState>;
   renameSession: (sessionRecord: SessionRecord) => Promise<void>;
   restartSession: (sessionRecord: SessionRecord) => Promise<TerminalSessionSnapshot>;
   syncSessions: (sessionRecords: readonly SessionRecord[]) => void;

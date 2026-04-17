@@ -1,5 +1,6 @@
-import { getVisibleTerminalTitle } from "../shared/session-grid-contract";
+import { normalizeTerminalTitle } from "../shared/session-grid-contract";
 import type { TerminalAgentStatus } from "../shared/terminal-host-protocol";
+import { isGenericAgentSessionTitle } from "./first-prompt-session-title";
 import type { PersistedSessionState } from "./session-state-file";
 
 export type TerminalSessionPresentationStateInput = {
@@ -21,25 +22,42 @@ export function resolvePersistedSessionPresentationState(
   currentState: PersistedSessionState,
   input: TerminalSessionPresentationStateInput,
 ): PersistedSessionState {
+  const sharedState = {
+    ...(currentState.hasAutoTitleFromFirstPrompt === undefined
+      ? {}
+      : { hasAutoTitleFromFirstPrompt: currentState.hasAutoTitleFromFirstPrompt }),
+    lastActivityAt: currentState.lastActivityAt,
+    title: resolvePresentedSessionTitle(currentState, input),
+  };
+
   if (shouldPreferPersistedSessionPresentation(currentState)) {
     return {
       agentName: currentState.agentName ?? input.snapshotAgentName ?? input.titleActivityAgentName,
       agentStatus: currentState.agentStatus,
-      lastActivityAt: currentState.lastActivityAt,
-      title:
-        getVisibleTerminalTitle(currentState.title) ??
-        getVisibleTerminalTitle(input.lastKnownPersistedTitle) ??
-        getVisibleTerminalTitle(input.liveTitle),
+      ...sharedState,
     };
   }
 
   return {
     agentName: input.titleActivityAgentName ?? input.snapshotAgentName ?? currentState.agentName,
     agentStatus: input.titleActivityStatus ?? input.snapshotAgentStatus ?? currentState.agentStatus,
-    lastActivityAt: currentState.lastActivityAt,
-    title:
-      getVisibleTerminalTitle(input.liveTitle) ??
-      getVisibleTerminalTitle(input.lastKnownPersistedTitle) ??
-      getVisibleTerminalTitle(currentState.title),
+    ...sharedState,
   };
+}
+
+export function resolvePresentedSessionTitle(
+  currentState: PersistedSessionState,
+  input: TerminalSessionPresentationStateInput,
+): string | undefined {
+  const liveTitleAgentName =
+    currentState.agentName ?? input.titleActivityAgentName ?? input.snapshotAgentName;
+  const isLiveTitleGeneric = isGenericAgentSessionTitle(liveTitleAgentName, input.liveTitle);
+
+  if (isLiveTitleGeneric) {
+    return normalizeTerminalTitle(currentState.title ?? input.lastKnownPersistedTitle);
+  }
+
+  return normalizeTerminalTitle(
+    input.liveTitle ?? input.lastKnownPersistedTitle ?? currentState.title,
+  );
 }

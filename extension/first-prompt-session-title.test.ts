@@ -1,0 +1,88 @@
+import { describe, expect, test } from "vite-plus/test";
+import {
+  isGenericAgentSessionTitle,
+  shouldAutoNameSessionFromFirstPrompt,
+} from "./first-prompt-session-title";
+
+describe("isGenericAgentSessionTitle", () => {
+  test("recognizes generic Codex titles", () => {
+    expect(isGenericAgentSessionTitle("codex", "⠸ OpenAI Codex")).toBe(true);
+    expect(isGenericAgentSessionTitle("codex", "Codex")).toBe(true);
+  });
+
+  test("recognizes generic Claude titles", () => {
+    expect(isGenericAgentSessionTitle("claude", "Claude")).toBe(true);
+    expect(isGenericAgentSessionTitle("claude", "Claude Code")).toBe(true);
+  });
+
+  test("keeps meaningful Codex titles", () => {
+    expect(isGenericAgentSessionTitle("codex", "Fix sidebar title sync")).toBe(false);
+  });
+});
+
+describe("shouldAutoNameSessionFromFirstPrompt", () => {
+  test("only auto names Codex sessions with generic titles", () => {
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "codex",
+        currentTitle: "Codex",
+        prompt: "How does terminal title syncing work here?",
+      }),
+    ).toBe(true);
+  });
+
+  test("skips sessions that already auto named from a first prompt", () => {
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "codex",
+        currentTitle: "Codex",
+        hasAutoTitleFromFirstPrompt: true,
+        pendingFirstPromptAutoRenamePrompt: undefined,
+        prompt: "How does terminal title syncing work here?",
+      }),
+    ).toBe(false);
+  });
+
+  test("skips sessions that already have a queued first prompt rename request", () => {
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "codex",
+        currentTitle: "Codex",
+        hasAutoTitleFromFirstPrompt: undefined,
+        pendingFirstPromptAutoRenamePrompt: "Rename the controller session",
+        prompt: "How does terminal title syncing work here?",
+      }),
+    ).toBe(false);
+  });
+
+  test("skips sessions that already have a meaningful title", () => {
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "codex",
+        currentTitle: "Review terminal title sync",
+        pendingFirstPromptAutoRenamePrompt: undefined,
+        prompt: "How does terminal title syncing work here?",
+      }),
+    ).toBe(false);
+  });
+
+  test("skips slash commands and meta prompts", () => {
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "codex",
+        currentTitle: "Codex",
+        pendingFirstPromptAutoRenamePrompt: undefined,
+        prompt: "/rename Better title",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "codex",
+        currentTitle: "Codex",
+        pendingFirstPromptAutoRenamePrompt: undefined,
+        prompt: "# AGENTS.md instructions for /Users/example/project\n\n<INSTRUCTIONS>",
+      }),
+    ).toBe(false);
+  });
+});

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
+  resolvePresentedSessionTitle,
   resolvePersistedSessionPresentationState,
   shouldPreferPersistedSessionPresentation,
 } from "./terminal-daemon-session-state";
@@ -11,6 +12,7 @@ describe("resolvePersistedSessionPresentationState", () => {
         {
           agentName: "codex",
           agentStatus: "idle",
+          hasAutoTitleFromFirstPrompt: undefined,
           lastActivityAt: "2026-04-08T10:00:00.000Z",
           title: "Auto fix corruption",
         },
@@ -23,6 +25,7 @@ describe("resolvePersistedSessionPresentationState", () => {
     ).toEqual({
       agentName: "codex",
       agentStatus: "idle",
+      hasAutoTitleFromFirstPrompt: undefined,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
       title: "Auto fix corruption",
     });
@@ -34,6 +37,7 @@ describe("resolvePersistedSessionPresentationState", () => {
         {
           agentName: "codex",
           agentStatus: "idle",
+          hasAutoTitleFromFirstPrompt: undefined,
           lastActivityAt: "2026-04-08T10:00:00.000Z",
           title: "Auto fix corruption",
         },
@@ -48,6 +52,7 @@ describe("resolvePersistedSessionPresentationState", () => {
     ).toEqual({
       agentName: "claude",
       agentStatus: "working",
+      hasAutoTitleFromFirstPrompt: undefined,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
       title: "Auto fix corruption",
     });
@@ -107,6 +112,7 @@ describe("resolvePersistedSessionPresentationState", () => {
         {
           agentName: "codex",
           agentStatus: "attention",
+          hasAutoTitleFromFirstPrompt: undefined,
           lastActivityAt: "2026-04-08T10:00:00.000Z",
           title: "Auto fix corruption",
         },
@@ -117,8 +123,57 @@ describe("resolvePersistedSessionPresentationState", () => {
     ).toEqual({
       agentName: "codex",
       agentStatus: "idle",
+      hasAutoTitleFromFirstPrompt: undefined,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
       title: "Auto fix corruption",
+    });
+  });
+
+  test("keeps the first prompt auto title while Codex is still generic", () => {
+    expect(
+      resolvePersistedSessionPresentationState(
+        {
+          agentName: "codex",
+          agentStatus: "attention",
+          hasAutoTitleFromFirstPrompt: true,
+          lastActivityAt: "2026-04-08T10:00:00.000Z",
+          title: "Project overview question",
+        },
+        {
+          liveTitle: "OpenAI Codex",
+          snapshotAgentStatus: "idle",
+        },
+      ),
+    ).toEqual({
+      agentName: "codex",
+      agentStatus: "idle",
+      hasAutoTitleFromFirstPrompt: true,
+      lastActivityAt: "2026-04-08T10:00:00.000Z",
+      title: "Project overview question",
+    });
+  });
+
+  test("allows a meaningful live Codex title to replace the first prompt fallback", () => {
+    expect(
+      resolvePersistedSessionPresentationState(
+        {
+          agentName: "codex",
+          agentStatus: "attention",
+          hasAutoTitleFromFirstPrompt: true,
+          lastActivityAt: "2026-04-08T10:00:00.000Z",
+          title: "Project overview question",
+        },
+        {
+          liveTitle: "Audit sidebar title syncing",
+          snapshotAgentStatus: "idle",
+        },
+      ),
+    ).toEqual({
+      agentName: "codex",
+      agentStatus: "idle",
+      hasAutoTitleFromFirstPrompt: true,
+      lastActivityAt: "2026-04-08T10:00:00.000Z",
+      title: "Audit sidebar title syncing",
     });
   });
 
@@ -128,6 +183,7 @@ describe("resolvePersistedSessionPresentationState", () => {
         {
           agentName: "opencode",
           agentStatus: "attention",
+          hasAutoTitleFromFirstPrompt: undefined,
           lastActivityAt: "2026-04-08T10:00:00.000Z",
           title: "Project overview question",
         },
@@ -142,9 +198,28 @@ describe("resolvePersistedSessionPresentationState", () => {
     ).toEqual({
       agentName: "opencode",
       agentStatus: "attention",
+      hasAutoTitleFromFirstPrompt: undefined,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
       title: "Project overview question",
     });
+  });
+});
+
+describe("resolvePresentedSessionTitle", () => {
+  test("prefers the auto title while Codex still reports a generic live title", () => {
+    expect(
+      resolvePresentedSessionTitle(
+        {
+          agentName: "codex",
+          agentStatus: "working",
+          hasAutoTitleFromFirstPrompt: true,
+          title: "Review terminal title sync",
+        },
+        {
+          liveTitle: "⠸ Codex",
+        },
+      ),
+    ).toBe("Review terminal title sync");
   });
 });
 
@@ -154,6 +229,7 @@ describe("shouldPreferPersistedSessionPresentation", () => {
       shouldPreferPersistedSessionPresentation({
         agentName: "opencode",
         agentStatus: "idle",
+        hasAutoTitleFromFirstPrompt: undefined,
         title: "Project overview question",
       }),
     ).toBe(true);
@@ -164,6 +240,7 @@ describe("shouldPreferPersistedSessionPresentation", () => {
       shouldPreferPersistedSessionPresentation({
         agentName: "codex",
         agentStatus: "idle",
+        hasAutoTitleFromFirstPrompt: true,
         title: "Auto fix corruption",
       }),
     ).toBe(false);

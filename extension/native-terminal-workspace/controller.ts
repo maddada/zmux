@@ -142,6 +142,7 @@ import {
   sortWorkspacePaneSessionRecords,
 } from "./workspace-pane-session-projection";
 import {
+  resolveSessionRenameTitleFromPrompt,
   resolveSessionRenameTitle,
   shouldSummarizeSessionRenameTitle,
 } from "./session-title-generation";
@@ -316,6 +317,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private readonly lastActivityOverrideAtBySessionId = new Map<string, number>();
   private readonly workingStartedAtBySessionId = new Map<string, number>();
   private readonly pendingCompletionSoundTimeoutBySessionId = new Map<string, NodeJS.Timeout>();
+  private readonly pendingFirstPromptAutoRenameBySessionId = new Set<string>();
   private readonly pendingForkRenameTimeoutBySessionId = new Map<string, NodeJS.Timeout>();
   private readonly loggedTitleSymbolKeys = new Set<string>();
   private readonly pendingT3SessionIds = new Set<string>();
@@ -510,6 +512,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       }),
       this.backend.onDidChangeSessionActivity(({ didComplete, sessionId }) => {
         this.syncSessionActivityState(sessionId, didComplete === true);
+        void this.processPendingFirstPromptAutoRename(sessionId);
         void this.postSessionPresentationMessage(sessionId);
       }),
       this.backend.onDidChangeSessionPresentation(({ sessionId, title }) => {
@@ -614,6 +617,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       clearTimeout(timeout);
     }
     this.pendingCompletionSoundTimeoutBySessionId.clear();
+    this.pendingFirstPromptAutoRenameBySessionId.clear();
     for (const timeout of this.pendingForkRenameTimeoutBySessionId.values()) {
       clearTimeout(timeout);
     }
@@ -1056,6 +1060,58 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     await this.renameSession(sessionId, resolvedTitle);
+  }
+
+  private async processPendingFirstPromptAutoRename(sessionId: string): Promise<void> {
+    if (this.pendingFirstPromptAutoRenameBySessionId.has(sessionId)) {
+      return;
+    }
+
+    const sessionRecord = this.store.getSession(sessionId);
+    if (!sessionRecord || !isTerminalSession(sessionRecord)) {
+      return;
+    }
+
+    const persistedState = await this.backend.readPersistedSessionState(sessionId);
+    const pendingPrompt = persistedState.pendingFirstPromptAutoRenamePrompt?.trim();
+    if (!pendingPrompt || persistedState.hasAutoTitleFromFirstPrompt) {
+      return;
+    }
+
+    const generator = getGitTextGenerationSettings();
+    if (!hasConfiguredGitTextGenerationProvider(generator)) {
+      logVSmuxDebug("controller.firstPromptAutoRename.skippedMissingGenerator", {
+        sessionId,
+      });
+      return;
+    }
+
+    this.pendingFirstPromptAutoRenameBySessionId.add(sessionId);
+    try {
+      const resolvedTitle = await resolveSessionRenameTitleFromPrompt({
+        cwd: getDefaultWorkspaceCwd(),
+        prompt: pendingPrompt,
+        settings: generator,
+      });
+      const normalizedTitle = resolvedTitle.trim();
+      if (!normalizedTitle) {
+        return;
+      }
+
+      await this.backend.applyFirstPromptAutoRename(sessionId, normalizedTitle);
+      await this.renameSession(sessionId, normalizedTitle);
+      logVSmuxDebug("controller.firstPromptAutoRename.applied", {
+        sessionId,
+        title: normalizedTitle,
+      });
+    } catch (error) {
+      logVSmuxDebug("controller.firstPromptAutoRename.failed", {
+        error: getErrorMessage(error),
+        sessionId,
+      });
+    } finally {
+      this.pendingFirstPromptAutoRenameBySessionId.delete(sessionId);
+    }
   }
 
   public async promptRenameSession(sessionId: string): Promise<void> {
@@ -5807,7 +5863,7 @@ async function readMacOSNativeClipboardPayload(): Promise<NativeClipboardPayload
     }
   }
 
-  if (files.length === 0 && Array.isArray(parsed.filePaths)) {
+  if (Array.isArray(parsed.filePaths)) {
     for (const candidatePath of parsed.filePaths) {
       if (typeof candidatePath !== "string" || candidatePath.trim().length === 0) {
         continue;

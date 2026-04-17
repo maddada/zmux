@@ -23,7 +23,9 @@ import {
   readPersistedSessionStateFromFile,
   updatePersistedSessionStateFile,
 } from "./session-state-file";
+import { isGenericAgentSessionTitle } from "./first-prompt-session-title";
 import {
+  resolvePresentedSessionTitle,
   resolvePersistedSessionPresentationState,
   shouldPreferPersistedSessionPresentation,
 } from "./terminal-daemon-session-state";
@@ -668,7 +670,14 @@ async function buildSnapshot(
     isAttached: sessionSocketsBySessionKey.get(session.sessionKey)?.readyState === WebSocket.OPEN,
     title: shouldPreferPersistedPresentation
       ? (persistedState.title ?? session.snapshot.title)
-      : getSessionSnapshotTitle(session.liveTitle, persistedState.title),
+      : resolvePresentedSessionTitle(persistedState, {
+          lastKnownPersistedTitle: session.lastKnownPersistedTitle,
+          liveTitle: session.liveTitle,
+          snapshotAgentName: session.snapshot.agentName,
+          snapshotAgentStatus: session.snapshot.agentStatus,
+          titleActivityAgentName: session.titleActivity?.agentName,
+          titleActivityStatus: session.titleActivity?.activity,
+        }),
   };
   return session.snapshot;
 }
@@ -843,12 +852,20 @@ async function persistSessionLiveTitle(session: ManagedSession, title: string): 
   const persistedState = await updatePersistedSessionStateFile(
     session.sessionStateFilePath,
     (currentState) => {
+      if (
+        currentState.hasAutoTitleFromFirstPrompt &&
+        isGenericAgentSessionTitle(currentState.agentName, title)
+      ) {
+        return currentState;
+      }
+
       if (currentState.title === title) {
         return currentState;
       }
 
       return {
         ...currentState,
+        hasAutoTitleFromFirstPrompt: false,
         title,
       };
     },

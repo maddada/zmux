@@ -3,6 +3,7 @@ import {
   GENERATED_SESSION_TITLE_MAX_LENGTH,
   GENERATED_SESSION_TITLE_SOURCE_MAX_LENGTH,
   SESSION_RENAME_SUMMARY_THRESHOLD,
+  resolveSessionRenameTitleFromPrompt,
   resolveSessionRenameTitle,
   shouldSummarizeSessionRenameTitle,
 } from "./session-title-generation";
@@ -84,5 +85,28 @@ describe("resolveSessionRenameTitle", () => {
 
   test("should expose a generated title max length under the summarize threshold", () => {
     expect(GENERATED_SESSION_TITLE_MAX_LENGTH).toBeLessThan(SESSION_RENAME_SUMMARY_THRESHOLD);
+  });
+});
+
+describe("resolveSessionRenameTitleFromPrompt", () => {
+  test("should always generate a session title from the first prompt text", async () => {
+    const generateTitle = vi.fn(async () => "Project overview and improvements");
+
+    await expect(
+      resolveSessionRenameTitleFromPrompt(
+        {
+          cwd: "/workspace",
+          prompt: "what's this project about? and how can we improve it",
+          settings: { customCommand: "", provider: "codex" },
+        },
+        generateTitle,
+      ),
+    ).resolves.toBe("Project overview and improvements");
+
+    expect(generateTitle).toHaveBeenCalledWith({
+      cwd: "/workspace",
+      settings: { customCommand: "", provider: "codex" },
+      sourceText: "what's this project about? and how can we improve it",
+    });
   });
 });

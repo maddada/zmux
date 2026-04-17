@@ -15,6 +15,7 @@ import {
 export type AgentShellIntegration = {
   binDir: string;
   claudeSettingsPath: string;
+  debugLogPath: string;
   notifyPath: string;
   opencodeConfigDir: string;
   powerShellBootstrapPath: string;
@@ -33,6 +34,7 @@ export async function createAgentShellIntegration(
 ): Promise<AgentShellIntegration> {
   const integrationRoot = path.join(daemonStateDir, AGENT_SHELL_DIR_NAME);
   const binDir = path.join(integrationRoot, "bin");
+  const debugLogPath = path.join(integrationRoot, "agent-shell-debug.log");
   const hooksDir = path.join(integrationRoot, "hooks");
   const claudeConfigDir = path.join(hooksDir, "claude");
   const claudeSettingsPath = path.join(claudeConfigDir, CLAUDE_SETTINGS_FILE_NAME);
@@ -75,6 +77,7 @@ export async function createAgentShellIntegration(
       getAgentWrapperShellScriptContent(agentName, {
         binDir,
         claudeSettingsPath,
+        debugLogPath,
         notifyPath,
         opencodeConfigDir,
         wrapperRunnerPath,
@@ -87,6 +90,7 @@ export async function createAgentShellIntegration(
         getAgentWrapperCmdContent(agentName, {
           binDir,
           claudeSettingsPath,
+          debugLogPath,
           notifyPath,
           opencodeConfigDir,
           wrapperRunnerPath,
@@ -123,6 +127,7 @@ export async function createAgentShellIntegration(
   return {
     binDir,
     claudeSettingsPath,
+    debugLogPath,
     notifyPath,
     opencodeConfigDir,
     powerShellBootstrapPath,

@@ -6,7 +6,9 @@ import type { TerminalAgentStatus } from "../shared/terminal-host-protocol";
 export type PersistedSessionState = {
   agentName?: string;
   agentStatus: TerminalAgentStatus;
+  hasAutoTitleFromFirstPrompt?: boolean;
   lastActivityAt?: string;
+  pendingFirstPromptAutoRenamePrompt?: string;
   title?: string;
 };
 
@@ -18,7 +20,9 @@ export type PersistedSessionStateSnapshot = {
 const DEFAULT_PERSISTED_SESSION_STATE: PersistedSessionState = {
   agentName: undefined,
   agentStatus: "idle",
+  hasAutoTitleFromFirstPrompt: undefined,
   lastActivityAt: undefined,
+  pendingFirstPromptAutoRenamePrompt: undefined,
   title: undefined,
 };
 
@@ -31,7 +35,9 @@ export function createDefaultPersistedSessionState(): PersistedSessionState {
 export function parsePersistedSessionState(rawState: string): PersistedSessionState {
   let agentName: string | undefined;
   let agentStatus: TerminalAgentStatus = "idle";
+  let hasAutoTitleFromFirstPrompt: boolean | undefined;
   let lastActivityAt: string | undefined;
+  let pendingFirstPromptAutoRenamePrompt: string | undefined;
   let title: string | undefined;
 
   for (const line of rawState.split(/\r?\n/)) {
@@ -46,6 +52,12 @@ export function parsePersistedSessionState(rawState: string): PersistedSessionSt
     if (key === "lastActivityAt") {
       lastActivityAt = normalizePersistedTimestamp(value);
     }
+    if (key === "pendingFirstPromptAutoRenamePrompt") {
+      pendingFirstPromptAutoRenamePrompt = normalizePersistedSessionValue(value);
+    }
+    if (key === "autoTitleFromFirstPrompt") {
+      hasAutoTitleFromFirstPrompt = value === "1" || /^true$/i.test(value) ? true : undefined;
+    }
     if (key === "status" && (value === "idle" || value === "working" || value === "attention")) {
       agentStatus = value;
     }
@@ -54,7 +66,9 @@ export function parsePersistedSessionState(rawState: string): PersistedSessionSt
   return {
     agentName,
     agentStatus,
+    hasAutoTitleFromFirstPrompt,
     lastActivityAt,
+    pendingFirstPromptAutoRenamePrompt,
     title,
   };
 }
@@ -63,7 +77,9 @@ export function serializePersistedSessionState(state: PersistedSessionState): st
   return [
     `status=${state.agentStatus}`,
     `agent=${normalizePersistedSessionValue(state.agentName) ?? ""}`,
+    `autoTitleFromFirstPrompt=${state.hasAutoTitleFromFirstPrompt ? "1" : ""}`,
     `lastActivityAt=${normalizePersistedTimestamp(state.lastActivityAt) ?? ""}`,
+    `pendingFirstPromptAutoRenamePrompt=${normalizePersistedSessionValue(state.pendingFirstPromptAutoRenamePrompt) ?? ""}`,
     `title=${normalizePersistedSessionValue(getVisibleTerminalTitle(state.title)) ?? ""}`,
     "",
   ].join("\n");
@@ -76,7 +92,9 @@ export function haveSamePersistedSessionState(
   return (
     left.agentName === right.agentName &&
     left.agentStatus === right.agentStatus &&
+    left.hasAutoTitleFromFirstPrompt === right.hasAutoTitleFromFirstPrompt &&
     left.lastActivityAt === right.lastActivityAt &&
+    left.pendingFirstPromptAutoRenamePrompt === right.pendingFirstPromptAutoRenamePrompt &&
     left.title === right.title
   );
 }

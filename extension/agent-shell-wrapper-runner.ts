@@ -3,7 +3,9 @@ import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { appendAgentShellDebugLog } from "./agent-shell-debug-log";
 import { detectCodexLifecycleEventFromLogLine } from "./agent-shell-integration";
+import { ensureCodexHooksFile } from "./codex-hooks-config";
 import { writePersistedSessionStateToFile } from "./session-state-file";
 
 type AgentName = "claude" | "codex" | "gemini" | "opencode";
@@ -12,6 +14,7 @@ type WrapperRunnerOptions = {
   agent: AgentName;
   binDir: string;
   claudeSettingsPath: string;
+  debugLogPath: string;
   forwardedArgs: string[];
   notifyRunnerPath: string;
   opencodeConfigDir: string;
@@ -26,6 +29,7 @@ const CLAUDE_CODE_DISABLE_TERMINAL_TITLE_ENV_KEY = "CLAUDE_CODE_DISABLE_TERMINAL
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
+  process.env.VSMUX_AGENT_SHELL_DEBUG_LOG_PATH = options.debugLogPath;
   const executablePath = resolveExecutablePath(options.agent, options.binDir);
   if (!executablePath) {
     throw new Error(`VSmux: ${options.agent} not found in PATH.`);
@@ -33,6 +37,11 @@ async function main(): Promise<void> {
 
   const environment = createAgentEnvironment(options.agent, process.env);
   const args = [...options.forwardedArgs];
+  await appendAgentShellDebugLog("wrapper.launch.prepare", {
+    agent: options.agent,
+    executablePath,
+    forwardedArgs: options.forwardedArgs,
+  });
 
   switch (options.agent) {
     case "claude":
@@ -44,13 +53,24 @@ async function main(): Promise<void> {
       delete environment.ELECTRON_RUN_AS_NODE;
       await writeInitialSessionState("codex", "Codex");
       environment.CODEX_TUI_RECORD_SESSION = "1";
+      environment.VSMUX_AGENT_SHELL_DEBUG_LOG_PATH = options.debugLogPath;
       if (!environment.CODEX_TUI_SESSION_LOG_PATH) {
         environment.CODEX_TUI_SESSION_LOG_PATH = path.join(
           os.tmpdir(),
           `VSmux-codex-${process.pid}-${Date.now()}.jsonl`,
         );
       }
+      args.unshift("-c", "features.codex_hooks=true");
       args.unshift("-c", `notify=${JSON.stringify([process.execPath, options.notifyRunnerPath])}`);
+      try {
+        const hooksResult = await ensureCodexHooksFile(options.notifyRunnerPath, environment);
+        await appendAgentShellDebugLog("wrapper.codex.hooksReady", {
+          changed: hooksResult.changed,
+          hooksPath: hooksResult.hooksPath,
+        });
+      } catch (error) {
+        await appendAgentShellDebugLog("wrapper.codex.hooksFailed", serializeUnknownError(error));
+      }
       break;
     }
     case "gemini":
@@ -69,7 +89,19 @@ async function main(): Promise<void> {
       ? startCodexWatcher(environment.CODEX_TUI_SESSION_LOG_PATH, options.notifyRunnerPath)
       : undefined;
 
+  await appendAgentShellDebugLog("wrapper.launch.spawn", {
+    agent: options.agent,
+    args,
+    codexHome: environment.CODEX_HOME,
+    notifyRunnerPath: options.notifyRunnerPath,
+    sessionLogPath: environment.CODEX_TUI_SESSION_LOG_PATH,
+    sessionStateFilePath: environment.VSMUX_SESSION_STATE_FILE,
+  });
   const exitCode = await spawnAgentProcess(options.agent, executablePath, args, environment);
+  await appendAgentShellDebugLog("wrapper.launch.exit", {
+    agent: options.agent,
+    exitCode,
+  });
   watcher?.stop();
   process.exit(exitCode);
 }
@@ -112,6 +144,7 @@ function parseArgs(argv: readonly string[]): WrapperRunnerOptions {
     agent,
     binDir: getRequiredArg(values, "bin-dir"),
     claudeSettingsPath: getRequiredArg(values, "claude-settings-path"),
+    debugLogPath: getRequiredArg(values, "debug-log-path"),
     forwardedArgs,
     notifyRunnerPath: getRequiredArg(values, "notify-runner-path"),
     opencodeConfigDir: getRequiredArg(values, "opencode-config-dir"),
@@ -241,6 +274,12 @@ function startCodexWatcher(logFilePath: string, notifyRunnerPath: string): Codex
             }
 
             lastStartedTurnId = turnId;
+            void appendAgentShellDebugLog("wrapper.codex.watcherEvent", {
+              eventType,
+              logFilePath,
+              source: "session-log",
+              turnId,
+            });
             emitNotifyEvent("Start", notifyRunnerPath);
             continue;
           }
@@ -250,6 +289,12 @@ function startCodexWatcher(logFilePath: string, notifyRunnerPath: string): Codex
           }
 
           lastStoppedTurnId = turnId;
+          void appendAgentShellDebugLog("wrapper.codex.watcherEvent", {
+            eventType,
+            logFilePath,
+            source: "session-log",
+            turnId,
+          });
           emitNotifyEvent("Stop", notifyRunnerPath);
         }
       })
@@ -274,6 +319,10 @@ function extractTurnId(line: string): string | undefined {
 }
 
 function emitNotifyEvent(eventName: "Start" | "Stop", notifyRunnerPath: string): void {
+  void appendAgentShellDebugLog("wrapper.notify.emit", {
+    eventName,
+    notifyRunnerPath,
+  });
   const payload = JSON.stringify({
     agent: "codex",
     hook_event_name: eventName,
@@ -359,6 +408,20 @@ function spawnAgentProcess(
   });
 }
 
+function serializeUnknownError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      name: error.name,
+      stack: error.stack,
+    };
+  }
+
+  return {
+    error: String(error),
+  };
+}
+
 function quoteWindowsCommandArgument(value: string): string {
   return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, "$1$1")}"`;
 }
@@ -370,6 +433,7 @@ const isMainModule =
 
 if (isMainModule) {
   void main().catch((error) => {
+    void appendAgentShellDebugLog("wrapper.launch.failed", serializeUnknownError(error));
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`${message}\n`);
     process.exit(1);

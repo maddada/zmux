@@ -7,6 +7,7 @@ export function getAgentWrapperShellScriptContent(
   options: {
     binDir: string;
     claudeSettingsPath: string;
+    debugLogPath: string;
     notifyPath: string;
     opencodeConfigDir: string;
     wrapperRunnerPath: string;
@@ -14,7 +15,7 @@ export function getAgentWrapperShellScriptContent(
 ): string {
   return `#!/bin/sh
 export ELECTRON_RUN_AS_NODE=1
-exec ${quoteShellLiteral(process.execPath)} ${quoteShellLiteral(options.wrapperRunnerPath)} --agent ${quoteShellLiteral(agentName)} --bin-dir ${quoteShellLiteral(options.binDir)} --claude-settings-path ${quoteShellLiteral(options.claudeSettingsPath)} --notify-runner-path ${quoteShellLiteral(options.notifyPath)} --opencode-config-dir ${quoteShellLiteral(options.opencodeConfigDir)} -- "$@"
+exec ${quoteShellLiteral(process.execPath)} ${quoteShellLiteral(options.wrapperRunnerPath)} --agent ${quoteShellLiteral(agentName)} --bin-dir ${quoteShellLiteral(options.binDir)} --claude-settings-path ${quoteShellLiteral(options.claudeSettingsPath)} --debug-log-path ${quoteShellLiteral(options.debugLogPath)} --notify-runner-path ${quoteShellLiteral(options.notifyPath)} --opencode-config-dir ${quoteShellLiteral(options.opencodeConfigDir)} -- "$@"
 `;
 }
 
@@ -23,6 +24,7 @@ export function getAgentWrapperCmdContent(
   options: {
     binDir: string;
     claudeSettingsPath: string;
+    debugLogPath: string;
     notifyPath: string;
     opencodeConfigDir: string;
     wrapperRunnerPath: string;
@@ -33,10 +35,10 @@ setlocal
 set "_vsmux_node="
 for %%I in (node.exe) do set "_vsmux_node=%%~$PATH:I"
 if defined _vsmux_node (
-  "%_vsmux_node%" "${options.wrapperRunnerPath}" --agent ${agentName} --bin-dir "${options.binDir}" --claude-settings-path "${options.claudeSettingsPath}" --notify-runner-path "${options.notifyPath}" --opencode-config-dir "${options.opencodeConfigDir}" -- %*
+  "%_vsmux_node%" "${options.wrapperRunnerPath}" --agent ${agentName} --bin-dir "${options.binDir}" --claude-settings-path "${options.claudeSettingsPath}" --debug-log-path "${options.debugLogPath}" --notify-runner-path "${options.notifyPath}" --opencode-config-dir "${options.opencodeConfigDir}" -- %*
 ) else (
   set ELECTRON_RUN_AS_NODE=1
-  "${process.execPath}" "${options.wrapperRunnerPath}" --agent ${agentName} --bin-dir "${options.binDir}" --claude-settings-path "${options.claudeSettingsPath}" --notify-runner-path "${options.notifyPath}" --opencode-config-dir "${options.opencodeConfigDir}" -- %*
+  "${process.execPath}" "${options.wrapperRunnerPath}" --agent ${agentName} --bin-dir "${options.binDir}" --claude-settings-path "${options.claudeSettingsPath}" --debug-log-path "${options.debugLogPath}" --notify-runner-path "${options.notifyPath}" --opencode-config-dir "${options.opencodeConfigDir}" -- %*
 )
 `;
 }

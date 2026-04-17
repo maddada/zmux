@@ -11,6 +11,12 @@ type ResolveRenameTitleInput = {
   title: string;
 };
 
+type ResolveFirstPromptRenameTitleInput = {
+  cwd: string;
+  prompt: string;
+  settings: GitTextGenerationSettings;
+};
+
 type GenerateSessionTitleFn = (input: {
   cwd: string;
   settings: GitTextGenerationSettings;
@@ -42,5 +48,21 @@ export async function resolveSessionRenameTitle(
     cwd: input.cwd,
     settings: input.settings,
     sourceText: truncateGeneratedSessionTitleSourceText(trimmedTitle),
+  });
+}
+
+export async function resolveSessionRenameTitleFromPrompt(
+  input: ResolveFirstPromptRenameTitleInput,
+  generateTitle: GenerateSessionTitleFn = generateSessionTitle,
+): Promise<string> {
+  const trimmedPrompt = input.prompt.trim();
+  if (!trimmedPrompt) {
+    return trimmedPrompt;
+  }
+
+  return generateTitle({
+    cwd: input.cwd,
+    settings: input.settings,
+    sourceText: truncateGeneratedSessionTitleSourceText(trimmedPrompt),
   });
 }

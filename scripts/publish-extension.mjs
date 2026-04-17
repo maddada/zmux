@@ -12,7 +12,10 @@ const extensionVersion = packageJson.default.version;
 const tagName = `v${extensionVersion}`;
 
 function fail(message) {
-  void message;
+  if (message) {
+    console.error(message);
+  }
+
   process.exit(1);
 }
 

@@ -14,6 +14,7 @@ export {
   getClaudeHookSettingsContent,
   getPowerShellBootstrapContent,
 } from "./agent-shell-integration-content";
+export { getCodexHookSettingsContent, resolveActiveCodexHooksPath } from "./codex-hooks-config";
 
 const integrationPromises = new Map<string, Promise<AgentShellIntegration>>();
 

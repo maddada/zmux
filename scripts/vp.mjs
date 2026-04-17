@@ -7,7 +7,10 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(scriptDir);
 
 function fail(message) {
-  void message;
+  if (message) {
+    console.error(message);
+  }
+
   process.exit(1);
 }
 
