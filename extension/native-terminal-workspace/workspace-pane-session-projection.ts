@@ -13,9 +13,19 @@ export function getWorkspacePaneSessionRecords(
     return [];
   }
 
-  return activeGroup.snapshot.sessions.filter(
-    (sessionRecord): sessionRecord is SessionRecord => sessionRecord !== undefined,
+  const activeGroupSessionIds = new Set(
+    activeGroup.snapshot.sessions.map((session) => session.sessionId),
   );
+  const retainedT3Sessions = workspaceSnapshot.groups.flatMap((group) =>
+    group.snapshot.sessions.filter(
+      (sessionRecord) =>
+        sessionRecord.kind === "t3" && !activeGroupSessionIds.has(sessionRecord.sessionId),
+    ),
+  );
+
+  return activeGroup.snapshot.sessions
+    .concat(retainedT3Sessions)
+    .filter((sessionRecord): sessionRecord is SessionRecord => sessionRecord !== undefined);
 }
 
 export function sortWorkspacePaneSessionRecords(

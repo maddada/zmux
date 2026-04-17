@@ -9,7 +9,7 @@ import {
 } from "./workspace-pane-session-projection";
 
 describe("getWorkspacePaneSessionRecords", () => {
-  test("should return only sessions from the active group in their existing order", () => {
+  test("should return active-group sessions first and retain t3 sessions from inactive groups", () => {
     const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
     const mainTerminal = createSessionRecord(1, 0);
     const mainT3 = createSessionRecord(2, 1, {
@@ -23,6 +23,16 @@ describe("getWorkspacePaneSessionRecords", () => {
       title: "T3",
     });
     const otherGroupTerminal = createSessionRecord(3, 2);
+    const otherGroupT3 = createSessionRecord(4, 3, {
+      kind: "t3",
+      t3: {
+        projectId: "project-2",
+        serverOrigin: "http://127.0.0.1:3773",
+        threadId: "thread-2",
+        workspaceRoot: "/workspace",
+      },
+      title: "T3 2",
+    });
 
     workspaceSnapshot.groups[0]!.snapshot.sessions = [mainTerminal, mainT3];
     workspaceSnapshot.groups.push({
@@ -30,7 +40,7 @@ describe("getWorkspacePaneSessionRecords", () => {
       snapshot: {
         focusedSessionId: otherGroupTerminal.sessionId,
         fullscreenRestoreVisibleCount: undefined,
-        sessions: [otherGroupTerminal],
+        sessions: [otherGroupTerminal, otherGroupT3],
         viewMode: "grid",
         visibleCount: 1,
         visibleSessionIds: [otherGroupTerminal.sessionId],
@@ -38,7 +48,11 @@ describe("getWorkspacePaneSessionRecords", () => {
       title: "Other",
     });
 
-    expect(getWorkspacePaneSessionRecords(workspaceSnapshot)).toEqual([mainTerminal, mainT3]);
+    expect(getWorkspacePaneSessionRecords(workspaceSnapshot)).toEqual([
+      mainTerminal,
+      mainT3,
+      otherGroupT3,
+    ]);
   });
 
   test("should return an empty list when the active group id is missing", () => {

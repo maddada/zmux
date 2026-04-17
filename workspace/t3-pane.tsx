@@ -8,6 +8,7 @@ import type {
 import {
   acquireCachedT3Runtime,
   attachCachedT3Runtime,
+  destroyCachedT3Runtime,
   releaseCachedT3Runtime,
   type CachedT3Runtime,
 } from "./t3-runtime-cache";
@@ -201,6 +202,18 @@ export const T3Pane: React.FC<T3PaneProps> = ({
 
   useEffect(() => {
     const cacheKey = pane.sessionId;
+    if (pane.sessionRecord.isSleeping === true) {
+      releaseComposerFocus("sleeping");
+      iframeRef.current = null;
+      runtimeRef.current = null;
+      destroyCachedT3Runtime(cacheKey);
+      reportDebug("workspace.t3PaneRuntimeDestroyedForSleep", {
+        sessionId: pane.sessionId,
+        threadId: pane.sessionRecord.t3.threadId,
+      });
+      return;
+    }
+
     const runtime = acquireCachedT3Runtime({
       cacheKey,
       html: pane.html,
@@ -228,7 +241,7 @@ export const T3Pane: React.FC<T3PaneProps> = ({
       runtimeRef.current = null;
       releaseCachedT3Runtime(cacheKey, reportDebug);
     };
-  }, [pane.html, pane.renderNonce, pane.sessionId]);
+  }, [pane.html, pane.renderNonce, pane.sessionId, pane.sessionRecord.isSleeping]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
