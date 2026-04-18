@@ -26,25 +26,30 @@ Download links:
   </tr>
 </table>
 
----
-
-### Recent updates!
-
-- T3 remote access has grown into a much smoother workflow: VSmux can open embedded T3 sessions outside the editor, reuse shared browser-access state, and now prefers simple same-network LAN links before falling back to Tailscale when that is the better path.
-- You can keep reusable prompts pinned in the sidebar, and the surrounding sidebar workflow has kept getting cleaner with steadier collapse state, calmer controls, smarter search/history entry points, and more readable session cards.
-- Workspace readability is much stronger now, with pane zoom controls, better cached appearance preferences, smoother terminal font-size and T3 zoom syncing, and a roomier commit-message editor for built-in Git actions.
-- Auto-sleep coverage is broader: Claude, Codex, and now idle T3 sessions can all participate when you opt in with `VSmux.backgroundSessionTimeoutMinutes`.
-- Embedded T3 handling is sturdier across the board, including native macOS clipboard fallback, cleaner runtime teardown after sleep, stronger thread projection across inactive groups, and explicit confirmation before a pane switches to a different bound thread.
-- VSmux can now launch either bundled DP Code or T3 Code as the managed embedded provider, with better bundled-versus-checkout resolution so local dev setups and packaged installs behave more predictably.
-- Codex and shell-hook integrations are smarter too, with first-prompt auto-titling, better resume-command fallbacks for custom agents, and duplicate prompt-hook deliveries filtered out before they can spam session state.
-
-Full release notes: [CHANGELOG.md](./CHANGELOG.md)
-
----
-
 ## Screenshot
 
 <img width="1000" alt="2026-0ffsafssfffsfs4-14_sfsdCodedsds_12-52-3d7@2x" src="https://github.com/user-attachments/assets/9ea0bcd8-38ea-4f87-9d78-ba91e76088c2" />
+
+---
+
+## Recent Updates
+
+### 4.4.0
+
+- Managed embedded sessions can launch with bundled DP Code or bundled T3 Code, with better packaged-versus-checkout resolution.
+- Embedded T3 reload, close, and thread-binding flows are safer and clearer, including visible reload state and confirmation before rebinding a live pane.
+
+### 4.3.1
+
+- Idle T3 sessions can join the opt-in auto-sleep flow.
+- Sleeping T3 panes now tear down stale runtimes more cleanly and stay projected across inactive groups more reliably.
+
+### 4.3.0
+
+- Auto-sleep expanded to Claude and Codex sessions when `VSmux.backgroundSessionTimeoutMinutes` is enabled.
+- Session handling is calmer overall, with double-click rename, steadier attention state, and better resume-command fallbacks for custom agents.
+
+Full release notes: [CHANGELOG.md](./CHANGELOG.md)
 
 ## Early Version Demo Video (Will rerecord soon)
 

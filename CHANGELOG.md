@@ -2,6 +2,12 @@
 
 All notable user-facing changes are documented in this file.
 
+## 4.4.1 - 2026-04-19
+
+- T3 remote-access links are more practical now: QR code and Copy link prefer your machine's Tailscale address when available, while Open link stays on the simpler LAN address when both routes exist.
+- Refocusing sessions from the sidebar is steadier now, especially when clicking an already-focused card, because VSmux only re-reveals the workspace when its tab is not already the active editor tab.
+- Storefront download links in the README and marketplace listing have been refreshed with clearer per-editor artwork for VS Code, Cursor, Antigravity, and Windsurf.
+
 ## 4.4.0 - 2026-04-19
 
 - Managed embedded T3 launches are more flexible now: VSmux can run either bundled DP Code or bundled T3 Code, and it is better at resolving whether to use packaged assets, sibling checkouts, or configured repo roots for each provider.
