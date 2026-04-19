@@ -30,6 +30,18 @@ Download links:
 
 ---
 
+## Early Version Demo Video (Will rerecord soon)
+
+https://github.com/user-attachments/assets/5b41df9a-bb2e-45f3-b8bd-ed3d6b7e2968
+
+---
+
+## Companion App
+
+VSmux works great with my other tool that shows all running agent sessions in a mini floating bar on macOS (with running/waiting/done indicators). Check it out here: https://github.com/maddada/agent-manager-x
+
+---
+
 ## Recent Updates
 
 ### 4.4.0
@@ -42,10 +54,6 @@ Download links:
 - Session handling is calmer overall, with double-click rename, steadier attention state, and better resume-command fallbacks for custom agents.
 
 Full release notes: [CHANGELOG.md](./CHANGELOG.md)
-
-## Early Version Demo Video (Will rerecord soon)
-
-https://github.com/user-attachments/assets/5b41df9a-bb2e-45f3-b8bd-ed3d6b7e2968
 
 ---
 
@@ -116,10 +124,10 @@ No more [50 lines pasted] nonsense. Paste all the lines you want and even select
 
 Gist on how to do this: https://gist.github.com/maddada/6eec96f4c8b467b81d69d291d4ac130e
 
-## Companion App
-
-VSmux works great with my other tool that shows all running agent sessions in a mini floating bar on macOS (with running/waiting/done indicators). Check it out here: https://github.com/maddada/agent-manager-x
+---
 
 ## Contributions Welcome
 
-Contributions welcome 🙏🏻
+- Adding more agents
+- Bug fixes
+- Adding features (Send an issue first so we can discuss if it's a large feature)
