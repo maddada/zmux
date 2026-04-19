@@ -17,10 +17,8 @@ Download links:
       <a href="https://open-vsx.org/extension/maddada/VSmux">
         <img src="./media/readme-download-cursor-tile.png" alt="Cursor" width="80" />
         <img src="./media/readme-download-antigravity-tile.png" alt="Antigravity" width="80" />
-        <img src="./media/readme-download-windsurf-tile.png" alt="Windsurf" width="80" />
         <br />
         <strong>Download for Cursor / Antigravity / Others</strong><br />
-        Open VSX Registry
       </a>
     </td>
   </tr>
