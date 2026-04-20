@@ -106,6 +106,19 @@ export type SidebarSessionGroup = {
   visibleCount: VisibleSessionCount;
 };
 
+export type SidebarProjectHeader = {
+  directory: string;
+  faviconDataUrl?: string;
+  name: string;
+  worktrees?: SidebarProjectWorktree[];
+};
+
+export type SidebarProjectWorktree = {
+  branch?: string;
+  directory: string;
+  name: string;
+};
+
 export type SidebarHudState = {
   activeSessionsSortMode: SidebarActiveSessionsSortMode;
   agentManagerZoomPercent: number;
@@ -120,6 +133,8 @@ export type SidebarHudState = {
   git: SidebarGitState;
   isFocusModeActive: boolean;
   pendingAgentIds: string[];
+  projectHeader?: SidebarProjectHeader;
+  projectWorktrees?: SidebarProjectWorktree[];
   sectionVisibility: SidebarSectionVisibility;
   createSessionOnSidebarDoubleClick: boolean;
   renameSessionOnDoubleClick: boolean;
@@ -482,6 +497,7 @@ export type SidebarToExtensionMessage =
       type: "runSidebarCommand";
       commandId: string;
       runMode?: SidebarCommandRunMode;
+      worktreePath?: string;
     }
   | {
       action: SidebarGitAction;

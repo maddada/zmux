@@ -42,6 +42,7 @@ import { DaemonSessionsModal } from "./daemon-sessions-modal";
 import { GitCommitModal } from "./git-commit-modal";
 import { PinnedPromptsModal } from "./pinned-prompts-modal";
 import { PreviousSessionsModal } from "./previous-sessions-modal";
+import { SidebarProjectHeader } from "./project-header";
 import { ScratchPadModal } from "./scratch-pad-modal";
 import { T3BrowserAccessModal } from "./t3-browser-access-modal";
 import {
@@ -212,6 +213,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     groupOrder,
     previousSessions,
     sectionVisibility,
+    projectHeader,
     showHotkeysOnSessionCards,
     showLastInteractionTimeOnSessionCards,
     sessionsById,
@@ -228,6 +230,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       debuggingMode: state.hud.debuggingMode,
       groupOrder: state.groupOrder,
       previousSessions: state.previousSessions,
+      projectHeader: state.hud.projectHeader,
       sectionVisibility: state.hud.sectionVisibility,
       showHotkeysOnSessionCards: state.hud.showHotkeysOnSessionCards,
       showLastInteractionTimeOnSessionCards: state.hud.showLastInteractionTimeOnSessionCards,
@@ -1394,6 +1397,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
 
   return (
     <Tooltip.Provider delay={TOOLTIP_DELAY_MS}>
+      <SidebarProjectHeader projectHeader={projectHeader} />
       <div
         className="stack"
         data-dimmed={String(isStartupInteractionBlocked)}

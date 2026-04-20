@@ -4,6 +4,7 @@ import { isSortableOperation, useSortable } from "@dnd-kit/react/sortable";
 import {
   IconBox,
   IconBug,
+  IconChevronLeft,
   IconLoader2,
   IconPencil,
   IconPlayerPlayFilled,
@@ -27,7 +28,9 @@ import type {
   SidebarCommandRunMode,
 } from "../shared/sidebar-commands";
 import { getSidebarCommandIconLabel } from "../shared/sidebar-command-icons";
+import type { SidebarProjectWorktree } from "../shared/session-grid-contract";
 import { getSidebarButtonGridColumnCount } from "./button-grid";
+import { getCommandButtonAriaLabel, getCommandButtonTooltip } from "./command-button-copy";
 import {
   getSidebarCommandRunFeedbackDuration,
   getSidebarCommandRunModeForClick,
@@ -50,6 +53,7 @@ const CONTEXT_MENU_ITEM_HEIGHT_PX = 43;
 const CONTEXT_MENU_DIVIDER_HEIGHT_PX = 13;
 const CONTEXT_MENU_DIVIDER_COUNT = 2;
 const REORDER_SYNC_TIMEOUT_MS = 3_000;
+const EMPTY_PROJECT_WORKTREES: SidebarProjectWorktree[] = [];
 
 type CommandsPanelProps = {
   createActionType?: SidebarActionType;
@@ -69,8 +73,12 @@ type ContextMenuPosition = {
 };
 
 type CommandMenuState = {
+  anchor: ContextMenuPosition;
   command: SidebarCommandButton;
   position: ContextMenuPosition;
+  view: "root" | "worktrees";
+  worktrees: SidebarProjectWorktree[];
+  worktreeRunMode?: SidebarCommandRunMode;
 };
 
 type CommandDragData = {
@@ -91,9 +99,9 @@ type PendingCommandRunClear = {
 function clampContextMenuPosition(
   clientX: number,
   clientY: number,
-  command: SidebarCommandButton,
+  menu: Pick<CommandMenuState, "command" | "view" | "worktrees">,
 ): ContextMenuPosition {
-  const menuHeight = getContextMenuHeight(command);
+  const menuHeight = getContextMenuHeight(menu);
 
   return {
     x: Math.max(
@@ -107,10 +115,25 @@ function clampContextMenuPosition(
   };
 }
 
-function getContextMenuHeight(command: SidebarCommandButton): number {
+function getContextMenuHeight(
+  menu: Pick<CommandMenuState, "command" | "view" | "worktrees">,
+): number {
+  if (menu.view === "worktrees") {
+    return (
+      CONTEXT_MENU_VERTICAL_PADDING_PX +
+      CONTEXT_MENU_ITEM_HEIGHT_PX * (menu.worktrees.length + 1) +
+      CONTEXT_MENU_DIVIDER_HEIGHT_PX
+    );
+  }
+
+  const runActionCount =
+    4 +
+    Number(menu.command.actionType === "terminal") +
+    Number(menu.command.actionType === "terminal" && menu.worktrees.length > 0) * 2;
+
   return (
     CONTEXT_MENU_VERTICAL_PADDING_PX +
-    CONTEXT_MENU_ITEM_HEIGHT_PX * (command.actionType === "terminal" ? 5 : 4) +
+    CONTEXT_MENU_ITEM_HEIGHT_PX * runActionCount +
     CONTEXT_MENU_DIVIDER_HEIGHT_PX * CONTEXT_MENU_DIVIDER_COUNT
   );
 }
@@ -166,12 +189,18 @@ export function CommandsPanel({
   titlebarActions,
   vscode,
 }: CommandsPanelProps) {
-  const { commands, git } = useSidebarStore(
+  const {
+    commands,
+    git,
+    projectWorktrees: rawProjectWorktrees,
+  } = useSidebarStore(
     useShallow((state) => ({
       commands: state.hud.commands,
       git: state.hud.git,
+      projectWorktrees: state.hud.projectWorktrees,
     })),
   );
+  const projectWorktrees = rawProjectWorktrees ?? EMPTY_PROJECT_WORKTREES;
   const commandRunStates = useSidebarStore((state) => state.commandRunStates);
   const clearCommandRunState = useSidebarStore((state) => state.clearCommandRunState);
   const latestCommandOrderSyncResult = useSidebarStore(
@@ -405,6 +434,29 @@ export function CommandsPanel({
   const gridColumnCount = getSidebarButtonGridColumnCount(orderedCommands.length);
   const shouldRenderSection = isVisible;
   const shouldShowEmptyState = orderedCommands.length === 0;
+  const openCommandContextMenu = (
+    command: SidebarCommandButton,
+    clientX: number,
+    clientY: number,
+  ) => {
+    const worktrees = command.actionType === "terminal" ? projectWorktrees : [];
+    const nextMenu: CommandMenuState = {
+      anchor: {
+        x: clientX,
+        y: clientY,
+      },
+      command,
+      position: {
+        x: 0,
+        y: 0,
+      },
+      view: "root",
+      worktrees,
+      worktreeRunMode: undefined,
+    };
+    nextMenu.position = clampContextMenuPosition(clientX, clientY, nextMenu);
+    setContextMenu(nextMenu);
+  };
 
   useEffect(() => {
     const payload = {
@@ -561,7 +613,7 @@ export function CommandsPanel({
   return (
     <>
       {shouldRenderSection ? (
-        <section className="commands-section">
+        <section className="commands-section" data-collapsed={String(isCollapsed)}>
           <SectionHeader
             actions={titlebarActions}
             idleIcon={<IconBox size={18} stroke={1.8} />}
@@ -620,14 +672,7 @@ export function CommandsPanel({
                           onContextMenu={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            setContextMenu({
-                              command,
-                              position: clampContextMenuPosition(
-                                event.clientX,
-                                event.clientY,
-                                command,
-                              ),
-                            });
+                            openCommandContextMenu(command, event.clientX, event.clientY);
                           }}
                           onRun={() => runOrConfigureCommand(command)}
                         />
@@ -657,73 +702,214 @@ export function CommandsPanel({
                 width: `${CONTEXT_MENU_WIDTH_PX}px`,
               }}
             >
-              <button
-                className="session-context-menu-item"
-                onClick={() => {
-                  setContextMenu(undefined);
-                  openCommandEditor(contextMenu.command);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <IconPencil aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Configure
-              </button>
-              <div className="session-context-menu-divider" role="separator" />
-              <button
-                className="session-context-menu-item"
-                onClick={() => {
-                  setContextMenu(undefined);
-                  openCreateCommandEditor("terminal");
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Add Action
-              </button>
-              <button
-                className="session-context-menu-item"
-                onClick={() => {
-                  setContextMenu(undefined);
-                  openCreateCommandEditor("browser");
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Add Webpage
-              </button>
-              <div className="session-context-menu-divider" role="separator" />
-              {contextMenu.command.actionType === "terminal" ? (
-                <button
-                  className="session-context-menu-item"
-                  onClick={() => {
-                    setContextMenu(undefined);
-                    runOrConfigureCommand(contextMenu.command, "debug");
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconBug aria-hidden="true" className="session-context-menu-icon" size={14} />
-                  Debug Action
-                </button>
-              ) : null}
-              <button
-                className="session-context-menu-item session-context-menu-item-danger"
-                onClick={() => {
-                  setContextMenu(undefined);
-                  vscode.postMessage({
-                    commandId: contextMenu.command.commandId,
-                    type: "deleteSidebarCommand",
-                  });
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <IconTrash aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Remove
-              </button>
+              {contextMenu.view === "root" ? (
+                <>
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => {
+                      setContextMenu(undefined);
+                      openCommandEditor(contextMenu.command);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconPencil
+                      aria-hidden="true"
+                      className="session-context-menu-icon"
+                      size={14}
+                    />
+                    Configure
+                  </button>
+                  <div className="session-context-menu-divider" role="separator" />
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => {
+                      setContextMenu(undefined);
+                      openCreateCommandEditor("terminal");
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
+                    Add Action
+                  </button>
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => {
+                      setContextMenu(undefined);
+                      openCreateCommandEditor("browser");
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
+                    Add Webpage
+                  </button>
+                  <div className="session-context-menu-divider" role="separator" />
+                  {contextMenu.command.actionType === "terminal" ? (
+                    <button
+                      className="session-context-menu-item"
+                      onClick={() => {
+                        setContextMenu(undefined);
+                        runOrConfigureCommand(contextMenu.command, "debug");
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconBug aria-hidden="true" className="session-context-menu-icon" size={14} />
+                      Debug Action
+                    </button>
+                  ) : null}
+                  {contextMenu.command.actionType === "terminal" &&
+                  contextMenu.worktrees.length > 0 ? (
+                    <button
+                      className="session-context-menu-item"
+                      onClick={() => {
+                        setContextMenu((currentMenu) => {
+                          if (!currentMenu) {
+                            return currentMenu;
+                          }
+
+                          const nextMenu: CommandMenuState = {
+                            ...currentMenu,
+                            view: "worktrees",
+                            worktreeRunMode: "default",
+                          };
+                          nextMenu.position = clampContextMenuPosition(
+                            currentMenu.anchor.x,
+                            currentMenu.anchor.y,
+                            nextMenu,
+                          );
+                          return nextMenu;
+                        });
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconPlayerPlayFilled
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Run on Worktree
+                    </button>
+                  ) : null}
+                  {contextMenu.command.actionType === "terminal" &&
+                  contextMenu.worktrees.length > 0 ? (
+                    <>
+                      <button
+                        className="session-context-menu-item"
+                        onClick={() => {
+                          setContextMenu((currentMenu) => {
+                            if (!currentMenu) {
+                              return currentMenu;
+                            }
+
+                            const nextMenu: CommandMenuState = {
+                              ...currentMenu,
+                              view: "worktrees",
+                              worktreeRunMode: "debug",
+                            };
+                            nextMenu.position = clampContextMenuPosition(
+                              currentMenu.anchor.x,
+                              currentMenu.anchor.y,
+                              nextMenu,
+                            );
+                            return nextMenu;
+                          });
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <IconBug
+                          aria-hidden="true"
+                          className="session-context-menu-icon"
+                          size={14}
+                        />
+                        Debug on Worktree
+                      </button>
+                      <div className="session-context-menu-divider" role="separator" />
+                    </>
+                  ) : null}
+                  <button
+                    className="session-context-menu-item session-context-menu-item-danger"
+                    onClick={() => {
+                      setContextMenu(undefined);
+                      vscode.postMessage({
+                        commandId: contextMenu.command.commandId,
+                        type: "deleteSidebarCommand",
+                      });
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconTrash aria-hidden="true" className="session-context-menu-icon" size={14} />
+                    Remove
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => {
+                      setContextMenu((currentMenu) => {
+                        if (!currentMenu) {
+                          return currentMenu;
+                        }
+
+                        const nextMenu: CommandMenuState = {
+                          ...currentMenu,
+                          view: "root",
+                          worktreeRunMode: undefined,
+                        };
+                        nextMenu.position = clampContextMenuPosition(
+                          currentMenu.anchor.x,
+                          currentMenu.anchor.y,
+                          nextMenu,
+                        );
+                        return nextMenu;
+                      });
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconChevronLeft
+                      aria-hidden="true"
+                      className="session-context-menu-icon"
+                      size={14}
+                    />
+                    Back
+                  </button>
+                  <div className="session-context-menu-divider" role="separator" />
+                  {contextMenu.worktrees.map((worktree) => (
+                    <button
+                      className="session-context-menu-item"
+                      key={worktree.directory}
+                      onClick={() => {
+                        setContextMenu(undefined);
+                        vscode.postMessage({
+                          commandId: contextMenu.command.commandId,
+                          ...(contextMenu.worktreeRunMode
+                            ? { runMode: contextMenu.worktreeRunMode }
+                            : {}),
+                          type: "runSidebarCommand",
+                          worktreePath: worktree.directory,
+                        });
+                      }}
+                      role="menuitem"
+                      title={worktree.directory}
+                      type="button"
+                    >
+                      <IconPlayerPlayFilled
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      {formatWorktreeMenuLabel(worktree)}
+                    </button>
+                  ))}
+                </>
+              )}
             </div>,
             document.body,
           )
@@ -754,6 +940,9 @@ export function CommandsPanel({
       ) : null}
     </>
   );
+}
+function formatWorktreeMenuLabel(worktree: SidebarProjectWorktree): string {
+  return worktree.branch ?? worktree.name;
 }
 
 type SortableCommandButtonProps = {
@@ -796,14 +985,12 @@ function SortableCommandButton({
       <Tooltip.Trigger
         render={
           <button
+            aria-busy={runStatus === "running"}
             aria-label={
               runStatus === "running"
                 ? getLoadingCommandButtonAriaLabel(command)
-                : isConfigured(command)
-                  ? runActionAriaLabel(command)
-                  : `Configure ${getCommandSubject(command)}`
+                : getCommandButtonAriaLabel(command)
             }
-            aria-busy={runStatus === "running"}
             className="command-button"
             data-configured={String(isConfigured(command))}
             data-default={String(command.isDefault)}
@@ -836,7 +1023,7 @@ function SortableCommandButton({
           <Tooltip.Popup className="tooltip-popup">
             {runStatus === "running"
               ? getLoadingCommandButtonTooltip(command)
-              : getActionTooltip(command)}
+              : getCommandButtonTooltip(command)}
           </Tooltip.Popup>
         </Tooltip.Positioner>
       </Tooltip.Portal>
@@ -976,18 +1163,6 @@ function getCommandSubject(command: SidebarCommandButton): string {
   return command.actionType === "browser" ? "browser action" : "terminal action";
 }
 
-function getActionTooltip(command: SidebarCommandButton): string {
-  const subject = getCommandSubject(command);
-
-  if (!isConfigured(command)) {
-    return `Configure ${subject}`;
-  }
-
-  return command.actionType === "browser"
-    ? `${subject}: ${command.url}`
-    : `${subject}: ${command.command}`;
-}
-
 function getLoadingCommandButtonAriaLabel(command: SidebarCommandButton): string {
   return command.actionType === "browser"
     ? `Opening ${getCommandSubject(command)}`
@@ -1029,9 +1204,4 @@ function describeRenderedButtonLayout(gridElement: HTMLDivElement) {
     renderedItems,
     visualOrderIds,
   };
-}
-
-function runActionAriaLabel(command: SidebarCommandButton): string {
-  const subject = getCommandSubject(command);
-  return command.actionType === "browser" ? `Open ${subject}` : `Run ${subject}`;
 }

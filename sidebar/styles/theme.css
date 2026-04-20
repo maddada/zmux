@@ -276,10 +276,16 @@ body[data-sidebar-theme="light-orange"] {
 }
 
 html,
-body,
-#root {
+body {
   height: 100%;
   margin: 0;
+  min-height: 100%;
+}
+
+#root {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
   min-height: 100%;
 }
 
@@ -327,7 +333,7 @@ button:disabled {
 
 .stack {
   display: grid;
-  gap: calc(10px * var(--sidebar-density-scale));
+  gap: 0;
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 100%;
@@ -338,7 +344,7 @@ button:disabled {
 
 .sidebar-top-panels {
   display: grid;
-  gap: calc(30px * var(--sidebar-density-scale));
+  gap: 0;
 }
 
 .stack[data-dimmed="true"] {

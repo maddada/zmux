@@ -426,7 +426,10 @@ export function AgentsPanel({
   return (
     <>
       {isVisible ? (
-        <section className="commands-section commands-section-agents">
+        <section
+          className="commands-section commands-section-agents"
+          data-collapsed={String(isCollapsed)}
+        >
           <SectionHeader
             actions={titlebarActions}
             idleIcon={<IconFlare size={18} stroke={1.8} />}

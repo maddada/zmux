@@ -4,8 +4,11 @@
 }
 
 .commands-section {
+  --sidebar-section-expanded-spacing: calc(20px * var(--sidebar-density-scale));
+  --sidebar-section-collapsed-spacing: calc(4px * var(--sidebar-density-scale));
   display: grid;
   gap: calc((10px * var(--sidebar-density-scale)) + 3px);
+  margin-bottom: var(--sidebar-section-collapsed-spacing);
   --sidebar-tile-background: color-mix(in srgb, var(--app-card-active) 90%, transparent);
   --sidebar-tile-border: color-mix(in srgb, var(--app-border) 92%, transparent);
   --sidebar-tile-foreground: color-mix(in srgb, var(--app-foreground) 90%, var(--app-muted) 10%);
@@ -21,8 +24,12 @@
   );
 }
 
+.commands-section[data-collapsed="false"] {
+  margin-bottom: var(--sidebar-section-expanded-spacing);
+}
+
 .commands-section-agents {
-  margin-top: calc(4px * var(--sidebar-density-scale));
+  margin-top: 0;
 }
 
 .commands-panel {

@@ -4,7 +4,7 @@ import type {
   SidebarCommandRunStateChangedMessage,
 } from "../shared/session-grid-contract";
 
-export const SIDEBAR_COMMAND_SUCCESS_FEEDBACK_DURATION_MS = 7_000;
+export const SIDEBAR_COMMAND_SUCCESS_FEEDBACK_DURATION_MS = 10_000;
 export const SIDEBAR_COMMAND_ERROR_FEEDBACK_DURATION_MS = 10_000;
 
 export type SidebarCommandRunFeedbackState = {

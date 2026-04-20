@@ -1,28 +1,35 @@
 .group-list {
   --sidebar-session-column-offset: calc(18px * var(--sidebar-density-scale));
   display: grid;
-  gap: calc(10px * var(--sidebar-density-scale));
+  gap: 0;
   justify-items: center;
 }
 
 .group {
+  --sidebar-section-expanded-spacing: calc(20px * var(--sidebar-density-scale));
+  --sidebar-section-collapsed-spacing: calc(4px * var(--sidebar-density-scale));
   border: 1px solid transparent;
   border-radius: calc(20px * var(--sidebar-density-scale));
   background: transparent;
   box-shadow: none;
   cursor: pointer;
   display: grid;
-  gap: calc(5px * var(--sidebar-density-scale));
+  gap: calc((10px * var(--sidebar-density-scale)) + 3px);
   justify-self: center;
+  margin-bottom: var(--sidebar-section-collapsed-spacing);
   max-width: calc(100% - var(--sidebar-session-column-offset));
   overflow: visible;
-  padding: calc(10px * var(--sidebar-density-scale)) calc(4px * var(--sidebar-density-scale));
+  padding: 0 calc(4px * var(--sidebar-density-scale));
   position: relative;
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease,
     background-color 140ms ease;
   width: calc(100% - var(--sidebar-session-column-offset));
+}
+
+.group[data-collapsed="false"] {
+  margin-bottom: var(--sidebar-section-expanded-spacing);
 }
 
 .group[data-dragging="true"] {
@@ -460,7 +467,9 @@
 
 .group[data-collapsed="true"] {
   cursor: default;
-  gap: calc(6px * var(--sidebar-density-scale));
+  gap: calc((10px * var(--sidebar-density-scale)) + 3px);
+  padding-bottom: 0;
+  padding-top: 0;
 }
 
 .group-head:hover .group-header-actions,
