@@ -16,7 +16,11 @@ export function SidebarProjectHeader({ projectHeader }: SidebarProjectHeaderProp
     <div className="sidebar-project-header-region" data-empty-space-blocking="true">
       <div className="sidebar-project-header-surface">
         <div className="sidebar-project-header-main">
-          <div aria-hidden="true" className="sidebar-project-header-icon-shell">
+          <div
+            aria-hidden="true"
+            className="sidebar-project-header-icon-shell"
+            data-icon-variant={projectHeader.faviconDataUrl ? "favicon" : "placeholder"}
+          >
             {projectHeader.faviconDataUrl ? (
               <img
                 alt=""

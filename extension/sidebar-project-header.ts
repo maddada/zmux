@@ -148,6 +148,13 @@ const ICON_SOURCE_FILES = [
   "src/index.html",
 ] as const;
 
+const XCODE_APP_ICON_SET_SOURCE_FILES = [
+  "Assets.xcassets/AppIcon.appiconset/Contents.json",
+  "Resources/Assets.xcassets/AppIcon.appiconset/Contents.json",
+  "App/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json",
+  "app/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json",
+] as const;
+
 const LINK_ICON_HTML_RE =
   /<link\b(?=[^>]*\brel=["'](?:icon|shortcut icon)["'])(?=[^>]*\bhref=["']([^"'?]+))[^>]*>/i;
 const LINK_ICON_OBJ_RE =
@@ -240,6 +247,23 @@ async function resolveProjectFaviconPath(workspaceRoot: string): Promise<string 
     for (const resolvedHrefCandidate of resolveIconHrefCandidates(workspaceRoot, iconHref)) {
       if (await isExistingProjectFile(workspaceRoot, resolvedHrefCandidate)) {
         return resolvedHrefCandidate;
+      }
+    }
+  }
+
+  for (const sourceFile of XCODE_APP_ICON_SET_SOURCE_FILES) {
+    const sourcePath = path.join(workspaceRoot, sourceFile);
+    let sourceContents: string;
+
+    try {
+      sourceContents = await readFile(sourcePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    for (const appIconPath of extractXcodeAppIconCandidates(sourcePath, sourceContents)) {
+      if (await isExistingProjectFile(workspaceRoot, appIconPath)) {
+        return appIconPath;
       }
     }
   }
@@ -392,6 +416,86 @@ function resolveIconHrefCandidates(workspaceRoot: string, href: string): string[
 
   const cleanedHref = normalizedHref.replace(/^\//, "");
   return [path.join(workspaceRoot, "public", cleanedHref), path.join(workspaceRoot, cleanedHref)];
+}
+
+function extractXcodeAppIconCandidates(contentsJsonPath: string, source: string): string[] {
+  let contents: unknown;
+
+  try {
+    contents = JSON.parse(source);
+  } catch {
+    return [];
+  }
+
+  if (!isObjectRecord(contents) || !Array.isArray(contents.images)) {
+    return [];
+  }
+
+  const appIconDirectory = path.dirname(contentsJsonPath);
+  const scoredCandidates = contents.images.flatMap((imageEntry) => {
+    if (!isObjectRecord(imageEntry) || typeof imageEntry.filename !== "string") {
+      return [];
+    }
+
+    const filename = imageEntry.filename.trim();
+    if (filename.length === 0) {
+      return [];
+    }
+
+    return [
+      {
+        resolvedPath: path.resolve(appIconDirectory, filename),
+        score: getXcodeAppIconCandidateScore(imageEntry, filename),
+      },
+    ];
+  });
+
+  const dedupedCandidates = new Map<string, number>();
+  for (const candidate of scoredCandidates) {
+    const existingScore = dedupedCandidates.get(candidate.resolvedPath) ?? Number.NEGATIVE_INFINITY;
+    if (candidate.score > existingScore) {
+      dedupedCandidates.set(candidate.resolvedPath, candidate.score);
+    }
+  }
+
+  return [...dedupedCandidates.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .map(([resolvedPath]) => resolvedPath);
+}
+
+function getXcodeAppIconCandidateScore(
+  imageEntry: Record<string, unknown>,
+  filename: string,
+): number {
+  const normalizedFilename = filename.toLowerCase();
+  const size = getXcodeAssetNumericToken(imageEntry.size) ?? getFilenameMaxNumericToken(filename);
+  const scale =
+    getXcodeAssetNumericToken(imageEntry.scale) ?? getXcodeFilenameScale(normalizedFilename) ?? 1;
+  const idiomScore = imageEntry.idiom === "mac" ? 5_000 : 0;
+  const extension = path.extname(normalizedFilename);
+  const extensionScore =
+    extension === ".png" ? 1_000 : extension === ".jpg" || extension === ".jpeg" ? 500 : 0;
+
+  return idiomScore + extensionScore + size * scale;
+}
+
+function getXcodeAssetNumericToken(input: unknown): number | undefined {
+  if (typeof input !== "string") {
+    return undefined;
+  }
+
+  const match = input.match(/(\d{1,4})/);
+  return match ? Number.parseInt(match[1], 10) : undefined;
+}
+
+function getFilenameMaxNumericToken(filename: string): number {
+  const matches = filename.match(/(\d{1,4})/g);
+  return matches ? Math.max(...matches.map((value) => Number.parseInt(value, 10))) : 0;
+}
+
+function getXcodeFilenameScale(filename: string): number | undefined {
+  const match = filename.match(/@(\d)x/);
+  return match ? Number.parseInt(match[1], 10) : undefined;
 }
 
 async function isExistingProjectFile(

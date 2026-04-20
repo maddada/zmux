@@ -168,6 +168,53 @@ describe("resolveSidebarProjectHeader", () => {
     );
   });
 
+  test("should resolve app icons from an xcode asset catalog appiconset", async () => {
+    const workspaceRoot = await createWorkspace("sidebar-project-header-xcode-");
+    const appIconDirectory = path.join(
+      workspaceRoot,
+      "App",
+      "Resources",
+      "Assets.xcassets",
+      "AppIcon.appiconset",
+    );
+    await mkdir(appIconDirectory, { recursive: true });
+    await writeFile(
+      path.join(appIconDirectory, "Contents.json"),
+      JSON.stringify({
+        images: [
+          {
+            filename: "icon_128x128.png",
+            idiom: "mac",
+            scale: "1x",
+            size: "128x128",
+          },
+          {
+            filename: "icon_512x512@2x.png",
+            idiom: "mac",
+            scale: "2x",
+            size: "512x512",
+          },
+        ],
+        info: {
+          author: "xcode",
+          version: 1,
+        },
+      }),
+    );
+    await writeFile(path.join(appIconDirectory, "icon_128x128.png"), "icon128");
+    await writeFile(path.join(appIconDirectory, "icon_512x512@2x.png"), "icon1024");
+
+    const result = await resolveSidebarProjectHeader({
+      workspaceRoot,
+    });
+
+    expect(result.name).toBe(path.basename(workspaceRoot));
+    expect(result.directory).toBe(workspaceRoot);
+    expect(result.faviconDataUrl).toBe(
+      `data:image/png;base64,${Buffer.from("icon1024").toString("base64")}`,
+    );
+  });
+
   test("should fall back to the workspace directory name when no workspace name or icon exists", async () => {
     const workspaceRoot = await createWorkspace("sidebar-project-header-fallback-");
 
