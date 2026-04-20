@@ -28,6 +28,9 @@ vi.mock("vscode", () => ({
       };
     },
   },
+  workspace: {
+    workspaceFolders: undefined,
+  },
   window: {
     tabGroups: {
       all: [],
@@ -39,7 +42,7 @@ import * as vscode from "vscode";
 import { getLiveBrowserTabs } from "./live-browser-tabs";
 
 describe("getLiveBrowserTabs", () => {
-  test("should detect Simple Browser webview tabs", () => {
+  test("should ignore browser webviews whose labels do not look like urls", () => {
     const browserTabs = getLiveBrowserTabs([
       {
         isActive: true,
@@ -54,15 +57,7 @@ describe("getLiveBrowserTabs", () => {
       } as never,
     ]);
 
-    expect(browserTabs).toHaveLength(1);
-    expect(browserTabs[0]).toEqual(
-      expect.objectContaining({
-        inputKind: "webview",
-        label: "Simple Browser",
-        viewType: "simpleBrowser.view",
-        viewColumn: 1,
-      }),
-    );
+    expect(browserTabs).toEqual([]);
   });
 
   test("should detect custom tabs backed by http urls", () => {
@@ -93,6 +88,314 @@ describe("getLiveBrowserTabs", () => {
         viewColumn: 2,
       }),
     );
+  });
+
+  test("should detect webview tabs whose labels start with http", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("simpleBrowser.view"),
+            isActive: true,
+            label: "https://example.com/docs",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail: "https://example.com/docs",
+        inputKind: "webview",
+        label: "https://example.com/docs",
+        url: "https://example.com/docs",
+        viewType: "simpleBrowser.view",
+      }),
+    );
+  });
+
+  test("should detect simple browser tabs whose labels are page titles", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("simpleBrowser.view"),
+            isActive: true,
+            label: "Google",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        inputKind: "webview",
+        label: "Google",
+        url: undefined,
+        viewType: "simpleBrowser.view",
+        viewColumn: 1,
+      }),
+    );
+  });
+
+  test("should detect unknown-input tabs whose labels look like browser page titles", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: undefined,
+            isActive: true,
+            label: "Google",
+          },
+          {
+            input: undefined,
+            isActive: false,
+            label: "My App",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(2);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        inputKind: "undefined",
+        label: "Google",
+        url: undefined,
+      }),
+    );
+    expect(browserTabs[1]).toEqual(
+      expect.objectContaining({
+        inputKind: "undefined",
+        label: "My App",
+        url: undefined,
+      }),
+    );
+  });
+
+  test("should detect webview tabs whose labels are localhost hosts", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("simpleBrowser.view"),
+            isActive: true,
+            label: "localhost:3000",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail: "http://localhost:3000",
+        label: "localhost:3000",
+        url: "http://localhost:3000",
+      }),
+    );
+  });
+
+  test("should detect webview tabs whose labels are ip hosts", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("simpleBrowser.view"),
+            isActive: true,
+            label: "127.0.0.1:4173/path",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail: "http://127.0.0.1:4173/path",
+        label: "127.0.0.1:4173/path",
+        url: "http://127.0.0.1:4173/path",
+      }),
+    );
+  });
+
+  test("should detect webview tabs whose labels are domain hosts", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("simpleBrowser.view"),
+            isActive: true,
+            label: "app.example.com:8080/dashboard",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail: "http://app.example.com:8080/dashboard",
+        label: "app.example.com:8080/dashboard",
+        url: "http://app.example.com:8080/dashboard",
+      }),
+    );
+  });
+
+  test("should detect bare domain labels on webview tabs", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("simpleBrowser.view"),
+            isActive: true,
+            label: "app.example.com",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail: "http://app.example.com",
+        label: "app.example.com",
+        url: "http://app.example.com",
+      }),
+    );
+  });
+
+  test("should detect bare domain labels on custom tabs", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputCustom(
+              vscode.Uri.parse("vscode-webview://ignored"),
+              "some.browser.tab",
+            ),
+            isActive: true,
+            label: "www.google.com",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail: "http://www.google.com",
+        inputKind: "custom",
+        label: "www.google.com",
+        url: "http://www.google.com",
+      }),
+    );
+  });
+
+  test("should detect wrapped localhost labels", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("simpleBrowser.view"),
+            isActive: true,
+            label: "[localhost:3000]",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail: "http://localhost:3000",
+        label: "[localhost:3000]",
+        url: "http://localhost:3000",
+      }),
+    );
+  });
+
+  test("should detect wrapped domain labels", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("simpleBrowser.view"),
+            isActive: true,
+            label: "(app.example.com/dashboard)",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail: "http://app.example.com/dashboard",
+        label: "(app.example.com/dashboard)",
+        url: "http://app.example.com/dashboard",
+      }),
+    );
+  });
+
+  test("should ignore text tabs whose labels look like dotted filenames", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputText(
+              vscode.Uri.parse("file:///tmp/vite.debug-panel.config.ts"),
+            ),
+            isActive: true,
+            label: "vite.debug-panel.config.ts",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toEqual([]);
+  });
+
+  test("should ignore unknown-input tabs whose labels look like filenames", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: undefined,
+            isActive: true,
+            label: "vite.debug-panel.config.ts",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toEqual([]);
   });
 
   test("should ignore VSmux T3 webviews", () => {

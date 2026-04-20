@@ -4,6 +4,7 @@ import {
   getBrowserTabUrl,
   normalizeUrl,
 } from "./browser-session-manager/helpers";
+import { logBrowserTabDetection } from "./browser-tab-detection-log";
 import { T3_PANEL_TYPE } from "./t3-webview-manager/helpers";
 import { WORKSPACE_PANEL_TYPE } from "./workspace-panel";
 
@@ -11,6 +12,7 @@ export const BROWSER_SIDEBAR_GROUP_ID = "browser-tabs";
 
 const BROWSER_SIDEBAR_SESSION_PREFIX = "browser-tab:";
 const SIMPLE_BROWSER_VIEW_TYPE = "simpleBrowser.view";
+const SIMPLE_BROWSER_DEFAULT_LABEL = "simple browser";
 const VSMUX_LABEL = "vsmux";
 const VSMUX_VIEW_TYPE_PREFIX = "vsmux.";
 const VSCODE_WELCOME_LABEL = "welcome";
@@ -19,6 +21,7 @@ const VSMUX_SEARCH_LABEL_PREFIX = "VSmux Search";
 const EXTENSION_LABEL_FRAGMENT = "Extension:";
 const WORKING_TREE_LABEL_FRAGMENT = "(Working Tree)";
 const INDEX_LABEL_FRAGMENT = "(Index)";
+const FILE_LIKE_LABEL_SUFFIX_PATTERN = /\.(?:[a-z0-9]{1,8})(?:\s*\([^)]+\))?$/i;
 const IGNORED_WEBVIEW_VIEW_TYPES = new Set([
   "claudevscodepanel",
   "claudeplanpreview",
@@ -39,11 +42,39 @@ export type LiveBrowserTabEntry = {
   viewColumn: vscode.ViewColumn;
 };
 
+type LiveBrowserTabInspection =
+  | {
+      accepted: false;
+      inputKind: string;
+      labelUrl?: string;
+      rawUrl?: string;
+      reason: string;
+      url?: string;
+      viewType?: string;
+    }
+  | {
+      accepted: true;
+      detail?: string;
+      identity: string;
+      inputKind: string;
+      labelUrl?: string;
+      rawUrl?: string;
+      reason: string;
+      url?: string;
+      viewType?: string;
+    };
+
 export function getLiveBrowserTabs(
   tabGroups: readonly vscode.TabGroup[] = vscode.window.tabGroups.all,
 ): LiveBrowserTabEntry[] {
   const browserTabs: LiveBrowserTabEntry[] = [];
   const occurrenceByIdentity = new Map<string, number>();
+  const scanId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  logBrowserTabDetection("browserTabs.scan.start", {
+    groupCount: tabGroups.length,
+    scanId,
+  });
 
   for (const group of tabGroups) {
     if (group.viewColumn === undefined) {
@@ -51,19 +82,35 @@ export function getLiveBrowserTabs(
     }
 
     for (const tab of group.tabs) {
-      const browserTabMetadata = getLiveBrowserTabMetadata(tab);
-      if (!browserTabMetadata) {
+      const browserTabInspection = inspectLiveBrowserTab(tab);
+      logBrowserTabDetection("browserTabs.scan.tab", {
+        groupIsActive: group.isActive,
+        inputDebug: getTabInputDebugInfo(tab.input),
+        inputConstructorName: tab.input?.constructor?.name,
+        inputKind: browserTabInspection.inputKind,
+        isAccepted: browserTabInspection.accepted,
+        isTabActive: tab.isActive,
+        label: tab.label,
+        labelUrl: browserTabInspection.labelUrl,
+        rawUrl: browserTabInspection.rawUrl,
+        reason: browserTabInspection.reason,
+        scanId,
+        url: browserTabInspection.url,
+        viewColumn: group.viewColumn,
+        viewType: browserTabInspection.viewType,
+      });
+      if (!browserTabInspection.accepted) {
         continue;
       }
 
-      const inputKind = getBrowserTabInputKind(tab);
-      const identity = [group.viewColumn, inputKind, tab.label, browserTabMetadata.identity].join(
+      const inputKind = browserTabInspection.inputKind;
+      const identity = [group.viewColumn, inputKind, tab.label, browserTabInspection.identity].join(
         "|",
       );
       const occurrence = occurrenceByIdentity.get(identity) ?? 0;
       occurrenceByIdentity.set(identity, occurrence + 1);
       browserTabs.push({
-        detail: browserTabMetadata.detail,
+        detail: browserTabInspection.detail,
         inputKind,
         isActive: group.isActive && tab.isActive,
         label: tab.label,
@@ -71,16 +118,21 @@ export function getLiveBrowserTabs(
           group.viewColumn,
           inputKind,
           tab.label,
-          browserTabMetadata.identity,
+          browserTabInspection.identity,
           occurrence,
         ),
         tab,
-        url: browserTabMetadata.url,
-        viewType: browserTabMetadata.viewType,
+        url: browserTabInspection.url,
+        viewType: browserTabInspection.viewType,
         viewColumn: group.viewColumn,
       });
     }
   }
+
+  logBrowserTabDetection("browserTabs.scan.complete", {
+    browserTabCount: browserTabs.length,
+    scanId,
+  });
 
   return browserTabs;
 }
@@ -110,6 +162,39 @@ export function normalizeSidebarBrowserUrl(url: string | undefined): string | un
   }
 }
 
+function normalizeSidebarBrowserLabelUrl(label: string): string | undefined {
+  const trimmedLabel = unwrapBrowserHostLabel(label.trim());
+  if (!trimmedLabel) {
+    return undefined;
+  }
+
+  if (/^https?:\/\//i.test(trimmedLabel)) {
+    return normalizeSidebarBrowserUrl(trimmedLabel);
+  }
+
+  if (isLikelyBrowserHostLabel(trimmedLabel)) {
+    return normalizeSidebarBrowserUrl(`http://${trimmedLabel}`);
+  }
+
+  return undefined;
+}
+
+function unwrapBrowserHostLabel(label: string): string {
+  const wrapperPairs: ReadonlyArray<readonly [string, string]> = [
+    ["[", "]"],
+    ["(", ")"],
+    ["<", ">"],
+  ];
+
+  for (const [start, end] of wrapperPairs) {
+    if (label.startsWith(start) && label.endsWith(end) && label.length > 2) {
+      return label.slice(1, -1).trim();
+    }
+  }
+
+  return label;
+}
+
 function createBrowserSidebarSessionId(
   viewColumn: vscode.ViewColumn,
   inputKind: string,
@@ -127,68 +212,227 @@ function createBrowserSidebarSessionId(
   ].join("|");
 }
 
-function getLiveBrowserTabMetadata(tab: vscode.Tab):
-  | {
-      detail?: string;
-      identity: string;
-      url?: string;
-      viewType?: string;
-    }
-  | undefined {
+function inspectLiveBrowserTab(tab: vscode.Tab): LiveBrowserTabInspection {
+  const inputKind = getBrowserTabInputKind(tab);
   if (tab.label.trim().startsWith(VSMUX_SEARCH_LABEL_PREFIX)) {
-    return undefined;
+    return { accepted: false, inputKind, reason: "ignored:vsmux-search-label" };
   }
 
   if (tab.label.includes(EXTENSION_LABEL_FRAGMENT)) {
-    return undefined;
+    return { accepted: false, inputKind, reason: "ignored:extension-label" };
   }
 
   if (VSCODE_IGNORED_LABELS.has(tab.label.trim())) {
-    return undefined;
+    return { accepted: false, inputKind, reason: "ignored:vscode-label" };
   }
 
   if (tab.label.includes(WORKING_TREE_LABEL_FRAGMENT) || tab.label.includes(INDEX_LABEL_FRAGMENT)) {
-    return undefined;
+    return { accepted: false, inputKind, reason: "ignored:git-diff-label" };
   }
 
   if (tab.label.trim().toLowerCase() === VSCODE_WELCOME_LABEL) {
-    return undefined;
+    return { accepted: false, inputKind, reason: "ignored:welcome-label" };
   }
 
   if (isDiffTabInput(tab.input)) {
-    return undefined;
+    return { accepted: false, inputKind, reason: "ignored:diff-input" };
   }
 
   const viewType = getTabViewType(tab.input);
-  const url = normalizeSidebarBrowserUrl(getBrowserTabUrl(tab));
+  const rawUrl = getBrowserTabUrl(tab);
+  const url = normalizeSidebarBrowserUrl(rawUrl);
+  const labelUrl =
+    inputKind === "webview" || inputKind === "custom"
+      ? normalizeSidebarBrowserLabelUrl(tab.label)
+      : undefined;
 
   if (isVSmuxOwnedTab(tab, viewType, url)) {
-    return undefined;
-  }
-
-  if (isIgnoredNonBrowserWebviewViewType(viewType)) {
-    return undefined;
-  }
-
-  if (url) {
     return {
-      detail: url,
-      identity: url,
+      accepted: false,
+      inputKind,
+      labelUrl,
+      rawUrl,
+      reason: "ignored:vsmux-owned",
       url,
       viewType,
     };
   }
 
-  if (viewType && isBrowserWebviewViewType(viewType)) {
+  if (isIgnoredNonBrowserWebviewViewType(viewType)) {
     return {
+      accepted: false,
+      inputKind,
+      labelUrl,
+      rawUrl,
+      reason: "ignored:non-browser-webview",
+      url,
+      viewType,
+    };
+  }
+
+  if (url) {
+    return {
+      accepted: true,
+      detail: url,
+      identity: url,
+      inputKind,
+      labelUrl,
+      rawUrl,
+      reason: "accepted:input-url",
+      url,
+      viewType,
+    };
+  }
+
+  if (labelUrl) {
+    return {
+      accepted: true,
+      detail: labelUrl,
+      identity: labelUrl,
+      inputKind,
+      labelUrl,
+      rawUrl,
+      reason: "accepted:label-url",
+      url: labelUrl,
+      viewType,
+    };
+  }
+
+  if (
+    viewType?.toLowerCase() === SIMPLE_BROWSER_VIEW_TYPE.toLowerCase() &&
+    tab.label.trim().toLowerCase() !== SIMPLE_BROWSER_DEFAULT_LABEL
+  ) {
+    return {
+      accepted: true,
       detail: undefined,
-      identity: viewType,
+      identity: `${viewType}:${tab.label}`,
+      inputKind,
+      labelUrl,
+      rawUrl,
+      reason: "accepted:simple-browser-title",
       url: undefined,
       viewType,
     };
   }
 
-  return undefined;
+  if (inputKind === "undefined" && isLikelyUnknownBrowserTabTitle(tab.label)) {
+    return {
+      accepted: true,
+      detail: undefined,
+      identity: `unknown-input:${tab.label}`,
+      inputKind,
+      labelUrl,
+      rawUrl,
+      reason: "accepted:unknown-input-title",
+      url: undefined,
+      viewType,
+    };
+  }
+
+  return {
+    accepted: false,
+    inputKind,
+    labelUrl,
+    rawUrl,
+    reason: "ignored:no-supported-browser-signal",
+    url,
+    viewType,
+  };
+}
+
+function getTabInputDebugInfo(input: vscode.Tab["input"]): Record<string, unknown> {
+  if (input === undefined || input === null) {
+    return { kind: typeof input };
+  }
+
+  if (typeof input !== "object") {
+    return {
+      kind: typeof input,
+      valuePreview: String(input),
+    };
+  }
+
+  const record = input as Record<string, unknown>;
+  const prototype = Object.getPrototypeOf(input) as Record<string, unknown> | null;
+  const prototypeLevelTwo =
+    prototype && typeof prototype === "object"
+      ? (Object.getPrototypeOf(prototype) as Record<string, unknown> | null)
+      : null;
+
+  return {
+    commonValues: {
+      modified: getDebugValuePreview(record.modified),
+      original: getDebugValuePreview(record.original),
+      resource: getDebugValuePreview(record.resource),
+      uri: getDebugValuePreview(record.uri),
+      viewType: getDebugValuePreview(record.viewType),
+    },
+    constructorName: input.constructor?.name,
+    ownKeys: Object.getOwnPropertyNames(input).sort(),
+    prototypeConstructorName:
+      prototype && "constructor" in prototype && prototype.constructor
+        ? (prototype.constructor as { name?: unknown }).name
+        : undefined,
+    prototypeKeys:
+      prototype && typeof prototype === "object"
+        ? Object.getOwnPropertyNames(prototype).sort().slice(0, 20)
+        : undefined,
+    prototypeLevelTwoConstructorName:
+      prototypeLevelTwo && "constructor" in prototypeLevelTwo && prototypeLevelTwo.constructor
+        ? (prototypeLevelTwo.constructor as { name?: unknown }).name
+        : undefined,
+    prototypeLevelTwoKeys:
+      prototypeLevelTwo && typeof prototypeLevelTwo === "object"
+        ? Object.getOwnPropertyNames(prototypeLevelTwo).sort().slice(0, 20)
+        : undefined,
+  };
+}
+
+function isLikelyUnknownBrowserTabTitle(label: string): boolean {
+  const trimmedLabel = label.trim();
+  if (!trimmedLabel) {
+    return false;
+  }
+
+  if (
+    trimmedLabel.includes("/") ||
+    trimmedLabel.includes("\\") ||
+    FILE_LIKE_LABEL_SUFFIX_PATTERN.test(trimmedLabel)
+  ) {
+    return false;
+  }
+
+  return /[a-z]/i.test(trimmedLabel);
+}
+
+function getDebugValuePreview(value: unknown): unknown {
+  if (value === undefined || value === null) {
+    return value;
+  }
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "object") {
+    if ("toString" in value && typeof value.toString === "function") {
+      try {
+        return value.toString();
+      } catch {
+        return {
+          constructorName: (value as { constructor?: { name?: unknown } }).constructor?.name,
+          ownKeys: Object.getOwnPropertyNames(value).sort().slice(0, 10),
+        };
+      }
+    }
+
+    return {
+      constructorName: (value as { constructor?: { name?: unknown } }).constructor?.name,
+      ownKeys: Object.getOwnPropertyNames(value).sort().slice(0, 10),
+    };
+  }
+
+  return typeof value;
 }
 
 function isVSmuxOwnedTab(
@@ -212,15 +456,6 @@ function isVSmuxOwnedTab(
   return url === undefined || isVSmuxLocalAssetUrl(url);
 }
 
-function isBrowserWebviewViewType(viewType: string): boolean {
-  const normalizedViewType = viewType.toLowerCase();
-  return (
-    normalizedViewType === SIMPLE_BROWSER_VIEW_TYPE.toLowerCase() ||
-    normalizedViewType.includes("browser") ||
-    normalizedViewType.includes("preview")
-  );
-}
-
 function isIgnoredNonBrowserWebviewViewType(viewType: string | undefined): boolean {
   if (!viewType) {
     return false;
@@ -232,6 +467,15 @@ function isIgnoredNonBrowserWebviewViewType(viewType: string | undefined): boole
 function isVSmuxLocalAssetUrl(url: string): boolean {
   return /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\/(?:workspace|dpcode-embed|t3code-embed)(?:\/|$)/i.test(
     url,
+  );
+}
+
+function isLikelyBrowserHostLabel(label: string): boolean {
+  return (
+    /^(?:localhost|\d{1,3}(?:\.\d{1,3}){3})(?::\d{1,5})?(?:[/?#].*)?$/i.test(label) ||
+    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])(?::\d{1,5})?(?:[/?#].*)?$/i.test(
+      label,
+    )
   );
 }
 
