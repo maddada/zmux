@@ -13,11 +13,11 @@ Download links:
         Extensions Marketplace
       </a>
     </td>
-    <td align="center" width="50%">      
+    <td align="center" width="50%">
       <a href="https://open-vsx.org/extension/maddada/VSmux">
         <img src="./media/readme-download-cursor-tile.png" alt="Cursor" width="80" />
         <img src="./media/readme-download-antigravity-tile.png" alt="Antigravity" width="80" />
-        <br />      
+        <br />
         <strong>Download for Cursor / Antigravity / Others</strong><br />
       </a>
     </td>
@@ -81,13 +81,6 @@ Then this is the extension for you! You get a very nice interface to work with y
 | **Automated Git**         | Use built-in tools to automatically generate commit messages and push code            |
 | **Change Monitoring**     | Track AI-driven code edits in a dedicated panel while working on other tasks          |
 | **Advanced Settings**     | Highly configure the tool to match your exact workflow needs                          |
-
-## Getting Started
-
-1. Open the Command Palette.
-2. Run `VSmux: Open Workspace`.
-3. Create your first session.
-4. Use the sidebar and hotkeys to change the visible split count and jump between sessions and groups.
 
 # Recommended VS Code Setup for Worktrees & Parallel Agents
 
