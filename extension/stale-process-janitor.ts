@@ -4,6 +4,9 @@ import { access, readdir, readFile, unlink } from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import type * as vscode from "vscode";
+import { WebSocket } from "ws";
+import { TERMINAL_HOST_PROTOCOL_VERSION } from "../shared/terminal-host-protocol";
+import { appendTerminalRestartReproLog } from "./terminal-restart-repro-log";
 import { logVSmuxDebug } from "./vsmux-debug-log";
 
 type UnixProcessSnapshot = {
@@ -13,17 +16,35 @@ type UnixProcessSnapshot = {
 };
 
 type TerminalDaemonInfo = {
+  port?: number;
   pid?: number;
+  protocolVersion?: typeof TERMINAL_HOST_PROTOCOL_VERSION;
+  token?: string;
+};
+
+type ReusableDaemonInfo = {
+  pid: number;
+  port: number;
+  protocolVersion: typeof TERMINAL_HOST_PROTOCOL_VERSION;
+  token: string;
 };
 
 const TERMINAL_DAEMON_STATE_PREFIX = "terminal-daemon-";
 const DAEMON_INFO_FILE_NAME = "daemon-info.json";
 const DAEMON_LAUNCH_LOCK_FILE_NAME = "daemon-launch.lock";
+const DAEMON_CONTROL_CONNECT_TIMEOUT_MS = 1_500;
 const execFileAsync = promisify(execFile);
 
 export async function runStaleVsmuxProcessJanitor(
   context: Pick<vscode.ExtensionContext, "extensionUri" | "globalStorageUri">,
+  workspaceId: string,
+  workspaceRoot?: string,
 ): Promise<void> {
+  await appendTerminalRestartReproLog(workspaceRoot, "janitor.start", {
+    currentExtensionPath: context.extensionUri.fsPath,
+    currentPid: process.pid,
+    globalStoragePath: context.globalStorageUri.fsPath,
+  });
   const staleProcessIds =
     process.platform === "win32"
       ? []
@@ -31,13 +52,20 @@ export async function runStaleVsmuxProcessJanitor(
           context.extensionUri.fsPath,
           context.globalStorageUri.fsPath,
           process.pid,
+          workspaceId,
         );
 
   for (const pid of staleProcessIds) {
     await terminateProcess(pid);
   }
 
-  await pruneStaleDaemonState(context.globalStorageUri.fsPath);
+  const prunedDaemonStateCount = await pruneStaleDaemonState(context.globalStorageUri.fsPath);
+  await appendTerminalRestartReproLog(workspaceRoot, "janitor.complete", {
+    killedProcessCount: staleProcessIds.length,
+    killedProcessIds: staleProcessIds,
+    prunedDaemonStateCount,
+    storagePath: context.globalStorageUri.fsPath,
+  });
   logVSmuxDebug("janitor.staleProcesses.completed", {
     killedProcessCount: staleProcessIds.length,
     killedProcessIds: staleProcessIds,
@@ -49,8 +77,13 @@ export async function listStaleVsmuxProcessIds(
   currentExtensionPath: string,
   globalStoragePath: string,
   currentPid: number,
+  workspaceId?: string,
 ): Promise<number[]> {
   try {
+    const reusableDaemonProcessIds = await listReusableDaemonProcessIds(
+      globalStoragePath,
+      workspaceId,
+    );
     const { stdout } = await execFileAsync("ps", ["eww", "-axo", "pid=,ppid=,command="], {
       maxBuffer: 8 * 1024 * 1024,
     });
@@ -58,6 +91,7 @@ export async function listStaleVsmuxProcessIds(
       currentExtensionPath,
       currentPid,
       globalStoragePath,
+      reusableDaemonProcessIds,
     });
   } catch (error) {
     logVSmuxDebug("janitor.staleProcesses.psFailed", {
@@ -96,10 +130,12 @@ export function selectStaleVsmuxProcessIds(
     currentExtensionPath: string;
     currentPid: number;
     globalStoragePath: string;
+    reusableDaemonProcessIds?: ReadonlySet<number>;
   },
 ): number[] {
   const normalizedExtensionPath = normalizeForComparison(options.currentExtensionPath);
   const normalizedGlobalStoragePath = normalizeForComparison(options.globalStoragePath);
+  const reusableDaemonProcessIds = options.reusableDaemonProcessIds ?? new Set<number>();
 
   return processes
     .filter((processInfo) => {
@@ -107,6 +143,9 @@ export function selectStaleVsmuxProcessIds(
         return false;
       }
       if (processInfo.pid === options.currentPid) {
+        return false;
+      }
+      if (reusableDaemonProcessIds.has(processInfo.pid)) {
         return false;
       }
 
@@ -138,14 +177,71 @@ export function selectStaleVsmuxProcessIds(
     .map((processInfo) => processInfo.pid);
 }
 
-async function pruneStaleDaemonState(globalStoragePath: string): Promise<void> {
+async function listReusableDaemonProcessIds(
+  globalStoragePath: string,
+  workspaceId?: string,
+): Promise<Set<number>> {
+  if (!workspaceId) {
+    return new Set();
+  }
+
+  const reusableDaemonInfo = await getReusableDaemonInfo(
+    path.join(
+      globalStoragePath,
+      `${TERMINAL_DAEMON_STATE_PREFIX}${workspaceId}`,
+      DAEMON_INFO_FILE_NAME,
+    ),
+  );
+  if (!reusableDaemonInfo) {
+    return new Set();
+  }
+
+  return new Set([reusableDaemonInfo.pid]);
+}
+
+async function getReusableDaemonInfo(
+  infoFilePath: string,
+): Promise<ReusableDaemonInfo | undefined> {
+  const daemonInfo = await readDaemonInfo(infoFilePath);
+  const pid = daemonInfo?.pid;
+  const port = daemonInfo?.port;
+  const protocolVersion = daemonInfo?.protocolVersion;
+  const token = daemonInfo?.token;
+  if (
+    typeof pid !== "number" ||
+    !Number.isInteger(pid) ||
+    pid <= 1 ||
+    protocolVersion !== TERMINAL_HOST_PROTOCOL_VERSION ||
+    typeof port !== "number" ||
+    !Number.isFinite(port) ||
+    typeof token !== "string" ||
+    token.length === 0
+  ) {
+    return undefined;
+  }
+
+  const reusableDaemonInfo: ReusableDaemonInfo = {
+    pid,
+    port,
+    protocolVersion,
+    token,
+  };
+  if (!(await canReachDaemon(reusableDaemonInfo))) {
+    return undefined;
+  }
+
+  return reusableDaemonInfo;
+}
+
+async function pruneStaleDaemonState(globalStoragePath: string): Promise<number> {
   let entries: Dirent[] = [];
   try {
     entries = await readdir(globalStoragePath, { withFileTypes: true });
   } catch {
-    return;
+    return 0;
   }
 
+  let prunedCount = 0;
   await Promise.all(
     entries
       .filter((entry) => entry.isDirectory() && entry.name.startsWith(TERMINAL_DAEMON_STATE_PREFIX))
@@ -160,8 +256,10 @@ async function pruneStaleDaemonState(globalStoragePath: string): Promise<void> {
         }
 
         await Promise.allSettled([unlink(daemonInfoPath), unlink(launchLockPath)]);
+        prunedCount += 1;
       }),
   );
+  return prunedCount;
 }
 
 async function pruneDeadLaunchLock(lockFilePath: string): Promise<void> {
@@ -203,6 +301,37 @@ function isVsmuxHelperProcess(command: string): boolean {
     command.includes("agent-shell-wrapper-runner.js") ||
     command.includes("agent-shell-notify-runner.js")
   );
+}
+
+async function canReachDaemon(
+  daemonInfo: Pick<ReusableDaemonInfo, "port" | "token">,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${String(daemonInfo.port)}/control?token=${encodeURIComponent(daemonInfo.token)}`,
+    );
+    const timeout = setTimeout(() => {
+      try {
+        socket.close();
+      } catch {
+        // Ignore socket close failures during daemon reachability checks.
+      }
+      resolve(false);
+    }, DAEMON_CONTROL_CONNECT_TIMEOUT_MS);
+
+    socket.once("open", () => {
+      clearTimeout(timeout);
+      socket.close();
+      resolve(true);
+    });
+    socket.once("error", () => {
+      clearTimeout(timeout);
+      resolve(false);
+    });
+    socket.once("close", () => {
+      clearTimeout(timeout);
+    });
+  });
 }
 
 function isProcessAlive(pid: number): boolean {

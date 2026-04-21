@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { resolveGitCommonDir, resolveGitDir } from "./git/paths";
 import { getDefaultWorkspaceCwd } from "./terminal-workspace-environment";
 
 const SETTINGS_SECTION = "VSmux";
@@ -27,46 +27,4 @@ function resolveGitCommonWorkspaceRoot(workspaceRoot: string): string | undefine
 
   const commonDir = resolveGitCommonDir(gitDir);
   return path.basename(commonDir) === ".git" ? path.dirname(commonDir) : undefined;
-}
-
-function resolveGitDir(workspaceRoot: string): string | undefined {
-  const dotGitPath = path.join(workspaceRoot, ".git");
-  if (!existsSync(dotGitPath)) {
-    return undefined;
-  }
-
-  try {
-    const stats = statSync(dotGitPath);
-    if (stats.isDirectory()) {
-      return dotGitPath;
-    }
-
-    if (!stats.isFile()) {
-      return undefined;
-    }
-
-    const gitDirLine = readFileSync(dotGitPath, "utf8").trim();
-    const match = /^gitdir:\s*(.+)$/i.exec(gitDirLine);
-    if (!match) {
-      return undefined;
-    }
-
-    return path.resolve(workspaceRoot, match[1]);
-  } catch {
-    return undefined;
-  }
-}
-
-function resolveGitCommonDir(gitDir: string): string {
-  const commonDirPath = path.join(gitDir, "commondir");
-  if (!existsSync(commonDirPath)) {
-    return gitDir;
-  }
-
-  try {
-    const commonDir = readFileSync(commonDirPath, "utf8").trim();
-    return path.resolve(gitDir, commonDir);
-  } catch {
-    return gitDir;
-  }
 }

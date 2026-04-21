@@ -1,37 +1,37 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import * as path from "node:path";
-import * as vscode from "vscode";
 import { ensureWorkspaceGitExcludeEntry } from "./git/local-exclude";
 
-const LOG_DIR_NAME = ".vsmux";
-const LOG_FILE_NAME = "browser-tab-detection-debug.log";
+const REPRO_LOG_DIR_NAME = ".vsmux";
+const REPRO_LOG_FILE_NAME = "terminal-restart-repro.log";
 
 let fileWriteQueue: Promise<void> = Promise.resolve();
 
-export function getBrowserTabDetectionLogPath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, LOG_DIR_NAME, LOG_FILE_NAME);
+export function getTerminalRestartReproLogPath(workspaceRoot: string): string {
+  return path.join(workspaceRoot, REPRO_LOG_DIR_NAME, REPRO_LOG_FILE_NAME);
 }
 
-export function logBrowserTabDetection(event: string, details?: unknown): void {
-  const workspaceRoot = resolveWorkspaceRoot();
+export function appendTerminalRestartReproLog(
+  workspaceRoot: string | undefined,
+  event: string,
+  details?: unknown,
+): Promise<void> {
   if (!workspaceRoot) {
-    return;
+    return Promise.resolve();
   }
-  const logFilePath = getBrowserTabDetectionLogPath(workspaceRoot);
 
-  const text = buildLogLine(event, details);
+  const logFilePath = getTerminalRestartReproLogPath(workspaceRoot);
+  const logLine = buildLogLine(event, details);
   fileWriteQueue = fileWriteQueue
     .catch(() => undefined)
     .then(async () => {
-      await ensureWorkspaceGitExcludeEntry(workspaceRoot, `${LOG_DIR_NAME}/`);
+      await ensureWorkspaceGitExcludeEntry(workspaceRoot, `${REPRO_LOG_DIR_NAME}/`);
       await mkdir(path.dirname(logFilePath), { recursive: true });
-      await appendFile(logFilePath, text, "utf8");
+      await appendFile(logFilePath, logLine, "utf8");
     })
     .catch(() => undefined);
-}
 
-function resolveWorkspaceRoot(): string | undefined {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  return fileWriteQueue;
 }
 
 function buildLogLine(event: string, details?: unknown): string {

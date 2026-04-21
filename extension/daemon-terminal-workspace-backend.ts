@@ -37,6 +37,7 @@ import {
 } from "./terminal-workspace-environment";
 import { indexWorkspaceTerminalSnapshotsBySessionId } from "./terminal-daemon-session-scope";
 import { getWorkspaceStorageKey } from "./terminal-workspace-environment";
+import { appendTerminalRestartReproLog } from "./terminal-restart-repro-log";
 import { logVSmuxDebug } from "./vsmux-debug-log";
 import {
   getBackgroundSessionTimeoutMs,
@@ -50,6 +51,7 @@ export type DaemonTerminalWorkspaceBackendOptions = {
   context: vscode.ExtensionContext;
   ensureShellSpawnAllowed: () => Promise<boolean>;
   workspaceId: string;
+  workspaceRoot: string;
 };
 
 export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
@@ -76,10 +78,19 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   public readonly onDidChangeSessions = this.changeSessionsEmitter.event;
 
   public constructor(private readonly options: DaemonTerminalWorkspaceBackendOptions) {
-    this.runtime = new DaemonTerminalRuntime(options.context, options.workspaceId);
+    this.runtime = new DaemonTerminalRuntime(
+      options.context,
+      options.workspaceId,
+      options.workspaceRoot,
+    );
   }
 
   public async initialize(sessionRecords: readonly SessionRecord[]): Promise<void> {
+    void appendTerminalRestartReproLog(this.options.workspaceRoot, "backend.initialize.start", {
+      sessionIds: sessionRecords.map((sessionRecord) => sessionRecord.sessionId),
+      sessionRecordCount: sessionRecords.length,
+      workspaceId: this.options.workspaceId,
+    });
     this.agentShellIntegration = await ensureAgentShellIntegration(
       path.join(this.options.context.globalStorageUri.fsPath, "terminal-host-daemon"),
     );
@@ -146,6 +157,11 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       }
     });
     await this.refreshSessionSnapshots();
+    void appendTerminalRestartReproLog(this.options.workspaceRoot, "backend.initialize.ready", {
+      sessionCount: this.sessions.size,
+      sessions: summarizeSnapshots([...this.sessions.values()]),
+      workspaceId: this.options.workspaceId,
+    });
     this.pollTimer = setInterval(() => {
       void this.refreshSessionSnapshots();
     }, POLL_INTERVAL_MS);
@@ -173,19 +189,58 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
 
   public async releaseForDeactivation(): Promise<void> {
     const idleShutdownTimeoutMs = this.getIdleShutdownTimeoutMs();
+    const sessionIds = this.getManagedTerminalSessionIds();
+
+    void appendTerminalRestartReproLog(
+      this.options.workspaceRoot,
+      "backend.releaseForDeactivation.start",
+      {
+        idleShutdownTimeoutMs,
+        sessionIds,
+        workspaceId: this.options.workspaceId,
+      },
+    );
 
     try {
       const didConfigure = await this.runtime.configureExisting(idleShutdownTimeoutMs);
       if (!didConfigure) {
+        void appendTerminalRestartReproLog(
+          this.options.workspaceRoot,
+          "backend.releaseForDeactivation.noDaemon",
+          {
+            idleShutdownTimeoutMs,
+            sessionIds,
+            workspaceId: this.options.workspaceId,
+          },
+        );
         return;
       }
 
       await this.runtime.syncSessionLeasesExisting(
         this.options.workspaceId,
-        this.getManagedTerminalSessionIds(),
+        sessionIds,
         idleShutdownTimeoutMs,
       );
+      void appendTerminalRestartReproLog(
+        this.options.workspaceRoot,
+        "backend.releaseForDeactivation.complete",
+        {
+          idleShutdownTimeoutMs,
+          sessionIds,
+          workspaceId: this.options.workspaceId,
+        },
+      );
     } catch (error) {
+      void appendTerminalRestartReproLog(
+        this.options.workspaceRoot,
+        "backend.releaseForDeactivation.failed",
+        {
+          error: error instanceof Error ? error.message : String(error),
+          idleShutdownTimeoutMs,
+          sessionIds,
+          workspaceId: this.options.workspaceId,
+        },
+      );
       logVSmuxDebug("backend.daemon.releaseForDeactivation.failed", {
         error: error instanceof Error ? error.message : String(error),
         workspaceId: this.options.workspaceId,
@@ -648,6 +703,18 @@ function formatDebugActivityAt(value: number | undefined): string | undefined {
   }
 
   return new Date(value).toISOString();
+}
+
+function summarizeSnapshots(snapshots: readonly TerminalSessionSnapshot[]) {
+  return snapshots.map((snapshot) => ({
+    agentName: snapshot.agentName,
+    agentStatus: snapshot.agentStatus,
+    isAttached: snapshot.isAttached,
+    restoreState: snapshot.restoreState,
+    sessionId: snapshot.sessionId,
+    status: snapshot.status,
+    title: snapshot.title,
+  }));
 }
 
 export function applyPersistedSessionStateToDisconnectedSnapshot(

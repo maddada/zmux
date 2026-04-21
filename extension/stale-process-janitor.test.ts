@@ -143,4 +143,32 @@ describe("selectStaleVsmuxProcessIds", () => {
 
     expect(pids).toEqual([]);
   });
+
+  test("should preserve reusable daemon pids from janitor cleanup", () => {
+    const pids = selectStaleVsmuxProcessIds(
+      [
+        {
+          command:
+            "node /Users/test/.vscode/extensions/maddada.vsmux-4.3.1/out/extension/terminal-daemon-process.js",
+          pid: 1001,
+          ppid: 1,
+        },
+        {
+          command:
+            "node /Users/test/.vscode/extensions/maddada.vsmux-4.3.1/out/extension/agent-shell-wrapper-runner.js",
+          pid: 1002,
+          ppid: 1,
+        },
+      ],
+      {
+        currentExtensionPath: "/Users/test/.vscode/extensions/maddada.vsmux-4.4.1",
+        currentPid: 900,
+        globalStoragePath:
+          "/Users/test/Library/Application Support/Code/User/globalStorage/maddada.vsmux",
+        reusableDaemonProcessIds: new Set([1001]),
+      },
+    );
+
+    expect(pids).toEqual([1002]);
+  });
 });

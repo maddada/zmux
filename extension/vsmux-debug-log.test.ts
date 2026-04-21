@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vite-plus/test";
@@ -40,8 +40,10 @@ describe("vsmux debug log", () => {
     workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "vsmux-debug-log-"));
     workspaceState.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }];
     workspaceState.debuggingMode = true;
+    await mkdir(path.join(workspaceRoot, ".git", "info"), { recursive: true });
 
     const logPath = getVSmuxDebugLogPath(workspaceRoot);
+    const excludePath = path.join(workspaceRoot, ".git", "info", "exclude");
 
     resetVSmuxDebugLog();
     await waitForQueueDrain();
@@ -61,10 +63,12 @@ describe("vsmux debug log", () => {
 
     expect(logPath).toBe(path.join(workspaceRoot, ".vsmux", "full-reload-terminal-reconnect.log"));
     const contents = await readFile(logPath, "utf8");
+    const excludeContents = await readFile(excludePath, "utf8");
     expect(contents).toContain("controller.waitForTerminalFrontendConnectionAfterReload.timeout");
     expect(contents).toContain('"sessionId":"session-04"');
     expect(contents).not.toContain("backend.daemon.sessionState");
     expect(contents).not.toContain("controller.focusSession.afterStateChange");
+    expect(excludeContents).toContain(".vsmux/");
   });
 
   test("does not create the debug log file when debugging is disabled", async () => {

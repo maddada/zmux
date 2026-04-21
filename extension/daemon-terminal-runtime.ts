@@ -19,6 +19,7 @@ import type {
   TerminalSessionSnapshot,
 } from "../shared/terminal-host-protocol";
 import { TERMINAL_HOST_PROTOCOL_VERSION } from "../shared/terminal-host-protocol";
+import { appendTerminalRestartReproLog } from "./terminal-restart-repro-log";
 import { logVSmuxDebug } from "./vsmux-debug-log";
 
 type DaemonInfo = {
@@ -135,6 +136,7 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   public constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly workspaceId: string,
+    private readonly workspaceRoot: string,
   ) {}
 
   public dispose(): void {
@@ -197,6 +199,14 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   public async configureExisting(idleShutdownTimeoutMs: number | null): Promise<boolean> {
     const daemonInfo = await this.ensureExistingReady();
     if (!daemonInfo) {
+      void appendTerminalRestartReproLog(
+        this.workspaceRoot,
+        "daemon.configureExisting.skippedMissingDaemon",
+        {
+          idleShutdownTimeoutMs,
+          workspaceId: this.workspaceId,
+        },
+      );
       return false;
     }
 
@@ -206,6 +216,11 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
       type: "configure",
     };
     await this.sendRequest(request);
+    void appendTerminalRestartReproLog(this.workspaceRoot, "daemon.configureExisting.applied", {
+      idleShutdownTimeoutMs,
+      pid: daemonInfo.pid,
+      workspaceId: this.workspaceId,
+    });
     return true;
   }
 
@@ -232,6 +247,15 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
   ): Promise<boolean> {
     const daemonInfo = await this.ensureExistingReady();
     if (!daemonInfo) {
+      void appendTerminalRestartReproLog(
+        this.workspaceRoot,
+        "daemon.syncSessionLeasesExisting.skippedMissingDaemon",
+        {
+          leaseDurationMs,
+          sessionIds,
+          workspaceId,
+        },
+      );
       return false;
     }
 
@@ -243,6 +267,16 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
       workspaceId,
     };
     await this.sendRequest(request);
+    void appendTerminalRestartReproLog(
+      this.workspaceRoot,
+      "daemon.syncSessionLeasesExisting.applied",
+      {
+        leaseDurationMs,
+        pid: daemonInfo.pid,
+        sessionIds,
+        workspaceId,
+      },
+    );
     return true;
   }
 
@@ -410,6 +444,13 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
 
       const info = await this.getReachableDaemonInfo();
       if (info && (await this.canReachDaemon(info))) {
+        void appendTerminalRestartReproLog(this.workspaceRoot, "daemon.ensureReady.reused", {
+          pid: info.pid,
+          port: info.port,
+          protocolVersion: info.protocolVersion,
+          startedAt: info.startedAt,
+          workspaceId: this.workspaceId,
+        });
         logVSmuxDebug("daemon.runtime.ensureDaemonProcess.readyExisting", {
           pid: info.pid,
           port: info.port,
@@ -433,6 +474,17 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
       try {
         const lockedInfo = await this.getReachableDaemonInfo();
         if (lockedInfo) {
+          void appendTerminalRestartReproLog(
+            this.workspaceRoot,
+            "daemon.ensureReady.reusedAfterLaunchLock",
+            {
+              pid: lockedInfo.pid,
+              port: lockedInfo.port,
+              protocolVersion: lockedInfo.protocolVersion,
+              startedAt: lockedInfo.startedAt,
+              workspaceId: this.workspaceId,
+            },
+          );
           logVSmuxDebug("daemon.runtime.ensureDaemonProcess.readyAfterLaunchLock", {
             extensionHostPid: process.pid,
             pid: lockedInfo.pid,
@@ -453,6 +505,12 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
           stdio: "ignore",
         });
         child.unref();
+        void appendTerminalRestartReproLog(this.workspaceRoot, "daemon.ensureReady.spawned", {
+          daemonStateDir,
+          extensionHostPid: process.pid,
+          pid: child.pid,
+          workspaceId: this.workspaceId,
+        });
         logVSmuxDebug("daemon.runtime.ensureDaemonProcess.spawned", {
           daemonStateDir,
           extensionHostPid: process.pid,
@@ -462,6 +520,17 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
         while (Date.now() < deadline) {
           const readyInfo = await this.getReachableDaemonInfo();
           if (readyInfo) {
+            void appendTerminalRestartReproLog(
+              this.workspaceRoot,
+              "daemon.ensureReady.readySpawned",
+              {
+                pid: readyInfo.pid,
+                port: readyInfo.port,
+                protocolVersion: readyInfo.protocolVersion,
+                startedAt: readyInfo.startedAt,
+                workspaceId: this.workspaceId,
+              },
+            );
             logVSmuxDebug("daemon.runtime.ensureDaemonProcess.readySpawned", {
               pid: readyInfo.pid,
               port: readyInfo.port,
@@ -509,6 +578,15 @@ export class DaemonTerminalRuntime implements vscode.Disposable {
       port: daemonInfo.port,
       protocolVersion: daemonInfo.protocolVersion,
       startedAt: daemonInfo.startedAt,
+    });
+    void appendTerminalRestartReproLog(this.workspaceRoot, "daemon.replaceStaleDaemon", {
+      hasExpectedProtocol,
+      isReachable,
+      pid: daemonInfo.pid,
+      port: daemonInfo.port,
+      protocolVersion: daemonInfo.protocolVersion,
+      startedAt: daemonInfo.startedAt,
+      workspaceId: this.workspaceId,
     });
     await terminateDaemonProcess(daemonInfo.pid);
     await this.clearPersistedDaemonInfo();

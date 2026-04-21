@@ -159,6 +159,7 @@ function createRuntime(): DaemonTerminalRuntime {
       globalStorageUri: { fsPath: "/tmp" },
     } as never,
     "workspace-1",
+    "/tmp/workspace",
   );
   stubLifecycle(runtime);
   return runtime;

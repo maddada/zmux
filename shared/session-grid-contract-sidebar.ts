@@ -301,9 +301,6 @@ export type ExtensionToSidebarMessage =
 
 export type SidebarToExtensionMessage =
   | {
-      type: "ready";
-    }
-  | {
       type: "openSettings";
     }
   | {

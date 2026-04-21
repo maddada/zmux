@@ -1,6 +1,7 @@
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { ensureWorkspaceGitExcludeEntry } from "./git/local-exclude";
 
 const SETTINGS_SECTION = "VSmux";
 const DEBUGGING_MODE_SETTING = "debuggingMode";
@@ -20,21 +21,36 @@ const DEBUG_EVENT_ALLOWLIST = new Set<string>([
 
 let fileWriteQueue: Promise<void> = Promise.resolve();
 
-export function initializeVSmuxDebugLog(_context: vscode.ExtensionContext): void {}
+export function initializeVSmuxDebugLog(context: vscode.ExtensionContext): void {
+  queueDebugLogWorkspaceIgnore();
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (
+        event.affectsConfiguration(`${SETTINGS_SECTION}.${DEBUGGING_MODE_SETTING}`) &&
+        isDebugLoggingEnabled()
+      ) {
+        queueDebugLogWorkspaceIgnore();
+      }
+    }),
+  );
+}
 
 export function resetVSmuxDebugLog(): void {
   if (!isDebugLoggingEnabled()) {
     return;
   }
 
-  const logFilePath = resolveWorkspaceDebugLogFilePath();
-  if (!logFilePath) {
+  const workspaceRoot = resolveWorkspaceRoot();
+  if (!workspaceRoot) {
     return;
   }
+  const logFilePath = getVSmuxDebugLogPath(workspaceRoot);
 
   fileWriteQueue = fileWriteQueue
     .catch(() => undefined)
     .then(async () => {
+      await ensureDebugLogWorkspaceIgnored(workspaceRoot);
       await mkdir(path.dirname(logFilePath), { recursive: true });
       await writeFile(logFilePath, "", "utf8");
     })
@@ -68,24 +84,42 @@ function buildLogLine(event: string, details?: unknown): string {
   return `${new Date().toISOString()} ${event}${suffix}\n`;
 }
 
-function resolveWorkspaceDebugLogFilePath(): string | undefined {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  return workspaceRoot ? getVSmuxDebugLogPath(workspaceRoot) : undefined;
+function resolveWorkspaceRoot(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+async function ensureDebugLogWorkspaceIgnored(workspaceRoot: string): Promise<void> {
+  await ensureWorkspaceGitExcludeEntry(workspaceRoot, `${DEBUG_LOG_DIR_NAME}/`);
 }
 
 function queueDebugLogFileAppend(text: string): void {
-  const logFilePath = resolveWorkspaceDebugLogFilePath();
-  if (!logFilePath) {
+  const workspaceRoot = resolveWorkspaceRoot();
+  if (!workspaceRoot) {
     return;
   }
+  const logFilePath = getVSmuxDebugLogPath(workspaceRoot);
 
   fileWriteQueue = fileWriteQueue
     .catch(() => undefined)
     .then(async () => {
+      await ensureDebugLogWorkspaceIgnored(workspaceRoot);
       await mkdir(path.dirname(logFilePath), { recursive: true });
       await appendFile(logFilePath, text, "utf8");
     })
     .catch(() => undefined);
+}
+
+function queueDebugLogWorkspaceIgnore(): void {
+  if (!isDebugLoggingEnabled()) {
+    return;
+  }
+
+  const workspaceRoot = resolveWorkspaceRoot();
+  if (!workspaceRoot) {
+    return;
+  }
+
+  void ensureDebugLogWorkspaceIgnored(workspaceRoot).catch(() => undefined);
 }
 
 function isDebugLoggingEnabled(): boolean {
