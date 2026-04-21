@@ -563,6 +563,7 @@ export function SessionGroupSection({
         data-collapsed={String(isCollapsed)}
         data-dragging={String(Boolean(sortable.isDragging))}
         data-drop-target={String(isGroupDropTarget)}
+        data-empty-space-blocking="true"
         data-session-connector={String(showSessionGroupConnector)}
         data-sidebar-group-id={group.groupId}
         onClick={() => {

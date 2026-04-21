@@ -11,10 +11,12 @@ import type {
   SidebarToExtensionMessage,
 } from "../shared/session-grid-contract";
 import { getDebuggingMode } from "./native-terminal-workspace/settings";
+import { appendTerminalRestartReproLog } from "./terminal-restart-repro-log";
 import { appendT3CloseSessionReproLog } from "./t3-close-session-repro-log";
 import { getDefaultWorkspaceCwd } from "./terminal-workspace-environment";
 
 const EXTENSION_ID = "maddada.VSmux";
+const SIDEBAR_STARTUP_REPRO_WINDOW_MS = 15_000;
 
 type SessionSidebarViewOptions = {
   onDidResolveView?: () => void | Promise<void>;
@@ -26,8 +28,15 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
   private messageQueue: Promise<void> = Promise.resolve();
   private nextQueuedMessageId = 0;
   private queuedSidebarMessageCount = 0;
+  private resolveCount = 0;
+  private sidebarStartupReproDeadline = Date.now() + SIDEBAR_STARTUP_REPRO_WINDOW_MS;
   private view: vscode.WebviewView | undefined;
-  private latestMessage: ExtensionToSidebarMessage | undefined;
+  private latestReplayableHydrate:
+    | Extract<ExtensionToSidebarMessage, { type: "hydrate" }>
+    | undefined;
+  private latestReplayableSessionState:
+    | Extract<ExtensionToSidebarMessage, { type: "sessionState" }>
+    | undefined;
 
   public constructor(private readonly options: SessionSidebarViewOptions) {}
 
@@ -41,13 +50,17 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
 
   public async postMessage(message: ExtensionToSidebarMessage): Promise<void> {
     if (message.type === "hydrate" || message.type === "sessionState") {
-      if (
-        !this.latestMessage ||
-        (this.latestMessage.type !== "hydrate" && this.latestMessage.type !== "sessionState") ||
-        this.latestMessage.revision <= message.revision
-      ) {
-        this.latestMessage = message;
-      }
+      this.recordReplayableMessage(message);
+      this.appendSidebarStartupReproLog(
+        this.view ? "sidebar.view.postMessage.sent" : "sidebar.view.postMessage.buffered",
+        {
+          groupCount: message.groups.length,
+          hasView: this.view !== undefined,
+          messageType: message.type,
+          revision: message.revision,
+          sessionCount: countSidebarSessions(message),
+        },
+      );
     }
 
     if (!this.view) {
@@ -66,6 +79,17 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken,
   ): void | Thenable<void> {
+    this.resolveCount += 1;
+    this.sidebarStartupReproDeadline = Date.now() + SIDEBAR_STARTUP_REPRO_WINDOW_MS;
+    const latestReplayableMessage = this.getLatestReplayableMessage();
+    this.appendSidebarStartupReproLog("sidebar.view.resolve.start", {
+      hasLatestMessage: latestReplayableMessage !== undefined,
+      latestMessageRevision:
+        latestReplayableMessage !== undefined ? latestReplayableMessage.revision : undefined,
+      latestMessageType:
+        latestReplayableMessage !== undefined ? latestReplayableMessage.type : undefined,
+      resolveCount: this.resolveCount,
+    });
     const extensionUri = getExtensionUri();
     this.view = webviewView;
     webviewView.webview.options = {
@@ -81,6 +105,9 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
 
     this.disposables.push(
       webviewView.onDidDispose(() => {
+        this.appendSidebarStartupReproLog("sidebar.view.dispose", {
+          resolveCount: this.resolveCount,
+        });
         if (this.view === webviewView) {
           this.view = undefined;
         }
@@ -217,8 +244,69 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
 
     void this.options.onDidResolveView?.();
 
-    if (this.latestMessage) {
-      void webviewView.webview.postMessage(this.latestMessage);
+    void this.replayLatestMessages(webviewView);
+  }
+
+  private recordReplayableMessage(
+    message: Extract<ExtensionToSidebarMessage, { type: "hydrate" | "sessionState" }>,
+  ): void {
+    if (message.type === "hydrate") {
+      if (
+        !this.latestReplayableHydrate ||
+        this.latestReplayableHydrate.revision <= message.revision
+      ) {
+        this.latestReplayableHydrate = message;
+      }
+      return;
+    }
+
+    if (
+      !this.latestReplayableSessionState ||
+      this.latestReplayableSessionState.revision <= message.revision
+    ) {
+      this.latestReplayableSessionState = message;
+    }
+  }
+
+  private getLatestReplayableMessage():
+    | Extract<ExtensionToSidebarMessage, { type: "hydrate" | "sessionState" }>
+    | undefined {
+    if (
+      this.latestReplayableHydrate &&
+      this.latestReplayableSessionState &&
+      this.latestReplayableSessionState.revision > this.latestReplayableHydrate.revision
+    ) {
+      return this.latestReplayableSessionState;
+    }
+
+    return this.latestReplayableHydrate ?? this.latestReplayableSessionState;
+  }
+
+  private async replayLatestMessages(webviewView: vscode.WebviewView): Promise<void> {
+    if (this.latestReplayableHydrate) {
+      this.appendSidebarStartupReproLog("sidebar.view.resolve.replayLatestMessage", {
+        groupCount: this.latestReplayableHydrate.groups.length,
+        messageType: this.latestReplayableHydrate.type,
+        resolveCount: this.resolveCount,
+        revision: this.latestReplayableHydrate.revision,
+        sessionCount: countSidebarSessions(this.latestReplayableHydrate),
+      });
+      await webviewView.webview.postMessage(this.latestReplayableHydrate);
+    }
+
+    if (
+      this.latestReplayableSessionState &&
+      (!this.latestReplayableHydrate ||
+        this.latestReplayableSessionState.revision > this.latestReplayableHydrate.revision)
+    ) {
+      this.appendSidebarStartupReproLog("sidebar.view.resolve.replayLatestMessage", {
+        groupCount: this.latestReplayableSessionState.groups.length,
+        messageType: this.latestReplayableSessionState.type,
+        resolveCount: this.resolveCount,
+        revision: this.latestReplayableSessionState.revision,
+        sessionCount: countSidebarSessions(this.latestReplayableSessionState),
+      });
+      await webviewView.webview.postMessage(this.latestReplayableSessionState);
     }
   }
 
@@ -228,6 +316,20 @@ export class SessionSidebarViewProvider implements vscode.Disposable, vscode.Web
     }
     void appendT3CloseSessionReproLog(getDefaultWorkspaceCwd(), event, details);
   }
+
+  private appendSidebarStartupReproLog(event: string, details: Record<string, unknown>): void {
+    if (Date.now() > this.sidebarStartupReproDeadline) {
+      return;
+    }
+
+    void appendTerminalRestartReproLog(getDefaultWorkspaceCwd(), event, details);
+  }
+}
+
+function countSidebarSessions(
+  message: Extract<ExtensionToSidebarMessage, { type: "hydrate" | "sessionState" }>,
+): number {
+  return message.groups.reduce((total, group) => total + group.sessions.length, 0);
 }
 
 export function shouldBypassSidebarMessageQueue(message: SidebarToExtensionMessage): boolean {
@@ -354,8 +456,6 @@ export function isSidebarMessage(candidate: unknown): candidate is SidebarToExte
 
   const message = candidate as Partial<SidebarToExtensionMessage>;
   switch (message.type) {
-    case "ready":
-      return true;
     case "openSettings":
     case "toggleCompletionBell":
     case "toggleShowLastInteractionTimeOnSessionCards":

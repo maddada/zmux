@@ -11,7 +11,6 @@ import type { SidebarGitAction } from "../../shared/sidebar-git";
 
 export type SidebarMessageHandlers = {
   adjustTerminalFontSize: (delta: -1 | 1) => Promise<void>;
-  clearStartupSidebarRefreshes: () => void;
   clearGeneratedPreviousSessions: () => Promise<void>;
   closeGroup: (groupId: string) => Promise<void>;
   closeSession: (sessionId: string) => Promise<void>;
@@ -46,7 +45,6 @@ export type SidebarMessageHandlers = {
   openSettings: () => Promise<void>;
   promptFindPreviousSession: () => Promise<void>;
   promptRenameSession: (sessionId: string) => Promise<void>;
-  refreshSidebarHydrate: () => Promise<void>;
   renameGroup: (groupId: string, title: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   refreshGitState: () => Promise<void>;
@@ -103,14 +101,7 @@ export async function dispatchSidebarMessage(
   message: SidebarToExtensionMessage,
   handlers: SidebarMessageHandlers,
 ): Promise<void> {
-  if (message.type !== "ready") {
-    handlers.clearStartupSidebarRefreshes();
-  }
-
   switch (message.type) {
-    case "ready":
-      await handlers.refreshSidebarHydrate();
-      return;
     case "createSession":
       await handlers.createSession();
       return;

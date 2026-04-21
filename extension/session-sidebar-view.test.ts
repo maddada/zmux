@@ -1,5 +1,9 @@
 import { describe, expect, test, vi } from "vite-plus/test";
-import { isSidebarMessage, shouldBypassSidebarMessageQueue } from "./session-sidebar-view";
+import {
+  SessionSidebarViewProvider,
+  isSidebarMessage,
+  shouldBypassSidebarMessageQueue,
+} from "./session-sidebar-view";
 
 vi.mock("vscode", () => ({
   extensions: {
@@ -8,6 +12,9 @@ vi.mock("vscode", () => ({
   },
   Uri: {
     joinPath: (...parts: unknown[]) => parts,
+  },
+  workspace: {
+    workspaceFolders: [{ uri: { fsPath: "/workspace" } }],
   },
 }));
 
@@ -171,3 +178,108 @@ describe("shouldBypassSidebarMessageQueue", () => {
     ).toBe(true);
   });
 });
+
+describe("SessionSidebarViewProvider", () => {
+  test("should replay hydrate before the latest session state when the view resolves late", async () => {
+    const provider = new SessionSidebarViewProvider({
+      onMessage: async () => undefined,
+    });
+    const postMessage = vi.fn(async () => true);
+    const webviewView = createMockWebviewView(postMessage);
+
+    const hydrateMessage = createReplayableSidebarMessage("hydrate", 3, 7);
+    const sessionStateMessage = createReplayableSidebarMessage("sessionState", 4, 7);
+
+    await provider.postMessage(hydrateMessage);
+    await provider.postMessage(sessionStateMessage);
+
+    provider.resolveWebviewView(webviewView as never, {} as never, {} as never);
+    await Promise.resolve();
+
+    expect(postMessage).toHaveBeenCalledTimes(2);
+    expect(postMessage).toHaveBeenNthCalledWith(1, hydrateMessage);
+    expect(postMessage).toHaveBeenNthCalledWith(2, sessionStateMessage);
+  });
+});
+
+function createMockWebviewView(postMessage: ReturnType<typeof vi.fn>) {
+  const disposable = { dispose() {} };
+  return {
+    onDidDispose: () => disposable,
+    onDidChangeVisibility: () => disposable,
+    show: () => undefined,
+    viewType: "vsmux.sessions",
+    visible: true,
+    webview: {
+      html: "",
+      onDidReceiveMessage: () => disposable,
+      options: {},
+      postMessage,
+    },
+  };
+}
+
+function createReplayableSidebarMessage(
+  type: "hydrate" | "sessionState",
+  revision: number,
+  sessionCount: number,
+): Parameters<SessionSidebarViewProvider["postMessage"]>[0] {
+  return {
+    groups: [
+      {
+        groupId: "group-1",
+        isActive: true,
+        isFocusModeActive: false,
+        layoutVisibleCount: 1,
+        sessions: Array.from({ length: sessionCount }, (_, index) => ({
+          activity: "idle",
+          kind: "terminal",
+          sessionId: `session-${index}`,
+          title: `Session ${index}`,
+        })),
+        title: "Main",
+        viewMode: "grid",
+        visibleCount: 1,
+      },
+    ],
+    hud: {
+      activeSessionsSortMode: "manual",
+      agentManagerZoomPercent: 100,
+      agents: [],
+      collapsedSections: {},
+      commands: [],
+      completionBellEnabled: false,
+      completionSound: "off",
+      completionSoundLabel: "Off",
+      createSessionOnSidebarDoubleClick: false,
+      debuggingMode: false,
+      git: {
+        availableActions: [],
+        hasWorkingTreeChanges: false,
+        isGitRepository: false,
+      },
+      highlightedVisibleCount: 1,
+      isFocusModeActive: false,
+      pendingAgentIds: [],
+      renameSessionOnDoubleClick: false,
+      sectionVisibility: {
+        actions: true,
+        agents: true,
+        browsers: true,
+        git: true,
+      },
+      showCloseButtonOnSessionCards: true,
+      showHotkeysOnSessionCards: true,
+      showLastInteractionTimeOnSessionCards: true,
+      theme: "plain-dark",
+      viewMode: "grid",
+      visibleCount: 1,
+      visibleSlotLabels: [],
+    },
+    pinnedPrompts: [],
+    previousSessions: [],
+    revision,
+    scratchPadContent: "",
+    type,
+  } as unknown as Parameters<SessionSidebarViewProvider["postMessage"]>[0];
+}

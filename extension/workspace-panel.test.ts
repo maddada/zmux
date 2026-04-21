@@ -163,7 +163,7 @@ describe("WorkspacePanelManager", () => {
     expect(closeTabGroupsMock).not.toHaveBeenCalled();
   });
 
-  test("should dispose restored workspace panels instead of adopting them", async () => {
+  test("should adopt restored workspace panels instead of creating new ones", async () => {
     const manager = new WorkspacePanelManager({
       context: createMockContext(),
       onMessage: vi.fn(),
@@ -173,24 +173,26 @@ describe("WorkspacePanelManager", () => {
     await registeredSerializer?.deserializeWebviewPanel(restoredPanel);
     await manager.reveal();
 
-    expect(restoredPanel.dispose).toHaveBeenCalledTimes(1);
-    expect(createdPanels).toHaveLength(1);
+    expect(restoredPanel.dispose).not.toHaveBeenCalled();
+    expect(createdPanels).toHaveLength(0);
 
     manager.dispose();
   });
 
-  test("should create a fresh workspace panel after discarding a restored one", async () => {
+  test("should dispose duplicate restored workspace panels after adopting the first one", async () => {
     const manager = new WorkspacePanelManager({
       context: createMockContext(),
       onMessage: vi.fn(),
     });
-    const restoredPanel = createMockPanel({ viewColumn: 3 });
+    const restoredPanel = createMockPanel({ active: true, viewColumn: 2, visible: true });
+    const duplicateRestoredPanel = createMockPanel({ active: false, viewColumn: 3, visible: true });
 
     await registeredSerializer?.deserializeWebviewPanel(restoredPanel);
-    await manager.reveal();
+    await registeredSerializer?.deserializeWebviewPanel(duplicateRestoredPanel);
 
-    expect(restoredPanel.dispose).toHaveBeenCalledTimes(1);
-    expect(createdPanels).toHaveLength(1);
+    expect(restoredPanel.dispose).not.toHaveBeenCalled();
+    expect(duplicateRestoredPanel.dispose).toHaveBeenCalledTimes(1);
+    expect(createdPanels).toHaveLength(0);
 
     manager.dispose();
   });
@@ -208,56 +210,55 @@ describe("WorkspacePanelManager", () => {
     manager.dispose();
   });
 
-  test("should close other VSmux workspace tabs before creating a new panel", async () => {
+  test("should create a new panel without closing workspace tabs during reveal", async () => {
     const manager = new WorkspacePanelManager({
       context: createMockContext(),
       onMessage: vi.fn(),
     });
 
-    closeTabGroupsMock.mockImplementationOnce(async () => {
-      (vscode.window.tabGroups.all as unknown as unknown[]) = [];
-      return true;
-    });
+    const firstGroupTabs = [
+      {
+        group: { viewColumn: 1 } as { tabs?: unknown[]; viewColumn: number },
+        input: new vscode.TabInputWebview("vsmux.workspace"),
+        isActive: true,
+        label: "VSmux",
+      },
+    ];
+    firstGroupTabs[0].group.tabs = firstGroupTabs;
+    const secondGroupTabs = [
+      {
+        group: { viewColumn: 2 } as { tabs?: unknown[]; viewColumn: number },
+        input: new vscode.TabInputWebview("vsmux.workspace"),
+        isActive: false,
+        label: "VSmux",
+      },
+      {
+        group: { viewColumn: 2 } as { tabs?: unknown[]; viewColumn: number },
+        input: new vscode.TabInputWebview("workbench.welcomePage"),
+        isActive: false,
+        label: "Welcome",
+      },
+    ];
+    for (const tab of secondGroupTabs) {
+      tab.group.tabs = secondGroupTabs;
+    }
 
     (vscode.window.tabGroups.all as unknown as unknown[]) = [
       {
         isActive: true,
-        tabs: [
-          {
-            group: { viewColumn: 1 },
-            input: new vscode.TabInputWebview("vsmux.workspace"),
-            isActive: true,
-            label: "VSmux",
-          },
-        ],
+        tabs: firstGroupTabs,
         viewColumn: 1,
       } as never,
       {
         isActive: false,
-        tabs: [
-          {
-            group: { viewColumn: 2 },
-            input: new vscode.TabInputWebview("vsmux.workspace"),
-            isActive: false,
-            label: "VSmux",
-          },
-          {
-            group: { viewColumn: 2 },
-            input: new vscode.TabInputWebview("workbench.welcomePage"),
-            isActive: false,
-            label: "Welcome",
-          },
-        ],
+        tabs: secondGroupTabs,
         viewColumn: 2,
       } as never,
     ];
 
     await manager.reveal();
 
-    expect(closeTabGroupsMock).toHaveBeenCalledWith(
-      [expect.objectContaining({ label: "VSmux" }), expect.objectContaining({ label: "VSmux" })],
-      true,
-    );
+    expect(closeTabGroupsMock).not.toHaveBeenCalled();
     expect(createdPanels).toHaveLength(1);
     expect(executeCommandMock).toHaveBeenCalledWith("workbench.action.pinEditor");
 

@@ -446,6 +446,7 @@ export function AgentsPanel({
           >
             <div
               className="card commands-panel agents-panel-shell sidebar-collapse-content"
+              data-empty-space-blocking="true"
               ref={contentRef}
             >
               {shouldShowEmptyState ? (

@@ -630,6 +630,7 @@ export function CommandsPanel({
           >
             <div
               className="card commands-panel commands-panel-shell sidebar-collapse-content"
+              data-empty-space-blocking="true"
               ref={contentRef}
             >
               {showGitButton ? <GitActionRow git={git} vscode={vscode} /> : null}

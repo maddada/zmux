@@ -14,6 +14,8 @@ const WORKSPACE_PANEL_TYPE = "vsmux.workspace";
 const WORKSPACE_PANEL_TITLE = "VSmux";
 const WORKSPACE_PANEL_FOCUS_CONTEXT = "vsmux.workspacePanelFocus";
 
+let activeWorkspacePanelManager: WorkspacePanelManager | undefined;
+
 type WorkspacePanelOptions = {
   context: vscode.ExtensionContext;
   onMessage: (message: WorkspacePanelToExtensionMessage) => Promise<void> | void;
@@ -46,15 +48,28 @@ export class WorkspacePanelManager implements vscode.Disposable {
   private panelFocusContext = false;
   private panel: vscode.WebviewPanel | undefined;
   public constructor(private readonly options: WorkspacePanelOptions) {
+    activeWorkspacePanelManager = this;
     this.disposables.push(
       vscode.window.registerWebviewPanelSerializer(WORKSPACE_PANEL_TYPE, {
         deserializeWebviewPanel: async (webviewPanel) => {
-          logVSmuxDebug("workspace.panel.disposingRestoredPanel", {
+          if (this.panel && this.panel !== webviewPanel) {
+            logVSmuxDebug("workspace.panel.disposingDuplicateRestoredPanel", {
+              active: webviewPanel.active,
+              existingViewColumn: this.panel.viewColumn,
+              viewColumn: webviewPanel.viewColumn,
+              visible: webviewPanel.visible,
+            });
+            webviewPanel.dispose();
+            return;
+          }
+
+          logVSmuxDebug("workspace.panel.restoredPanelAdopted", {
             active: webviewPanel.active,
             viewColumn: webviewPanel.viewColumn,
             visible: webviewPanel.visible,
           });
-          webviewPanel.dispose();
+          this.panel = webviewPanel;
+          this.configurePanel(webviewPanel);
         },
       }),
     );
@@ -67,6 +82,9 @@ export class WorkspacePanelManager implements vscode.Disposable {
 
     this.panel?.dispose();
     this.panel = undefined;
+    if (activeWorkspacePanelManager === this) {
+      activeWorkspacePanelManager = undefined;
+    }
     void this.setWorkspacePanelFocusContext(false);
   }
 
@@ -82,6 +100,20 @@ export class WorkspacePanelManager implements vscode.Disposable {
     if (!revealedExistingTab) {
       panel.reveal(panel.viewColumn ?? vscode.ViewColumn.Active, false);
     }
+  }
+
+  public async revealInBackground(): Promise<boolean> {
+    if (!this.panel) {
+      return false;
+    }
+
+    this.panel.reveal(this.panel.viewColumn ?? vscode.ViewColumn.Active, true);
+    logVSmuxDebug("workspace.panel.revealInBackground", {
+      active: this.panel.active,
+      visible: this.panel.visible,
+      viewColumn: this.panel.viewColumn,
+    });
+    return true;
   }
 
   public hide(): void {
@@ -139,7 +171,6 @@ export class WorkspacePanelManager implements vscode.Disposable {
       return this.panel;
     }
 
-    await closeWorkspacePanelTabs();
     const panel = this.getOrCreatePanel();
     await this.pinWorkspaceTab();
     return panel;
@@ -262,6 +293,10 @@ export class WorkspacePanelManager implements vscode.Disposable {
     this.panelFocusContext = isFocused;
     await vscode.commands.executeCommand("setContext", WORKSPACE_PANEL_FOCUS_CONTEXT, isFocused);
   }
+}
+
+export async function revealWorkspacePanelInBackground(): Promise<boolean> {
+  return (await activeWorkspacePanelManager?.revealInBackground()) ?? false;
 }
 
 function getWorkspaceHtml(

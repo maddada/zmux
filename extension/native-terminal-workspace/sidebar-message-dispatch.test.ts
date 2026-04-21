@@ -6,7 +6,6 @@ function createHandlers(): SidebarMessageHandlers {
     adjustTerminalFontSize: vi.fn(async () => undefined),
     cancelSidebarGitCommit: vi.fn(async () => undefined),
     clearGeneratedPreviousSessions: vi.fn(async () => undefined),
-    clearStartupSidebarRefreshes: vi.fn(() => undefined),
     closeGroup: vi.fn(async () => undefined),
     closeSession: vi.fn(async () => undefined),
     confirmSidebarGitCommit: vi.fn(async () => undefined),
@@ -34,7 +33,6 @@ function createHandlers(): SidebarMessageHandlers {
     promptRenameSession: vi.fn(async () => undefined),
     refreshDaemonSessions: vi.fn(async () => undefined),
     refreshGitState: vi.fn(async () => undefined),
-    refreshSidebarHydrate: vi.fn(async () => undefined),
     renameGroup: vi.fn(async () => undefined),
     renameSession: vi.fn(async () => undefined),
     restartSession: vi.fn(async () => undefined),
@@ -80,7 +78,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.runSidebarCommand).toHaveBeenCalledWith(
       "build",
       "debug",
@@ -106,7 +103,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.saveSidebarCommand).toHaveBeenCalledWith(
       "dev",
       "",
@@ -132,7 +128,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.forkSession).toHaveBeenCalledWith("session-3");
   });
 
@@ -148,7 +143,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.setSessionSleeping).toHaveBeenCalledWith("session-3", true);
   });
 
@@ -164,7 +158,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.setSessionFavorite).toHaveBeenCalledWith("session-3", true);
   });
 
@@ -180,7 +173,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.setGroupSleeping).toHaveBeenCalledWith("group-2", true);
   });
 
@@ -197,7 +189,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.savePinnedPrompt).toHaveBeenCalledWith(
       "prompt-1",
       "Release checklist",
@@ -216,7 +207,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.fullReloadGroup).toHaveBeenCalledWith("group-2");
   });
 
@@ -230,7 +220,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.toggleActiveSessionsSortMode).toHaveBeenCalledTimes(1);
   });
 
@@ -244,7 +233,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.toggleShowLastInteractionTimeOnSessionCards).toHaveBeenCalledTimes(1);
   });
 
@@ -258,7 +246,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.openWorkspaceWelcome).toHaveBeenCalledTimes(1);
   });
 
@@ -272,7 +259,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.promptFindPreviousSession).toHaveBeenCalledTimes(1);
   });
 
@@ -288,7 +274,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.syncSidebarAgentOrder).toHaveBeenCalledWith("req-agent", ["claude", "codex"]);
   });
 
@@ -304,7 +289,6 @@ describe("dispatchSidebarMessage", () => {
       handlers,
     );
 
-    expect(handlers.clearStartupSidebarRefreshes).toHaveBeenCalledTimes(1);
     expect(handlers.syncSidebarCommandOrder).toHaveBeenCalledWith("req-command", ["test", "build"]);
   });
 });

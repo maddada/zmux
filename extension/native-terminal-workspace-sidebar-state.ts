@@ -293,9 +293,6 @@ function buildSidebarItem(
   const isFocused = isActiveGroup && presentedSnapshot.focusedSessionId === sessionRecord.sessionId;
   const isSleeping = sessionRecord.isSleeping === true;
   const visiblePrimaryTitle = getVisibleTerminalTitle(getVisiblePrimaryTitle(sessionRecord.title));
-  const visibleTerminalTitle = getVisibleTerminalTitle(
-    options.getTerminalTitle(sessionRecord.sessionId),
-  );
 
   if (isBrowserSession(sessionRecord)) {
     return {
@@ -372,6 +369,9 @@ function buildSidebarItem(
   const sessionSnapshot =
     options.getSessionSnapshot(sessionRecord.sessionId) ??
     createDisconnectedSessionSnapshot(sessionRecord.sessionId, options.workspaceId);
+  const visibleTerminalTitle = getVisibleTerminalTitle(
+    options.getTerminalTitle(sessionRecord.sessionId) ?? sessionSnapshot.title,
+  );
   const effectiveActivity = options.getEffectiveSessionActivity(sessionRecord, sessionSnapshot);
   const agentIcon = options.getSidebarAgentIcon(
     sessionRecord.sessionId,

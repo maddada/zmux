@@ -212,6 +212,46 @@ describe("buildSidebarMessage", () => {
     );
   });
 
+  test("should fall back to the live session snapshot title during startup restore", () => {
+    const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
+    const sessionRecord = createSessionRecord(1, 0, {
+      title: "Session 1945",
+    });
+    workspaceSnapshot.groups[0].snapshot.sessions = [sessionRecord];
+    workspaceSnapshot.groups[0].snapshot.focusedSessionId = sessionRecord.sessionId;
+    workspaceSnapshot.groups[0].snapshot.visibleSessionIds = [sessionRecord.sessionId];
+
+    const message = getSidebarStateMessage(
+      buildSidebarMessage({
+        ...createBuildSidebarMessageOptions(workspaceSnapshot, []),
+        getSessionSnapshot: () => ({
+          agentName: "codex",
+          agentStatus: "idle",
+          cols: 120,
+          cwd: "/workspace",
+          isAttached: true,
+          restoreState: "live",
+          rows: 34,
+          sessionId: sessionRecord.sessionId,
+          shell: "/bin/zsh",
+          startedAt: "2026-04-21T07:24:32.972Z",
+          status: "running",
+          title: "Agent Tiler Memory Leak",
+          workspaceId: "workspace-1",
+        }),
+        getTerminalTitle: () => undefined,
+      }),
+    );
+
+    expect(message.groups[1]?.sessions[0]).toEqual(
+      expect.objectContaining({
+        isPrimaryTitleTerminalTitle: true,
+        primaryTitle: "Agent Tiler Memory Leak",
+        terminalTitle: undefined,
+      }),
+    );
+  });
+
   test("should expose reloading sessions to the sidebar state", () => {
     const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
     const sessionRecord = createSessionRecord(1, 0);

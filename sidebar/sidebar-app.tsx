@@ -85,6 +85,7 @@ import { useScrollGlowState } from "./use-scroll-glow-state";
 import type { WebviewApi } from "./webview-api";
 import { createDisplaySessionLayout } from "../shared/active-sessions-sort";
 import { matchesSidebarSessionSearchQuery } from "./previous-session-search";
+import { isEmptySidebarDoubleClick } from "./empty-sidebar-double-click";
 
 export type SidebarAppProps = {
   messageSource?: Pick<Window, "addEventListener" | "removeEventListener">;
@@ -114,18 +115,6 @@ type SidebarSessionPointerDragState = {
   };
 };
 
-const SIDEBAR_EMPTY_SPACE_BLOCKER_SELECTOR = [
-  "button",
-  "input",
-  "select",
-  "textarea",
-  "a",
-  "[role='button']",
-  "[role='menu']",
-  "[role='menuitem']",
-  "[data-empty-space-blocking='true']",
-].join(", ");
-
 const sensors = [
   PointerSensor.configure({
     activationConstraints(event) {
@@ -140,6 +129,7 @@ const sensors = [
 ];
 
 const SIDEBAR_STARTUP_INTERACTION_BLOCK_MS = 1500;
+const SIDEBAR_STARTUP_REPRO_WINDOW_MS = 15_000;
 const SIDEBAR_POINTER_DRAG_REORDER_THRESHOLD_PX = 8;
 const SIDEBAR_SECTION_COLLAPSE_PERSIST_DEBOUNCE_MS = 200;
 const MIN_SESSION_SEARCH_QUERY_LENGTH = 2;
@@ -186,6 +176,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     Partial<Record<SidebarCollapsibleSection, number>>
   >({});
   const sessionGroupsContentRef = useRef<HTMLDivElement>(null);
+  const sidebarStartupStartedAtRef = useRef(getSidebarStartupNow());
 
   if (!didResetStoreRef.current) {
     resetSidebarStore();
@@ -214,6 +205,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     previousSessions,
     sectionVisibility,
     projectHeader,
+    revision,
     showHotkeysOnSessionCards,
     showLastInteractionTimeOnSessionCards,
     sessionsById,
@@ -231,6 +223,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       groupOrder: state.groupOrder,
       previousSessions: state.previousSessions,
       projectHeader: state.hud.projectHeader,
+      revision: state.revision,
       sectionVisibility: state.hud.sectionVisibility,
       showHotkeysOnSessionCards: state.hud.showHotkeysOnSessionCards,
       showLastInteractionTimeOnSessionCards: state.hud.showLastInteractionTimeOnSessionCards,
@@ -241,6 +234,34 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   );
   const gitCommitDraft = useSidebarStore((state) => state.gitCommitDraft);
   const authoritativeSessionIdsByGroup = useSidebarStore((state) => state.sessionIdsByGroup);
+
+  const postSidebarDebugLog = useEffectEvent((event: string, details: unknown) => {
+    if (!debuggingMode) {
+      return;
+    }
+
+    logSidebarDebug(debuggingMode, event, details);
+    vscode.postMessage({
+      details,
+      event,
+      type: "sidebarDebugLog",
+    });
+  });
+
+  const postSidebarStartupReproLog = useEffectEvent((event: string, details: unknown) => {
+    if (
+      getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current) >
+      SIDEBAR_STARTUP_REPRO_WINDOW_MS
+    ) {
+      return;
+    }
+
+    vscode.postMessage({
+      details,
+      event: `repro.sidebarStartup.${event}`,
+      type: "sidebarDebugLog",
+    });
+  });
 
   useLayoutEffect(() => {
     const nextBrowserSessionCountsByGroup = getBrowserSessionCountsByGroup({
@@ -307,7 +328,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       return;
     }
 
-    if (!isEmptySidebarDoubleClick(event.target, event.currentTarget)) {
+    if (!isEmptySidebarDoubleClick(event)) {
       return;
     }
 
@@ -400,6 +421,16 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       messageType: event.data.type,
       revision: event.data.revision,
     });
+    postSidebarStartupReproLog("messageReceived", {
+      elapsedMs: getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current),
+      groupCount: event.data.groups.length,
+      messageType: event.data.type,
+      previousRevision: revision,
+      revision: event.data.revision,
+      sessionCount: countSidebarSessions(event.data.groups),
+      stale: event.data.revision < revision,
+      startupInteractionBlocked: isStartupInteractionBlocked,
+    });
 
     if (pendingCreateGroupRef.current) {
       const nextGroupId = findCreatedGroupId(
@@ -413,7 +444,31 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     }
 
     applySidebarMessage(event.data);
+    postSidebarStartupReproLog("messageApplied", {
+      elapsedMs: getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current),
+      groupCount: event.data.groups.length,
+      messageType: event.data.type,
+      previousRevision: revision,
+      revision: event.data.revision,
+      sessionCount: countSidebarSessions(event.data.groups),
+      stale: event.data.revision < revision,
+      startupInteractionBlocked: isStartupInteractionBlocked,
+    });
   });
+
+  useEffect(() => {
+    postSidebarStartupReproLog("appMounted", {
+      elapsedMs: getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current),
+      startupInteractionBlockMs: SIDEBAR_STARTUP_INTERACTION_BLOCK_MS,
+    });
+
+    return () => {
+      postSidebarStartupReproLog("appUnmounted", {
+        elapsedMs: getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current),
+        finalRevision: useSidebarStore.getState().revision,
+      });
+    };
+  }, [postSidebarStartupReproLog]);
 
   useEffect(() => {
     const handleMessage = (event: Event) => {
@@ -447,6 +502,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
+      postSidebarStartupReproLog("interactionBlockReleased", {
+        elapsedMs: getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current),
+        revision: useSidebarStore.getState().revision,
+      });
       setIsStartupInteractionBlocked(false);
     }, SIDEBAR_STARTUP_INTERACTION_BLOCK_MS);
 
@@ -454,10 +513,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       window.clearTimeout(timeout);
     };
   }, []);
-
-  useEffect(() => {
-    vscode.postMessage({ type: "ready" });
-  }, [vscode]);
 
   useEffect(() => {
     document.body.dataset.sidebarTheme = theme;
@@ -786,19 +841,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       window.cancelAnimationFrame(animationFrameId);
     };
   }, [focusedSessionId]);
-
-  const postSidebarDebugLog = useEffectEvent((event: string, details: unknown) => {
-    if (!debuggingMode) {
-      return;
-    }
-
-    logSidebarDebug(debuggingMode, event, details);
-    vscode.postMessage({
-      details,
-      event,
-      type: "sidebarDebugLog",
-    });
-  });
 
   const unlockCompletionSoundPlayback = useEffectEvent(() => {
     void prepareCompletionSoundPlayback((soundEvent, details) => {
@@ -1619,9 +1661,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
                   (groupId) => (displayedWorkspaceSessionIdsByGroup[groupId] ?? []).length === 0,
                 ) &&
                 !isSessionSearchOpen ? (
-                <div className="empty" data-empty-space-blocking="true">
-                  Create the first session to start the workspace.
-                </div>
+                <div className="empty" data-empty-space-blocking="true"></div>
               ) : null}
             </div>
             <div
@@ -1692,24 +1732,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       </div>
     </Tooltip.Provider>
   );
-}
-
-function isEmptySidebarDoubleClick(
-  target: EventTarget | null,
-  currentTarget: HTMLElement,
-): boolean {
-  if (target === currentTarget) {
-    return true;
-  }
-
-  const targetNode = target instanceof Node ? target : undefined;
-  const targetElement =
-    targetNode instanceof Element ? targetNode : (targetNode?.parentElement ?? undefined);
-  if (!targetElement || !currentTarget.contains(targetElement)) {
-    return false;
-  }
-
-  return targetElement.closest(SIDEBAR_EMPTY_SPACE_BLOCKER_SELECTOR) === null;
 }
 
 type ToolbarIconButtonProps = {
@@ -2347,6 +2369,22 @@ function hasPointerDragMovedPastThreshold(
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function getSidebarStartupNow(): number {
+  if (typeof performance !== "undefined") {
+    return performance.now();
+  }
+
+  return Date.now();
+}
+
+function getSidebarStartupElapsedMs(startedAt: number): number {
+  return Math.round(getSidebarStartupNow() - startedAt);
+}
+
+function countSidebarSessions(groups: readonly { sessions: readonly unknown[] }[]): number {
+  return groups.reduce((total, group) => total + group.sessions.length, 0);
 }
 
 function createDisplayedSessionIdsByGroup({
