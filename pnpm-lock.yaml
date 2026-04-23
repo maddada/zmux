@@ -38,6 +38,9 @@ importers:
       '@tabler/icons-react':
         specifier: ^3.40.0
         version: 3.40.0(react@19.2.4)
+      '@wterm/dom':
+        specifier: 0.1.9
+        version: 0.1.9
       '@xterm/addon-attach':
         specifier: 0.13.0-beta.197
         version: 0.13.0-beta.197(@xterm/xterm@6.1.0-beta.197)
@@ -2056,6 +2059,12 @@ packages:
     resolution: {integrity: sha512-OTm2XdMt2YkpSn2Nx7z2EJtSuhRHsTPYsSK59hr3v8jRArK+2UEoju4Jumn1CmpgoBLGI6ReHLJ/czYltNUW3g==}
     engines: {node: '>= 20'}
     hasBin: true
+
+  '@wterm/core@0.1.9':
+    resolution: {integrity: sha512-RqyS/w7SU3sLCY2yfsw5p+T7wYIIgCYzOMQIWkoJHKN7o+n/uerr2nTNygR3MBQ2FOcznilFm30w9aOJ2OK3GQ==}
+
+  '@wterm/dom@0.1.9':
+    resolution: {integrity: sha512-jccLWVW36loRWWnieY3iRLmDgvTgvCroMQfkcuMUeLmTSwnmrm6dB7RAAngal+udQ6VaTp0QF0gLpA+kq1R1fw==}
 
   '@xterm/addon-attach@0.13.0-beta.197':
     resolution: {integrity: sha512-3rJVIqN8+JoB9Z/DZLtokEEX82wf85Og5pYE9YBlcXuiPNUM5t0TSuF24ZbForHGrhPYkCKC0UHAWvUhqgb7bA==}
@@ -7228,6 +7237,12 @@ snapshots:
       keytar: 7.9.0
     transitivePeerDependencies:
       - supports-color
+
+  '@wterm/core@0.1.9': {}
+
+  '@wterm/dom@0.1.9':
+    dependencies:
+      '@wterm/core': 0.1.9
 
   '@xterm/addon-attach@0.13.0-beta.197(@xterm/xterm@6.1.0-beta.197)':
     dependencies:

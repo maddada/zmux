@@ -10,7 +10,6 @@ const buildMode = parseBuildMode(process.argv.slice(2));
 
 async function main() {
   const preWorkspaceTasks = [
-    () => runNodeScript("scripts/sync-wterm-vendor.mjs"),
     () => runNodeScript("scripts/vp.mjs", ["build", "--config", "vite.sidebar.config.ts"]),
   ];
 

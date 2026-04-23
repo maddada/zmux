@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { IconArrowBigDownFilled, IconArrowBigUpFilled } from "@tabler/icons-react";
+import { WTerm } from "@wterm/dom";
 import type {
   WorkspacePanelAcknowledgeSessionAttentionReason,
   WorkspacePanelAutoFocusRequest,
@@ -7,8 +8,6 @@ import type {
   WorkspacePanelTerminalAppearance,
   WorkspacePanelTerminalPane,
 } from "../shared/workspace-panel-contract";
-import { Search, type SearchMatch, type SearchOptions } from "../shared/wterm-vendor-search";
-import { WTerm } from "../shared/wterm-vendor-dom";
 import { getWindowsCtrlWordDeleteInputSequence } from "./terminal-input-shortcuts";
 import { logWorkspaceDebug } from "./workspace-debug";
 import { applyWtermHostAppearance, ensureWtermWebFontsLoaded } from "./wterm-appearance";
@@ -19,16 +18,7 @@ import {
 import "./terminal-pane.css";
 
 const IS_WINDOWS = navigator.platform.toLowerCase().includes("win");
-const SEARCH_RESULTS_EMPTY = {
-  resultCount: 0,
-  resultIndex: -1,
-};
 const SCROLL_TO_BOTTOM_SHOW_THRESHOLD_PX = 40;
-
-type SearchResultsState = {
-  resultCount: number;
-  resultIndex: number;
-};
 
 type WtermTerminalPaneProps = {
   autoFocusRequest?: WorkspacePanelAutoFocusRequest;
@@ -64,9 +54,6 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<WTerm | null>(null);
   const transportRef = useRef<WorkspaceWtermTransportController | null>(null);
-  const searchRef = useRef<Search | null>(null);
-  const searchMatchesRef = useRef<SearchMatch[]>([]);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const handledAutoFocusRequestIdRef = useRef<number | undefined>(undefined);
   const handledRefreshRequestIdRef = useRef(refreshRequestId);
   const handledScrollRequestIdRef = useRef<number | undefined>(undefined);
@@ -78,12 +65,6 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
   const lastFocusActivationTargetRef = useRef<EventTarget | null>(null);
   const onAttentionInteractionRef = useRef(onAttentionInteraction);
   const onTerminalEnterRef = useRef(onTerminalEnter);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
-  const [searchRegex, setSearchRegex] = useState(false);
-  const [searchWholeWord, setSearchWholeWord] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResultsState>(SEARCH_RESULTS_EMPTY);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
 
@@ -117,12 +98,6 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
     logWorkspaceDebug(debuggingMode, event, decoratedPayload);
     debugLogRef.current?.(event, decoratedPayload);
   };
-
-  const getSearchOptions = (): SearchOptions => ({
-    caseSensitive: searchCaseSensitive,
-    regex: searchRegex,
-    wholeWord: searchWholeWord,
-  });
 
   const focusTerminal = (reason: string) => {
     const term = termRef.current;
@@ -182,153 +157,6 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
     host.scrollTop = 0;
     updateScrollButtons();
     return true;
-  };
-
-  const focusSearchInput = () => {
-    requestAnimationFrame(() => {
-      searchInputRef.current?.focus();
-      searchInputRef.current?.select();
-    });
-  };
-
-  const closeSearch = () => {
-    searchRef.current?.reset();
-    searchMatchesRef.current = [];
-    setIsSearchOpen(false);
-    setSearchResults(SEARCH_RESULTS_EMPTY);
-    requestAnimationFrame(() => {
-      focusTerminal("close-search");
-    });
-  };
-
-  const scrollToMatch = (match: SearchMatch) => {
-    const host = terminalHostRef.current;
-    const bridge = termRef.current?.bridge;
-    if (!host || !bridge) {
-      return;
-    }
-
-    const scrollbackCount = bridge.getScrollbackCount();
-    const rowElements = host.querySelectorAll<HTMLElement>(".term-scrollback-row, .term-row");
-    const rowIndex = Math.max(0, Math.min(rowElements.length - 1, scrollbackCount + match.row));
-    rowElements.item(rowIndex)?.scrollIntoView({ block: "center" });
-    updateScrollButtons();
-  };
-
-  const updateSearchState = (activeMatch: SearchMatch | null) => {
-    const matches = searchMatchesRef.current;
-    if (matches.length === 0 || !activeMatch) {
-      setSearchResults(
-        matches.length === 0
-          ? SEARCH_RESULTS_EMPTY
-          : {
-              resultCount: matches.length,
-              resultIndex: 0,
-            },
-      );
-      return;
-    }
-
-    const activeIndex = matches.findIndex(
-      (match) =>
-        match.row === activeMatch.row &&
-        match.col === activeMatch.col &&
-        match.length === activeMatch.length,
-    );
-
-    setSearchResults({
-      resultCount: matches.length,
-      resultIndex: activeIndex >= 0 ? activeIndex : 0,
-    });
-  };
-
-  const seekLastMatch = (query: string, options: SearchOptions): SearchMatch | null => {
-    const search = searchRef.current;
-    if (!search) {
-      return null;
-    }
-
-    search.reset();
-    let lastMatch: SearchMatch | null = null;
-    while (true) {
-      const nextMatch = search.findNext(query, options);
-      if (!nextMatch) {
-        break;
-      }
-      lastMatch = nextMatch;
-    }
-    return lastMatch;
-  };
-
-  const refreshSearch = () => {
-    const search = searchRef.current;
-    if (!search || !searchQuery) {
-      searchMatchesRef.current = [];
-      setSearchResults(SEARCH_RESULTS_EMPTY);
-      return;
-    }
-
-    try {
-      const options = getSearchOptions();
-      search.reset();
-      const matches = search.findAll(searchQuery, options);
-      searchMatchesRef.current = matches;
-      if (matches.length === 0) {
-        setSearchResults(SEARCH_RESULTS_EMPTY);
-        return;
-      }
-
-      const activeMatch = search.findNext(searchQuery, options) ?? matches[0] ?? null;
-      if (activeMatch) {
-        scrollToMatch(activeMatch);
-      }
-      updateSearchState(activeMatch);
-    } catch (error) {
-      reportDebug("terminal.searchRefreshError", {
-        message: error instanceof Error ? error.message : String(error),
-        query: searchQuery,
-        sessionId: pane.sessionId,
-      });
-      searchMatchesRef.current = [];
-      setSearchResults(SEARCH_RESULTS_EMPTY);
-    }
-  };
-
-  const moveSearch = (direction: "next" | "previous") => {
-    const search = searchRef.current;
-    if (!search || !searchQuery) {
-      return;
-    }
-
-    try {
-      const options = getSearchOptions();
-      let activeMatch =
-        direction === "next"
-          ? search.findNext(searchQuery, options)
-          : search.findPrevious(searchQuery, options);
-
-      if (!activeMatch) {
-        activeMatch =
-          direction === "next"
-            ? (search.reset(), search.findNext(searchQuery, options))
-            : seekLastMatch(searchQuery, options);
-      }
-
-      if (!activeMatch) {
-        return;
-      }
-
-      scrollToMatch(activeMatch);
-      updateSearchState(activeMatch);
-      focusTerminal(`search-${direction}`);
-    } catch (error) {
-      reportDebug("terminal.searchMoveError", {
-        direction,
-        message: error instanceof Error ? error.message : String(error),
-        query: searchQuery,
-        sessionId: pane.sessionId,
-      });
-    }
   };
 
   useEffect(() => {
@@ -417,7 +245,6 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
 
       termRef.current = term;
       isInitializingRef.current = false;
-      searchRef.current = new Search(term);
       reportDebug("wterm.initSucceeded", {
         bridgeCols: term.bridge?.getCols(),
         bridgeRows: term.bridge?.getRows(),
@@ -511,8 +338,6 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
       if (transportRef.current === activeTransport) {
         transportRef.current = null;
       }
-      searchMatchesRef.current = [];
-      searchRef.current = null;
       termRef.current?.destroy();
       termRef.current = null;
       if (terminalHostRef.current) {
@@ -588,18 +413,6 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
     });
   }, [isFocused, isVisible]);
 
-  useEffect(() => {
-    if (!isSearchOpen) {
-      return;
-    }
-
-    focusSearchInput();
-  }, [isSearchOpen]);
-
-  useEffect(() => {
-    refreshSearch();
-  }, [searchCaseSensitive, searchQuery, searchRegex, searchWholeWord]);
-
   return (
     <div
       className="terminal-pane-root terminal-pane-root-wterm"
@@ -636,19 +449,6 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
         onActivate("focusin");
       }}
       onKeyDownCapture={(event) => {
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-          event.preventDefault();
-          setIsSearchOpen(true);
-          return;
-        }
-
-        if (event.key === "Escape" && isSearchOpen) {
-          event.preventDefault();
-          closeSearch();
-          onAttentionInteractionRef.current("escape");
-          return;
-        }
-
         if (
           IS_WINDOWS &&
           event.ctrlKey &&
@@ -698,85 +498,6 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
       >
         <IconArrowBigDownFilled size={16} stroke={1.8} />
       </button>
-      {isSearchOpen ? (
-        <div className="terminal-pane-search">
-          <input
-            ref={searchInputRef}
-            className="terminal-pane-search-input"
-            onChange={(event) => {
-              setSearchQuery(event.target.value);
-            }}
-            placeholder="Find in terminal"
-            type="text"
-            value={searchQuery}
-          />
-          <div className="terminal-pane-search-status">
-            {searchResults.resultCount > 0
-              ? `${searchResults.resultIndex + 1}/${searchResults.resultCount}`
-              : "0/0"}
-          </div>
-          <button
-            className="terminal-pane-search-button"
-            onClick={() => {
-              moveSearch("previous");
-            }}
-            type="button"
-          >
-            Prev
-          </button>
-          <button
-            className="terminal-pane-search-button"
-            onClick={() => {
-              moveSearch("next");
-            }}
-            type="button"
-          >
-            Next
-          </button>
-          <button
-            className={`terminal-pane-search-toggle${
-              searchCaseSensitive ? " terminal-pane-search-toggle-active" : ""
-            }`}
-            onClick={() => {
-              setSearchCaseSensitive((current) => !current);
-            }}
-            type="button"
-          >
-            Aa
-          </button>
-          <button
-            className={`terminal-pane-search-toggle${
-              searchRegex ? " terminal-pane-search-toggle-active" : ""
-            }`}
-            onClick={() => {
-              setSearchRegex((current) => !current);
-            }}
-            type="button"
-          >
-            .*
-          </button>
-          <button
-            className={`terminal-pane-search-toggle${
-              searchWholeWord ? " terminal-pane-search-toggle-active" : ""
-            }`}
-            onClick={() => {
-              setSearchWholeWord((current) => !current);
-            }}
-            type="button"
-          >
-            ab
-          </button>
-          <button
-            className="terminal-pane-search-close"
-            onClick={() => {
-              closeSearch();
-            }}
-            type="button"
-          >
-            Close
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 };
