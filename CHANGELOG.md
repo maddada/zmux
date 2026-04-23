@@ -8,6 +8,7 @@ All notable user-facing changes are documented in this file.
 - Sidebar and workspace restore behavior are steadier now, especially during startup and reconnect flows, and the empty sidebar area offers clearer actions when you want to create something new from a blank state.
 - Completion sounds are more customizable now, with several new built-in variants so it is easier to find a finish sound that fits your workflow.
 - Workspace-side debug and repro logs are handled more cleanly now: VSmux keeps those `.vsmux/` traces out of Git automatically and captures better restart diagnostics when daemon/runtime reuse goes wrong.
+- Auto-sleep now has its own `VSmux.autoSleepTimeoutMinutes` setting, separate from `VSmux.backgroundSessionTimeoutMinutes`, so idle-session sleeping and detached background-session retention can be configured independently.
 
 ## 4.5.1 - 2026-04-20
 
@@ -31,7 +32,7 @@ All notable user-facing changes are documented in this file.
 
 ## 4.4.0 - 2026-04-19
 
-- Managed embedded T3 launches are more flexible now: VSmux can run either bundled DP Code or bundled T3 Code, and it is better at resolving whether to use packaged assets, sibling checkouts, or configured repo roots for each provider.
+- Managed embedded T3 launches are more flexible now: VSmux is better at resolving whether to use packaged assets, sibling checkouts, or a configured repo root for T3 Code.
 - Embedded T3 sessions are much safer during close, reload, and restore flows now, with stronger bound-thread tracking, cleaner reload lifecycle handling, and better protection against stray thread changes while sessions are still starting or shutting down.
 - Workspace and sidebar T3 surfaces are clearer now: reloading sessions can show their transient state directly in the UI, thread changes require confirmation before rebinding a live pane, and close/reload behavior is steadier while grouped sessions move around.
 - T3 browser access links now prefer the local network path before Tailscale when both are available, which makes same-network phone testing faster while still keeping the Tailscale route available when you need it.
@@ -39,13 +40,13 @@ All notable user-facing changes are documented in this file.
 
 ## 4.3.1 - 2026-04-17
 
-- Idle T3 sessions now participate in the opt-in auto-sleep flow alongside Claude and Codex when `VSmux.backgroundSessionTimeoutMinutes` is set to a non-zero value.
+- Idle T3 sessions now participate in the opt-in auto-sleep flow alongside Claude and Codex when the auto-sleep timeout is set to a non-zero value.
 - Sleeping embedded T3 panes now destroy their cached runtime more cleanly, which helps avoid stale iframe state when a session sleeps and later wakes back up.
 - Workspace pane projection now keeps T3 threads available even when they belong to an inactive group, so embedded T3 sessions remain projected while you focus other terminal groups.
 
 ## 4.3.0 - 2026-04-17
 
-- Idle Claude and Codex sessions can auto-sleep now, but only when you opt in by setting `VSmux.backgroundSessionTimeoutMinutes` to a non-zero value such as `20`, so the default behavior stays conservative while restore coverage for other agents continues to improve.
+- Idle Claude and Codex sessions can auto-sleep now, but only when you opt in by setting the auto-sleep timeout to a non-zero value such as `20`, so the default behavior stays conservative while restore coverage for other agents continues to improve.
 - Workspace attention handling is calmer now: done states wait for a meaningful acknowledgement like clicking, typing, or a short focus dwell before clearing, and embedded T3 sessions can derive a steadier working-started timestamp from the in-app timer.
 - Terminal session cards can now open rename on double-click when `VSmux.renameSessionOnDoubleClick` is enabled, and T3 session cards have a simpler context menu that keeps remote access but removes the old manual thread-ID action.
 - Codex sessions can now auto-rename from the first meaningful prompt, and `Copy Resume Command` falls back to the original launch command for custom agents whose resume syntax is not known to VSmux.
@@ -62,7 +63,7 @@ All notable user-facing changes are documented in this file.
 
 - Pinned prompts are now available in the sidebar, so you can save, edit, and copy reusable prompts that stay available across projects.
 - T3 browser access is more forgiving now: if you request remote access without an active T3 session, VSmux can start one for you first, and the shared browser-access endpoint now uses a stable server port and cleaner share URL.
-- The bundled dpcode server runtime is pruned more aggressively during packaging, which cuts a large amount of shipped runtime weight, and new rollback build/install commands make it easier to recover from bad local embed updates.
+- The bundled embedded server runtime is pruned more aggressively during packaging, which cuts a large amount of shipped runtime weight, and new rollback build/install commands make it easier to recover from bad local embed updates.
 
 ## 4.0.0 - 2026-04-16
 
@@ -109,7 +110,7 @@ All notable user-facing changes are documented in this file.
 
 - Inline session search is easier to use now, with keyboard selection so you can move through search results without leaving the keyboard.
 - Session rename behavior is smarter and more reliable, with improved lifecycle tracking so workspace state stays in sync more cleanly while sessions change.
-- Runtime packaging is more self-contained now, with bundled dpcode server and terminal assets to make the embedded runtime path more dependable.
+- Runtime packaging is more self-contained now, with bundled T3 server and terminal assets to make the embedded runtime path more dependable.
 - Conversation/history surfaces are a bit leaner internally, including cleanup of an unused sidebar wrapper in the chat-history flow.
 
 ## 3.3.0 - 2026-04-13

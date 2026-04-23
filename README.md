@@ -40,11 +40,12 @@ VSmux works great with my other tool that shows all running agent sessions in a 
 
 ### 4.4.0
 
-- Managed embedded sessions can launch with bundled DP Code or bundled T3 Code, with better packaged-versus-checkout resolution.
+- Managed embedded sessions launch with bundled T3 Code, with better packaged-versus-checkout resolution.
 - Embedded T3 reload, close, and thread-binding flows are safer and clearer, including visible reload state and confirmation before rebinding a live pane.
-- Idle T3 sessions can join the opt-in auto-sleep flow.
+- Auto-sleep and detached background-session retention now have separate settings, so you can tune one without changing the other.
+- Idle T3 sessions can join the auto-sleep flow.
 - Sleeping T3 panes now tear down stale runtimes more cleanly and stay projected across inactive groups more reliably.
-- Auto-sleep expanded to Claude and Codex sessions when `VSmux.backgroundSessionTimeoutMinutes` is enabled.
+- Auto-sleep expanded to Claude and Codex sessions when `VSmux.autoSleepTimeoutMinutes` is enabled.
 - Session handling is calmer overall, with double-click rename, steadier attention state, and better resume-command fallbacks for custom agents.
 
 Full release notes: [CHANGELOG.md](./CHANGELOG.md)
