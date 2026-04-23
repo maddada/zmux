@@ -79,6 +79,20 @@ describe("createSessionInSnapshot", () => {
         : undefined,
     ).toBe("xterm");
   });
+
+  test("should preserve wterm on new terminal sessions", () => {
+    const result = createSessionInSnapshot(createDefaultSessionGridSnapshot(), 1, {
+      terminalEngine: "wterm",
+      title: "Session 1",
+    });
+
+    expect(result.session?.kind).toBe("terminal");
+    expect(
+      result.session && "terminalEngine" in result.session
+        ? result.session.terminalEngine
+        : undefined,
+    ).toBe("wterm");
+  });
 });
 
 describe("normalizeSessionGridSnapshot", () => {
@@ -165,6 +179,16 @@ describe("normalizeSessionGridSnapshot", () => {
 
     expect(normalized.kind).toBe("terminal");
     expect(normalized.terminalEngine).toBe("ghostty-non-persistent");
+  });
+
+  test("should preserve explicit wterm engines while normalizing", () => {
+    const normalized = normalizeSessionRecord({
+      ...createSessionRecord(1, 0),
+      terminalEngine: "wterm",
+    });
+
+    expect(normalized.kind).toBe("terminal");
+    expect(normalized.terminalEngine).toBe("wterm");
   });
 
   test("should preserve fullscreen restore count only while the snapshot is in fullscreen mode", () => {

@@ -46,7 +46,7 @@ export type SidebarThemeSetting =
 export type SidebarThemeVariant = "light" | "dark";
 
 export type SessionKind = "browser" | "terminal" | "t3";
-export type TerminalEngine = "ghostty-non-persistent" | "non-persistent" | "xterm";
+export type TerminalEngine = "ghostty-non-persistent" | "non-persistent" | "wterm" | "xterm";
 
 export type T3SessionMetadata = {
   boundThreadId?: string;

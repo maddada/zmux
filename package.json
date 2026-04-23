@@ -44,10 +44,10 @@
   ],
   "main": "./out/extension/extension.js",
   "scripts": {
-    "build:extension": "pnpm exec concurrently --kill-others-on-fail --prefix none \"pnpm run t3:embed:build\" \"pnpm run sidebar:build\" \"pnpm run debug-panel:build\" \"pnpm run workspace:build\" \"pnpm run chat-history:webview:build\" && tsc -p ./tsconfig.extension.json && node ./scripts/vendor-runtime-deps.mjs",
-    "build:extension:rollback": "pnpm exec concurrently --kill-others-on-fail --prefix none \"pnpm run t3:embed:build:rollback\" \"pnpm run sidebar:build\" \"pnpm run debug-panel:build\" \"pnpm run workspace:build\" \"pnpm run chat-history:webview:build\" && tsc -p ./tsconfig.extension.json && node ./scripts/vendor-runtime-deps.mjs",
-    "build:extension:original": "pnpm run t3:embed:build && pnpm run sidebar:build && pnpm run debug-panel:build && pnpm run workspace:build && pnpm run chat-history:webview:build && tsc -p ./tsconfig.extension.json && node ./scripts/vendor-runtime-deps.mjs",
-    "build:extension:minimal": "pnpm run sidebar:build && pnpm run workspace:build",
+    "build:extension": "node ./scripts/build-extension.mjs",
+    "build:extension:rollback": "node ./scripts/build-extension.mjs --rollback",
+    "build:extension:original": "node ./scripts/build-extension.mjs --serial",
+    "build:extension:minimal": "node ./scripts/build-extension.mjs --minimal",
     "vscode:prepublish": "node ./scripts/vscode-prepublish.mjs",
     "sidebar:build": "node ./scripts/vp.mjs build --config vite.sidebar.config.ts",
     "debug-panel:build": "node ./scripts/vp.mjs build --config vite.debug-panel.config.ts",
@@ -85,6 +85,7 @@
     "@dnd-kit/react": "0.3.2",
     "@fontsource-variable/inter": "^5.2.8",
     "@tabler/icons-react": "^3.40.0",
+    "@wterm/dom": "0.1.9",
     "@xterm/addon-attach": "0.13.0-beta.197",
     "@xterm/addon-fit": "0.12.0-beta.197",
     "@xterm/addon-search": "0.17.0-beta.197",
@@ -580,19 +581,22 @@
           "enum": [
             "ghostty-non-persistent",
             "non-persistent",
+            "wterm",
             "xterm"
           ],
           "enumItemLabels": [
             "Ghostty (non-persistent)",
             "xterm.js (recommended)",
+            "wterm (Beta)",
             "xterm.js (persistent)"
           ],
           "enumDescriptions": [
             "Ghostty-based direct PTY terminal without daemon-side persistence. On reopen or reload, resumable sessions are recreated and resumed; other sessions reopen as a frozen snapshot.",
             "Default. Live xterm.js terminal attached straight to the backend PTY. On reopen or reload, resumable sessions are recreated and resumed; other sessions reopen as a frozen snapshot.",
+            "Beta. Live wterm terminal attached directly to the backend PTY with raw history replay on reconnect.",
             "Stable fallback. Uses daemon-side xterm.js persistence for reconnect scrollback."
           ],
-          "description": "Choose the default engine for new VSmux terminal sessions. xterm.js (recommended) is the default and uses a direct PTY connection without daemon-side xterm serialization. Ghostty (non-persistent) reopens resumable sessions and shows frozen snapshots for the rest. xterm.js (persistent) keeps daemon-side reconnect scrollback."
+          "description": "Choose the default engine for new VSmux terminal sessions. xterm.js (recommended) is the default and uses a direct PTY connection without daemon-side xterm serialization. wterm and Ghostty are beta direct PTY engines. xterm.js (persistent) keeps daemon-side reconnect scrollback."
         },
         "VSmux.xtermHeadlessScrollback": {
           "title": "xterm.js Reconnect Scrollback",

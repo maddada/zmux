@@ -302,6 +302,10 @@ export function normalizeTerminalEngine(value: string | undefined): TerminalEngi
     return "non-persistent";
   }
 
+  if (value === "wterm") {
+    return "wterm";
+  }
+
   return DEFAULT_TERMINAL_ENGINE;
 }
 

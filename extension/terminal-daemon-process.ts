@@ -375,7 +375,7 @@ async function handleCreateOrAttachRequest(
   const session =
     existingSession && existingSession.snapshot.status !== "exited"
       ? existingSession
-      : createSession(request);
+      : await createSession(request);
 
   if (session.cols !== request.cols || session.rows !== request.rows) {
     resizeSession(session, request.cols, request.rows);
@@ -469,7 +469,7 @@ async function handleAcknowledgeAttentionRequest(
   socket.send(JSON.stringify({ type: "response", ok: true, requestId: request.sessionId }));
 }
 
-function createSession(request: TerminalHostCreateOrAttachRequest): ManagedSession {
+async function createSession(request: TerminalHostCreateOrAttachRequest): Promise<ManagedSession> {
   const sessionKey = createTerminalDaemonSessionKey(request.workspaceId, request.sessionId);
   const terminalEngine = normalizeTerminalEngine(request.terminalEngine);
   const environment = createPtyEnvironment(
