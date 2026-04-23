@@ -8,6 +8,10 @@
 @import "./styles/session-chrome.css";
 @import "./styles/session-overlays.css";
 
+.copy-cursor {
+  cursor: pointer !important;
+}
+
 * {
   -ms-overflow-style: none;
   scrollbar-width: none;

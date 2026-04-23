@@ -80,6 +80,34 @@ const DEFAULT_GROUPS: SidebarStoryGroup[] = [
   },
 ];
 
+const COMMAND_INDICATOR_ACTIVE_GROUPS: SidebarStoryGroup[] = [
+  {
+    groupId: "group-1",
+    isActive: true,
+    sessions: [
+      createStorySession({
+        alias: "Dev server",
+        agentIcon: "codex",
+        detail: "OpenAI Codex",
+        isFocused: true,
+        isVisible: true,
+        lastInteractionAt: secondsAgo(12),
+        sessionId: "session-1",
+        shortcutLabel: "⌘⌥1",
+      }),
+      createStorySession({
+        alias: "layout drift fix",
+        agentIcon: "codex",
+        detail: "OpenAI Codex",
+        lastInteractionAt: minutesAgo(7),
+        sessionId: "session-2",
+        shortcutLabel: "⌘⌥2",
+      }),
+    ],
+    title: "Main",
+  },
+];
+
 const BROWSER_GROUPS: SidebarStoryGroup[] = [
   {
     groupId: "browser-main",
@@ -496,6 +524,7 @@ const THREE_GROUPS_STRESS: SidebarStoryGroup[] = [
 
 export const GROUPS_BY_FIXTURE: Record<SidebarStoryFixture, SidebarStoryGroup[]> = {
   "browser-groups": BROWSER_GROUPS,
+  "command-indicator-active": COMMAND_INDICATOR_ACTIVE_GROUPS,
   default: DEFAULT_GROUPS,
   "empty-groups": EMPTY_GROUPS,
   "overflow-stress": OVERFLOW_STRESS_GROUPS,

@@ -128,6 +128,10 @@
   --section-titlebar-toggle-rotation: 90deg;
 }
 
+.group-collapse-button[data-empty-browser-group="true"] {
+  cursor: pointer;
+}
+
 .group-collapse-icon {
   display: block;
   flex: none;
@@ -212,6 +216,44 @@
 .group-title-button:hover .group-title,
 .group-title-button:focus-visible .group-title {
   color: var(--app-foreground);
+}
+
+.group-title-button[data-disabled="true"] {
+  cursor: default;
+}
+
+.group-title-button[data-disabled="true"]:hover .group-title,
+.group-title-button[data-disabled="true"]:focus-visible .group-title {
+  color: inherit;
+}
+
+.group-title-button[data-empty-browser-group="true"] {
+  cursor: pointer;
+}
+
+.group-title-button[data-empty-browser-group="true"]:hover .group-title,
+.group-title-button[data-empty-browser-group="true"]:focus-visible .group-title {
+  color: var(--app-foreground);
+}
+
+.group-head:hover
+  .group-collapse-button[data-empty-browser-group="true"]
+  .section-titlebar-toggle-chevron-icon,
+.group-head:has(.group-collapse-button[data-empty-browser-group="true"]:focus-visible)
+  .group-collapse-button[data-empty-browser-group="true"]
+  .section-titlebar-toggle-chevron-icon {
+  opacity: 0;
+  transform: rotate(var(--section-titlebar-toggle-rotation)) scale(0.82);
+}
+
+.group-head:hover
+  .group-collapse-button[data-empty-browser-group="true"]
+  .section-titlebar-toggle-idle-icon,
+.group-head:has(.group-collapse-button[data-empty-browser-group="true"]:focus-visible)
+  .group-collapse-button[data-empty-browser-group="true"]
+  .section-titlebar-toggle-idle-icon {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .group-title-button:focus-visible {

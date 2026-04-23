@@ -579,6 +579,21 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
   z-index: 2;
 }
 
+.command-button-session-indicator::after {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  content: "";
+  inset: 1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease,
+    scale 180ms ease;
+}
+
 .command-button-session-indicator-dot {
   background-color: var(--command-button-session-indicator-color);
   border-radius: 999px;
@@ -606,19 +621,28 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
 .command-button-session-indicator[data-active-session="true"]
   .command-button-session-indicator-dot {
   box-shadow:
-    0 0 0 1px var(--session-focused-outline),
     0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
     0 0 0 4px color-mix(in srgb, var(--command-button-session-indicator-color) 12%, transparent),
     0 4px 12px color-mix(in srgb, var(--command-button-session-indicator-color) 18%, transparent);
 }
 
+.command-button-session-indicator[data-active-session="true"]::after {
+  border-color: var(--session-focused-outline);
+  box-shadow: 0 0 0 1px var(--session-focused-ring);
+  opacity: 1;
+}
+
 .command-button-session-indicator[data-active-session="true"]:is(:hover, :focus-visible)
   .command-button-session-indicator-dot {
   box-shadow:
-    0 0 0 1px var(--session-focused-outline),
     0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
     0 0 0 5px color-mix(in srgb, var(--command-button-session-indicator-color) 18%, transparent),
     0 5px 14px color-mix(in srgb, var(--command-button-session-indicator-color) 24%, transparent);
+}
+
+.command-button-session-indicator[data-active-session="true"]:is(:hover, :focus-visible)::after {
+  box-shadow: 0 0 0 1px var(--session-focused-ring);
+  scale: 1.04;
 }
 
 .command-button-session-indicator[data-session-status="running"]

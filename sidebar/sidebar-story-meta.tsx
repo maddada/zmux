@@ -29,6 +29,7 @@ export const SIDEBAR_STORY_ARG_TYPES: NonNullable<Meta<SidebarStoryArgs>["argTyp
     control: "select",
     options: [
       "browser-groups",
+      "command-indicator-active",
       "default",
       "sort-toggle-demo",
       "selector-states",

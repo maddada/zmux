@@ -609,9 +609,6 @@
 
 .session-last-interaction-time {
   color: color-mix(in srgb, var(--app-muted) 88%, transparent);
-  font-family:
-    Consolas, "SFMono-Regular", Menlo, Monaco, "Cascadia Mono", "Liberation Mono",
-    "DejaVu Sans Mono", "Ubuntu Mono", "Courier New";
   font-size: calc(11px * var(--sidebar-density-scale));
   font-variant-numeric: tabular-nums;
   font-weight: 500;

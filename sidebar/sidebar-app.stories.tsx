@@ -26,6 +26,13 @@ export const BrowserGroups: Story = {
   },
 };
 
+export const CommandIndicatorActive: Story = {
+  args: {
+    fixture: "command-indicator-active",
+    theme: "dark-blue",
+  },
+};
+
 export const Default: Story = {};
 
 export const ActiveSortToggle: Story = {

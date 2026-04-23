@@ -24,6 +24,7 @@ import {
 
 export type SidebarStoryFixture =
   | "browser-groups"
+  | "command-indicator-active"
   | "default"
   | "sort-toggle-demo"
   | "selector-states"
@@ -67,6 +68,20 @@ const PREVIOUS_SESSIONS_BY_FIXTURE: Partial<
   ],
 };
 
+const COMMAND_SESSION_INDICATORS_BY_FIXTURE: Partial<
+  Record<SidebarStoryFixture, SidebarHudState["commandSessionIndicators"]>
+> = {
+  "command-indicator-active": [
+    {
+      commandId: "dev",
+      isActive: true,
+      sessionId: "session-1",
+      status: "running",
+      title: "Dev server",
+    },
+  ],
+};
+
 export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrateMessage {
   const groups = cloneGroups(GROUPS_BY_FIXTURE[args.fixture]).map((group) => {
     const visibleCount = group.isActive
@@ -87,7 +102,7 @@ export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrat
     agents: createDefaultSidebarAgentButtons(),
     collapsedSections: createDefaultSidebarSectionCollapseState(),
     commands: createDefaultSidebarCommandButtons(),
-    commandSessionIndicators: [],
+    commandSessionIndicators: COMMAND_SESSION_INDICATORS_BY_FIXTURE[args.fixture] ?? [],
     completionBellEnabled: false,
     completionSound: DEFAULT_COMPLETION_SOUND,
     completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),

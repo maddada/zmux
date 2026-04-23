@@ -24,6 +24,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from "react";
@@ -135,6 +136,21 @@ const SIDEBAR_SECTION_COLLAPSE_PERSIST_DEBOUNCE_MS = 200;
 const BROWSER_AUTO_COLLAPSE_SUPPRESSION_MS = 1_200;
 const MIN_SESSION_SEARCH_QUERY_LENGTH = 2;
 const COMPLETION_FLASH_DURATION_MS = 3_000;
+const DEBUG_BUILD_STAMP_STYLE: CSSProperties = {
+  position: "fixed",
+  right: "10px",
+  bottom: "8px",
+  zIndex: 20,
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  color: "var(--vscode-foreground)",
+  fontFamily: "var(--vscode-font-family)",
+  fontSize: "10px",
+  lineHeight: 1.2,
+  fontVariantNumeric: "tabular-nums",
+  opacity: 0.72,
+};
 
 export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) {
   const [isStartupInteractionBlocked, setIsStartupInteractionBlocked] = useState(true);
@@ -239,6 +255,9 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   );
   const gitCommitDraft = useSidebarStore((state) => state.gitCommitDraft);
   const authoritativeSessionIdsByGroup = useSidebarStore((state) => state.sessionIdsByGroup);
+  const buildStamp = useSidebarStore((state) =>
+    state.hud.debuggingMode ? state.hud.buildStamp : undefined,
+  );
 
   const postSidebarDebugLog = useEffectEvent((event: string, details: unknown) => {
     if (!debuggingMode) {
@@ -361,27 +380,29 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
         sound: event.data.sound,
         sessionId,
       });
-      const existingTimeout = completionFlashTimeoutBySessionIdRef.current.get(sessionId);
-      if (existingTimeout !== undefined) {
-        window.clearTimeout(existingTimeout);
-      }
-      setCompletionFlashNonceBySessionId((previous) => ({
-        ...previous,
-        [sessionId]: (previous[sessionId] ?? 0) + 1,
-      }));
-      const timeout = window.setTimeout(() => {
-        completionFlashTimeoutBySessionIdRef.current.delete(sessionId);
-        setCompletionFlashNonceBySessionId((previous) => {
-          if (!(sessionId in previous)) {
-            return previous;
-          }
+      if (sessionId) {
+        const existingTimeout = completionFlashTimeoutBySessionIdRef.current.get(sessionId);
+        if (existingTimeout !== undefined) {
+          window.clearTimeout(existingTimeout);
+        }
+        setCompletionFlashNonceBySessionId((previous) => ({
+          ...previous,
+          [sessionId]: (previous[sessionId] ?? 0) + 1,
+        }));
+        const timeout = window.setTimeout(() => {
+          completionFlashTimeoutBySessionIdRef.current.delete(sessionId);
+          setCompletionFlashNonceBySessionId((previous) => {
+            if (!(sessionId in previous)) {
+              return previous;
+            }
 
-          const next = { ...previous };
-          delete next[sessionId];
-          return next;
-        });
-      }, COMPLETION_FLASH_DURATION_MS);
-      completionFlashTimeoutBySessionIdRef.current.set(sessionId, timeout);
+            const next = { ...previous };
+            delete next[sessionId];
+            return next;
+          });
+        }, COMPLETION_FLASH_DURATION_MS);
+        completionFlashTimeoutBySessionIdRef.current.set(sessionId, timeout);
+      }
       void playCompletionSound(event.data.sound, (soundEvent, details) => {
         postSidebarDebugLog(soundEvent, details);
       });
@@ -1789,6 +1810,20 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
             });
           }}
         />
+        {buildStamp ? (
+          <button
+            aria-label={`Copy build stamp ${buildStamp}`}
+            className="copy-cursor"
+            onClick={() => {
+              void navigator.clipboard.writeText(buildStamp).catch(() => {});
+            }}
+            style={DEBUG_BUILD_STAMP_STYLE}
+            title="Copy build stamp"
+            type="button"
+          >
+            {buildStamp}
+          </button>
+        ) : null}
       </div>
     </Tooltip.Provider>
   );

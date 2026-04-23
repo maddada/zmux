@@ -158,7 +158,7 @@ export function T3BrowserAccessModal({
         </div>
         <div className="confirm-modal-actions">
           <button
-            className="secondary confirm-modal-button"
+            className="secondary confirm-modal-button copy-cursor"
             onClick={() => {
               void navigator.clipboard.writeText(access.endpointUrl).then(() => {
                 setDidCopy(true);

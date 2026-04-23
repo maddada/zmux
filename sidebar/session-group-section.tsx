@@ -1,3 +1,4 @@
+import { Tooltip } from "@base-ui/react/tooltip";
 import {
   IconCaretRightFilled,
   IconMessageCircle,
@@ -99,6 +100,26 @@ type ContextMenuPosition = {
 };
 
 type GroupControlMenu = "visible-count";
+
+export function getEmptyBrowserGroupExpandTooltip({
+  browserTabCount,
+  isBrowserGroup,
+  isCollapsed,
+}: {
+  browserTabCount: number;
+  isBrowserGroup: boolean;
+  isCollapsed: boolean;
+}): string | undefined {
+  /**
+   * CDXC:SidebarGroups 2026-04-23-15:00
+   * Collapsed browser groups with zero live tabs should not expand into an empty
+   * shell. Keep the header inert in that state and surface a hover explanation
+   * instead so the user sees why nothing opens.
+   */
+  return isBrowserGroup && browserTabCount === 0 && isCollapsed
+    ? "No browser tabs open"
+    : undefined;
+}
 
 export type SessionGroupSectionProps = {
   autoEdit: boolean;
@@ -245,6 +266,11 @@ export function SessionGroupSection({
   const allSessionsSleeping =
     groupSessions.length > 0 && groupSessions.every((session) => session.isSleeping);
   const browserTabCount = isBrowserGroup ? groupSessions.length : 0;
+  const emptyBrowserExpandTooltip = getEmptyBrowserGroupExpandTooltip({
+    browserTabCount,
+    isBrowserGroup,
+    isCollapsed,
+  });
   const canFullReloadGroup = groupSessions.length > 0;
   const collapsedIndicatorActivity = sessionSummary.indicatorActivity;
   const hasCollapsedSummary = collapsedIndicatorActivity !== undefined;
@@ -538,11 +564,15 @@ export function SessionGroupSection({
   };
 
   const toggleCollapsed = () => {
+    if (emptyBrowserExpandTooltip) {
+      return;
+    }
+
     onCollapsedChange(group.groupId, !isCollapsed);
   };
 
   const handleGroupHeaderClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (isEditing) {
+    if (isEditing || emptyBrowserExpandTooltip) {
       return;
     }
 
@@ -605,37 +635,88 @@ export function SessionGroupSection({
               />
             ) : (
               <div className="group-title-row">
-                <button
-                  aria-controls={isCollapsed ? undefined : sessionsRegionId}
-                  aria-expanded={!isCollapsed}
-                  aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${group.title}`}
-                  className="group-collapse-button section-titlebar-toggle"
-                  data-collapsed={String(isCollapsed)}
-                  data-has-idle-icon="true"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    toggleCollapsed();
-                  }}
-                  title={`${isCollapsed ? "Expand" : "Collapse"} ${group.title}`}
-                  type="button"
-                >
-                  <span
-                    aria-hidden="true"
-                    className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
-                  >
-                    {isBrowserGroup ? (
-                      <IconWorld size={16} stroke={1.8} />
-                    ) : (
-                      <IconMessageCircle size={16} stroke={1.8} />
-                    )}
-                  </span>
-                  <IconCaretRightFilled
-                    aria-hidden="true"
-                    className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
-                    size={16}
-                  />
-                </button>
+                {emptyBrowserExpandTooltip ? (
+                  <Tooltip.Provider delay={100}>
+                    <Tooltip.Root>
+                      <Tooltip.Trigger
+                        render={
+                          <button
+                            aria-controls={isCollapsed ? undefined : sessionsRegionId}
+                            aria-disabled="true"
+                            aria-expanded={!isCollapsed}
+                            aria-label={emptyBrowserExpandTooltip}
+                            className="group-collapse-button section-titlebar-toggle"
+                            data-collapsed={String(isCollapsed)}
+                            data-empty-browser-group="true"
+                            data-has-idle-icon="true"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              toggleCollapsed();
+                            }}
+                            type="button"
+                          >
+                            <span
+                              aria-hidden="true"
+                              className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
+                            >
+                              <IconWorld size={16} stroke={1.8} />
+                            </span>
+                            <IconCaretRightFilled
+                              aria-hidden="true"
+                              className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+                              size={16}
+                            />
+                          </button>
+                        }
+                      />
+                      <Tooltip.Portal>
+                        <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
+                          <Tooltip.Popup className="tooltip-popup">
+                            {emptyBrowserExpandTooltip}
+                          </Tooltip.Popup>
+                        </Tooltip.Positioner>
+                      </Tooltip.Portal>
+                    </Tooltip.Root>
+                  </Tooltip.Provider>
+                ) : (
+                  <Tooltip.Root>
+                    <Tooltip.Trigger
+                      render={
+                        <button
+                          aria-controls={isCollapsed ? undefined : sessionsRegionId}
+                          aria-expanded={!isCollapsed}
+                          aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${group.title}`}
+                          className="group-collapse-button section-titlebar-toggle"
+                          data-collapsed={String(isCollapsed)}
+                          data-has-idle-icon="true"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            toggleCollapsed();
+                          }}
+                          type="button"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
+                          >
+                            {isBrowserGroup ? (
+                              <IconWorld size={16} stroke={1.8} />
+                            ) : (
+                              <IconMessageCircle size={16} stroke={1.8} />
+                            )}
+                          </span>
+                          <IconCaretRightFilled
+                            aria-hidden="true"
+                            className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+                            size={16}
+                          />
+                        </button>
+                      }
+                    />
+                  </Tooltip.Root>
+                )}
                 <div
                   className="group-title-handle"
                   data-draggable={String(!isBrowserGroup)}
@@ -643,15 +724,23 @@ export function SessionGroupSection({
                 >
                   <button
                     aria-controls={isCollapsed ? undefined : sessionsRegionId}
+                    aria-disabled={emptyBrowserExpandTooltip !== undefined}
                     aria-expanded={!isCollapsed}
-                    aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${group.title}`}
+                    aria-label={
+                      emptyBrowserExpandTooltip ??
+                      `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
+                    }
                     className="group-title-button"
+                    data-empty-browser-group={String(emptyBrowserExpandTooltip !== undefined)}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
                       toggleCollapsed();
                     }}
-                    title={`${isCollapsed ? "Expand" : "Collapse"} ${group.title}`}
+                    title={
+                      emptyBrowserExpandTooltip ??
+                      `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
+                    }
                     type="button"
                   >
                     <span className="group-title section-titlebar-label">{group.title}</span>

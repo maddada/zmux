@@ -213,11 +213,6 @@ export function CommandsPanel({
       ),
     [commandSessionIndicators],
   );
-  const sessionsById = useSidebarStore((state) => state.sessionsById);
-  const focusedSessionId = useMemo(
-    () => Object.values(sessionsById).find((session) => session.isFocused)?.sessionId,
-    [sessionsById],
-  );
   const commandRunStates = useSidebarStore((state) => state.commandRunStates);
   const clearCommandRunState = useSidebarStore((state) => state.clearCommandRunState);
   const latestCommandOrderSyncResult = useSidebarStore(
@@ -689,8 +684,8 @@ export function CommandsPanel({
                           )}
                           index={index}
                           isActiveSessionIndicator={
-                            commandSessionIndicatorByCommandId.get(command.commandId)?.sessionId ===
-                            focusedSessionId
+                            commandSessionIndicatorByCommandId.get(command.commandId)?.isActive ===
+                            true
                           }
                           isContextMenuOpen={contextMenu?.command.commandId === command.commandId}
                           key={command.commandId}

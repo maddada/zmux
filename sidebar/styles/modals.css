@@ -258,7 +258,6 @@
 }
 
 .t3-browser-access-local-link code {
-  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -415,14 +414,6 @@
 
 .daemon-session-card-subtitle {
   color: var(--app-muted);
-  font-family: var(
-    --vscode-editor-font-family,
-    "SFMono-Regular",
-    Consolas,
-    "Liberation Mono",
-    Menlo,
-    monospace
-  );
   font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -473,14 +464,6 @@
 }
 
 .daemon-session-detail-value {
-  font-family: var(
-    --vscode-editor-font-family,
-    "SFMono-Regular",
-    Consolas,
-    "Liberation Mono",
-    Menlo,
-    monospace
-  );
   font-size: 11px;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -690,14 +673,6 @@
   border: 1px solid color-mix(in srgb, var(--app-button-background) 32%, var(--app-border));
   border-radius: 14px;
   color: inherit;
-  font-family: var(
-    --vscode-editor-font-family,
-    "SFMono-Regular",
-    Consolas,
-    "Liberation Mono",
-    Menlo,
-    monospace
-  );
   font-size: var(--vscode-editor-font-size, 12px);
   font-weight: 400;
   letter-spacing: normal;
@@ -832,14 +807,6 @@
   border-radius: 14px;
   height: 100%;
   color: inherit;
-  font-family: var(
-    --vscode-editor-font-family,
-    "SFMono-Regular",
-    Consolas,
-    "Liberation Mono",
-    Menlo,
-    monospace
-  );
   font-size: var(--vscode-editor-font-size, 12px);
   line-height: 1.55;
   min-height: 0;

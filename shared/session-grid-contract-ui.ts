@@ -52,6 +52,7 @@ export function createSidebarHudState(
   createSessionOnSidebarDoubleClick = false,
   renameSessionOnDoubleClick = false,
   commandSessionIndicators: SidebarCommandSessionIndicator[] = [],
+  buildStamp?: string,
 ): SidebarHudState {
   const sessionById = new Map(snapshot.sessions.map((session) => [session.sessionId, session]));
   const focusedSession = snapshot.focusedSessionId
@@ -62,6 +63,7 @@ export function createSidebarHudState(
     activeSessionsSortMode,
     agentManagerZoomPercent,
     agents,
+    buildStamp,
     collapsedSections,
     commands,
     commandSessionIndicators,

@@ -7,6 +7,7 @@ import {
   type SessionGroupRecord,
   type SessionRecord,
   type SidebarHydrateMessage,
+  type SidebarCommandSessionIndicator,
   type SidebarSessionItem,
   type SidebarSessionStateMessage,
   type SidebarToExtensionMessage,
@@ -32,6 +33,7 @@ type SidebarStoryWorkspaceOptions = {
   agentManagerZoomPercent: number;
   agents: SidebarAgentButton[];
   commands: SidebarCommandButton[];
+  commandSessionIndicators: SidebarCommandSessionIndicator[];
   completionBellEnabled: boolean;
   completionSound: SidebarHydrateMessage["hud"]["completionSound"];
   debuggingMode: boolean;
@@ -68,6 +70,7 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
       agentManagerZoomPercent: message.hud.agentManagerZoomPercent,
       agents: message.hud.agents,
       commands: message.hud.commands,
+      commandSessionIndicators: message.hud.commandSessionIndicators,
       completionBellEnabled: message.hud.completionBellEnabled,
       completionSound: message.hud.completionSound,
       debuggingMode: message.hud.debuggingMode,
@@ -159,6 +162,12 @@ export function createSidebarStoryMessage(
       undefined,
       undefined,
       workspace.options.activeSessionsSortMode,
+      false,
+      false,
+      workspace.options.commandSessionIndicators.map((indicator) => ({
+        ...indicator,
+        isActive: indicator.sessionId === activeGroup?.snapshot.focusedSessionId,
+      })),
     ),
     pinnedPrompts: workspace.pinnedPrompts.map((prompt) => ({ ...prompt })),
     previousSessions: workspace.previousSessions.map((session) => ({ ...session })),

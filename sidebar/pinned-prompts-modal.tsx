@@ -156,7 +156,7 @@ function PinnedPromptCard({ index, onCopy, onEdit, prompt }: PinnedPromptCardPro
       <div className="pinned-prompt-card-actions">
         <button
           aria-label={`Copy pinned prompt ${index + 1}`}
-          className="pinned-prompt-card-action"
+          className="pinned-prompt-card-action copy-cursor"
           onClick={() => {
             void onCopy();
           }}

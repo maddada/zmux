@@ -122,6 +122,7 @@ export type SidebarProjectWorktree = {
 
 export type SidebarCommandSessionIndicator = {
   commandId: string;
+  isActive?: boolean;
   sessionId: string;
   status: "idle" | "running" | "error";
   title?: string;
@@ -131,6 +132,7 @@ export type SidebarHudState = {
   activeSessionsSortMode: SidebarActiveSessionsSortMode;
   agentManagerZoomPercent: number;
   agents: SidebarAgentButton[];
+  buildStamp?: string;
   collapsedSections: SidebarSectionCollapseState;
   commands: SidebarCommandButton[];
   commandSessionIndicators: SidebarCommandSessionIndicator[];
@@ -195,7 +197,7 @@ export type SidebarSessionPresentationChangedMessage = {
 
 export type SidebarPlayCompletionSoundMessage = {
   sound: CompletionSoundSetting;
-  sessionId: string;
+  sessionId?: string;
   type: "playCompletionSound";
 };
 

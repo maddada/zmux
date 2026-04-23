@@ -270,10 +270,15 @@ body[data-sidebar-theme^="light-"]
 }
 
 .sidebar-project-header-copy {
+  appearance: none;
+  background: transparent;
+  border: none;
   display: grid;
   flex: 1 1 auto;
   gap: calc(4px * var(--sidebar-density-scale));
   min-width: 0;
+  padding: 0;
+  text-align: left;
 }
 
 .sidebar-project-header-name {
@@ -288,22 +293,16 @@ body[data-sidebar-theme^="light-"]
 }
 
 .sidebar-project-header-directory {
-  appearance: none;
-  background: transparent;
-  border: none;
   color: color-mix(in srgb, var(--app-muted) 88%, var(--app-foreground) 12%);
-  cursor: pointer;
   font-size: calc(10px * var(--sidebar-density-scale));
   line-height: 1.25;
   min-width: 0;
   overflow: hidden;
-  padding: 0;
-  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sidebar-project-header-directory:focus-visible {
+.sidebar-project-header-copy:focus-visible {
   outline: none;
 }
 
