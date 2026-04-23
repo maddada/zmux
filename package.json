@@ -581,22 +581,19 @@
           "enum": [
             "ghostty-non-persistent",
             "non-persistent",
-            "wterm",
             "xterm"
           ],
           "enumItemLabels": [
             "Ghostty (non-persistent)",
             "xterm.js (recommended)",
-            "wterm (Beta)",
             "xterm.js (persistent)"
           ],
           "enumDescriptions": [
             "Ghostty-based direct PTY terminal without daemon-side persistence. On reopen or reload, resumable sessions are recreated and resumed; other sessions reopen as a frozen snapshot.",
             "Default. Live xterm.js terminal attached straight to the backend PTY. On reopen or reload, resumable sessions are recreated and resumed; other sessions reopen as a frozen snapshot.",
-            "Beta. Live wterm terminal attached directly to the backend PTY with raw history replay on reconnect.",
             "Stable fallback. Uses daemon-side xterm.js persistence for reconnect scrollback."
           ],
-          "description": "Choose the default engine for new VSmux terminal sessions. xterm.js (recommended) is the default and uses a direct PTY connection without daemon-side xterm serialization. wterm and Ghostty are beta direct PTY engines. xterm.js (persistent) keeps daemon-side reconnect scrollback."
+          "description": "Choose the default engine for new VSmux terminal sessions. xterm.js (recommended) is the default and uses a direct PTY connection without daemon-side xterm serialization. Ghostty is a beta direct PTY engine. xterm.js (persistent) keeps daemon-side reconnect scrollback."
         },
         "VSmux.xtermHeadlessScrollback": {
           "title": "xterm.js Reconnect Scrollback",
