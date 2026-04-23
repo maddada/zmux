@@ -518,7 +518,7 @@
   left: calc(8px * var(--sidebar-density-scale));
   pointer-events: none;
   position: absolute;
-  top: calc(-12px * var(--sidebar-density-scale));
+  top: calc(-12px * var(--sidebar-density-scale) - 2px);
   width: 1px;
   z-index: 0;
 }

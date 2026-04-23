@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
   createAgentEnvironment,
+  extractCodexSessionId,
   getCandidateExecutableNames,
   getProcessTreeKillTarget,
   shouldSpawnAgentInDetachedGroup,
@@ -38,6 +39,34 @@ describe("createAgentEnvironment", () => {
 
   test("should stamp the wrapper pid into the environment for descendant cleanup", () => {
     expect(createAgentEnvironment("codex", {}).VSMUX_WRAPPER_PID).toBe(String(process.pid));
+  });
+});
+
+describe("extractCodexSessionId", () => {
+  test("returns the session id from session meta log lines", () => {
+    expect(
+      extractCodexSessionId(
+        JSON.stringify({
+          payload: {
+            id: "019db54a-e2e1-78c1-b05b-61335c73ad3a",
+          },
+          type: "session_meta",
+        }),
+      ),
+    ).toBe("019db54a-e2e1-78c1-b05b-61335c73ad3a");
+  });
+
+  test("ignores non session-meta log lines", () => {
+    expect(
+      extractCodexSessionId(
+        JSON.stringify({
+          payload: {
+            turn_id: "turn-123",
+          },
+          type: "event_msg",
+        }),
+      ),
+    ).toBeUndefined();
   });
 });
 

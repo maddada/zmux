@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import {
   isTerminalSession,
+  isPersistentTerminalEngine,
   normalizeTerminalTitle,
   type SessionRecord,
   type TerminalSessionRecord,
@@ -44,8 +45,9 @@ import {
   getXtermHeadlessScrollback,
 } from "./native-terminal-workspace/settings";
 
-const POLL_INTERVAL_MS = 500;
+const POLL_INTERVAL_STEPS_MS = [500, 1_000, 2_000] as const;
 const AGENT_STATE_DIR_NAME = "terminal-session-state";
+const MAX_PERSISTED_FROZEN_HISTORY_BYTES = 512 * 1024;
 
 export type DaemonTerminalWorkspaceBackendOptions = {
   context: vscode.ExtensionContext;
@@ -56,6 +58,8 @@ export type DaemonTerminalWorkspaceBackendOptions = {
 
 export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend {
   private agentShellIntegration: AgentShellIntegration | undefined;
+  private hasInitialized = false;
+  private didResetPollingCadenceDuringPoll = false;
   private isDisposed = false;
   private readonly changeSessionsEmitter = new vscode.EventEmitter<void>();
   private readonly changeSessionActivityEmitter =
@@ -67,7 +71,10 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   private readonly runtime: DaemonTerminalRuntime;
   private leaseRenewalTimer: NodeJS.Timeout | undefined;
   private readonly lastTerminalActivityAtBySessionId = new Map<string, number>();
+  private consecutiveIdlePollCount = 0;
+  private pollInFlight = false;
   private pollTimer: NodeJS.Timeout | undefined;
+  private scheduledPollDelayMs: number | undefined;
   private readonly sessionRecordBySessionId = new Map<string, TerminalSessionRecord>();
   private readonly sessionTitleBySessionId = new Map<string, string>();
   private readonly sessions = new Map<string, TerminalSessionSnapshot>();
@@ -103,6 +110,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       if (snapshot.workspaceId !== this.options.workspaceId) {
         return;
       }
+      this.resetPollingCadence();
       const previousSnapshot = this.sessions.get(snapshot.sessionId);
       const previousTitle = this.sessionTitleBySessionId.get(snapshot.sessionId);
       this.sessions.set(snapshot.sessionId, snapshot);
@@ -162,9 +170,13 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       sessions: summarizeSnapshots([...this.sessions.values()]),
       workspaceId: this.options.workspaceId,
     });
-    this.pollTimer = setInterval(() => {
-      void this.refreshSessionSnapshots();
-    }, POLL_INTERVAL_MS);
+    this.hasInitialized = true;
+    this.scheduleNextPoll(
+      getSessionSnapshotPollIntervalMs(
+        this.consecutiveIdlePollCount,
+        this.sessionRecordBySessionId.size,
+      ),
+    );
   }
 
   public dispose(): void {
@@ -177,14 +189,19 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       this.leaseRenewalTimer = undefined;
     }
     if (this.pollTimer) {
-      clearInterval(this.pollTimer);
+      clearTimeout(this.pollTimer);
       this.pollTimer = undefined;
+      this.scheduledPollDelayMs = undefined;
     }
     this.runtime.dispose();
     this.changeSessionsEmitter.dispose();
     this.changeSessionActivityEmitter.dispose();
     this.changeSessionPresentationEmitter.dispose();
     this.changeSessionTitleEmitter.dispose();
+  }
+
+  public async freezeNonPersistentSessionsForPanelClose(): Promise<void> {
+    await this.freezeNonPersistentSessions({ killSessions: true });
   }
 
   public async releaseForDeactivation(): Promise<void> {
@@ -202,6 +219,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     );
 
     try {
+      await this.freezeNonPersistentSessions({ killSessions: true });
       const didConfigure = await this.runtime.configureExisting(idleShutdownTimeoutMs);
       if (!didConfigure) {
         void appendTerminalRestartReproLog(
@@ -315,6 +333,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       workspaceId: this.options.workspaceId,
     });
     const snapshot = createOrAttachResult.session;
+    await this.clearFrozenSessionState(sessionRecord.sessionId);
     this.sessions.set(sessionRecord.sessionId, snapshot);
     this.syncSessionTitle(sessionRecord.sessionId, snapshot.title);
     this.changeSessionsEmitter.fire();
@@ -342,6 +361,42 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         pendingFirstPromptAutoRenamePrompt: undefined,
         title: normalizedTitle,
       }),
+    ).catch(() => undefined);
+  }
+
+  public async cancelPendingFirstPromptAutoRename(sessionId: string): Promise<void> {
+    await updatePersistedSessionStateFile(
+      this.getSessionAgentStateFilePath(sessionId),
+      (currentState) => {
+        if (!currentState.pendingFirstPromptAutoRenamePrompt) {
+          return currentState;
+        }
+
+        return {
+          ...currentState,
+          pendingFirstPromptAutoRenamePrompt: undefined,
+        };
+      },
+    ).catch(() => undefined);
+  }
+
+  public async markFirstPromptAutoRenameTriggered(sessionId: string): Promise<void> {
+    await updatePersistedSessionStateFile(
+      this.getSessionAgentStateFilePath(sessionId),
+      (currentState) => {
+        if (
+          currentState.hasAutoTitleFromFirstPrompt &&
+          !currentState.pendingFirstPromptAutoRenamePrompt
+        ) {
+          return currentState;
+        }
+
+        return {
+          ...currentState,
+          hasAutoTitleFromFirstPrompt: true,
+          pendingFirstPromptAutoRenamePrompt: undefined,
+        };
+      },
     ).catch(() => undefined);
   }
 
@@ -453,6 +508,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       }
     }
 
+    this.resetPollingCadence();
     void this.syncManagedSessionLeases();
   }
 
@@ -466,11 +522,13 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     if (shouldExecute && isWindowsPowerShellShell(getDefaultShell())) {
       await this.runtime.write(this.options.workspaceId, sessionId, data);
       await this.runtime.write(this.options.workspaceId, sessionId, "\r");
+      this.resetPollingCadence();
       return;
     }
 
     const text = shouldExecute ? `${data}\n` : data;
     await this.runtime.write(this.options.workspaceId, sessionId, text);
+    this.resetPollingCadence();
   }
 
   public async getConnection(): Promise<DaemonTerminalConnection> {
@@ -521,13 +579,14 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     return true;
   }
 
-  private async refreshSessionSnapshots(): Promise<void> {
+  private async refreshSessionSnapshots(): Promise<boolean> {
     const daemonSessions = await this.runtime.listSessions(this.options.workspaceId);
     const nextSnapshotsBySessionId = indexWorkspaceTerminalSnapshotsBySessionId(
       daemonSessions,
       this.options.workspaceId,
     );
-    let didChange = false;
+    let didChangeSessions = false;
+    let didObserveActivityChange = false;
 
     for (const [sessionId, sessionRecord] of this.sessionRecordBySessionId) {
       const nextSnapshot =
@@ -539,10 +598,10 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       const previousSnapshot = this.sessions.get(sessionId);
       const previousTitle = this.sessionTitleBySessionId.get(sessionId);
       if (!haveSameTerminalSessionSnapshot(previousSnapshot, nextSnapshot)) {
-        didChange = true;
+        didChangeSessions = true;
       }
       this.sessions.set(sessionId, nextSnapshot);
-      await this.refreshPersistedSessionActivity(sessionId);
+      didObserveActivityChange ||= await this.refreshPersistedSessionActivity(sessionId);
       const nextTitle = this.syncSessionTitle(sessionId, nextSnapshot.title);
       const presentationDiff = describeTerminalSessionPresentationDiff(
         previousSnapshot,
@@ -551,7 +610,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
         nextTitle,
       );
       const didChangeAgentPresentation = hasMeaningfulAgentPresentationChange(presentationDiff);
-      didChange ||= didChangeAgentPresentation;
+      didChangeSessions ||= didChangeAgentPresentation;
       if (!presentationDiff.isSame) {
         logVSmuxDebug("backend.daemon.sessionPresentationDiff", {
           ...presentationDiff,
@@ -565,9 +624,11 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       }
     }
 
-    if (didChange) {
+    if (didChangeSessions) {
       this.changeSessionsEmitter.fire();
     }
+
+    return didChangeSessions || didObserveActivityChange;
   }
 
   private getIdleShutdownTimeoutMs(): number | null {
@@ -575,7 +636,10 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
   }
 
   private getManagedTerminalSessionIds(): string[] {
-    return [...this.sessionRecordBySessionId.keys()].sort();
+    return [...this.sessionRecordBySessionId.values()]
+      .filter((sessionRecord) => isPersistentTerminalEngine(sessionRecord.terminalEngine))
+      .map((sessionRecord) => sessionRecord.sessionId)
+      .sort();
   }
 
   private async syncManagedSessionLeases(): Promise<void> {
@@ -610,6 +674,108 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     }, intervalMs);
   }
 
+  private scheduleNextPoll(delayMs: number): void {
+    if (this.isDisposed || !this.hasInitialized) {
+      return;
+    }
+
+    if (
+      this.pollTimer &&
+      this.scheduledPollDelayMs !== undefined &&
+      this.scheduledPollDelayMs <= delayMs
+    ) {
+      return;
+    }
+
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+    }
+
+    this.scheduledPollDelayMs = delayMs;
+    this.pollTimer = setTimeout(() => {
+      this.pollTimer = undefined;
+      this.scheduledPollDelayMs = undefined;
+      void this.runPollCycle();
+    }, delayMs);
+  }
+
+  private resetPollingCadence(): void {
+    this.consecutiveIdlePollCount = 0;
+    if (this.pollInFlight) {
+      this.didResetPollingCadenceDuringPoll = true;
+      return;
+    }
+
+    this.scheduleNextPoll(POLL_INTERVAL_STEPS_MS[0]);
+  }
+
+  private async runPollCycle(): Promise<void> {
+    if (this.isDisposed || this.pollInFlight) {
+      return;
+    }
+
+    this.pollInFlight = true;
+    let nextPollDelayMs: number = POLL_INTERVAL_STEPS_MS[0];
+
+    try {
+      const didObserveChange = await this.refreshSessionSnapshots();
+      const nextPollState = resolveSessionSnapshotPollState({
+        consecutiveIdlePolls: this.consecutiveIdlePollCount,
+        didObserveChange,
+        didResetCadenceDuringPoll: this.didResetPollingCadenceDuringPoll,
+        sessionCount: this.sessionRecordBySessionId.size,
+      });
+      this.consecutiveIdlePollCount = nextPollState.consecutiveIdlePolls;
+      nextPollDelayMs = nextPollState.delayMs;
+    } catch (error) {
+      this.consecutiveIdlePollCount = 0;
+      logVSmuxDebug("backend.daemon.refreshSessionSnapshots.failed", {
+        error: error instanceof Error ? error.message : String(error),
+        workspaceId: this.options.workspaceId,
+      });
+    } finally {
+      this.didResetPollingCadenceDuringPoll = false;
+      this.pollInFlight = false;
+      this.scheduleNextPoll(nextPollDelayMs);
+    }
+  }
+
+  private async freezeNonPersistentSessions(options: { killSessions: boolean }): Promise<void> {
+    const targetSessionRecords = [...this.sessionRecordBySessionId.values()].filter(
+      (sessionRecord) => !isPersistentTerminalEngine(sessionRecord.terminalEngine),
+    );
+    if (targetSessionRecords.length === 0) {
+      return;
+    }
+
+    const latestSnapshots = indexWorkspaceTerminalSnapshotsBySessionId(
+      await this.runtime.listSessions(this.options.workspaceId).catch(() => []),
+      this.options.workspaceId,
+    );
+
+    for (const sessionRecord of targetSessionRecords) {
+      const liveSnapshot =
+        latestSnapshots.get(sessionRecord.sessionId) ?? this.sessions.get(sessionRecord.sessionId);
+      await this.persistFrozenSessionSnapshot(sessionRecord, liveSnapshot);
+
+      if (options.killSessions && liveSnapshot) {
+        await this.runtime
+          .killExistingSession(this.options.workspaceId, sessionRecord.sessionId)
+          .catch(() => false);
+      }
+
+      this.sessions.set(
+        sessionRecord.sessionId,
+        await this.createPersistedDisconnectedSnapshot(
+          sessionRecord.sessionId,
+          this.options.workspaceId,
+        ),
+      );
+    }
+
+    this.changeSessionsEmitter.fire();
+  }
+
   private getSessionAgentStateFilePath(sessionId: string): string {
     const workspaceStateKey = getWorkspaceStorageKey(
       AGENT_STATE_DIR_NAME,
@@ -620,6 +786,40 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       workspaceStateKey,
       `${sessionId}.state`,
     );
+  }
+
+  private async clearFrozenSessionState(sessionId: string): Promise<void> {
+    await updatePersistedSessionStateFile(
+      this.getSessionAgentStateFilePath(sessionId),
+      (state) => ({
+        ...state,
+        frozenAt: undefined,
+      }),
+    ).catch(() => undefined);
+  }
+
+  private async persistFrozenSessionSnapshot(
+    sessionRecord: TerminalSessionRecord,
+    snapshot: TerminalSessionSnapshot | undefined,
+  ): Promise<void> {
+    const history = snapshot?.history;
+    const nextHistoryBase64 =
+      typeof history === "string"
+        ? Buffer.from(trimPersistedFrozenHistory(history), "utf8").toString("base64")
+        : undefined;
+    const frozenAt = new Date().toISOString();
+
+    await updatePersistedSessionStateFile(
+      this.getSessionAgentStateFilePath(sessionRecord.sessionId),
+      (state) => ({
+        ...state,
+        agentName: snapshot?.agentName ?? state.agentName,
+        agentStatus: snapshot?.agentStatus ?? state.agentStatus,
+        frozenAt,
+        historyBase64: nextHistoryBase64,
+        title: normalizeTitle(snapshot?.title) ?? state.title,
+      }),
+    ).catch(() => undefined);
   }
 
   private syncSessionTitle(sessionId: string, nextTitle: string | undefined): string | undefined {
@@ -654,7 +854,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     return applyPersistedSessionStateToDisconnectedSnapshot(snapshot, persistedState);
   }
 
-  private async refreshPersistedSessionActivity(sessionId: string): Promise<void> {
+  private async refreshPersistedSessionActivity(sessionId: string): Promise<boolean> {
     const persistedState = await readPersistedSessionStateSnapshotFromFile(
       this.getSessionAgentStateFilePath(sessionId),
     );
@@ -662,17 +862,21 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     const previousActivityAtMs = this.lastTerminalActivityAtBySessionId.get(sessionId);
 
     if (nextActivityAtMs === undefined) {
+      if (previousActivityAtMs === undefined) {
+        return false;
+      }
+
       this.lastTerminalActivityAtBySessionId.delete(sessionId);
       logVSmuxDebug("backend.daemon.sessionActivity.cleared", {
         nextActivityAt: undefined,
         previousActivityAt: formatDebugActivityAt(previousActivityAtMs),
         sessionId,
       });
-      return;
+      return true;
     }
 
     if (previousActivityAtMs === nextActivityAtMs) {
-      return;
+      return false;
     }
 
     this.lastTerminalActivityAtBySessionId.set(sessionId, nextActivityAtMs);
@@ -684,6 +888,7 @@ export class DaemonTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
       sessionId,
     });
     this.changeSessionActivityEmitter.fire(activityChange);
+    return true;
   }
 }
 
@@ -721,12 +926,30 @@ export function applyPersistedSessionStateToDisconnectedSnapshot(
   snapshot: TerminalSessionSnapshot,
   persistedState: PersistedSessionState,
 ): TerminalSessionSnapshot {
+  const history =
+    typeof persistedState.historyBase64 === "string"
+      ? Buffer.from(persistedState.historyBase64, "base64").toString("utf8")
+      : snapshot.history;
+
   return {
     ...snapshot,
     agentName: persistedState.agentName,
     agentStatus: persistedState.agentStatus,
+    endedAt: persistedState.frozenAt,
+    history,
     title: persistedState.title,
   };
+}
+
+function trimPersistedFrozenHistory(history: string): string {
+  const historyBuffer = Buffer.from(history, "utf8");
+  if (historyBuffer.byteLength <= MAX_PERSISTED_FROZEN_HISTORY_BYTES) {
+    return history;
+  }
+
+  return historyBuffer
+    .subarray(historyBuffer.byteLength - MAX_PERSISTED_FROZEN_HISTORY_BYTES)
+    .toString("utf8");
 }
 
 function describeTerminalSessionPresentationDiff(
@@ -792,6 +1015,42 @@ export function hasMeaningfulAgentPresentationChange(diff: {
   agentStatusChanged: boolean;
 }): boolean {
   return diff.agentNameChanged || diff.agentStatusChanged;
+}
+
+export function getSessionSnapshotPollIntervalMs(
+  consecutiveIdlePolls: number,
+  sessionCount: number,
+): number {
+  if (sessionCount <= 0) {
+    return POLL_INTERVAL_STEPS_MS[POLL_INTERVAL_STEPS_MS.length - 1];
+  }
+
+  const normalizedIdlePolls = Math.max(0, Math.floor(consecutiveIdlePolls));
+  const intervalIndex = Math.min(POLL_INTERVAL_STEPS_MS.length - 1, normalizedIdlePolls);
+  return POLL_INTERVAL_STEPS_MS[intervalIndex];
+}
+
+export function resolveSessionSnapshotPollState(args: {
+  consecutiveIdlePolls: number;
+  didObserveChange: boolean;
+  didResetCadenceDuringPoll: boolean;
+  sessionCount: number;
+}): {
+  consecutiveIdlePolls: number;
+  delayMs: number;
+} {
+  if (args.didResetCadenceDuringPoll || args.didObserveChange) {
+    return {
+      consecutiveIdlePolls: 0,
+      delayMs: POLL_INTERVAL_STEPS_MS[0],
+    };
+  }
+
+  const consecutiveIdlePolls = Math.max(0, Math.floor(args.consecutiveIdlePolls)) + 1;
+  return {
+    consecutiveIdlePolls,
+    delayMs: getSessionSnapshotPollIntervalMs(consecutiveIdlePolls, args.sessionCount),
+  };
 }
 
 function normalizeTitle(title: string | undefined): string | undefined {

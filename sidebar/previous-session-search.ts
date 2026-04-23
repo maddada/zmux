@@ -1,3 +1,4 @@
+import Fuse, { type IFuseOptions } from "fuse.js";
 import type {
   SidebarPreviousSessionItem,
   SidebarSessionItem,
@@ -11,6 +12,26 @@ export type PreviousSessionsModalDayGroup = {
 export type FilterPreviousSessionsOptions = {
   favoritesOnly?: boolean;
 };
+
+type SidebarSearchableSession = Pick<
+  SidebarSessionItem,
+  "alias" | "detail" | "primaryTitle" | "sessionNumber" | "terminalTitle"
+>;
+
+type SidebarSessionSearchRecord<T extends SidebarSearchableSession> = {
+  item: T;
+  itemIndex: number;
+  searchText: string;
+};
+
+const SESSION_SEARCH_OPTIONS = {
+  ignoreDiacritics: true,
+  ignoreLocation: true,
+  keys: ["searchText"],
+  shouldSort: false,
+  threshold: 0.3,
+  useTokenSearch: true,
+} satisfies IFuseOptions<SidebarSessionSearchRecord<SidebarSearchableSession>>;
 
 export function filterPreviousSessions(
   previousSessions: readonly SidebarPreviousSessionItem[],
@@ -26,7 +47,7 @@ export function filterPreviousSessions(
     return filteredSessions;
   }
 
-  return filteredSessions.filter((session) => matchesSidebarSessionSearchQuery(session, query));
+  return filterSidebarSessionItems(filteredSessions, query);
 }
 
 export function groupPreviousSessionsByDay(
@@ -58,6 +79,81 @@ export function groupPreviousSessionsByDay(
   }));
 }
 
+export function filterSidebarSessionItems<T extends SidebarSearchableSession>(
+  sessions: readonly T[],
+  query: string,
+): T[] {
+  const normalizedQuery = normalizeSessionSearchValue(query);
+  if (!normalizedQuery) {
+    return [...sessions];
+  }
+
+  const searchRecords = sessions.map((session, itemIndex) =>
+    createSidebarSessionSearchRecord(session, itemIndex),
+  );
+  const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  const shouldUseAbbreviationMatching =
+    queryTokens.length > 0 && queryTokens.every((token) => token.length <= 3);
+
+  if (shouldUseAbbreviationMatching) {
+    return sessions.filter((_, itemIndex) =>
+      matchesNormalizedQueryTokens(searchRecords[itemIndex]?.searchText ?? "", queryTokens),
+    );
+  }
+
+  const fuse = new Fuse(searchRecords, SESSION_SEARCH_OPTIONS);
+  const matchedItemIndexes = new Set(
+    fuse.search(normalizedQuery).map((result) => result.item.itemIndex),
+  );
+
+  return sessions.filter((_, itemIndex) => matchedItemIndexes.has(itemIndex));
+}
+
+export function matchesSidebarSessionSearchQuery(
+  session: SidebarSearchableSession,
+  query: string,
+): boolean {
+  return filterSidebarSessionItems([session], query).length > 0;
+}
+
+function createSidebarSessionSearchRecord<T extends SidebarSearchableSession>(
+  session: T,
+  itemIndex: number,
+): SidebarSessionSearchRecord<T> {
+  return {
+    item: session,
+    itemIndex,
+    searchText: [
+      session.alias,
+      session.primaryTitle,
+      session.terminalTitle,
+      session.detail,
+      session.sessionNumber,
+    ]
+      .map((part) => normalizeSessionSearchValue(part))
+      .filter(Boolean)
+      .join(" "),
+  };
+}
+
+function normalizeSessionSearchValue(value: string | undefined): string {
+  if (!value) {
+    return "";
+  }
+
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[-_/\\.]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function matchesNormalizedQueryTokens(searchText: string, queryTokens: readonly string[]): boolean {
+  return queryTokens.every((token) => fuzzyIncludes(searchText, token));
+}
+
 function fuzzyIncludes(text: string, query: string): boolean {
   let queryIndex = 0;
 
@@ -73,31 +169,4 @@ function fuzzyIncludes(text: string, query: string): boolean {
   }
 
   return query.length === 0;
-}
-
-export function matchesSidebarSessionSearchQuery(
-  session: Pick<
-    SidebarSessionItem,
-    "alias" | "detail" | "primaryTitle" | "sessionNumber" | "terminalTitle"
-  >,
-  query: string,
-): boolean {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return true;
-  }
-
-  const haystack = [
-    session.alias,
-    session.primaryTitle,
-    session.terminalTitle,
-    session.detail,
-    session.sessionNumber,
-  ]
-    .filter((part) => typeof part === "string" && part.trim().length > 0)
-    .join(" ")
-    .toLowerCase();
-  const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
-
-  return queryTokens.every((token) => fuzzyIncludes(haystack, token));
 }

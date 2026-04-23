@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
   isGenericAgentSessionTitle,
+  resolveFirstPromptAutoRenameStrategy,
   shouldAutoNameSessionFromFirstPrompt,
 } from "./first-prompt-session-title";
 
@@ -21,11 +22,21 @@ describe("isGenericAgentSessionTitle", () => {
 });
 
 describe("shouldAutoNameSessionFromFirstPrompt", () => {
-  test("only auto names Codex sessions with generic titles", () => {
+  test("auto names Codex sessions with generic titles", () => {
     expect(
       shouldAutoNameSessionFromFirstPrompt({
         agentName: "codex",
         currentTitle: "Codex",
+        prompt: "How does terminal title syncing work here?",
+      }),
+    ).toBe(true);
+  });
+
+  test("auto names Claude sessions with generic titles", () => {
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "claude",
+        currentTitle: "Claude Code",
         prompt: "How does terminal title syncing work here?",
       }),
     ).toBe(true);
@@ -84,5 +95,41 @@ describe("shouldAutoNameSessionFromFirstPrompt", () => {
         prompt: "# AGENTS.md instructions for /Users/example/project\n\n<INSTRUCTIONS>",
       }),
     ).toBe(false);
+  });
+
+  test("skips prompts that include inline slash command examples", () => {
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "codex",
+        currentTitle: "Codex",
+        pendingFirstPromptAutoRenamePrompt: undefined,
+        prompt:
+          "add 1 more toggle here [Image #1] that makes it open as /rename Memory Consolidation Agent",
+      }),
+    ).toBe(false);
+  });
+
+  test("skips agents outside the supported first prompt auto rename flow", () => {
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "gemini",
+        currentTitle: "Gemini",
+        prompt: "How does terminal title syncing work here?",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("resolveFirstPromptAutoRenameStrategy", () => {
+  test("uses a bare Claude rename command instead of generating a title locally", () => {
+    expect(resolveFirstPromptAutoRenameStrategy("claude")).toBe("sendBareRenameCommand");
+  });
+
+  test("keeps generated-title auto rename for Codex", () => {
+    expect(resolveFirstPromptAutoRenameStrategy("codex")).toBe("generateTitleAndRename");
+  });
+
+  test("skips unsupported agents", () => {
+    expect(resolveFirstPromptAutoRenameStrategy("gemini")).toBeUndefined();
   });
 });

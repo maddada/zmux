@@ -25,6 +25,7 @@ type T3ClipboardPayload = {
 
 const VSMUX_PASTE_TRACE_TAG = "[VSMUX_PASTE_TRACE]";
 const MAX_PASTE_TRACE_TEXT_LENGTH = 180;
+const THREAD_SOURCE_REPRO_POLL_MS = 1_000;
 const WORKING_STARTED_AT_POLL_MS = 1_000;
 
 declare global {
@@ -213,7 +214,7 @@ let lastObservedThreadSourceState = `${bootstrap.threadId}|${window.__VSMUX_T3_A
 
 installObservedThreadGlobals();
 installHistoryObservers();
-window.setInterval(() => {
+const threadSourceReproPollId = window.setInterval(() => {
   const nextLocationKey = `${window.location.href}#${window.location.hash}`;
   if (nextLocationKey !== lastObservedLocationKey) {
     reportThreadSourceRepro("frameLocationPolledChange", {
@@ -237,11 +238,12 @@ window.setInterval(() => {
     });
     lastObservedThreadSourceState = nextThreadSourceState;
   }
-}, 250);
+}, THREAD_SOURCE_REPRO_POLL_MS);
 
 window.addEventListener("beforeunload", () => {
   workingStartedAtObserver.disconnect();
   window.clearInterval(workingStartedAtPollId);
+  window.clearInterval(threadSourceReproPollId);
   reportDebugLog("workspace.t3FrameHostBeforeUnload", {
     currentThreadId: getCurrentThreadId(),
     hash: window.location.hash,
@@ -657,9 +659,9 @@ function getCurrentThreadId(): string | undefined {
 }
 
 function syncWorkingStartedAt(reason: string): void {
-  const bodyText = document.body?.innerText ?? document.body?.textContent ?? "";
+  const workingStartedAtText = document.body?.innerText ?? document.body?.textContent ?? "";
   const nextWorkingStartedAtMs = coalesceWorkingStartedAtMs({
-    nextWorkingStartedAtMs: getWorkingStartedAtMsFromText(bodyText, Date.now()),
+    nextWorkingStartedAtMs: getWorkingStartedAtMsFromText(workingStartedAtText, Date.now()),
     previousWorkingStartedAtMs: lastReportedWorkingStartedAtMs,
   });
   if (nextWorkingStartedAtMs === lastReportedWorkingStartedAtMs) {

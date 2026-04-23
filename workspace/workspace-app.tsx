@@ -21,6 +21,7 @@ import type {
   WorkspacePanelSessionStateMessage,
   WorkspacePanelShowToastMessage,
   WorkspacePanelT3Appearance,
+  WorkspacePanelToExtensionMessage,
 } from "../shared/workspace-panel-contract";
 import {
   getVisiblePrimaryTitle,
@@ -259,7 +260,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const [draggedPaneId, setDraggedPaneId] = useState<string | undefined>();
   const [dropTargetPaneId, setDropTargetPaneId] = useState<string | undefined>();
   const [welcomeModalMode, setWelcomeModalMode] = useState<WorkspaceWelcomeModalMode>();
-  const [paneMeasuredBoundsVersion, setPaneMeasuredBoundsVersion] = useState(0);
   const [, setTerminalPortalVersion] = useState(0);
   const [workspaceToast, setWorkspaceToast] = useState<WorkspaceToastState | undefined>();
   const [completionFlashNonceBySessionId, setCompletionFlashNonceBySessionId] = useState<
@@ -322,8 +322,14 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     setWelcomeModalMode("required");
   }, [workspaceState?.shouldShowWelcomeModal]);
 
-  const postToExtension = (message: Record<string, unknown>) => {
+  const postToExtension = (message: WorkspacePanelToExtensionMessage) => {
     vscode.postMessage(message);
+  };
+
+  const requestCreateSession = () => {
+    postToExtension({
+      type: "createSession",
+    });
   };
 
   const requestAcknowledgeSessionAttention = (
@@ -334,6 +340,13 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       reason,
       sessionId,
       type: "acknowledgeSessionAttention",
+    });
+  };
+
+  const requestCancelFirstPromptAutoRename = (sessionId: string) => {
+    postToExtension({
+      sessionId,
+      type: "cancelFirstPromptAutoRename",
     });
   };
 
@@ -374,6 +387,14 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     void payload;
   };
 
+  const postWorkspaceStartupLog = (event: string, payload?: Record<string, unknown>) => {
+    postToExtension({
+      details: payload,
+      event,
+      type: "workspaceDebugLog",
+    });
+  };
+
   const postWorkspaceDebugLog = (
     enabled: boolean | undefined,
     event: string,
@@ -391,6 +412,15 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   };
 
   useEffect(() => {
+    const bootstrapState = getInitialWorkspaceState();
+    postWorkspaceStartupLog("workspaceStartup.webviewMounted", {
+      bootId: workspaceBootIdRef.current,
+      bootstrapPaneCount: bootstrapState?.panes.length ?? 0,
+      bootstrapStateType: bootstrapState?.type,
+      documentHasFocus: document.hasFocus(),
+      hidden: document.hidden,
+      visibilityState: document.visibilityState,
+    });
     postWorkspaceDebugLog(true, "workspace.instanceMounted", {
       bootId: workspaceBootIdRef.current,
       documentHasFocus: document.hasFocus(),
@@ -449,6 +479,14 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     const applyWorkspaceStateMessage = (
       message: WorkspacePanelHydrateMessage | WorkspacePanelSessionStateMessage,
     ) => {
+      postWorkspaceStartupLog("workspaceStartup.stateApplied", {
+        activeGroupId: message.activeGroupId,
+        bootId: workspaceBootIdRef.current,
+        focusedSessionId: message.focusedSessionId,
+        paneCount: message.panes.length,
+        paneIds: message.panes.map((pane) => pane.sessionId),
+        type: message.type,
+      });
       postWorkspaceDebugLog(message.debuggingMode, "message.received", {
         activeGroupId: message.activeGroupId,
         bootId: workspaceBootIdRef.current,
@@ -493,6 +531,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       if (nextMessage.type === "terminalPresentationChanged") {
         postWorkspaceDebugLog(debuggingModeRef.current, "workspace.terminalPresentationChanged", {
           activity: nextMessage.activity,
+          isGeneratingFirstPromptTitle: nextMessage.isGeneratingFirstPromptTitle,
           lifecycleState: nextMessage.lifecycleState,
           sessionId: nextMessage.sessionId,
           snapshotAgentName: nextMessage.snapshot?.agentName,
@@ -506,6 +545,12 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
             !previousState ||
             (previousState.type !== "hydrate" && previousState.type !== "sessionState")
           ) {
+            postWorkspaceStartupLog("workspaceStartup.transientIgnoredWithoutBaseState", {
+              bootId: workspaceBootIdRef.current,
+              sessionId: nextMessage.sessionId,
+              terminalTitle: nextMessage.terminalTitle,
+              transientType: nextMessage.type,
+            });
             return previousState;
           }
 
@@ -517,6 +562,8 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
                 : {
                     ...pane,
                     activity: nextMessage.activity ?? pane.activity,
+                    isGeneratingFirstPromptTitle:
+                      nextMessage.isGeneratingFirstPromptTitle ?? pane.isGeneratingFirstPromptTitle,
                     lifecycleState: nextMessage.lifecycleState ?? pane.lifecycleState,
                     snapshot: nextMessage.snapshot ?? pane.snapshot,
                     terminalTitle: nextMessage.terminalTitle,
@@ -643,6 +690,20 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       window.removeEventListener("message", handleIframeFocus);
     };
   }, [messageSource, vscode]);
+
+  useEffect(() => {
+    postWorkspaceStartupLog(
+      workspaceState ? "workspaceStartup.workspaceStateAvailable" : "workspaceStartup.emptyState",
+      {
+        activeGroupId: workspaceState?.activeGroupId,
+        bootId: workspaceBootIdRef.current,
+        focusedSessionId: workspaceState?.focusedSessionId,
+        paneCount: workspaceState?.panes.length ?? 0,
+        paneIds: workspaceState?.panes.map((pane) => pane.sessionId) ?? [],
+        stateType: workspaceState?.type,
+      },
+    );
+  }, [workspaceState]);
 
   useEffect(() => {
     return () => {
@@ -843,21 +904,31 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     workspaceShellPaddingTopPx,
     visiblePanes.length,
   ]);
-  const hiddenPaneInPlaceStyles = useMemo(() => {
+  const hiddenPaneFallbackLayout = useMemo(
+    () =>
+      visiblePaneLayoutBySessionId.get(workspaceState?.focusedSessionId ?? "") ??
+      visiblePaneLayoutBySessionId.get(visiblePanes[0]?.sessionId ?? "") ?? {
+        gridColumn: "1",
+        gridRow: "1",
+      },
+    [visiblePaneLayoutBySessionId, visiblePanes, workspaceState?.focusedSessionId],
+  );
+  const hiddenPaneLayerStyles = useMemo(() => {
     const nextStyles = new Map<string, CSSProperties>();
     for (const pane of orderedPanes) {
-      if (pane.isVisible || !activeGroupSessionIdSet.has(pane.sessionId)) {
+      if (pane.isVisible) {
         continue;
       }
 
       const cachedLayout = lastVisibleLayoutBySessionIdRef.current.get(pane.sessionId);
-      if (!cachedLayout || cachedLayout.layoutKey !== activeGroupLayoutKey) {
-        continue;
-      }
+      const shouldUseCachedLayout =
+        activeGroupSessionIdSet.has(pane.sessionId) &&
+        cachedLayout?.layoutKey === activeGroupLayoutKey;
+      const targetLayout = shouldUseCachedLayout ? cachedLayout : hiddenPaneFallbackLayout;
 
       nextStyles.set(pane.sessionId, {
-        gridColumn: cachedLayout.gridColumn,
-        gridRow: cachedLayout.gridRow,
+        gridColumn: targetLayout.gridColumn,
+        gridRow: targetLayout.gridRow,
         pointerEvents: "none",
         visibility: "hidden",
         zIndex: 0,
@@ -865,38 +936,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     }
 
     return nextStyles;
-  }, [activeGroupLayoutKey, activeGroupSessionIdSet, orderedPanes]);
-  const hiddenPaneParkingStyles = useMemo(() => {
-    const hiddenPanes = orderedPanes.filter(
-      (pane) =>
-        !pane.isVisible &&
-        (!activeGroupSessionIdSet.has(pane.sessionId) ||
-          lastVisibleLayoutBySessionIdRef.current.get(pane.sessionId)?.layoutKey !==
-            activeGroupLayoutKey),
-    );
-    const nextStyles = new Map<string, CSSProperties>();
-
-    hiddenPanes.forEach((pane, index) => {
-      const measuredBounds = paneMeasuredBoundsRef.current.get(pane.sessionId);
-      nextStyles.set(pane.sessionId, {
-        height: measuredBounds?.height ? `${String(measuredBounds.height)}px` : "1px",
-        left: "0",
-        pointerEvents: "none",
-        position: "absolute",
-        top: `calc(100% + ${String((index + 1) * (workspaceShellPaneGapPx + 24))}px)`,
-        width: measuredBounds?.width ? `${String(measuredBounds.width)}px` : "1px",
-        zIndex: 0,
-      });
-    });
-
-    return nextStyles;
-  }, [
-    activeGroupLayoutKey,
-    activeGroupSessionIdSet,
-    orderedPanes,
-    paneMeasuredBoundsVersion,
-    workspaceShellPaneGapPx,
-  ]);
+  }, [activeGroupLayoutKey, activeGroupSessionIdSet, hiddenPaneFallbackLayout, orderedPanes]);
 
   useEffect(() => {
     if (!workspaceState) {
@@ -927,30 +967,26 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       return;
     }
 
-    postWorkspaceDebugLog(workspaceState.debuggingMode, "workspace.hiddenPaneParkingSummary", {
+    postWorkspaceDebugLog(workspaceState.debuggingMode, "workspace.hiddenPaneLayerSummary", {
       activeGroupId: workspaceState.activeGroupId,
       hiddenPanes: orderedPanes.flatMap((pane) => {
         if (pane.kind !== "terminal" || pane.isVisible) {
           return [];
         }
 
-        const measuredBounds = paneMeasuredBoundsRef.current.get(pane.sessionId);
-        const inPlaceStyle = hiddenPaneInPlaceStyles.get(pane.sessionId);
-        const parkingStyle = hiddenPaneParkingStyles.get(pane.sessionId);
+        const layerStyle = hiddenPaneLayerStyles.get(pane.sessionId);
+        const cachedLayout = lastVisibleLayoutBySessionIdRef.current.get(pane.sessionId);
         return [
           {
-            hiddenMode: inPlaceStyle ? "in-place" : "parked",
-            lastVisibleLayoutKey: lastVisibleLayoutBySessionIdRef.current.get(pane.sessionId)
-              ?.layoutKey,
-            measuredBounds,
-            inPlaceGridColumn:
-              typeof inPlaceStyle?.gridColumn === "string" ? inPlaceStyle.gridColumn : undefined,
-            inPlaceGridRow:
-              typeof inPlaceStyle?.gridRow === "string" ? inPlaceStyle.gridRow : undefined,
-            parkingHeight:
-              typeof parkingStyle?.height === "string" ? parkingStyle.height : undefined,
-            parkingTop: typeof parkingStyle?.top === "string" ? parkingStyle.top : undefined,
-            parkingWidth: typeof parkingStyle?.width === "string" ? parkingStyle.width : undefined,
+            hiddenMode:
+              activeGroupSessionIdSet.has(pane.sessionId) &&
+              cachedLayout?.layoutKey === activeGroupLayoutKey
+                ? "cached-layout"
+                : "overlay-layout",
+            lastVisibleLayoutKey: cachedLayout?.layoutKey,
+            layerGridColumn:
+              typeof layerStyle?.gridColumn === "string" ? layerStyle.gridColumn : undefined,
+            layerGridRow: typeof layerStyle?.gridRow === "string" ? layerStyle.gridRow : undefined,
             renderNonce: pane.renderNonce,
             sessionId: pane.sessionId,
           },
@@ -960,8 +996,8 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     });
   }, [
     activeGroupLayoutKey,
-    hiddenPaneInPlaceStyles,
-    hiddenPaneParkingStyles,
+    activeGroupSessionIdSet,
+    hiddenPaneLayerStyles,
     orderedPanes,
     workspaceState,
   ]);
@@ -1449,7 +1485,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     }
 
     paneMeasuredBoundsRef.current.set(sessionId, bounds);
-    setPaneMeasuredBoundsVersion((value) => value + 1);
     postWorkspaceDebugLog(workspaceState?.debuggingMode, "workspace.paneMeasuredBounds", {
       bounds,
       previousBounds,
@@ -1601,8 +1636,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
             layoutStyle={
               pane.isVisible
                 ? visiblePaneLayoutBySessionId.get(pane.sessionId)
-                : (hiddenPaneInPlaceStyles.get(pane.sessionId) ??
-                  hiddenPaneParkingStyles.get(pane.sessionId))
+                : hiddenPaneLayerStyles.get(pane.sessionId)
             }
             t3FocusSuppressedUntil={t3TerminalFocusGuardUntil}
             onAttentionInteraction={(reason) =>
@@ -1774,6 +1808,9 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
               onAttentionInteraction={(reason) =>
                 requestAcknowledgeSessionAttention(pane.sessionId, reason)
               }
+              onCancelFirstPromptAutoRename={() =>
+                requestCancelFirstPromptAutoRename(pane.sessionId)
+              }
               onLagDetected={handleTerminalLagDetected}
               onActivate={(source) => handleTerminalActivate(pane.sessionId, source)}
               onTerminalEnter={() => handleTerminalEnter(pane.sessionId)}
@@ -1791,7 +1828,11 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
           );
         })}
         {visiblePanes.length === 0 ? (
-          <div className="workspace-empty-state">No sessions in this group.</div>
+          <button className="workspace-empty-state" onClick={requestCreateSession} type="button">
+            No active VSmux sessions in current group
+            {"\n"}
+            Click here to start one
+          </button>
         ) : null}
         <WorkspaceWelcomeModal
           isOpen={isWelcomeModalOpen}
@@ -1893,8 +1934,7 @@ const WorkspacePaneView: React.FC<WorkspacePaneViewProps> = ({
   const canFork = supportsWorkspacePaneFork(pane);
   const canReload = supportsWorkspacePaneFullReload(pane);
   const showPaneHeaderActions = pane.kind === "terminal" || pane.kind === "t3";
-  const showPaneZoomControls =
-    pane.kind === "terminal" || (pane.kind === "t3" && t3Appearance.provider !== "t3code");
+  const showPaneZoomControls = pane.kind === "terminal";
   const showPaneRenameButton = pane.kind === "terminal" || pane.kind === "t3";
   const showPaneRenameDivider = showPaneZoomControls && showPaneRenameButton;
   const showPaneSleepDivider = showPaneRenameButton || canFork || canReload || showPaneZoomControls;

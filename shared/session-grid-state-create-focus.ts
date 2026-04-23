@@ -31,8 +31,10 @@ export function createSessionInSnapshot(
 
   const session = createSessionRecord(sessionNumber, orderedSessions.length, options);
   const sessions = reindexSessionsInOrder([...orderedSessions, session]);
-  const visibleSessionIds =
-    normalizedSnapshot.visibleSessionIds.length < normalizedSnapshot.visibleCount
+  const shouldCreateInBackground = options?.initialPresentation === "background";
+  const visibleSessionIds = shouldCreateInBackground
+    ? normalizedSnapshot.visibleSessionIds
+    : normalizedSnapshot.visibleSessionIds.length < normalizedSnapshot.visibleCount
       ? [...normalizedSnapshot.visibleSessionIds, session.sessionId]
       : replaceFocusedVisibleSession(normalizedSnapshot, session.sessionId);
 
@@ -40,7 +42,9 @@ export function createSessionInSnapshot(
     session,
     snapshot: normalizeSessionGridSnapshot({
       ...normalizedSnapshot,
-      focusedSessionId: session.sessionId,
+      focusedSessionId: shouldCreateInBackground
+        ? normalizedSnapshot.focusedSessionId
+        : session.sessionId,
       sessions,
       visibleSessionIds,
     }),

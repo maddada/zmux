@@ -1,11 +1,14 @@
+import * as path from "node:path";
 import type { SidebarActionType, SidebarCommandRunMode } from "../shared/sidebar-commands";
 
 export type SidebarCommandTerminalRunPlan =
   | {
-      target: "vscode-terminal";
       closeOnExit: boolean;
+      presentation: "background-indicator";
+      target: "vsmux-terminal";
     }
   | {
+      presentation: "sidebar-card";
       target: "vsmux-terminal";
     };
 
@@ -20,13 +23,15 @@ export function getSidebarCommandTerminalRunPlan(
 
   if (runMode === "debug") {
     return {
+      presentation: "sidebar-card",
       target: "vsmux-terminal",
     };
   }
 
   return {
     closeOnExit: closeTerminalOnExit,
-    target: "vscode-terminal",
+    presentation: "background-indicator",
+    target: "vsmux-terminal",
   };
 }
 
@@ -40,4 +45,25 @@ export function getSidebarCommandWorkspaceSessionTitle(
     normalizedActionName.length > 0 ? normalizedActionName : command.trim().slice(0, 20);
 
   return runMode === "debug" ? `Debug: ${baseTitle}` : baseTitle;
+}
+
+export function getSidebarCommandTerminalExecutionText(
+  shellPath: string,
+  command: string,
+  closeOnExit: boolean,
+): string {
+  if (!closeOnExit) {
+    return command;
+  }
+
+  const shellName = path.basename(shellPath).toLowerCase();
+  if (process.platform === "win32") {
+    if (shellName === "cmd.exe" || shellName === "cmd") {
+      return `(${command}) & exit /b %errorlevel%`;
+    }
+
+    return `${command}; exit $LASTEXITCODE`;
+  }
+
+  return `${command}; __vsmux_exit=$?; exit $__vsmux_exit`;
 }

@@ -6,7 +6,10 @@ import type { TerminalAgentStatus } from "../shared/terminal-host-protocol";
 export type PersistedSessionState = {
   agentName?: string;
   agentStatus: TerminalAgentStatus;
+  agentSessionId?: string;
+  frozenAt?: string;
   hasAutoTitleFromFirstPrompt?: boolean;
+  historyBase64?: string;
   lastActivityAt?: string;
   pendingFirstPromptAutoRenamePrompt?: string;
   title?: string;
@@ -20,7 +23,10 @@ export type PersistedSessionStateSnapshot = {
 const DEFAULT_PERSISTED_SESSION_STATE: PersistedSessionState = {
   agentName: undefined,
   agentStatus: "idle",
+  agentSessionId: undefined,
+  frozenAt: undefined,
   hasAutoTitleFromFirstPrompt: undefined,
+  historyBase64: undefined,
   lastActivityAt: undefined,
   pendingFirstPromptAutoRenamePrompt: undefined,
   title: undefined,
@@ -41,7 +47,10 @@ export function createDefaultPersistedSessionState(): PersistedSessionState {
 export function parsePersistedSessionState(rawState: string): PersistedSessionState {
   let agentName: string | undefined;
   let agentStatus: TerminalAgentStatus = "idle";
+  let agentSessionId: string | undefined;
+  let frozenAt: string | undefined;
   let hasAutoTitleFromFirstPrompt: boolean | undefined;
+  let historyBase64: string | undefined;
   let lastActivityAt: string | undefined;
   let pendingFirstPromptAutoRenamePrompt: string | undefined;
   let title: string | undefined;
@@ -52,8 +61,17 @@ export function parsePersistedSessionState(rawState: string): PersistedSessionSt
     if (key === "agent") {
       agentName = value || undefined;
     }
+    if (key === "agentSessionId") {
+      agentSessionId = normalizePersistedSessionValue(value);
+    }
     if (key === "title") {
       title = getVisibleTerminalTitle(value);
+    }
+    if (key === "historyBase64") {
+      historyBase64 = normalizePersistedHistoryBase64(value);
+    }
+    if (key === "frozenAt") {
+      frozenAt = normalizePersistedTimestamp(value);
     }
     if (key === "lastActivityAt") {
       lastActivityAt = normalizePersistedTimestamp(value);
@@ -72,7 +90,10 @@ export function parsePersistedSessionState(rawState: string): PersistedSessionSt
   return {
     agentName,
     agentStatus,
+    agentSessionId,
+    frozenAt,
     hasAutoTitleFromFirstPrompt,
+    historyBase64,
     lastActivityAt,
     pendingFirstPromptAutoRenamePrompt,
     title,
@@ -83,7 +104,10 @@ export function serializePersistedSessionState(state: PersistedSessionState): st
   return [
     `status=${state.agentStatus}`,
     `agent=${normalizePersistedSessionValue(state.agentName) ?? ""}`,
+    `agentSessionId=${normalizePersistedSessionValue(state.agentSessionId) ?? ""}`,
+    `frozenAt=${normalizePersistedTimestamp(state.frozenAt) ?? ""}`,
     `autoTitleFromFirstPrompt=${state.hasAutoTitleFromFirstPrompt ? "1" : ""}`,
+    `historyBase64=${normalizePersistedHistoryBase64(state.historyBase64) ?? ""}`,
     `lastActivityAt=${normalizePersistedTimestamp(state.lastActivityAt) ?? ""}`,
     `pendingFirstPromptAutoRenamePrompt=${normalizePersistedSessionValue(state.pendingFirstPromptAutoRenamePrompt) ?? ""}`,
     `title=${normalizePersistedSessionValue(getVisibleTerminalTitle(state.title)) ?? ""}`,
@@ -98,7 +122,10 @@ export function haveSamePersistedSessionState(
   return (
     left.agentName === right.agentName &&
     left.agentStatus === right.agentStatus &&
+    left.agentSessionId === right.agentSessionId &&
+    left.frozenAt === right.frozenAt &&
     left.hasAutoTitleFromFirstPrompt === right.hasAutoTitleFromFirstPrompt &&
+    left.historyBase64 === right.historyBase64 &&
     left.lastActivityAt === right.lastActivityAt &&
     left.pendingFirstPromptAutoRenamePrompt === right.pendingFirstPromptAutoRenamePrompt &&
     left.title === right.title
@@ -198,6 +225,19 @@ export async function deletePersistedSessionStateFile(filePath: string): Promise
 function normalizePersistedSessionValue(value: string | undefined): string | undefined {
   const normalizedValue = value?.replace(/\s+/g, " ").trim();
   return normalizedValue && normalizedValue.length > 0 ? normalizedValue : undefined;
+}
+
+function normalizePersistedHistoryBase64(value: string | undefined): string | undefined {
+  const normalizedValue = value?.trim();
+  if (!normalizedValue) {
+    return undefined;
+  }
+
+  try {
+    return Buffer.from(normalizedValue, "base64").toString("base64");
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizePersistedTimestamp(value: string | undefined): string | undefined {

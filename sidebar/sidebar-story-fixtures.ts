@@ -87,6 +87,7 @@ export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrat
     agents: createDefaultSidebarAgentButtons(),
     collapsedSections: createDefaultSidebarSectionCollapseState(),
     commands: createDefaultSidebarCommandButtons(),
+    commandSessionIndicators: [],
     completionBellEnabled: false,
     completionSound: DEFAULT_COMPLETION_SOUND,
     completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),

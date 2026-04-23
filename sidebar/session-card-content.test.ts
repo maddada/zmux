@@ -312,6 +312,33 @@ describe("SessionCardContent", () => {
     expect(markup).toContain("session-last-interaction-time");
     expect(markup).toContain("session-header-reloading-icon");
   });
+
+  test("should render the same header spinner while Codex first-prompt rename loading is active", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionCardContent, {
+        session: {
+          activity: "idle",
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "00",
+          column: 0,
+          isFocused: false,
+          isGeneratingFirstPromptTitle: true,
+          isRunning: true,
+          isVisible: true,
+          row: 0,
+          sessionId: "session-1",
+          shortcutLabel: "1",
+        },
+        showCloseButton: false,
+        showDebugSessionNumbers: false,
+        showHotkeys: false,
+      }),
+    );
+
+    expect(markup).toContain("session-header-reloading-icon");
+    expect(markup).not.toContain("session-header-agent-icon");
+  });
 });
 
 describe("SessionFloatingAgentIcon", () => {

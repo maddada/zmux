@@ -25,6 +25,34 @@ describe("filterPreviousSessions", () => {
     ]);
   });
 
+  test("should match the same session words across spaces, hyphens, and camel case", () => {
+    const previousSessions = [
+      createPreviousSession({
+        alias: "My Session Title",
+        historyId: "history-1",
+      }),
+      createPreviousSession({
+        alias: "my-session-title",
+        historyId: "history-2",
+      }),
+      createPreviousSession({
+        alias: "MySessionTitle",
+        historyId: "history-3",
+      }),
+    ];
+
+    expect(filterPreviousSessions(previousSessions, "my session title")).toMatchObject([
+      { historyId: "history-1" },
+      { historyId: "history-2" },
+      { historyId: "history-3" },
+    ]);
+    expect(filterPreviousSessions(previousSessions, "my-session-title")).toMatchObject([
+      { historyId: "history-1" },
+      { historyId: "history-2" },
+      { historyId: "history-3" },
+    ]);
+  });
+
   test("should optionally restrict results to favorite sessions before searching", () => {
     const previousSessions = [
       createPreviousSession({

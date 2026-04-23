@@ -49,6 +49,7 @@ const EMPTY_STATE: NativeTerminalDebugPanelState = {
       agentManagerZoomPercent: 100,
       agents: [],
       commands: [],
+      commandSessionIndicators: [],
       completionBellEnabled: false,
       completionSound: DEFAULT_COMPLETION_SOUND,
       completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),

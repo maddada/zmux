@@ -312,6 +312,29 @@ describe("WorkspacePanelManager", () => {
     manager.dispose();
   });
 
+  test("should forward create session messages from the workspace webview", async () => {
+    const onMessage = vi.fn();
+    const manager = new WorkspacePanelManager({
+      context: createMockContext(),
+      onMessage,
+    });
+
+    await manager.reveal();
+
+    const panel = createdPanels[0];
+    expect(panel).toBeDefined();
+
+    panel.webview.messageListeners[0]?.({
+      type: "createSession",
+    });
+
+    expect(onMessage).toHaveBeenCalledWith({
+      type: "createSession",
+    });
+
+    manager.dispose();
+  });
+
   test("should forward acknowledge session attention messages from the workspace webview", async () => {
     const onMessage = vi.fn();
     const manager = new WorkspacePanelManager({
@@ -407,6 +430,31 @@ describe("WorkspacePanelManager", () => {
     expect(onMessage).toHaveBeenCalledWith({
       sessionId: "session-1",
       type: "promptRenameSession",
+    });
+
+    manager.dispose();
+  });
+
+  test("should forward cancel first prompt auto rename messages from the workspace webview", async () => {
+    const onMessage = vi.fn();
+    const manager = new WorkspacePanelManager({
+      context: createMockContext(),
+      onMessage,
+    });
+
+    await manager.reveal();
+
+    const panel = createdPanels[0];
+    expect(panel).toBeDefined();
+
+    panel.webview.messageListeners[0]?.({
+      sessionId: "session-1",
+      type: "cancelFirstPromptAutoRename",
+    });
+
+    expect(onMessage).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      type: "cancelFirstPromptAutoRename",
     });
 
     manager.dispose();

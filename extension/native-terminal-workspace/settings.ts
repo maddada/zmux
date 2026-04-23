@@ -28,6 +28,7 @@ import {
 
 export const SETTINGS_SECTION = "VSmux";
 export const BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING = "backgroundSessionTimeoutMinutes";
+export const AUTO_SLEEP_TIMEOUT_MINUTES_SETTING = "autoSleepTimeoutMinutes";
 export const AUTO_OPEN_SIDEBAR_VIEWS_ON_STARTUP_SETTING = "autoOpenSidebarViewsOnStartup";
 export const SEND_RENAME_COMMAND_ON_SIDEBAR_RENAME_SETTING = "sendRenameCommandOnSidebarRename";
 export const CREATE_SESSION_ON_SIDEBAR_DOUBLE_CLICK_SETTING = "createSessionOnSidebarDoubleClick";
@@ -107,16 +108,37 @@ export function getBackgroundSessionTimeoutConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING}`;
 }
 
+export function getAutoSleepTimeoutConfigurationKey(): string {
+  return `${SETTINGS_SECTION}.${AUTO_SLEEP_TIMEOUT_MINUTES_SETTING}`;
+}
+
 export function getBackgroundSessionTimeoutMinutes(): number {
   return (
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<number>(BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING, 0) ?? 0
+      .get<number>(BACKGROUND_SESSION_TIMEOUT_MINUTES_SETTING, 5) ?? 5
   );
 }
 
 export function getBackgroundSessionTimeoutMs(): number | null {
   const timeoutMinutes = getBackgroundSessionTimeoutMinutes();
+  if (timeoutMinutes <= 0) {
+    return null;
+  }
+
+  return Math.max(0, Math.round(timeoutMinutes * 60_000));
+}
+
+export function getAutoSleepTimeoutMinutes(): number {
+  return (
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<number>(AUTO_SLEEP_TIMEOUT_MINUTES_SETTING, 20) ?? 20
+  );
+}
+
+export function getAutoSleepTimeoutMs(): number | null {
+  const timeoutMinutes = getAutoSleepTimeoutMinutes();
   if (timeoutMinutes <= 0) {
     return null;
   }
@@ -358,7 +380,7 @@ export function getClampedActionCompletionSoundSetting(): CompletionSoundSetting
   const value =
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<string>(ACTION_COMPLETION_SOUND_SETTING, "ping") ?? "ping";
+      .get<string>(ACTION_COMPLETION_SOUND_SETTING, "shamisenreverb") ?? "shamisenreverb";
   return clampCompletionSoundSetting(value);
 }
 
@@ -531,7 +553,7 @@ export function getDefaultTerminalEngine(): TerminalEngine {
   const value =
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
-      .get<string>(TERMINAL_ENGINE_SETTING, "xterm") ?? "xterm";
+      .get<string>(TERMINAL_ENGINE_SETTING, "non-persistent") ?? "non-persistent";
   return normalizeTerminalEngine(value);
 }
 

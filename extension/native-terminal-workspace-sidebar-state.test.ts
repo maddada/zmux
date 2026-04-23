@@ -74,6 +74,23 @@ describe("buildSidebarMessage", () => {
     expect(message.groups[1]?.kind).toBe("workspace");
   });
 
+  test("should omit sessions that are routed to action indicators instead of session cards", () => {
+    const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
+    const sessionRecord = createSessionRecord(1, 0);
+    workspaceSnapshot.groups[0].snapshot.sessions = [sessionRecord];
+    workspaceSnapshot.groups[0].snapshot.focusedSessionId = sessionRecord.sessionId;
+    workspaceSnapshot.groups[0].snapshot.visibleSessionIds = [sessionRecord.sessionId];
+
+    const message = getSidebarStateMessage(
+      buildSidebarMessage({
+        ...createBuildSidebarMessageOptions(workspaceSnapshot, []),
+        shouldIncludeSessionInSidebar: () => false,
+      }),
+    );
+
+    expect(message.groups[1]?.sessions).toEqual([]);
+  });
+
   test("should show pending T3 sessions without a fake thread detail", () => {
     const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
     const sessionRecord = createSessionRecord(1, 0, {
@@ -269,6 +286,52 @@ describe("buildSidebarMessage", () => {
     expect(message.groups[1]?.sessions[0]).toEqual(
       expect.objectContaining({
         isReloading: true,
+        sessionId: sessionRecord.sessionId,
+      }),
+    );
+  });
+
+  test("should expose Codex first-prompt rename loading to the sidebar state", () => {
+    const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
+    const sessionRecord = createSessionRecord(1, 0);
+    workspaceSnapshot.groups[0].snapshot.sessions = [sessionRecord];
+    workspaceSnapshot.groups[0].snapshot.focusedSessionId = sessionRecord.sessionId;
+    workspaceSnapshot.groups[0].snapshot.visibleSessionIds = [sessionRecord.sessionId];
+
+    const message = getSidebarStateMessage(
+      buildSidebarMessage({
+        ...createBuildSidebarMessageOptions(workspaceSnapshot, []),
+        getIsFirstPromptAutoRenameInProgress: (sessionId) => sessionId === sessionRecord.sessionId,
+        getSidebarAgentIcon: () => "codex",
+      }),
+    );
+
+    expect(message.groups[1]?.sessions[0]).toEqual(
+      expect.objectContaining({
+        isGeneratingFirstPromptTitle: true,
+        sessionId: sessionRecord.sessionId,
+      }),
+    );
+  });
+
+  test("should not expose first-prompt rename loading for non-Codex sidebar sessions", () => {
+    const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
+    const sessionRecord = createSessionRecord(1, 0);
+    workspaceSnapshot.groups[0].snapshot.sessions = [sessionRecord];
+    workspaceSnapshot.groups[0].snapshot.focusedSessionId = sessionRecord.sessionId;
+    workspaceSnapshot.groups[0].snapshot.visibleSessionIds = [sessionRecord.sessionId];
+
+    const message = getSidebarStateMessage(
+      buildSidebarMessage({
+        ...createBuildSidebarMessageOptions(workspaceSnapshot, []),
+        getIsFirstPromptAutoRenameInProgress: (sessionId) => sessionId === sessionRecord.sessionId,
+        getSidebarAgentIcon: () => "claude",
+      }),
+    );
+
+    expect(message.groups[1]?.sessions[0]).toEqual(
+      expect.objectContaining({
+        isGeneratingFirstPromptTitle: false,
         sessionId: sessionRecord.sessionId,
       }),
     );
@@ -730,6 +793,7 @@ describe("createPreviousSessionEntry", () => {
         activity: "idle",
         agentName: "codex",
       }),
+      getIsFirstPromptAutoRenameInProgress: () => false,
       getIsSessionReloading: () => false,
       getSessionAgentLaunch: () => undefined,
       getLastTerminalActivityAt: () => undefined,
@@ -798,6 +862,7 @@ function createPreviousSessionEntryOptions(
       activity: "idle",
       agentName: "codex",
     }),
+    getIsFirstPromptAutoRenameInProgress: () => false,
     getIsSessionReloading: () => false,
     getSessionAgentLaunch: () => undefined,
     getLastTerminalActivityAt: () => undefined,
@@ -850,6 +915,7 @@ function createBuildSidebarMessageOptions(
       activity: "idle",
       agentName: undefined,
     }),
+    getIsFirstPromptAutoRenameInProgress: () => false,
     getIsSessionReloading: () => false,
     getSessionAgentLaunch: () => undefined,
     getLastTerminalActivityAt: () => undefined,
@@ -883,6 +949,7 @@ function createSidebarHudState(): SidebarHydrateMessage["hud"] {
       agents: false,
     },
     commands: [],
+    commandSessionIndicators: [],
     completionBellEnabled: false,
     completionSound: "arcade",
     completionSoundLabel: "Arcade",

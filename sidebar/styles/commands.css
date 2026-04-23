@@ -340,6 +340,12 @@
   width: 100%;
 }
 
+.command-button-shell {
+  min-width: 0;
+  position: relative;
+  width: 100%;
+}
+
 .command-button[data-icon-only="true"] {
   min-width: 0;
   padding: 0;
@@ -553,6 +559,71 @@ body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] 
 .command-button[data-has-icon="true"] .command-button-kind-badge,
 .command-button[data-icon-only="true"] .command-button-kind-badge {
   display: inline-flex;
+}
+
+.command-button-session-indicator {
+  --command-button-session-indicator-color: #1f75ca;
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  color: inherit;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: -2px;
+  top: -3px;
+  width: 18px;
+  z-index: 2;
+}
+
+.command-button-session-indicator-dot {
+  background-color: var(--command-button-session-indicator-color);
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--command-button-session-indicator-color) 12%, transparent),
+    0 4px 12px color-mix(in srgb, var(--command-button-session-indicator-color) 18%, transparent);
+  display: block;
+  height: 10px;
+  transition:
+    box-shadow 180ms ease,
+    scale 180ms ease;
+  width: 10px;
+}
+
+.command-button-session-indicator:hover .command-button-session-indicator-dot,
+.command-button-session-indicator:focus-visible .command-button-session-indicator-dot {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--command-button-session-indicator-color) 18%, transparent),
+    0 5px 14px color-mix(in srgb, var(--command-button-session-indicator-color) 24%, transparent);
+  scale: 1.08;
+}
+
+.command-button-session-indicator[data-active-session="true"]
+  .command-button-session-indicator-dot {
+  box-shadow:
+    0 0 0 1px var(--session-focused-outline),
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--command-button-session-indicator-color) 12%, transparent),
+    0 4px 12px color-mix(in srgb, var(--command-button-session-indicator-color) 18%, transparent);
+}
+
+.command-button-session-indicator[data-active-session="true"]:is(:hover, :focus-visible)
+  .command-button-session-indicator-dot {
+  box-shadow:
+    0 0 0 1px var(--session-focused-outline),
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--command-button-session-indicator-color) 18%, transparent),
+    0 5px 14px color-mix(in srgb, var(--command-button-session-indicator-color) 24%, transparent);
+}
+
+.command-button-session-indicator[data-session-status="running"]
+  .command-button-session-indicator-dot {
+  animation: session-status-dot-pulse 1.35s ease-in-out infinite;
 }
 
 @container (min-width: 80px) {

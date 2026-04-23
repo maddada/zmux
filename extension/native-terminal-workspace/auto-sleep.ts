@@ -5,14 +5,15 @@ import {
 
 const MIN_AUTO_SLEEP_CHECK_INTERVAL_MS = 5_000;
 const MAX_AUTO_SLEEP_CHECK_INTERVAL_MS = 30_000;
+export const AUTO_SLEEP_FOCUS_GRACE_MS = 10 * 60_000;
 
 export function shouldAutoSleepSidebarSession(
   session: Pick<
     SidebarSessionItem,
-    "activity" | "agentIcon" | "isRunning" | "isSleeping" | "lifecycleState"
+    "activity" | "agentIcon" | "isFocused" | "isRunning" | "isSleeping" | "lifecycleState"
   >,
 ): boolean {
-  if (session.isSleeping === true) {
+  if (session.isSleeping === true || session.isFocused === true) {
     return false;
   }
 
@@ -41,6 +42,24 @@ export function hasReachedAutoSleepTimeout(args: {
   }
 
   return Math.max(0, now - activityAtMs) >= timeoutMs;
+}
+
+export function hasAutoSleepFocusGrace(args: {
+  focusedAt: number | undefined;
+  now?: number;
+  graceMs?: number;
+}): boolean {
+  const { focusedAt, now = Date.now(), graceMs = AUTO_SLEEP_FOCUS_GRACE_MS } = args;
+  if (
+    focusedAt === undefined ||
+    !Number.isFinite(focusedAt) ||
+    !Number.isFinite(graceMs) ||
+    graceMs <= 0
+  ) {
+    return false;
+  }
+
+  return now < focusedAt + graceMs;
 }
 
 export function getAutoSleepCheckIntervalMs(timeoutMs: number | null): number | undefined {

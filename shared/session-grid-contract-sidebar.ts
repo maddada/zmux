@@ -53,6 +53,7 @@ export type SidebarSessionItem = {
   activity: "idle" | "working" | "attention";
   activityLabel?: string;
   agentIcon?: SidebarAgentIcon;
+  isGeneratingFirstPromptTitle?: boolean;
   isReloading?: boolean;
   lifecycleState?: SessionLifecycleState;
   isFavorite?: boolean;
@@ -119,12 +120,20 @@ export type SidebarProjectWorktree = {
   name: string;
 };
 
+export type SidebarCommandSessionIndicator = {
+  commandId: string;
+  sessionId: string;
+  status: "idle" | "running" | "error";
+  title?: string;
+};
+
 export type SidebarHudState = {
   activeSessionsSortMode: SidebarActiveSessionsSortMode;
   agentManagerZoomPercent: number;
   agents: SidebarAgentButton[];
   collapsedSections: SidebarSectionCollapseState;
   commands: SidebarCommandButton[];
+  commandSessionIndicators: SidebarCommandSessionIndicator[];
   completionBellEnabled: boolean;
   completionSound: CompletionSoundSetting;
   completionSoundLabel: string;

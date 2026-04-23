@@ -121,19 +121,24 @@ export function createSessionInSimpleWorkspace(
     } as CreateSessionRecordOptions & { displayId: string },
   );
   const nextSessionRecord = withCanonicalSessionId(nextSession);
+  const shouldCreateInBackground = options?.initialPresentation === "background";
   const nextSnapshot = updateGroup(normalizedSnapshot, activeGroup.groupId, (group) => {
     const nextGroup = {
       ...group,
       snapshot: normalizeGroupSnapshot({
         ...group.snapshot,
-        focusedSessionId: nextSessionRecord.sessionId,
+        focusedSessionId: shouldCreateInBackground
+          ? group.snapshot.focusedSessionId
+          : nextSessionRecord.sessionId,
         sessions: [...group.snapshot.sessions, nextSessionRecord],
-        visibleSessionIds: getNormalizedVisibleIds(
-          [...group.snapshot.sessions, nextSessionRecord],
-          group.snapshot.visibleCount,
-          nextSessionRecord.sessionId,
-          [...group.snapshot.visibleSessionIds, nextSessionRecord.sessionId],
-        ),
+        visibleSessionIds: shouldCreateInBackground
+          ? group.snapshot.visibleSessionIds
+          : getNormalizedVisibleIds(
+              [...group.snapshot.sessions, nextSessionRecord],
+              group.snapshot.visibleCount,
+              nextSessionRecord.sessionId,
+              [...group.snapshot.visibleSessionIds, nextSessionRecord.sessionId],
+            ),
       }),
     };
     return nextGroup;

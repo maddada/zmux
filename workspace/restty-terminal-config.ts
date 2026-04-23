@@ -48,6 +48,10 @@ const fallbackTheme = {
 };
 
 export function getResttyFontSources(fontFamily: string | undefined): ResttyFontSource[] {
+  if (!canUseLocalFontSources()) {
+    return [];
+  }
+
   const configuredFamilies = getConfiguredFontFamilies(fontFamily);
   return configuredFamilies.flatMap(createLocalFontSourcesForFamily);
 }
@@ -161,4 +165,31 @@ function getCssColor(
   }
 
   return fallback;
+}
+
+function canUseLocalFontSources(): boolean {
+  if (typeof globalThis.queryLocalFonts !== "function") {
+    return false;
+  }
+
+  if (typeof document === "undefined") {
+    return true;
+  }
+
+  const documentWithPolicy = document as Document & {
+    featurePolicy?: {
+      allowsFeature?: (feature: string) => boolean;
+    };
+    permissionsPolicy?: {
+      allowsFeature?: (feature: string) => boolean;
+    };
+  };
+  const policy =
+    documentWithPolicy.permissionsPolicy ?? documentWithPolicy.featurePolicy ?? undefined;
+
+  if (typeof policy?.allowsFeature === "function") {
+    return policy.allowsFeature("local-fonts");
+  }
+
+  return true;
 }

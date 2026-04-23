@@ -60,10 +60,12 @@ type BuildSidebarMessageOptions = {
     activity: TerminalAgentStatus;
     agentName: string | undefined;
   };
+  getIsFirstPromptAutoRenameInProgress: (sessionId: string) => boolean;
   getIsSessionReloading: (sessionId: string) => boolean;
   getSessionAgentLaunch: (sessionId: string) => PreviousSessionHistoryEntry["agentLaunch"];
   getLastTerminalActivityAt: (sessionId: string) => number | undefined;
   getSessionSnapshot: (sessionId: string) => TerminalSessionSnapshot | undefined;
+  shouldIncludeSessionInSidebar?: (sessionRecord: SessionRecord) => boolean;
   getT3ActivityState: (sessionRecord: SessionRecord) => {
     activity: TerminalAgentStatus;
     detail?: string;
@@ -94,10 +96,12 @@ type CreatePreviousSessionEntryOptions = Pick<
   | "browserHasLiveProjection"
   | "debuggingMode"
   | "getEffectiveSessionActivity"
+  | "getIsFirstPromptAutoRenameInProgress"
   | "getIsSessionReloading"
   | "getSessionAgentLaunch"
   | "getLastTerminalActivityAt"
   | "getSessionSnapshot"
+  | "shouldIncludeSessionInSidebar"
   | "getSidebarAgentIcon"
   | "getT3ActivityState"
   | "getTerminalTitle"
@@ -114,10 +118,12 @@ type CreateSidebarSessionItemOptions = Pick<
   | "browserHasLiveProjection"
   | "debuggingMode"
   | "getEffectiveSessionActivity"
+  | "getIsFirstPromptAutoRenameInProgress"
   | "getIsSessionReloading"
   | "getSessionAgentLaunch"
   | "getLastTerminalActivityAt"
   | "getSessionSnapshot"
+  | "shouldIncludeSessionInSidebar"
   | "getSidebarAgentIcon"
   | "getT3ActivityState"
   | "getTerminalTitle"
@@ -172,6 +178,9 @@ export function createPreviousSessionEntry(
       activeGroupId: options.group.groupId,
     },
   );
+  if (!sidebarItem) {
+    return undefined;
+  }
   const closedAt = new Date().toISOString();
   return {
     agentIcon: sidebarItem.agentIcon,
@@ -219,12 +228,14 @@ function buildSidebarGroup(
     isFocusModeActive: isSessionGridFocusModeActive(presentedSnapshot),
     kind: "workspace",
     layoutVisibleCount: getSessionGridLayoutVisibleCount(presentedSnapshot),
-    sessions: getOrderedSessions(group.snapshot).map((session) =>
-      buildSidebarItem(group, presentedSnapshot, session, {
-        ...options,
-        activeGroupId: options.workspaceSnapshot.activeGroupId,
-      }),
-    ),
+    sessions: getOrderedSessions(group.snapshot)
+      .map((session) =>
+        buildSidebarItem(group, presentedSnapshot, session, {
+          ...options,
+          activeGroupId: options.workspaceSnapshot.activeGroupId,
+        }),
+      )
+      .filter((session): session is SidebarSessionItem => session !== undefined),
     title: group.title,
     viewMode: presentedSnapshot.viewMode,
     visibleCount: presentedSnapshot.visibleCount,
@@ -275,10 +286,12 @@ function buildSidebarItem(
     | "browserHasLiveProjection"
     | "debuggingMode"
     | "getEffectiveSessionActivity"
+    | "getIsFirstPromptAutoRenameInProgress"
     | "getIsSessionReloading"
     | "getSessionAgentLaunch"
     | "getLastTerminalActivityAt"
     | "getSessionSnapshot"
+    | "shouldIncludeSessionInSidebar"
     | "getSidebarAgentIcon"
     | "getT3ActivityState"
     | "getTerminalTitle"
@@ -286,7 +299,14 @@ function buildSidebarItem(
     | "terminalHasLiveProjection"
     | "workspaceId"
   > & { activeGroupId: string },
-): SidebarSessionItem {
+): SidebarSessionItem | undefined {
+  if (
+    options.shouldIncludeSessionInSidebar &&
+    !options.shouldIncludeSessionInSidebar(sessionRecord)
+  ) {
+    return undefined;
+  }
+
   const isActiveGroup = options.activeGroupId === group.groupId;
   const isVisible =
     isActiveGroup && presentedSnapshot.visibleSessionIds.includes(sessionRecord.sessionId);
@@ -387,6 +407,8 @@ function buildSidebarItem(
     isSleeping,
     status: sessionSnapshot.status,
   });
+  const isGeneratingFirstPromptTitle =
+    agentIcon === "codex" && options.getIsFirstPromptAutoRenameInProgress(sessionRecord.sessionId);
 
   return {
     activity: isSleeping ? "idle" : effectiveActivity.activity,
@@ -397,6 +419,7 @@ function buildSidebarItem(
     alias: sessionRecord.alias,
     column: sessionRecord.column,
     detail: isSleeping ? "Sleeping" : sessionSnapshot.errorMessage,
+    isGeneratingFirstPromptTitle,
     lifecycleState,
     isFocused,
     isFavorite: sessionRecord.isFavorite === true,

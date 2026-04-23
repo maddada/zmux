@@ -28,7 +28,10 @@ import type {
   SidebarCommandRunMode,
 } from "../shared/sidebar-commands";
 import { getSidebarCommandIconLabel } from "../shared/sidebar-command-icons";
-import type { SidebarProjectWorktree } from "../shared/session-grid-contract";
+import type {
+  SidebarCommandSessionIndicator,
+  SidebarProjectWorktree,
+} from "../shared/session-grid-contract";
 import { getSidebarButtonGridColumnCount } from "./button-grid";
 import { getCommandButtonAriaLabel, getCommandButtonTooltip } from "./command-button-copy";
 import {
@@ -190,17 +193,31 @@ export function CommandsPanel({
   vscode,
 }: CommandsPanelProps) {
   const {
+    commandSessionIndicators,
     commands,
     git,
     projectWorktrees: rawProjectWorktrees,
   } = useSidebarStore(
     useShallow((state) => ({
+      commandSessionIndicators: state.hud.commandSessionIndicators,
       commands: state.hud.commands,
       git: state.hud.git,
       projectWorktrees: state.hud.projectWorktrees,
     })),
   );
   const projectWorktrees = rawProjectWorktrees ?? EMPTY_PROJECT_WORKTREES;
+  const commandSessionIndicatorByCommandId = useMemo(
+    () =>
+      new Map(
+        commandSessionIndicators.map((indicator) => [indicator.commandId, indicator] as const),
+      ),
+    [commandSessionIndicators],
+  );
+  const sessionsById = useSidebarStore((state) => state.sessionsById);
+  const focusedSessionId = useMemo(
+    () => Object.values(sessionsById).find((session) => session.isFocused)?.sessionId,
+    [sessionsById],
+  );
   const commandRunStates = useSidebarStore((state) => state.commandRunStates);
   const clearCommandRunState = useSidebarStore((state) => state.clearCommandRunState);
   const latestCommandOrderSyncResult = useSidebarStore(
@@ -667,7 +684,14 @@ export function CommandsPanel({
                               ? commandRunStates[command.commandId]
                               : undefined
                           }
+                          commandSessionIndicator={commandSessionIndicatorByCommandId.get(
+                            command.commandId,
+                          )}
                           index={index}
+                          isActiveSessionIndicator={
+                            commandSessionIndicatorByCommandId.get(command.commandId)?.sessionId ===
+                            focusedSessionId
+                          }
                           isContextMenuOpen={contextMenu?.command.commandId === command.commandId}
                           key={command.commandId}
                           onContextMenu={(event) => {
@@ -676,6 +700,7 @@ export function CommandsPanel({
                             openCommandContextMenu(command, event.clientX, event.clientY);
                           }}
                           onRun={() => runOrConfigureCommand(command)}
+                          vscode={vscode}
                         />
                       ))}
                     </div>
@@ -949,19 +974,25 @@ function formatWorktreeMenuLabel(worktree: SidebarProjectWorktree): string {
 type SortableCommandButtonProps = {
   command: SidebarCommandButton;
   commandRunState: SidebarCommandRunFeedbackState | undefined;
+  commandSessionIndicator: SidebarCommandSessionIndicator | undefined;
   index: number;
+  isActiveSessionIndicator: boolean;
   isContextMenuOpen: boolean;
   onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
   onRun: () => void;
+  vscode: WebviewApi;
 };
 
 function SortableCommandButton({
   command,
   commandRunState,
+  commandSessionIndicator,
   index,
+  isActiveSessionIndicator,
   isContextMenuOpen,
   onContextMenu,
   onRun,
+  vscode,
 }: SortableCommandButtonProps) {
   const trimmedName = command.name.trim();
   const isIconOnly = trimmedName.length === 0;
@@ -976,8 +1007,10 @@ function SortableCommandButton({
     index,
     type: "sidebar-command",
   });
-  const setButtonRef = (element: HTMLButtonElement | null) => {
+  const setShellRef = (element: HTMLDivElement | null) => {
     sortable.ref(element);
+  };
+  const setButtonRef = (element: HTMLButtonElement | null) => {
     sortable.sourceRef(element);
   };
 
@@ -985,38 +1018,64 @@ function SortableCommandButton({
     <Tooltip.Root>
       <Tooltip.Trigger
         render={
-          <button
-            aria-busy={runStatus === "running"}
-            aria-label={
-              runStatus === "running"
-                ? getLoadingCommandButtonAriaLabel(command)
-                : getCommandButtonAriaLabel(command)
-            }
-            className="command-button"
-            data-configured={String(isConfigured(command))}
-            data-default={String(command.isDefault)}
-            data-dragging={String(Boolean(sortable.isDragging))}
-            data-empty-space-blocking="true"
-            data-has-icon={String(command.icon !== undefined || runStatus === "running")}
-            data-icon-only={String(isIconOnly)}
-            data-loading={String(runStatus === "running")}
-            data-run-status={runStatus}
+          <div
+            className="command-button-shell"
             data-sidebar-order-id={command.commandId}
-            draggable={false}
-            onClick={runStatus === "running" ? undefined : onRun}
-            onContextMenu={runStatus === "running" ? undefined : onContextMenu}
-            ref={setButtonRef}
-            type="button"
+            ref={setShellRef}
           >
-            <span aria-hidden="true" className="command-button-kind-badge">
-              {runStatus === "running" ? (
-                <IconLoader2 className="command-button-loading-icon" size={15} stroke={1.8} />
-              ) : (
-                <ActionButtonIcon command={command} />
-              )}
-            </span>
-            {trimmedName ? <span className="command-button-label">{trimmedName}</span> : null}
-          </button>
+            <button
+              aria-busy={runStatus === "running"}
+              aria-label={
+                runStatus === "running"
+                  ? getLoadingCommandButtonAriaLabel(command)
+                  : getCommandButtonAriaLabel(command)
+              }
+              className="command-button"
+              data-configured={String(isConfigured(command))}
+              data-default={String(command.isDefault)}
+              data-dragging={String(Boolean(sortable.isDragging))}
+              data-empty-space-blocking="true"
+              data-has-icon={String(command.icon !== undefined || runStatus === "running")}
+              data-icon-only={String(isIconOnly)}
+              data-has-session-indicator={String(commandSessionIndicator !== undefined)}
+              data-loading={String(runStatus === "running")}
+              data-run-status={runStatus}
+              draggable={false}
+              onClick={runStatus === "running" ? undefined : onRun}
+              onContextMenu={runStatus === "running" ? undefined : onContextMenu}
+              ref={setButtonRef}
+              type="button"
+            >
+              <span aria-hidden="true" className="command-button-kind-badge">
+                {runStatus === "running" ? (
+                  <IconLoader2 className="command-button-loading-icon" size={15} stroke={1.8} />
+                ) : (
+                  <ActionButtonIcon command={command} />
+                )}
+              </span>
+              {trimmedName ? <span className="command-button-label">{trimmedName}</span> : null}
+            </button>
+            {commandSessionIndicator ? (
+              <button
+                aria-label={getCommandSessionIndicatorAriaLabel(command, commandSessionIndicator)}
+                className="command-button-session-indicator"
+                data-active-session={String(isActiveSessionIndicator)}
+                data-session-status={commandSessionIndicator.status}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  vscode.postMessage({
+                    sessionId: commandSessionIndicator.sessionId,
+                    type: "focusSession",
+                  });
+                }}
+                title={getCommandSessionIndicatorTooltip(command, commandSessionIndicator)}
+                type="button"
+              >
+                <span aria-hidden="true" className="command-button-session-indicator-dot" />
+              </button>
+            ) : null}
+          </div>
         }
       />
       <Tooltip.Portal>
@@ -1174,6 +1233,34 @@ function getLoadingCommandButtonTooltip(command: SidebarCommandButton): string {
   return command.actionType === "browser"
     ? `Opening ${getCommandSubject(command)}...`
     : `Running ${getCommandSubject(command)}...`;
+}
+
+function getCommandSessionIndicatorTooltip(
+  command: SidebarCommandButton,
+  indicator: SidebarCommandSessionIndicator,
+): string {
+  const commandSubject = getCommandSubject(command);
+  const statusLabel =
+    indicator.status === "running" ? "running" : indicator.status === "error" ? "failed" : "open";
+  const title = indicator.title?.trim();
+  return title
+    ? `Open ${commandSubject} terminal (${statusLabel})\n${title}`
+    : `Open ${commandSubject} terminal (${statusLabel})`;
+}
+
+function getCommandSessionIndicatorAriaLabel(
+  command: SidebarCommandButton,
+  indicator: SidebarCommandSessionIndicator,
+): string {
+  const commandSubject = getCommandSubject(command);
+  switch (indicator.status) {
+    case "running":
+      return `Open running ${commandSubject} terminal`;
+    case "error":
+      return `Open failed ${commandSubject} terminal`;
+    default:
+      return `Open ${commandSubject} terminal`;
+  }
 }
 
 function describeRenderedButtonLayout(gridElement: HTMLDivElement) {

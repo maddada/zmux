@@ -35,7 +35,7 @@ export type WorkspacePanelLayoutAppearance = {
 };
 
 export type WorkspacePanelT3Appearance = {
-  provider: "dpcode" | "t3code";
+  provider: "t3code";
   zoomPercent: number;
 };
 
@@ -49,6 +49,7 @@ export type WorkspaceWelcomeModalMode = "optional" | "required";
 
 export type WorkspacePanelTerminalPane = {
   activity?: SidebarSessionActivityState;
+  isGeneratingFirstPromptTitle?: boolean;
   lifecycleState?: SessionLifecycleState;
   kind: "terminal";
   isVisible: boolean;
@@ -97,6 +98,7 @@ export type WorkspacePanelSessionStateMessage = Omit<WorkspacePanelHydrateMessag
 
 export type WorkspacePanelTerminalPresentationChangedMessage = {
   activity?: SidebarSessionActivityState;
+  isGeneratingFirstPromptTitle?: boolean;
   lifecycleState?: SessionLifecycleState;
   sessionId: string;
   snapshot?: TerminalSessionSnapshot;
@@ -190,6 +192,10 @@ export type WorkspacePanelFocusSessionMessage = {
   sessionId: string;
 };
 
+export type WorkspacePanelCreateSessionMessage = {
+  type: "createSession";
+};
+
 export type WorkspacePanelAcknowledgeSessionAttentionReason =
   | "click"
   | "escape"
@@ -214,6 +220,11 @@ export type WorkspacePanelFullReloadSessionMessage = {
 
 export type WorkspacePanelPromptRenameSessionMessage = {
   type: "promptRenameSession";
+  sessionId: string;
+};
+
+export type WorkspacePanelCancelFirstPromptAutoRenameMessage = {
+  type: "cancelFirstPromptAutoRename";
   sessionId: string;
 };
 
@@ -318,11 +329,13 @@ export type WorkspacePanelToExtensionMessage =
   | WorkspacePanelApplyCodexTerminalTitleMessage
   | WorkspacePanelApplyCodexStatusLineMessage
   | WorkspacePanelDebugLogMessage
+  | WorkspacePanelCreateSessionMessage
   | WorkspacePanelAcknowledgeSessionAttentionMessage
   | WorkspacePanelFocusSessionMessage
   | WorkspacePanelCloseSessionMessage
   | WorkspacePanelFullReloadSessionMessage
   | WorkspacePanelPromptRenameSessionMessage
+  | WorkspacePanelCancelFirstPromptAutoRenameMessage
   | WorkspacePanelAdjustTerminalFontSizeMessage
   | WorkspacePanelResetTerminalFontSizeMessage
   | WorkspacePanelAdjustT3ZoomPercentMessage

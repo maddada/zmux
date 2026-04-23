@@ -28,6 +28,7 @@ import {
   resolvePersistedSessionPresentationState,
   shouldPreferPersistedSessionPresentation,
 } from "./terminal-daemon-session-state";
+import { appendFirstPromptAutoRenameReproLog } from "./first-prompt-auto-rename-repro-log";
 import {
   hasOpenCodeTitlePrefix,
   getTitleActivityWindowMs,
@@ -759,13 +760,19 @@ async function persistSessionLiveTitle(session: ManagedSession, title: string): 
     return;
   }
 
+  let previousAgentName: string | undefined;
+  let previousHasAutoTitleFromFirstPrompt = false;
+  let skippedBecauseGenericTitle = false;
   const persistedState = await updatePersistedSessionStateFile(
     session.sessionStateFilePath,
     (currentState) => {
+      previousAgentName = currentState.agentName;
+      previousHasAutoTitleFromFirstPrompt = currentState.hasAutoTitleFromFirstPrompt === true;
       if (
         currentState.hasAutoTitleFromFirstPrompt &&
         isGenericAgentSessionTitle(currentState.agentName, title)
       ) {
+        skippedBecauseGenericTitle = true;
         return currentState;
       }
 
@@ -783,6 +790,34 @@ async function persistSessionLiveTitle(session: ManagedSession, title: string): 
 
   if (!persistedState) {
     return;
+  }
+
+  if (skippedBecauseGenericTitle) {
+    void appendFirstPromptAutoRenameReproLog(
+      process.cwd(),
+      "daemon.firstPromptAutoRename.persistSessionLiveTitle.skippedGenericTitle",
+      {
+        agentName: previousAgentName,
+        liveTitle: title,
+        sessionId: session.sessionId,
+      },
+    );
+  } else if (
+    previousHasAutoTitleFromFirstPrompt &&
+    persistedState.hasAutoTitleFromFirstPrompt !== true
+  ) {
+    void appendFirstPromptAutoRenameReproLog(
+      process.cwd(),
+      "daemon.firstPromptAutoRename.persistSessionLiveTitle.resetAutoNamedFlag",
+      {
+        agentName: previousAgentName,
+        liveTitle: title,
+        pendingFirstPromptAutoRenamePrompt:
+          persistedState.pendingFirstPromptAutoRenamePrompt?.slice(0, 120) ?? undefined,
+        sessionId: session.sessionId,
+        title: persistedState.title,
+      },
+    );
   }
 
   session.lastKnownPersistedTitle = persistedState.title;

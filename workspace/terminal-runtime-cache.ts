@@ -127,6 +127,7 @@ export const acquireCachedTerminalRuntime = (
   const restty = new Restty({
     createInitialPane: true,
     defaultContextMenu: false,
+    fontSources: getResttyFontSources(options.terminalAppearance.fontFamily),
     paneStyles: {
       paneBackground: TERMINAL_STARTUP_BACKGROUND,
       splitBackground: TERMINAL_STARTUP_BACKGROUND,
@@ -159,7 +160,6 @@ export const acquireCachedTerminalRuntime = (
       // Match xterm.js sizing more closely so the configured font size
       // does not render noticeably smaller on the ghostty/restty path.
       fontSizeMode: "em",
-      fontSources: getResttyFontSources(options.terminalAppearance.fontFamily),
       ptyTransport: transportController?.transport,
       renderer: TERMINAL_PREFERRED_RENDERER,
     },

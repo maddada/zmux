@@ -1,26 +1,30 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
+  getSidebarCommandTerminalExecutionText,
   getSidebarCommandTerminalRunPlan,
   getSidebarCommandWorkspaceSessionTitle,
 } from "./sidebar-command-run-plan";
 
 describe("getSidebarCommandTerminalRunPlan", () => {
-  test("should keep default terminal runs in a VS Code terminal", () => {
+  test("should route default terminal runs into background VSmux sessions", () => {
     expect(getSidebarCommandTerminalRunPlan("terminal", false, "default")).toEqual({
       closeOnExit: false,
-      target: "vscode-terminal",
+      presentation: "background-indicator",
+      target: "vsmux-terminal",
     });
   });
 
   test("should preserve close-on-exit behavior for default terminal runs", () => {
     expect(getSidebarCommandTerminalRunPlan("terminal", true, "default")).toEqual({
       closeOnExit: true,
-      target: "vscode-terminal",
+      presentation: "background-indicator",
+      target: "vsmux-terminal",
     });
   });
 
-  test("should route debug terminal runs into VSmux", () => {
+  test("should keep debug terminal runs in the sidebar card flow", () => {
     expect(getSidebarCommandTerminalRunPlan("terminal", true, "debug")).toEqual({
+      presentation: "sidebar-card",
       target: "vsmux-terminal",
     });
   });
@@ -45,5 +49,17 @@ describe("getSidebarCommandWorkspaceSessionTitle", () => {
     expect(
       getSidebarCommandWorkspaceSessionTitle("", "pnpm build --watch --filter web", "debug"),
     ).toBe("Debug: pnpm build --watch -");
+  });
+});
+
+describe("getSidebarCommandTerminalExecutionText", () => {
+  test("should preserve the raw command for persistent action terminals", () => {
+    expect(getSidebarCommandTerminalExecutionText("/bin/zsh", "pnpm dev", false)).toBe("pnpm dev");
+  });
+
+  test("should append an explicit shell exit for close-on-exit action terminals", () => {
+    expect(getSidebarCommandTerminalExecutionText("/bin/zsh", "pnpm build", true)).toBe(
+      "pnpm build; __vsmux_exit=$?; exit $__vsmux_exit",
+    );
   });
 });

@@ -42,7 +42,11 @@ export function activate(context: vscode.ExtensionContext): void {
     workspace,
     debuggingStatusIndicator,
     registerModalPromptEditorInterceptor(),
-    vscode.window.registerWebviewViewProvider(SESSIONS_VIEW_ID, workspace.sidebarProvider),
+    vscode.window.registerWebviewViewProvider(SESSIONS_VIEW_ID, workspace.sidebarProvider, {
+      webviewOptions: {
+        retainContextWhenHidden: true,
+      },
+    }),
     registerCommand("VSmux.openWorkspace", () => workspace.openWorkspace()),
     registerCommand("VSmux.saveAndClosePromptTempModal", () =>
       saveAndCloseActivePromptTempModalEditor(),

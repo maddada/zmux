@@ -641,6 +641,42 @@ export class NativeTerminalWorkspaceBackend implements TerminalWorkspaceBackend 
     ).catch(() => undefined);
   }
 
+  public async cancelPendingFirstPromptAutoRename(sessionId: string): Promise<void> {
+    await updatePersistedSessionStateFile(
+      this.getSessionAgentStateFilePath(sessionId),
+      (currentState) => {
+        if (!currentState.pendingFirstPromptAutoRenamePrompt) {
+          return currentState;
+        }
+
+        return {
+          ...currentState,
+          pendingFirstPromptAutoRenamePrompt: undefined,
+        };
+      },
+    ).catch(() => undefined);
+  }
+
+  public async markFirstPromptAutoRenameTriggered(sessionId: string): Promise<void> {
+    await updatePersistedSessionStateFile(
+      this.getSessionAgentStateFilePath(sessionId),
+      (currentState) => {
+        if (
+          currentState.hasAutoTitleFromFirstPrompt &&
+          !currentState.pendingFirstPromptAutoRenamePrompt
+        ) {
+          return currentState;
+        }
+
+        return {
+          ...currentState,
+          hasAutoTitleFromFirstPrompt: true,
+          pendingFirstPromptAutoRenamePrompt: undefined,
+        };
+      },
+    ).catch(() => undefined);
+  }
+
   public async killSession(sessionId: string): Promise<void> {
     const projection = this.projections.get(sessionId);
     if (!projection) {

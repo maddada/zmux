@@ -157,6 +157,16 @@ describe("normalizeSessionGridSnapshot", () => {
     expect(normalized.terminalEngine).toBe("ghostty");
   });
 
+  test("should preserve the ghostty non-persistent engine", () => {
+    const normalized = normalizeSessionRecord({
+      ...createSessionRecord(1, 0),
+      terminalEngine: "ghostty-non-persistent",
+    });
+
+    expect(normalized.kind).toBe("terminal");
+    expect(normalized.terminalEngine).toBe("ghostty-non-persistent");
+  });
+
   test("should preserve fullscreen restore count only while the snapshot is in fullscreen mode", () => {
     const snapshot = normalizeSessionGridSnapshot({
       focusedSessionId: "session-1",

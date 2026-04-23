@@ -21,6 +21,7 @@ describe("deletePersistedSessionStateFile", () => {
     await writePersistedSessionStateToFile(filePath, {
       agentName: "claude",
       agentStatus: "attention",
+      agentSessionId: "session-123",
       hasAutoTitleFromFirstPrompt: true,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
       pendingFirstPromptAutoRenamePrompt: "rename this session from the first prompt",
@@ -102,6 +103,7 @@ describe("persisted session title normalization", () => {
       serializePersistedSessionState({
         agentName: "claude",
         agentStatus: "working",
+        agentSessionId: "session-abc",
         hasAutoTitleFromFirstPrompt: true,
         lastActivityAt: "2026-04-08T10:00:00.000Z",
         pendingFirstPromptAutoRenamePrompt: "rename this session from the first prompt",
@@ -116,14 +118,17 @@ describe("persisted session title normalization", () => {
 
     await writeFile(
       filePath,
-      "status=working\nagent=codex\nautoTitleFromFirstPrompt=1\nlastActivityAt=2026-04-08T10:00:00.000Z\npendingFirstPromptAutoRenamePrompt=  explain the project and suggest improvements  \ntitle=  🤖 Copilot fix  \n",
+      "status=working\nagent=codex\nagentSessionId=session-xyz\nautoTitleFromFirstPrompt=1\nlastActivityAt=2026-04-08T10:00:00.000Z\npendingFirstPromptAutoRenamePrompt=  explain the project and suggest improvements  \ntitle=  🤖 Copilot fix  \n",
       "utf8",
     );
 
     await expect(readPersistedSessionStateFromFile(filePath)).resolves.toEqual({
       agentName: "codex",
       agentStatus: "working",
+      agentSessionId: "session-xyz",
+      frozenAt: undefined,
       hasAutoTitleFromFirstPrompt: true,
+      historyBase64: undefined,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
       pendingFirstPromptAutoRenamePrompt: "explain the project and suggest improvements",
       title: "Copilot fix",
@@ -135,6 +140,7 @@ describe("persisted session title normalization", () => {
       serializePersistedSessionState({
         agentName: "codex",
         agentStatus: "idle",
+        agentSessionId: "session-idle",
         lastActivityAt: "2026-04-08T10:00:00.000Z",
         title: "⠸ Codex",
       }),
@@ -152,6 +158,9 @@ describe("persisted session title normalization", () => {
     await expect(readPersistedSessionStateFromFile(filePath)).resolves.toEqual({
       agentName: "claude",
       agentStatus: "idle",
+      agentSessionId: undefined,
+      frozenAt: undefined,
+      historyBase64: undefined,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
       pendingFirstPromptAutoRenamePrompt: undefined,
       title: undefined,
@@ -164,7 +173,7 @@ describe("persisted session title normalization", () => {
 
     await writeFile(
       filePath,
-      "status=attention\nagent=claude\nautoTitleFromFirstPrompt=\nlastActivityAt=2026-04-08T10:00:00.000Z\npendingFirstPromptAutoRenamePrompt=rename this session\ntitle=Claude Code\n",
+      "status=attention\nagent=claude\nagentSessionId=session-snapshot\nautoTitleFromFirstPrompt=\nlastActivityAt=2026-04-08T10:00:00.000Z\npendingFirstPromptAutoRenamePrompt=rename this session\ntitle=Claude Code\n",
       "utf8",
     );
 
@@ -172,11 +181,29 @@ describe("persisted session title normalization", () => {
     expect(snapshot.state).toEqual({
       agentName: "claude",
       agentStatus: "attention",
+      agentSessionId: "session-snapshot",
+      frozenAt: undefined,
       hasAutoTitleFromFirstPrompt: undefined,
+      historyBase64: undefined,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
       pendingFirstPromptAutoRenamePrompt: "rename this session",
       title: undefined,
     });
     expect(snapshot.updatedAtMs).toEqual(expect.any(Number));
+  });
+
+  test("should round-trip frozen terminal history metadata", async () => {
+    const serialized = serializePersistedSessionState({
+      agentName: "codex",
+      agentStatus: "idle",
+      frozenAt: "2026-04-23T08:00:00.000Z",
+      historyBase64: Buffer.from("prompt\r\noutput\r\n", "utf8").toString("base64"),
+      title: "Bug hunt",
+    });
+
+    expect(serialized).toContain("frozenAt=2026-04-23T08:00:00.000Z");
+    expect(serialized).toContain(
+      `historyBase64=${Buffer.from("prompt\r\noutput\r\n", "utf8").toString("base64")}`,
+    );
   });
 });

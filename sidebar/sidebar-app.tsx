@@ -84,7 +84,7 @@ import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import { useScrollGlowState } from "./use-scroll-glow-state";
 import type { WebviewApi } from "./webview-api";
 import { createDisplaySessionLayout } from "../shared/active-sessions-sort";
-import { matchesSidebarSessionSearchQuery } from "./previous-session-search";
+import { filterPreviousSessions, filterSidebarSessionItems } from "./previous-session-search";
 import { isEmptySidebarDoubleClick } from "./empty-sidebar-double-click";
 
 export type SidebarAppProps = {
@@ -132,6 +132,7 @@ const SIDEBAR_STARTUP_INTERACTION_BLOCK_MS = 1500;
 const SIDEBAR_STARTUP_REPRO_WINDOW_MS = 15_000;
 const SIDEBAR_POINTER_DRAG_REORDER_THRESHOLD_PX = 8;
 const SIDEBAR_SECTION_COLLAPSE_PERSIST_DEBOUNCE_MS = 200;
+const BROWSER_AUTO_COLLAPSE_SUPPRESSION_MS = 1_200;
 const MIN_SESSION_SEARCH_QUERY_LENGTH = 2;
 const COMPLETION_FLASH_DURATION_MS = 3_000;
 
@@ -168,6 +169,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   const groupIdsRef = useRef<string[]>([]);
   const sessionIdsByGroupRef = useRef<SessionIdsByGroup>({});
   const previousBrowserSessionCountsByGroupRef = useRef<Record<string, number>>({});
+  const browserAutoCollapseSuppressedUntilRef = useRef(0);
   const previousNormalizedSessionSearchQueryRef = useRef("");
   const pointerDownSessionTargetRef = useRef<SidebarPointerDownSessionTarget>();
   const sessionPointerDragStateRef = useRef<SidebarSessionPointerDragState>();
@@ -177,6 +179,9 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   >({});
   const sessionGroupsContentRef = useRef<HTMLDivElement>(null);
   const sidebarStartupStartedAtRef = useRef(getSidebarStartupNow());
+  const hasAppliedHydrateRef = useRef(false);
+  const firstHydrateRevisionRef = useRef<number>();
+  const lastSidebarStartupRenderStateKeyRef = useRef<string>();
 
   if (!didResetStoreRef.current) {
     resetSidebarStore();
@@ -268,10 +273,13 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       browserGroupIds,
       sessionIdsByGroup: authoritativeSessionIdsByGroup,
     });
+    const collapseBlockedBrowserGroupIds =
+      getSidebarStartupNow() < browserAutoCollapseSuppressedUntilRef.current ? browserGroupIds : [];
 
     setCollapsedGroupsById((previous) =>
       reconcileCollapsedGroupsById({
         browserGroupIds,
+        collapseBlockedGroupIds: collapseBlockedBrowserGroupIds,
         groupIds: groupOrder,
         previousBrowserSessionCountsByGroup: previousBrowserSessionCountsByGroupRef.current,
         previousCollapsedGroupsById: previous,
@@ -290,6 +298,12 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
         previousCollapsedGroupsById: previous,
       }),
     );
+  };
+
+  const prepareBrowserGroupsForOpen = (groupIds: readonly string[]) => {
+    browserAutoCollapseSuppressedUntilRef.current =
+      getSidebarStartupNow() + BROWSER_AUTO_COLLAPSE_SUPPRESSION_MS;
+    expandGroups(groupIds);
   };
 
   const setGroupCollapsed = (groupId: string, collapsed: boolean) => {
@@ -424,6 +438,8 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     postSidebarStartupReproLog("messageReceived", {
       elapsedMs: getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current),
       groupCount: event.data.groups.length,
+      hasHydrateBeforeMessage: hasAppliedHydrateRef.current,
+      firstHydrateRevision: firstHydrateRevisionRef.current,
       messageType: event.data.type,
       previousRevision: revision,
       revision: event.data.revision,
@@ -431,6 +447,14 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       stale: event.data.revision < revision,
       startupInteractionBlocked: isStartupInteractionBlocked,
     });
+    if (event.data.type === "sessionState" && !hasAppliedHydrateRef.current) {
+      postSidebarStartupReproLog("sessionStateBeforeHydrate", {
+        elapsedMs: getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current),
+        previousRevision: revision,
+        revision: event.data.revision,
+        sessionCount: countSidebarSessions(event.data.groups),
+      });
+    }
 
     if (pendingCreateGroupRef.current) {
       const nextGroupId = findCreatedGroupId(
@@ -444,9 +468,15 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     }
 
     applySidebarMessage(event.data);
+    if (event.data.type === "hydrate" && !hasAppliedHydrateRef.current) {
+      hasAppliedHydrateRef.current = true;
+      firstHydrateRevisionRef.current = event.data.revision;
+    }
     postSidebarStartupReproLog("messageApplied", {
       elapsedMs: getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current),
       groupCount: event.data.groups.length,
+      hasHydrateAfterApply: hasAppliedHydrateRef.current,
+      firstHydrateRevision: firstHydrateRevisionRef.current,
       messageType: event.data.type,
       previousRevision: revision,
       revision: event.data.revision,
@@ -469,6 +499,38 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       });
     };
   }, [postSidebarStartupReproLog]);
+
+  useEffect(() => {
+    const renderState = {
+      browserGroupCount: browserGroupIds.length,
+      elapsedMs: getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current),
+      firstHydrateRevision: firstHydrateRevisionRef.current,
+      groupCount: groupOrder.length,
+      hasHydrate: hasAppliedHydrateRef.current,
+      revision,
+      sessionCount: Object.keys(sessionsById).length,
+      startupInteractionBlocked: isStartupInteractionBlocked,
+      workspaceGroupCount: workspaceGroupIds.length,
+    };
+    const renderStateKey = JSON.stringify(renderState);
+    if (lastSidebarStartupRenderStateKeyRef.current === renderStateKey) {
+      return;
+    }
+
+    lastSidebarStartupRenderStateKeyRef.current = renderStateKey;
+    postSidebarStartupReproLog("renderState", renderState);
+    if (hasAppliedHydrateRef.current && renderState.sessionCount === 0) {
+      postSidebarStartupReproLog("emptyStateAfterHydrate", renderState);
+    }
+  }, [
+    browserGroupIds,
+    groupOrder,
+    isStartupInteractionBlocked,
+    postSidebarStartupReproLog,
+    revision,
+    sessionsById,
+    workspaceGroupIds,
+  ]);
 
   useEffect(() => {
     const handleMessage = (event: Event) => {
@@ -713,9 +775,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     () =>
       !isSessionSearchFiltering
         ? []
-        : previousSessions.filter((session) =>
-            matchesSidebarSessionSearchQuery(session, normalizedSessionSearchQuery),
-          ),
+        : filterPreviousSessions(previousSessions, normalizedSessionSearchQuery),
     [isSessionSearchFiltering, normalizedSessionSearchQuery, previousSessions],
   );
   const focusedSessionId = useMemo(
@@ -1471,7 +1531,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
             }
             isCollapsed={collapsedSections.actions}
             isVisible={shouldShowActionsPanel}
-            onBrowserCommandRun={() => expandGroups(browserGroupIds)}
+            onBrowserCommandRun={() => prepareBrowserGroupsForOpen(browserGroupIds)}
             onToggleCollapsed={(collapsed) => {
               setSectionCollapsed("actions", collapsed);
               scheduleSectionCollapsePersistence("actions", collapsed);
@@ -1547,7 +1607,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
                       onAutoEditHandled={() => undefined}
                       onCollapsedChange={setGroupCollapsed}
                       onCreateSessionRequested={(requestedGroupId) =>
-                        expandGroups([requestedGroupId])
+                        prepareBrowserGroupsForOpen([requestedGroupId])
                       }
                       orderedSessionIds={displayedBrowserSessionIdsByGroup[groupId] ?? []}
                       selectedSearchSessionId={
@@ -2406,13 +2466,26 @@ function createDisplayedSessionIdsByGroup({
     const sessionIds = sessionIdsByGroup[groupId] ?? [];
     displayedSessionIdsByGroup[groupId] = !shouldFilter
       ? [...sessionIds]
-      : sessionIds.filter((sessionId) => {
-          const session = sessionsById[sessionId];
-          return session ? matchesSidebarSessionSearchQuery(session, query) : false;
-        });
+      : filterSessionIdsByQuery(sessionIds, sessionsById, query);
   }
 
   return displayedSessionIdsByGroup;
+}
+
+function filterSessionIdsByQuery(
+  sessionIds: readonly string[],
+  sessionsById: ReturnType<typeof useSidebarStore.getState>["sessionsById"],
+  query: string,
+): string[] {
+  const sessions = sessionIds.flatMap((sessionId) => {
+    const session = sessionsById[sessionId];
+    return session ? [session] : [];
+  });
+  const matchedSessionIds = new Set(
+    filterSidebarSessionItems(sessions, query).map((session) => session.sessionId),
+  );
+
+  return sessionIds.filter((sessionId) => matchedSessionIds.has(sessionId));
 }
 
 function createDisplayedGroupIds(

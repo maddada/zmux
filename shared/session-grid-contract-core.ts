@@ -46,7 +46,7 @@ export type SidebarThemeSetting =
 export type SidebarThemeVariant = "light" | "dark";
 
 export type SessionKind = "browser" | "terminal" | "t3";
-export type TerminalEngine = "ghostty" | "xterm";
+export type TerminalEngine = "ghostty" | "ghostty-non-persistent" | "non-persistent" | "xterm";
 
 export type T3SessionMetadata = {
   boundThreadId?: string;
@@ -95,17 +95,20 @@ export type CreateSessionRecordOptions =
   | {
       browser: BrowserSessionMetadata;
       displayId?: string;
+      initialPresentation?: "background" | "focused";
       kind: "browser";
       title?: string;
     }
   | {
       displayId?: string;
+      initialPresentation?: "background" | "focused";
       kind?: "terminal";
       terminalEngine?: TerminalEngine;
       title?: string;
     }
   | {
       displayId?: string;
+      initialPresentation?: "background" | "focused";
       kind: "t3";
       t3: T3SessionMetadata;
       title?: string;

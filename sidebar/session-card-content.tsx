@@ -54,7 +54,9 @@ export function SessionCardContent({
     showDebugSessionNumbers,
   });
   const hasLastInteractionTime = Boolean(session.lastInteractionAt);
-  const hasHeaderAgentIcon = Boolean(session.agentIcon) || session.isReloading === true;
+  const showHeaderLoadingSpinner =
+    session.isReloading === true || session.isGeneratingFirstPromptTitle === true;
+  const hasHeaderAgentIcon = Boolean(session.agentIcon) || showHeaderLoadingSpinner;
   useRelativeTimeTick(hasLastInteractionTime);
   const lastInteractionLabel =
     hasLastInteractionTime && session.lastInteractionAt
@@ -72,8 +74,8 @@ export function SessionCardContent({
       : lastInteractionLabel
         ? "time"
         : "icon";
-  const shouldKeepReloadingIconVisible = session.isReloading === true && hasHeaderAgentIcon;
-  const hoverTrailingDisplay = shouldKeepReloadingIconVisible
+  const shouldKeepLoadingIconVisible = showHeaderLoadingSpinner && hasHeaderAgentIcon;
+  const hoverTrailingDisplay = shouldKeepLoadingIconVisible
     ? "icon"
     : defaultTrailingDisplay === "icon"
       ? lastInteractionLabel
@@ -105,6 +107,7 @@ export function SessionCardContent({
               <SessionHeaderAgentIcon
                 agentIcon={session.agentIcon}
                 isFavorite={session.isFavorite}
+                isGeneratingFirstPromptTitle={session.isGeneratingFirstPromptTitle}
                 isReloading={session.isReloading}
               />
             ) : null}
@@ -312,6 +315,7 @@ export function getSessionTitleTooltipOptions({
 type SessionAgentIconProps = {
   agentIcon: SidebarSessionItem["agentIcon"];
   isFavorite?: boolean;
+  isGeneratingFirstPromptTitle?: boolean;
   isReloading?: boolean;
 };
 
@@ -329,11 +333,12 @@ function SessionAgentIconDecoration({
   agentIcon,
   className,
   isFavorite = false,
+  isGeneratingFirstPromptTitle = false,
   isReloading = false,
   loadingClassName,
   tablerClassName,
 }: SessionAgentIconDecorationProps) {
-  if (isReloading) {
+  if (isReloading || isGeneratingFirstPromptTitle) {
     return <IconLoader2 aria-hidden="true" className={loadingClassName} size={14} stroke={1.8} />;
   }
 
@@ -385,6 +390,7 @@ export function SessionFloatingAgentIcon({ agentIcon, isFavorite = false }: Sess
 function SessionHeaderAgentIcon({
   agentIcon,
   isFavorite = false,
+  isGeneratingFirstPromptTitle = false,
   isReloading = false,
 }: SessionAgentIconProps) {
   return (
@@ -392,6 +398,7 @@ function SessionHeaderAgentIcon({
       agentIcon={agentIcon}
       className="session-header-agent-icon"
       isFavorite={isFavorite}
+      isGeneratingFirstPromptTitle={isGeneratingFirstPromptTitle}
       isReloading={isReloading}
       loadingClassName="session-header-reloading-icon"
       tablerClassName="session-header-agent-tabler-icon"

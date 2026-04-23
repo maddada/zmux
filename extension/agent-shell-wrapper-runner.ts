@@ -6,7 +6,10 @@ import * as path from "node:path";
 import { appendAgentShellDebugLog } from "./agent-shell-debug-log";
 import { detectCodexLifecycleEventFromLogLine } from "./agent-shell-integration";
 import { ensureCodexHooksFile } from "./codex-hooks-config";
-import { writePersistedSessionStateToFile } from "./session-state-file";
+import {
+  updatePersistedSessionStateFile,
+  writePersistedSessionStateToFile,
+} from "./session-state-file";
 
 type AgentName = "claude" | "codex" | "gemini" | "opencode";
 
@@ -86,7 +89,11 @@ async function main(): Promise<void> {
 
   const watcher =
     options.agent === "codex" && environment.CODEX_TUI_SESSION_LOG_PATH
-      ? startCodexWatcher(environment.CODEX_TUI_SESSION_LOG_PATH, options.notifyRunnerPath)
+      ? startCodexWatcher(
+          environment.CODEX_TUI_SESSION_LOG_PATH,
+          options.notifyRunnerPath,
+          environment.VSMUX_SESSION_STATE_FILE,
+        )
       : undefined;
 
   await appendAgentShellDebugLog("wrapper.launch.spawn", {
@@ -231,10 +238,15 @@ async function writeInitialSessionState(agent: AgentName, title: string): Promis
   }).catch(() => undefined);
 }
 
-function startCodexWatcher(logFilePath: string, notifyRunnerPath: string): CodexWatcherHandle {
+function startCodexWatcher(
+  logFilePath: string,
+  notifyRunnerPath: string,
+  sessionStateFilePath: string | undefined,
+): CodexWatcherHandle {
   let disposed = false;
   let pendingLine = "";
   let lastContentLength = 0;
+  let lastSeenSessionId: string | undefined;
   let lastStartedTurnId: string | undefined;
   let lastStoppedTurnId: string | undefined;
   let polling = false;
@@ -266,6 +278,12 @@ function startCodexWatcher(logFilePath: string, notifyRunnerPath: string): Codex
         pendingLine = lines.pop() ?? "";
 
         for (const line of lines) {
+          const sessionId = extractCodexSessionId(line);
+          if (sessionId && sessionId !== lastSeenSessionId) {
+            lastSeenSessionId = sessionId;
+            void persistCodexSessionId(sessionStateFilePath, sessionId);
+          }
+
           const eventType = detectCodexLifecycleEventFromLogLine(line);
           if (!eventType) {
             continue;
@@ -320,6 +338,35 @@ function startCodexWatcher(logFilePath: string, notifyRunnerPath: string): Codex
 
 function extractTurnId(line: string): string | undefined {
   return line.match(/"turn_id":"([^"]+)"/)?.[1];
+}
+
+export function extractCodexSessionId(line: string): string | undefined {
+  try {
+    const parsed = JSON.parse(line) as {
+      payload?: { id?: unknown };
+      type?: unknown;
+    };
+    return parsed.type === "session_meta" && typeof parsed.payload?.id === "string"
+      ? parsed.payload.id
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function persistCodexSessionId(
+  stateFilePath: string | undefined,
+  sessionId: string,
+): Promise<void> {
+  const normalizedStateFilePath = stateFilePath?.trim();
+  if (!normalizedStateFilePath) {
+    return;
+  }
+
+  await updatePersistedSessionStateFile(normalizedStateFilePath, (state) => ({
+    ...state,
+    agentSessionId: sessionId,
+  })).catch(() => undefined);
 }
 
 function emitNotifyEvent(eventName: "Start" | "Stop", notifyRunnerPath: string): void {

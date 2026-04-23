@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
+  AUTO_SLEEP_FOCUS_GRACE_MS,
   getAutoSleepCheckIntervalMs,
+  hasAutoSleepFocusGrace,
   hasReachedAutoSleepTimeout,
   shouldAutoSleepSidebarSession,
 } from "./auto-sleep";
@@ -11,6 +13,7 @@ describe("shouldAutoSleepSidebarSession", () => {
       shouldAutoSleepSidebarSession({
         activity: "idle",
         agentIcon: "claude",
+        isFocused: false,
         isRunning: true,
         isSleeping: false,
       }),
@@ -22,6 +25,7 @@ describe("shouldAutoSleepSidebarSession", () => {
       shouldAutoSleepSidebarSession({
         activity: "idle",
         agentIcon: "codex",
+        isFocused: false,
         isRunning: true,
         isSleeping: false,
       }),
@@ -33,6 +37,7 @@ describe("shouldAutoSleepSidebarSession", () => {
       shouldAutoSleepSidebarSession({
         activity: "idle",
         agentIcon: "t3",
+        isFocused: false,
         isRunning: true,
         isSleeping: false,
       }),
@@ -44,6 +49,7 @@ describe("shouldAutoSleepSidebarSession", () => {
       shouldAutoSleepSidebarSession({
         activity: "idle",
         agentIcon: "opencode",
+        isFocused: false,
         isRunning: true,
         isSleeping: false,
       }),
@@ -55,6 +61,7 @@ describe("shouldAutoSleepSidebarSession", () => {
       shouldAutoSleepSidebarSession({
         activity: "working",
         agentIcon: "claude",
+        isFocused: false,
         isRunning: true,
         isSleeping: false,
       }),
@@ -66,6 +73,7 @@ describe("shouldAutoSleepSidebarSession", () => {
       shouldAutoSleepSidebarSession({
         activity: "attention",
         agentIcon: "claude",
+        isFocused: false,
         isRunning: true,
         isSleeping: false,
       }),
@@ -77,6 +85,7 @@ describe("shouldAutoSleepSidebarSession", () => {
       shouldAutoSleepSidebarSession({
         activity: "idle",
         agentIcon: "claude",
+        isFocused: false,
         isRunning: false,
         isSleeping: false,
       }),
@@ -88,8 +97,21 @@ describe("shouldAutoSleepSidebarSession", () => {
       shouldAutoSleepSidebarSession({
         activity: "idle",
         agentIcon: "claude",
+        isFocused: false,
         isRunning: true,
         isSleeping: true,
+      }),
+    ).toBe(false);
+  });
+
+  test("should skip the currently focused session", () => {
+    expect(
+      shouldAutoSleepSidebarSession({
+        activity: "idle",
+        agentIcon: "claude",
+        isFocused: true,
+        isRunning: true,
+        isSleeping: false,
       }),
     ).toBe(false);
   });
@@ -123,6 +145,32 @@ describe("hasReachedAutoSleepTimeout", () => {
     expect(hasReachedAutoSleepTimeout({ activityAt: "not-a-date", timeoutMs: 15 * 60_000 })).toBe(
       false,
     );
+  });
+});
+
+describe("hasAutoSleepFocusGrace", () => {
+  test("should return true while the focus grace window is still active", () => {
+    expect(
+      hasAutoSleepFocusGrace({
+        focusedAt: Date.parse("2026-04-17T10:00:00.000Z"),
+        graceMs: AUTO_SLEEP_FOCUS_GRACE_MS,
+        now: Date.parse("2026-04-17T10:09:59.000Z"),
+      }),
+    ).toBe(true);
+  });
+
+  test("should return false once the focus grace window has expired", () => {
+    expect(
+      hasAutoSleepFocusGrace({
+        focusedAt: Date.parse("2026-04-17T10:00:00.000Z"),
+        graceMs: AUTO_SLEEP_FOCUS_GRACE_MS,
+        now: Date.parse("2026-04-17T10:10:00.000Z"),
+      }),
+    ).toBe(false);
+  });
+
+  test("should return false when no focused timestamp is available", () => {
+    expect(hasAutoSleepFocusGrace({ focusedAt: undefined })).toBe(false);
   });
 });
 

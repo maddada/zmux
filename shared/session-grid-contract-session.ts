@@ -286,7 +286,27 @@ export function createSessionRecord(
 }
 
 export function normalizeTerminalEngine(value: string | undefined): TerminalEngine {
-  return value === "xterm" ? "xterm" : DEFAULT_TERMINAL_ENGINE;
+  if (value === "ghostty-non-persistent") {
+    return "ghostty-non-persistent";
+  }
+
+  if (value === "xterm") {
+    return "xterm";
+  }
+
+  if (value === "non-persistent") {
+    return "non-persistent";
+  }
+
+  return DEFAULT_TERMINAL_ENGINE;
+}
+
+export function isPersistentTerminalEngine(value: TerminalEngine): boolean {
+  return value === "xterm" || value === "ghostty";
+}
+
+export function isXtermTerminalEngine(value: TerminalEngine): boolean {
+  return value === "xterm" || value === "non-persistent";
 }
 
 export function getTerminalSessionSurfaceTitle(

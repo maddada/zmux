@@ -80,6 +80,7 @@ export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
       agents: createDefaultSidebarAgentButtons(),
       collapsedSections: createDefaultSidebarSectionCollapseState(),
       commands: createDefaultSidebarCommandButtons(),
+      commandSessionIndicators: [],
       completionBellEnabled: false,
       completionSound: DEFAULT_COMPLETION_SOUND,
       completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),
@@ -536,6 +537,7 @@ function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSess
     left.alias === right.alias &&
     left.column === right.column &&
     left.detail === right.detail &&
+    left.isGeneratingFirstPromptTitle === right.isGeneratingFirstPromptTitle &&
     left.isReloading === right.isReloading &&
     left.lifecycleState === right.lifecycleState &&
     left.isFocused === right.isFocused &&

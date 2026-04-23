@@ -17,6 +17,7 @@ type AgentHookInfo = {
   normalizedEvent?: "start" | "stop";
   prompt?: string;
   rawEventName?: string;
+  sessionId?: string;
   turnId?: string;
 };
 
@@ -95,6 +96,10 @@ export function getAgentHookInfo(
         ? getJsonStringField(input, "prompt")
         : undefined,
     rawEventName,
+    sessionId:
+      rawEventName === USER_PROMPT_SUBMIT_EVENT_NAME
+        ? getJsonStringField(input, "session_id")
+        : undefined,
     turnId:
       rawEventName === USER_PROMPT_SUBMIT_EVENT_NAME
         ? getJsonStringField(input, "turn_id")
@@ -175,6 +180,10 @@ export function resolvePersistedSessionStateForHook(
   currentState: PersistedSessionState,
   hookInfo: AgentHookInfo,
 ): PersistedSessionState {
+  if (shouldIgnorePromptSubmitForDifferentSession(currentState, hookInfo)) {
+    return currentState;
+  }
+
   const nextState: PersistedSessionState = {
     ...currentState,
     agentName: hookInfo.agentName || currentState.agentName,
@@ -203,6 +212,18 @@ export function resolvePersistedSessionStateForHook(
   }
 
   return nextState;
+}
+
+function shouldIgnorePromptSubmitForDifferentSession(
+  currentState: PersistedSessionState,
+  hookInfo: AgentHookInfo,
+): boolean {
+  return (
+    hookInfo.rawEventName === USER_PROMPT_SUBMIT_EVENT_NAME &&
+    Boolean(currentState.agentSessionId?.trim()) &&
+    Boolean(hookInfo.sessionId?.trim()) &&
+    currentState.agentSessionId?.trim() !== hookInfo.sessionId?.trim()
+  );
 }
 
 async function writeSessionState(hookInfo: AgentHookInfo): Promise<Record<string, unknown>> {

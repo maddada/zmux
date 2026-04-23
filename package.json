@@ -32,7 +32,6 @@
     "out/sidebar/**/*.css",
     "out/sidebar/**/*.html",
     "out/sidebar/**/*.js",
-    "out/dpcode-server/**",
     "out/t3code-embed/**",
     "out/t3code-server/**",
     "out/workspace/**/*.css",
@@ -97,6 +96,7 @@
     "@xterm/xterm": "6.1.0-beta.197",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "fuse.js": "^7.3.0",
     "ghostty-web": "^0.4.0",
     "lucide-react": "^0.561.0",
     "qrcode": "^1.5.4",
@@ -361,33 +361,27 @@
     "configuration": {
       "title": "VSmux",
       "properties": {
+        "VSmux.autoSleepTimeoutMinutes": {
+          "title": "Auto Sleep Timeout Minutes",
+          "type": "number",
+          "minimum": 0,
+          "default": 20,
+          "description": "How long an eligible idle session can sit without activity before VSmux automatically sleeps it. Set to 0 to disable auto-sleep.",
+          "markdownDescription": "How long an eligible idle session can sit without activity before VSmux automatically sleeps it. The default is `20` minutes. Set to `0` to disable auto-sleep.\n\nAuto-sleep currently applies to idle Claude, Codex, and T3 sessions."
+        },
         "VSmux.backgroundSessionTimeoutMinutes": {
           "title": "Background Session Timeout Minutes",
           "type": "number",
           "minimum": 0,
-          "default": 0,
-          "description": "How long detached background sessions stay alive after the last VSmux window disconnects. Set to 0 to disable this timeout. For auto-sleep, set this to a value like 20 minutes to opt in.",
-          "markdownDescription": "How long detached background sessions stay alive after the last VSmux window disconnects. Set to `0` to keep this disabled by default.\n\nNote: this same timeout also drives automatic sleeping for idle sessions when you opt in by setting a value such as `20` minutes. Auto-sleep applies to idle Claude, Codex, and T3 sessions."
+          "default": 5,
+          "description": "How long detached background sessions stay alive after the last VSmux window disconnects. Set to 0 to disable this timeout.",
+          "markdownDescription": "How long detached background sessions stay alive after the last VSmux window disconnects. The default is `5` minutes. Set to `0` to disable this timeout."
         },
         "VSmux.autoOpenSidebarViewsOnStartup": {
           "title": "Auto Open Sidebar Views On Startup",
           "type": "boolean",
           "default": false,
           "description": "When enabled, VS Code startup automatically reveals the VSmux sidebar and reopens the VSmux Sessions view if it is not already open."
-        },
-        "VSmux.t3EmbedProvider": {
-          "title": "T3 Embed Provider",
-          "type": "string",
-          "default": "t3code",
-          "enum": [
-            "dpcode",
-            "t3code"
-          ],
-          "enumItemLabels": [
-            "DP Code",
-            "T3 Code"
-          ],
-          "description": "Which embedded T3-compatible app VSmux launches when you click the T3 Code sidebar agent."
         },
         "VSmux.t3codeRepoRoot": {
           "title": "T3 Code Repo Root",
@@ -581,20 +575,20 @@
         "VSmux.terminalEngine": {
           "title": "Terminal Engine",
           "type": "string",
-          "default": "xterm",
+          "default": "non-persistent",
           "enum": [
-            "ghostty",
+            "non-persistent",
             "xterm"
           ],
           "enumItemLabels": [
-            "Ghostty (Beta)",
-            "xterm.js"
+            "xterm.js (non-persistent)",
+            "xterm.js (persistent)"
           ],
           "enumDescriptions": [
-            "Nearly stable, but Codex terminal reloads can still hit bugs. If that happens, use the refresh button.",
-            "Stable and the default. Recommended for everyday use."
+            "Default. Live xterm.js terminal attached straight to the backend PTY. On reopen or reload, resumable sessions are recreated and resumed; other sessions reopen as a frozen snapshot.",
+            "Stable fallback. Uses daemon-side xterm.js persistence for reconnect scrollback."
           ],
-          "description": "Choose the default engine for new VSmux terminal sessions. xterm.js is the stable default; Ghostty is still beta and may occasionally need a refresh after reloads."
+          "description": "Choose the default engine for new VSmux terminal sessions. xterm.js (non-persistent) is the default and uses a direct PTY connection without daemon-side xterm serialization; xterm.js (persistent) keeps terminals alive on restart (still not stable)."
         },
         "VSmux.xtermHeadlessScrollback": {
           "title": "xterm.js Reconnect Scrollback",
@@ -759,7 +753,7 @@
         "VSmux.actionCompletionSound": {
           "title": "Action Completion Sound",
           "type": "string",
-          "default": "ping",
+          "default": "shamisenreverb",
           "enum": [
             "ping",
             "pingdouble",

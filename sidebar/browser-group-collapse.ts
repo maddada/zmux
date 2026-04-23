@@ -15,17 +15,20 @@ export function getBrowserSessionCountsByGroup({
 
 export function reconcileCollapsedGroupsById({
   browserGroupIds,
+  collapseBlockedGroupIds = [],
   groupIds,
   previousBrowserSessionCountsByGroup,
   previousCollapsedGroupsById,
   sessionIdsByGroup,
 }: {
   browserGroupIds: readonly string[];
+  collapseBlockedGroupIds?: readonly string[];
   groupIds: readonly string[];
   previousBrowserSessionCountsByGroup: Readonly<Record<string, number>>;
   previousCollapsedGroupsById: CollapsedGroupsById;
   sessionIdsByGroup: SessionIdsByGroup;
 }): CollapsedGroupsById {
+  const blockedGroupIds = new Set(collapseBlockedGroupIds);
   const validGroupIds = new Set(groupIds);
   let changed = false;
   const next: CollapsedGroupsById = {};
@@ -44,6 +47,10 @@ export function reconcileCollapsedGroupsById({
     const nextCount = (sessionIdsByGroup[browserGroupId] ?? []).length;
 
     if (nextCount === 0) {
+      if (blockedGroupIds.has(browserGroupId)) {
+        continue;
+      }
+
       if (!next[browserGroupId]) {
         next[browserGroupId] = true;
         changed = true;

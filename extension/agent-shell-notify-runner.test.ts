@@ -17,6 +17,7 @@ describe("getAgentHookInfo", () => {
           agent: "codex",
           hook_event_name: "UserPromptSubmit",
           prompt: 'can you fix the "rename" flow?',
+          session_id: "session-123",
         }),
       ),
     ).toEqual({
@@ -24,6 +25,7 @@ describe("getAgentHookInfo", () => {
       normalizedEvent: undefined,
       prompt: 'can you fix the "rename" flow?',
       rawEventName: "UserPromptSubmit",
+      sessionId: "session-123",
       turnId: undefined,
     });
   });
@@ -35,6 +37,7 @@ describe("getAgentHookInfo", () => {
           agent: "codex",
           hook_event_name: "UserPromptSubmit",
           prompt: "hello",
+          session_id: "session-123",
           turn_id: "turn-123",
         }),
       ),
@@ -43,6 +46,7 @@ describe("getAgentHookInfo", () => {
       normalizedEvent: undefined,
       prompt: "hello",
       rawEventName: "UserPromptSubmit",
+      sessionId: "session-123",
       turnId: "turn-123",
     });
   });
@@ -60,6 +64,7 @@ describe("getAgentHookInfo", () => {
       normalizedEvent: "stop",
       prompt: undefined,
       rawEventName: undefined,
+      sessionId: undefined,
       turnId: undefined,
     });
   });
@@ -96,6 +101,7 @@ describe("resolvePersistedSessionStateForHook", () => {
       {
         agentName: "codex",
         agentStatus: "idle",
+        agentSessionId: "session-top-level",
         hasAutoTitleFromFirstPrompt: undefined,
         pendingFirstPromptAutoRenamePrompt: undefined,
         title: "Codex",
@@ -104,6 +110,7 @@ describe("resolvePersistedSessionStateForHook", () => {
         agentName: "codex",
         prompt: "how does terminal title syncing work in this project?",
         rawEventName: "UserPromptSubmit",
+        sessionId: "session-top-level",
       },
     );
 
@@ -115,11 +122,36 @@ describe("resolvePersistedSessionStateForHook", () => {
     expect(nextState.lastActivityAt).toEqual(expect.any(String));
   });
 
+  test("queues a pending auto rename request for a generic Claude session", () => {
+    const nextState = resolvePersistedSessionStateForHook(
+      {
+        agentName: "claude",
+        agentStatus: "idle",
+        hasAutoTitleFromFirstPrompt: undefined,
+        pendingFirstPromptAutoRenamePrompt: undefined,
+        title: "Claude Code",
+      },
+      {
+        agentName: "claude",
+        prompt: "can you explain how this repo is structured?",
+        rawEventName: "UserPromptSubmit",
+      },
+    );
+
+    expect(nextState.hasAutoTitleFromFirstPrompt).toBeUndefined();
+    expect(nextState.pendingFirstPromptAutoRenamePrompt).toBe(
+      "can you explain how this repo is structured?",
+    );
+    expect(nextState.title).toBe("Claude Code");
+    expect(nextState.lastActivityAt).toEqual(expect.any(String));
+  });
+
   test("does not queue another request once a first prompt rename is already pending", () => {
     const nextState = resolvePersistedSessionStateForHook(
       {
         agentName: "codex",
         agentStatus: "working",
+        agentSessionId: "session-top-level",
         hasAutoTitleFromFirstPrompt: undefined,
         pendingFirstPromptAutoRenamePrompt: "rename the controller session",
         title: "Codex",
@@ -128,6 +160,7 @@ describe("resolvePersistedSessionStateForHook", () => {
         agentName: "codex",
         prompt: "fix the workspace group ordering too",
         rawEventName: "UserPromptSubmit",
+        sessionId: "session-top-level",
       },
     );
 
@@ -140,6 +173,7 @@ describe("resolvePersistedSessionStateForHook", () => {
       {
         agentName: "codex",
         agentStatus: "idle",
+        agentSessionId: "session-top-level",
         hasAutoTitleFromFirstPrompt: undefined,
         pendingFirstPromptAutoRenamePrompt: undefined,
         title: "Codex",
@@ -148,6 +182,30 @@ describe("resolvePersistedSessionStateForHook", () => {
         agentName: "codex",
         prompt: "/rename Better title",
         rawEventName: "UserPromptSubmit",
+        sessionId: "session-top-level",
+      },
+    );
+
+    expect(nextState.pendingFirstPromptAutoRenamePrompt).toBeUndefined();
+    expect(nextState.title).toBe("Codex");
+  });
+
+  test("does not queue auto rename requests for prompts that mention inline slash commands", () => {
+    const nextState = resolvePersistedSessionStateForHook(
+      {
+        agentName: "codex",
+        agentStatus: "idle",
+        agentSessionId: "session-top-level",
+        hasAutoTitleFromFirstPrompt: undefined,
+        pendingFirstPromptAutoRenamePrompt: undefined,
+        title: "Codex",
+      },
+      {
+        agentName: "codex",
+        prompt:
+          "add 1 more toggle here [Image #1] that makes it open as /rename Memory Consolidation Agent",
+        rawEventName: "UserPromptSubmit",
+        sessionId: "session-top-level",
       },
     );
 
@@ -174,6 +232,35 @@ describe("resolvePersistedSessionStateForHook", () => {
 
     expect(startState.agentStatus).toBe("working");
     expect(stopState.agentStatus).toBe("attention");
+  });
+
+  test("ignores prompt submit hooks from a different Codex session id", () => {
+    const nextState = resolvePersistedSessionStateForHook(
+      {
+        agentName: "codex",
+        agentStatus: "idle",
+        agentSessionId: "session-top-level",
+        hasAutoTitleFromFirstPrompt: undefined,
+        pendingFirstPromptAutoRenamePrompt: undefined,
+        title: "Codex",
+      },
+      {
+        agentName: "codex",
+        prompt:
+          "<permissions instructions>\nFilesystem sandboxing defines which files can be read or written.\n</permissions instructions>",
+        rawEventName: "UserPromptSubmit",
+        sessionId: "session-background-memory-agent",
+      },
+    );
+
+    expect(nextState).toEqual({
+      agentName: "codex",
+      agentStatus: "idle",
+      agentSessionId: "session-top-level",
+      hasAutoTitleFromFirstPrompt: undefined,
+      pendingFirstPromptAutoRenamePrompt: undefined,
+      title: "Codex",
+    });
   });
 });
 

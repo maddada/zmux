@@ -586,6 +586,45 @@ describe("createSessionInSimpleWorkspace", () => {
     expect(result.session?.alias).toBe("01");
     expect(result.session?.sessionId).toBe(sessionIdForDisplay("01"));
   });
+
+  test("should keep the current focus and visible slots when creating a background session", () => {
+    const result = createSessionInSimpleWorkspace(
+      createWorkspaceSnapshot({
+        activeGroupId: DEFAULT_MAIN_GROUP_ID,
+        groups: [
+          {
+            groupId: DEFAULT_MAIN_GROUP_ID,
+            snapshot: {
+              focusedSessionId: sessionIdForDisplay("00"),
+              fullscreenRestoreVisibleCount: undefined,
+              sessions: [
+                createSessionRecord(1, 0, { displayId: "00" }),
+                createSessionRecord(2, 1, { displayId: "01" }),
+              ],
+              viewMode: "grid",
+              visibleCount: 2,
+              visibleSessionIds: [sessionIdForDisplay("00"), sessionIdForDisplay("01")],
+            },
+            title: "Main",
+          },
+        ],
+        nextGroupNumber: 2,
+        nextSessionDisplayId: 2,
+        nextSessionNumber: 3,
+      }),
+      {
+        initialPresentation: "background",
+        title: "Build",
+      },
+    );
+
+    expect(result.session?.sessionId).toBe(sessionIdForDisplay("02"));
+    expect(result.snapshot.groups[0]?.snapshot.focusedSessionId).toBe(sessionIdForDisplay("00"));
+    expect(result.snapshot.groups[0]?.snapshot.visibleSessionIds).toEqual([
+      sessionIdForDisplay("00"),
+      sessionIdForDisplay("01"),
+    ]);
+  });
 });
 
 describe("setT3SessionMetadataInSimpleWorkspace", () => {

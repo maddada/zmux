@@ -11,10 +11,12 @@ import type {
 import { logWorkspaceDebug } from "./workspace-debug";
 import { getResttyFontSources, getResttyTheme } from "./restty-terminal-config";
 import type { WorkspaceResttyTransportController } from "./restty-session-transport";
+import { TerminalLoadingOverlay } from "./terminal-loading-overlay";
 import {
   getShiftEnterInputSequence,
   getWindowsCtrlWordDeleteInputSequence,
 } from "./terminal-input-shortcuts";
+import { useTerminalLoadingOverlayProgress } from "./use-terminal-loading-overlay-progress";
 import {
   acquireCachedTerminalRuntime,
   getTerminalRuntimeCacheKey,
@@ -62,6 +64,7 @@ export type TerminalPaneProps = {
   isFocused: boolean;
   isVisible: boolean;
   onAttentionInteraction: (reason: WorkspacePanelAcknowledgeSessionAttentionReason) => void;
+  onCancelFirstPromptAutoRename?: () => void;
   onTerminalEnter?: () => void;
   onLagDetected?: (payload: {
     overshootMs: number;
@@ -80,6 +83,24 @@ type SearchResultsState = {
   resultIndex: number;
 };
 
+function shouldConnectLiveGhosttySession(pane: WorkspacePanelTerminalPane): boolean {
+  if (pane.sessionRecord.terminalEngine !== "ghostty-non-persistent") {
+    return true;
+  }
+
+  const snapshot = pane.snapshot;
+  if (!snapshot) {
+    return true;
+  }
+
+  return (
+    snapshot.isAttached ||
+    snapshot.status === "running" ||
+    snapshot.status === "starting" ||
+    (snapshot.frontendAttachmentGeneration ?? 0) > 0
+  );
+}
+
 export const TerminalPane: React.FC<TerminalPaneProps> = ({
   autoFocusRequest,
   connection,
@@ -88,6 +109,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   isFocused,
   isVisible,
   onAttentionInteraction,
+  onCancelFirstPromptAutoRename,
   onTerminalEnter,
   onLagDetected,
   onActivate,
@@ -96,7 +118,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   scrollToBottomRequestId,
   terminalAppearance,
 }) => {
-  if (pane.sessionRecord.terminalEngine === "xterm") {
+  if (
+    pane.sessionRecord.terminalEngine === "xterm" ||
+    pane.sessionRecord.terminalEngine === "non-persistent"
+  ) {
     return (
       <XtermTerminalPane
         autoFocusRequest={autoFocusRequest}
@@ -106,6 +131,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         isFocused={isFocused}
         isVisible={isVisible}
         onAttentionInteraction={onAttentionInteraction}
+        onCancelFirstPromptAutoRename={onCancelFirstPromptAutoRename}
         onActivate={onActivate}
         onTerminalEnter={onTerminalEnter}
         pane={pane}
@@ -160,7 +186,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const [showScrollToTop, setShowScrollToTop] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultsState>(SEARCH_RESULTS_EMPTY);
+  const shouldConnectLiveSession = shouldConnectLiveGhosttySession(pane);
+  const frozenHistoryReplay = shouldConnectLiveSession ? undefined : pane.snapshot?.history;
   const runtimeCacheKey = getTerminalRuntimeCacheKey(pane.sessionId);
+  const isGeneratingFirstPromptTitle = pane.isGeneratingFirstPromptTitle === true;
+  const loadingOverlay = useTerminalLoadingOverlayProgress(isGeneratingFirstPromptTitle);
 
   useEffect(() => {
     debugLogRef.current = debugLog;
@@ -208,7 +238,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   });
 
   const shouldAllowHiddenReconnect = () =>
-    isVisibleRef.current || pane.snapshot?.isAttached === true;
+    shouldConnectLiveSession && (isVisibleRef.current || pane.snapshot?.isAttached === true);
 
   const syncRefsFromRuntime = (runtime: CachedTerminalRuntime) => {
     activePaneRef.current = runtime.activePane;
@@ -736,7 +766,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   };
 
   const sendRawTerminalInput = (data: string) => {
-    if (!data) {
+    if (!data || loadingOverlay.isVisible) {
       return false;
     }
 
@@ -975,6 +1005,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     if (connection.mock) {
       reportDebug("terminal.connectSkipped", {
         reason: "mock-connection",
+        sessionId: pane.sessionId,
+        source: sourceLabel,
+        ...collectSnapshotMetrics(),
+      });
+      return;
+    }
+
+    if (!shouldConnectLiveSession) {
+      reportDebug("terminal.connectSkipped", {
+        reason: "frozen-snapshot",
         sessionId: pane.sessionId,
         source: sourceLabel,
         ...collectSnapshotMetrics(),
@@ -1388,11 +1428,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           focusTerminalWithRetries("mount-visible");
         }
 
-        if (connection.mock) {
-          if (pane.snapshot?.history) {
-            runtime.activePane.sendInput(pane.snapshot.history, "pty");
+        if (connection.mock || !shouldConnectLiveSession) {
+          if (frozenHistoryReplay) {
+            runtime.activePane.sendInput(frozenHistoryReplay, "pty");
           }
-          runVisibleMaintenance("mock-history");
+          runVisibleMaintenance(connection.mock ? "mock-history" : "frozen-history");
           return;
         }
 
@@ -1445,9 +1485,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     connection.mock,
     connection.token,
     connection.workspaceId,
+    frozenHistoryReplay,
     pane.renderNonce,
     pane.sessionId,
     runtimeCacheKey,
+    shouldConnectLiveSession,
   ]);
 
   useEffect(() => {
@@ -1727,6 +1769,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         onActivate("pointer");
       }}
       onKeyDownCapture={(event) => {
+        if (loadingOverlay.isVisible) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.key === "Escape") {
+            onCancelFirstPromptAutoRename?.();
+          }
+          return;
+        }
+
         const primaryModifier = IS_MAC ? event.metaKey : event.ctrlKey;
         const lowerKey = event.key.toLowerCase();
 
@@ -1840,6 +1891,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       }}
     >
       <div className="terminal-pane-canvas terminal-tab" ref={containerRef} />
+      {loadingOverlay.isVisible ? (
+        <TerminalLoadingOverlay
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          progressPercent={loadingOverlay.progressPercent}
+        />
+      ) : null}
       <button
         aria-hidden={!showScrollToTop}
         aria-label="Scroll terminal to top"

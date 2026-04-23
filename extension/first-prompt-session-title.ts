@@ -1,5 +1,7 @@
 import { normalizeTerminalTitle } from "../shared/session-grid-contract";
 
+export type FirstPromptAutoRenameStrategy = "sendBareRenameCommand" | "generateTitleAndRename";
+
 const META_PROMPT_PREFIXES = [
   "<command",
   "<environment_context",
@@ -23,6 +25,22 @@ const GENERIC_SESSION_TITLES_BY_AGENT = new Map<string, ReadonlySet<string>>([
 ]);
 const LEADING_PROMPT_FILLER_PATTERN =
   /^(?:(?:please|kindly|hey|hi|hello)\s+|(?:can|could|would|will)\s+you\s+|(?:can|could|would)\s+we\s+|help\s+me\s+|i\s+need(?:\s+you)?\s+to\s+|i\s+need\s+|how\s+do\s+i\s+|how\s+does\s+|is\s+there\s+(?:any\s+)?way\s+to\s+)+/iu;
+const INLINE_SLASH_COMMAND_PATTERN = /(?:^|[\s([{"'`])\/[a-z][\w-]*(?=\s|$|[).,:;!?'"`])/iu;
+
+export function resolveFirstPromptAutoRenameStrategy(
+  agentName: string | undefined,
+): FirstPromptAutoRenameStrategy | undefined {
+  const normalizedAgentName = agentName?.trim().toLowerCase();
+  if (normalizedAgentName === "claude") {
+    return "sendBareRenameCommand";
+  }
+
+  if (normalizedAgentName === "codex") {
+    return "generateTitleAndRename";
+  }
+
+  return undefined;
+}
 
 export function isGenericAgentSessionTitle(
   agentName: string | undefined,
@@ -44,7 +62,7 @@ export function shouldAutoNameSessionFromFirstPrompt(input: {
   pendingFirstPromptAutoRenamePrompt?: string;
   prompt: string | undefined;
 }): boolean {
-  if (input.agentName?.trim().toLowerCase() !== "codex") {
+  if (!resolveFirstPromptAutoRenameStrategy(input.agentName)) {
     return false;
   }
 
@@ -61,7 +79,12 @@ export function shouldAutoNameSessionFromFirstPrompt(input: {
   }
 
   const normalizedPrompt = normalizePrompt(input.prompt);
-  if (!normalizedPrompt || isMetaPrompt(normalizedPrompt) || normalizedPrompt.startsWith("/")) {
+  if (
+    !normalizedPrompt ||
+    isMetaPrompt(normalizedPrompt) ||
+    normalizedPrompt.startsWith("/") ||
+    containsInlineSlashCommandReference(normalizedPrompt)
+  ) {
     return false;
   }
 
@@ -77,6 +100,10 @@ function normalizePrompt(prompt: string): string | undefined {
   const strippedPrompt = normalizedPrompt.replace(LEADING_PROMPT_FILLER_PATTERN, "").trim();
   const cleanedPrompt = (strippedPrompt || normalizedPrompt).replace(/[.?!:;,]+$/g, "").trim();
   return cleanedPrompt || undefined;
+}
+
+function containsInlineSlashCommandReference(prompt: string): boolean {
+  return INLINE_SLASH_COMMAND_PATTERN.test(prompt);
 }
 
 function isMetaPrompt(prompt: string): boolean {

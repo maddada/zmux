@@ -98,6 +98,24 @@ describe("reconcileCollapsedGroupsById", () => {
     });
   });
 
+  test("should defer browser auto-collapse while a browser open is still settling", () => {
+    expect(
+      reconcileCollapsedGroupsById({
+        browserGroupIds: ["browser-tabs"],
+        collapseBlockedGroupIds: ["browser-tabs"],
+        groupIds: ["browser-tabs", "group-1"],
+        previousBrowserSessionCountsByGroup: {
+          "browser-tabs": 1,
+        },
+        previousCollapsedGroupsById: {},
+        sessionIdsByGroup: {
+          "browser-tabs": [],
+          "group-1": ["session-1"],
+        },
+      }),
+    ).toEqual({});
+  });
+
   test("should keep other collapsed groups untouched when browser counts stay flat", () => {
     const collapsedGroupsById = {
       "browser-tabs": true,

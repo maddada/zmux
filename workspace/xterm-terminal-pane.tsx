@@ -25,11 +25,13 @@ import {
   getTerminalAppearanceFontLoadKey,
   getTerminalAppearanceOptions,
 } from "./terminal-appearance";
+import { TerminalLoadingOverlay } from "./terminal-loading-overlay";
 import {
   getShiftEnterInputSequence,
   getWindowsCtrlWordDeleteInputSequence,
 } from "./terminal-input-shortcuts";
 import { getTerminalTheme } from "./terminal-theme";
+import { useTerminalLoadingOverlayProgress } from "./use-terminal-loading-overlay-progress";
 import { logWorkspaceDebug } from "./workspace-debug";
 import { getXtermViewportDimensions, measureTerminalFont } from "./xterm-font-metrics";
 import "./terminal-pane.css";
@@ -90,6 +92,7 @@ export type XtermTerminalPaneProps = {
   isFocused: boolean;
   isVisible: boolean;
   onAttentionInteraction: (reason: WorkspacePanelAcknowledgeSessionAttentionReason) => void;
+  onCancelFirstPromptAutoRename?: () => void;
   onTerminalEnter?: () => void;
   onActivate: (source: "focusin" | "pointer") => void;
   pane: WorkspacePanelTerminalPane;
@@ -167,6 +170,24 @@ function createTerminalResizeMessage(sessionId: string, cols: number, rows: numb
   return JSON.stringify(message);
 }
 
+function shouldConnectLiveXtermSession(pane: WorkspacePanelTerminalPane): boolean {
+  if (pane.sessionRecord.terminalEngine !== "non-persistent") {
+    return true;
+  }
+
+  const snapshot = pane.snapshot;
+  if (!snapshot) {
+    return true;
+  }
+
+  return (
+    snapshot.isAttached ||
+    snapshot.status === "running" ||
+    snapshot.status === "starting" ||
+    (snapshot.frontendAttachmentGeneration ?? 0) > 0
+  );
+}
+
 export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   autoFocusRequest,
   connection,
@@ -175,6 +196,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   isFocused,
   isVisible,
   onAttentionInteraction,
+  onCancelFirstPromptAutoRename,
   onTerminalEnter,
   onActivate,
   pane,
@@ -196,6 +218,9 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   const handledScrollToBottomRequestIdRef = useRef<number | undefined>(undefined);
   const isVisibleRef = useRef(isVisible);
   const isFocusedRef = useRef(isFocused);
+  const isGeneratingFirstPromptTitle = pane.isGeneratingFirstPromptTitle === true;
+  const loadingOverlay = useTerminalLoadingOverlayProgress(isGeneratingFirstPromptTitle);
+  const isGeneratingFirstPromptTitleRef = useRef(loadingOverlay.isVisible);
   const isTerminalOpenRef = useRef(false);
   const needsReconnectRecoveryOnVisibleRef = useRef(false);
   const applyViewportGeometryRef = useRef<
@@ -217,6 +242,8 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   const [isTerminalSurfaceReady, setIsTerminalSurfaceReady] = useState(false);
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
   const [showScrollToTopButton, setShowScrollToTopButton] = useState(false);
+  const shouldConnectLiveSession = shouldConnectLiveXtermSession(pane);
+  const frozenHistoryReplay = shouldConnectLiveSession ? undefined : pane.snapshot?.history;
 
   const withPreservedTerminalBottomLock = <T,>(applyLayoutChange: () => T): T => {
     const preserveTerminalBottomLock = preserveTerminalBottomLockRef.current;
@@ -242,6 +269,10 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   useEffect(() => {
     isFocusedRef.current = isFocused;
   }, [isFocused]);
+
+  useEffect(() => {
+    isGeneratingFirstPromptTitleRef.current = loadingOverlay.isVisible;
+  }, [loadingOverlay.isVisible]);
 
   const reportDebug = (event: string, payload?: Record<string, unknown>) => {
     const decoratedPayload = {
@@ -464,6 +495,10 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     updateScrollToBottomButtonVisibilityRef.current = updateScrollToBottomButtonVisibility;
 
     const sendSocketMessage = (message: string) => {
+      if (!shouldConnectLiveSession) {
+        return;
+      }
+
       if (!websocket) {
         pendingSocketMessages.push(message);
         return;
@@ -824,9 +859,6 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
             const reconnectRecoveryCols = terminal.cols;
             const reconnectRecoveryRows = terminal.rows;
             if (reconnectRecoveryCols > 0 && reconnectRecoveryRows > 0) {
-              preserveTerminalBottomLock(() => {
-                terminal.resize(reconnectRecoveryCols, reconnectRecoveryRows + 1);
-              });
               window.requestAnimationFrame(() => {
                 if (didDispose || !isVisibleRef.current) {
                   needsReconnectRecoveryOnVisibleRef.current = true;
@@ -929,30 +961,30 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       }
 
       pendingReconnectLayoutAfterData = false;
-      if (reconnectLayoutFrame !== 0) {
-        window.cancelAnimationFrame(reconnectLayoutFrame);
-      }
-      reconnectLayoutFrame = window.requestAnimationFrame(() => {
-        reconnectLayoutFrame = 0;
-        if (didDispose) {
-          return;
-        }
-
-        if (!isVisibleRef.current) {
-          needsReconnectRecoveryOnVisibleRef.current = true;
-          lastMeasuredSizeRef.current = undefined;
-          return;
-        }
-
-        applyViewportGeometry({
-          force: true,
-          refresh: true,
-        });
-      });
+      // if (reconnectLayoutFrame !== 0) {
+      //   window.cancelAnimationFrame(reconnectLayoutFrame);
+      // }
+      // reconnectLayoutFrame = window.requestAnimationFrame(() => {
+      //   reconnectLayoutFrame = 0;
+      //   if (didDispose) {
+      //     return;
+      //   }
+      //
+      //   if (!isVisibleRef.current) {
+      //     needsReconnectRecoveryOnVisibleRef.current = true;
+      //     lastMeasuredSizeRef.current = undefined;
+      //     return;
+      //   }
+      //
+      //   applyViewportGeometry({
+      //     force: true,
+      //     refresh: true,
+      //   });
+      // });
     };
 
     const connectWebsocket = () => {
-      if (connection.mock || websocket || didDispose) {
+      if (connection.mock || websocket || didDispose || !shouldConnectLiveSession) {
         return;
       }
 
@@ -1102,11 +1134,15 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       }
     })();
 
-    if (connection.mock && pane.snapshot?.history !== undefined) {
-      terminal.write(pane.snapshot.history);
+    if ((!shouldConnectLiveSession || connection.mock) && frozenHistoryReplay !== undefined) {
+      terminal.write(frozenHistoryReplay);
     }
 
     terminal.attachCustomKeyEventHandler((event) => {
+      if (isGeneratingFirstPromptTitleRef.current) {
+        return false;
+      }
+
       if (event.key === "Enter" && event.shiftKey) {
         if (event.type === "keydown") {
           sendSocketMessage(
@@ -1184,6 +1220,9 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     });
 
     terminal.onData((data) => {
+      if (isGeneratingFirstPromptTitleRef.current) {
+        return;
+      }
       sendSocketMessage(createTerminalInputMessage(pane.sessionId, data));
     });
 
@@ -1212,7 +1251,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       }
 
       const text = event.clipboardData?.getData("text/plain");
-      if (!text) {
+      if (!text || isGeneratingFirstPromptTitleRef.current) {
         return;
       }
 
@@ -1332,6 +1371,9 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     connection.workspaceId,
     pane.renderNonce,
     pane.sessionId,
+    pane.sessionRecord.terminalEngine,
+    shouldConnectLiveSession,
+    frozenHistoryReplay,
     terminalAppearance.xtermFrontendScrollback,
     ...terminalAppearanceDependencies,
   ]);
@@ -1525,6 +1567,15 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         onActivate("focusin");
       }}
       onKeyDownCapture={(event) => {
+        if (loadingOverlay.isVisible) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.key === "Escape") {
+            onCancelFirstPromptAutoRename?.();
+          }
+          return;
+        }
+
         if (
           event.key === "Enter" &&
           !event.shiftKey &&
@@ -1572,6 +1623,15 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         ref={containerRef}
         style={{ opacity: isTerminalSurfaceReady ? 1 : 0 }}
       />
+      {loadingOverlay.isVisible ? (
+        <TerminalLoadingOverlay
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          progressPercent={loadingOverlay.progressPercent}
+        />
+      ) : null}
       {isSearchOpen ? (
         <div
           className="terminal-pane-search"

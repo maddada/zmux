@@ -16,6 +16,7 @@ import {
   createDefaultSidebarSectionCollapseState,
   createDefaultSidebarSectionVisibility,
   type SidebarActiveSessionsSortMode,
+  type SidebarCommandSessionIndicator,
   type SidebarHudState,
   type SidebarSectionCollapseState,
   type SidebarSectionVisibility,
@@ -50,6 +51,7 @@ export function createSidebarHudState(
   activeSessionsSortMode: SidebarActiveSessionsSortMode = "manual",
   createSessionOnSidebarDoubleClick = false,
   renameSessionOnDoubleClick = false,
+  commandSessionIndicators: SidebarCommandSessionIndicator[] = [],
 ): SidebarHudState {
   const sessionById = new Map(snapshot.sessions.map((session) => [session.sessionId, session]));
   const focusedSession = snapshot.focusedSessionId
@@ -62,6 +64,7 @@ export function createSidebarHudState(
     agents,
     collapsedSections,
     commands,
+    commandSessionIndicators,
     completionBellEnabled,
     completionSound,
     completionSoundLabel: getCompletionSoundLabel(completionSound),
