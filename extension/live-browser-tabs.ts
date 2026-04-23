@@ -5,6 +5,7 @@ import {
   normalizeUrl,
 } from "./browser-session-manager/helpers";
 import { logBrowserTabDetection } from "./browser-tab-detection-log";
+import { logStorybookBrowserTabDebug } from "./storybook-browser-tab-debug-log";
 import { T3_PANEL_TYPE } from "./t3-webview-manager/helpers";
 import { WORKSPACE_PANEL_TYPE } from "./workspace-panel";
 
@@ -64,12 +65,28 @@ type LiveBrowserTabInspection =
       viewType?: string;
     };
 
+type StorybookBrowserTabDebugEntry = {
+  accepted: boolean;
+  groupIsActive: boolean;
+  inputKind: string;
+  isTabActive: boolean;
+  label: string;
+  reason: string;
+  url?: string;
+  viewColumn: vscode.ViewColumn;
+  viewType?: string;
+};
+
+let lastStorybookBrowserTabScanSummarySignature: string | undefined;
+
 export function getLiveBrowserTabs(
   tabGroups: readonly vscode.TabGroup[] = vscode.window.tabGroups.all,
 ): LiveBrowserTabEntry[] {
   const browserTabs: LiveBrowserTabEntry[] = [];
   const occurrenceByIdentity = new Map<string, number>();
   const scanId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const storybookDebugEntries: StorybookBrowserTabDebugEntry[] = [];
+  let totalTabCount = 0;
 
   logBrowserTabDetection("browserTabs.scan.start", {
     groupCount: tabGroups.length,
@@ -82,7 +99,20 @@ export function getLiveBrowserTabs(
     }
 
     for (const tab of group.tabs) {
+      totalTabCount += 1;
       const browserTabInspection = inspectLiveBrowserTab(tab);
+      storybookDebugEntries.push({
+        accepted: browserTabInspection.accepted,
+        groupIsActive: group.isActive,
+        inputKind: browserTabInspection.inputKind,
+        isTabActive: tab.isActive,
+        label: tab.label,
+        reason: browserTabInspection.reason,
+        url: browserTabInspection.url,
+        viewColumn: group.viewColumn,
+        viewType: browserTabInspection.viewType,
+      });
+      logStorybookCandidateTabDebug(scanId, group, tab, browserTabInspection);
       logBrowserTabDetection("browserTabs.scan.tab", {
         groupIsActive: group.isActive,
         inputDebug: getTabInputDebugInfo(tab.input),
@@ -133,6 +163,7 @@ export function getLiveBrowserTabs(
     browserTabCount: browserTabs.length,
     scanId,
   });
+  logStorybookScanSummaryDebug(scanId, tabGroups.length, totalTabCount, storybookDebugEntries);
 
   return browserTabs;
 }
@@ -163,6 +194,34 @@ export function normalizeSidebarBrowserUrl(url: string | undefined): string | un
 }
 
 function normalizeSidebarBrowserLabelUrl(label: string): string | undefined {
+  const explicitUrl = normalizeSidebarBrowserExplicitLabelUrl(label);
+  if (explicitUrl) {
+    return explicitUrl;
+  }
+
+  return normalizeDirectSidebarBrowserHostLabelUrl(label);
+}
+
+function normalizeSidebarBrowserExplicitLabelUrl(label: string): string | undefined {
+  const trimmedLabel = unwrapBrowserHostLabel(label.trim());
+  if (/^https?:\/\//i.test(trimmedLabel)) {
+    return normalizeSidebarBrowserUrl(trimmedLabel);
+  }
+
+  const embeddedUrl = extractEmbeddedSidebarBrowserUrl(label);
+  return embeddedUrl ? normalizeSidebarBrowserUrl(embeddedUrl) : undefined;
+}
+
+function normalizeDirectSidebarBrowserHostLabelUrl(label: string): string | undefined {
+  const normalizedDirectLabel = normalizeDirectSidebarBrowserLabel(label);
+  if (normalizedDirectLabel) {
+    return normalizedDirectLabel;
+  }
+
+  return undefined;
+}
+
+function normalizeDirectSidebarBrowserLabel(label: string): string | undefined {
   const trimmedLabel = unwrapBrowserHostLabel(label.trim());
   if (!trimmedLabel) {
     return undefined;
@@ -177,6 +236,167 @@ function normalizeSidebarBrowserLabelUrl(label: string): string | undefined {
   }
 
   return undefined;
+}
+
+function trimTrailingBrowserUrlPunctuation(value: string): string {
+  return value.replace(/[),.;]+$/g, "");
+}
+
+function extractEmbeddedSidebarBrowserUrl(label: string): string | undefined {
+  const urlStartIndex = label.search(/https?:\/\//i);
+  if (urlStartIndex < 0) {
+    return undefined;
+  }
+
+  const urlTail = label.slice(urlStartIndex);
+  const wrapperEndIndex = urlTail.search(/[)\]>]/);
+  const candidate = wrapperEndIndex >= 0 ? urlTail.slice(0, wrapperEndIndex) : urlTail;
+  const sanitizedCandidate = trimTrailingBrowserUrlPunctuation(candidate)
+    .replace(/\|(?=[/?#])/g, "")
+    .replace(/\s+/g, "");
+
+  return sanitizedCandidate || undefined;
+}
+
+function getEmbeddedSidebarBrowserUrlDebugInfo(label: string): Record<string, unknown> {
+  const urlStartIndex = label.search(/https?:\/\//i);
+  if (urlStartIndex < 0) {
+    return {
+      found: false,
+      normalizedUrl: undefined,
+    };
+  }
+
+  const urlTail = label.slice(urlStartIndex);
+  const wrapperEndIndex = urlTail.search(/[)\]>]/);
+  const candidate = wrapperEndIndex >= 0 ? urlTail.slice(0, wrapperEndIndex) : urlTail;
+  const trimmedCandidate = trimTrailingBrowserUrlPunctuation(candidate);
+  const sanitizedCandidate = trimmedCandidate.replace(/\|(?=[/?#])/g, "").replace(/\s+/g, "");
+
+  return {
+    candidate,
+    found: true,
+    normalizedUrl: normalizeSidebarBrowserUrl(sanitizedCandidate),
+    sanitizedCandidate,
+    trimmedCandidate,
+    urlStartIndex,
+    urlTailPreview: urlTail.slice(0, 240),
+    wrapperEndIndex,
+  };
+}
+
+function logStorybookCandidateTabDebug(
+  scanId: string,
+  group: vscode.TabGroup,
+  tab: vscode.Tab,
+  inspection: LiveBrowserTabInspection,
+): void {
+  if (!isStorybookBrowserTabDebugCandidate(tab.label, inspection)) {
+    return;
+  }
+
+  logStorybookBrowserTabDebug("storybookBrowserTabs.scan.candidate", {
+    groupIsActive: group.isActive,
+    inputDebug: getTabInputDebugInfo(tab.input),
+    inputConstructorName: tab.input?.constructor?.name,
+    inputKind: inspection.inputKind,
+    isAccepted: inspection.accepted,
+    isTabActive: tab.isActive,
+    label: tab.label,
+    labelAnalysis: getStorybookBrowserTabLabelDebugInfo(tab.label),
+    labelUrl: inspection.labelUrl,
+    rawUrl: inspection.rawUrl,
+    reason: inspection.reason,
+    scanId,
+    url: inspection.url,
+    viewColumn: group.viewColumn,
+    viewType: inspection.viewType,
+  });
+}
+
+function logStorybookScanSummaryDebug(
+  scanId: string,
+  groupCount: number,
+  totalTabCount: number,
+  entries: readonly StorybookBrowserTabDebugEntry[],
+): void {
+  const candidateEntries = entries.filter((entry) =>
+    isStorybookBrowserTabDebugCandidateLabel(entry.label),
+  );
+  const acceptedEntries = entries.filter((entry) => entry.accepted);
+  const signature = JSON.stringify({
+    accepted: acceptedEntries.map((entry) => [entry.label, entry.reason, entry.url]),
+    candidates: candidateEntries.map((entry) => [entry.label, entry.reason, entry.url]),
+    labels: entries.map((entry) => entry.label),
+  });
+
+  if (signature === lastStorybookBrowserTabScanSummarySignature) {
+    return;
+  }
+
+  lastStorybookBrowserTabScanSummarySignature = signature;
+  logStorybookBrowserTabDebug("storybookBrowserTabs.scan.summary", {
+    acceptedBrowserTabCount: acceptedEntries.length,
+    acceptedBrowserTabs: acceptedEntries.map((entry) => ({
+      inputKind: entry.inputKind,
+      label: entry.label,
+      reason: entry.reason,
+      url: entry.url,
+      viewColumn: entry.viewColumn,
+      viewType: entry.viewType,
+    })),
+    candidateTabCount: candidateEntries.length,
+    candidateTabs: candidateEntries.map((entry) => ({
+      inputKind: entry.inputKind,
+      label: entry.label,
+      reason: entry.reason,
+      url: entry.url,
+      viewColumn: entry.viewColumn,
+      viewType: entry.viewType,
+    })),
+    groupCount,
+    scanId,
+    tabLabels: entries.map((entry) => ({
+      accepted: entry.accepted,
+      inputKind: entry.inputKind,
+      label: entry.label,
+      reason: entry.reason,
+      viewColumn: entry.viewColumn,
+      viewType: entry.viewType,
+    })),
+    totalTabCount,
+  });
+}
+
+function isStorybookBrowserTabDebugCandidate(
+  label: string,
+  inspection: LiveBrowserTabInspection,
+): boolean {
+  return (
+    isStorybookBrowserTabDebugCandidateLabel(label) ||
+    inspection.reason.includes("label-url") ||
+    inspection.url?.includes(":6006") === true ||
+    inspection.url?.includes(":6007") === true
+  );
+}
+
+function isStorybookBrowserTabDebugCandidateLabel(label: string): boolean {
+  return /storybook|https?:\/\/|localhost|127\.0\.0\.1|192\.168\.|:6006|:6007/i.test(label);
+}
+
+function getStorybookBrowserTabLabelDebugInfo(label: string): Record<string, unknown> {
+  return {
+    directHostLabelUrl: normalizeDirectSidebarBrowserHostLabelUrl(label),
+    explicitLabelUrl: normalizeSidebarBrowserExplicitLabelUrl(label),
+    hasHttpUrl: /https?:\/\//i.test(label),
+    hasStorybookText: /storybook/i.test(label),
+    looksFileLike: FILE_LIKE_LABEL_SUFFIX_PATTERN.test(label.trim()),
+    normalizedLabelUrl: normalizeSidebarBrowserLabelUrl(label),
+    rawLength: label.length,
+    trimmedLabel: label.trim(),
+    unknownTitleHeuristic: isLikelyUnknownBrowserTabTitle(label),
+    urlExtraction: getEmbeddedSidebarBrowserUrlDebugInfo(label),
+  };
 }
 
 function unwrapBrowserHostLabel(label: string): string {
@@ -244,7 +464,9 @@ function inspectLiveBrowserTab(tab: vscode.Tab): LiveBrowserTabInspection {
   const labelUrl =
     inputKind === "webview" || inputKind === "custom"
       ? normalizeSidebarBrowserLabelUrl(tab.label)
-      : undefined;
+      : inputKind === "undefined"
+        ? normalizeSidebarBrowserExplicitLabelUrl(tab.label)
+        : undefined;
 
   if (isVSmuxOwnedTab(tab, viewType, url)) {
     return {
@@ -392,6 +614,10 @@ function isLikelyUnknownBrowserTabTitle(label: string): boolean {
   const trimmedLabel = label.trim();
   if (!trimmedLabel) {
     return false;
+  }
+
+  if (normalizeSidebarBrowserExplicitLabelUrl(trimmedLabel)) {
+    return true;
   }
 
   if (

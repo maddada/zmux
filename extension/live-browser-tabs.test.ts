@@ -29,6 +29,9 @@ vi.mock("vscode", () => ({
     },
   },
   workspace: {
+    getConfiguration: () => ({
+      get: () => false,
+    }),
     workspaceFolders: undefined,
   },
   window: {
@@ -113,6 +116,85 @@ describe("getLiveBrowserTabs", () => {
         label: "https://example.com/docs",
         url: "https://example.com/docs",
         viewType: "simpleBrowser.view",
+      }),
+    );
+  });
+
+  test("should detect embedded http urls inside Storybook-style webview titles", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: new vscode.TabInputWebview("simpleBrowser.view"),
+            isActive: true,
+            label:
+              "Sidebar / Interactions - Inline Search Filters Groups In Place - Storybook (http://localhost:6006/?path=/story/sidebar-interactions--inline-search-filters-groups-in-place)",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail:
+          "http://localhost:6006/?path=/story/sidebar-interactions--inline-search-filters-groups-in-place",
+        inputKind: "webview",
+        url: "http://localhost:6006/?path=/story/sidebar-interactions--inline-search-filters-groups-in-place",
+        viewType: "simpleBrowser.view",
+      }),
+    );
+  });
+
+  test("should detect embedded Storybook urls on unknown-input tabs with noisy query separators", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: undefined,
+            isActive: true,
+            label:
+              "Sidebar / Interactions - Toolbar Actions - Storybook (http://192.168.1.132:6007|? path%3D%2Fstory%2Fsidebar-interactions--toolbar-actions)",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail: "http://192.168.1.132:6007?path%3D%2Fstory%2Fsidebar-interactions--toolbar-actions",
+        inputKind: "undefined",
+        url: "http://192.168.1.132:6007?path%3D%2Fstory%2Fsidebar-interactions--toolbar-actions",
+      }),
+    );
+  });
+
+  test("should detect unknown-input titles with slashes when they contain an explicit http url", () => {
+    const browserTabs = getLiveBrowserTabs([
+      {
+        isActive: true,
+        tabs: [
+          {
+            input: undefined,
+            isActive: true,
+            label: "Docs / Routing (https://example.com/docs/routing)",
+          },
+        ],
+        viewColumn: 1,
+      } as never,
+    ]);
+
+    expect(browserTabs).toHaveLength(1);
+    expect(browserTabs[0]).toEqual(
+      expect.objectContaining({
+        detail: "https://example.com/docs/routing",
+        inputKind: "undefined",
+        url: "https://example.com/docs/routing",
       }),
     );
   });
