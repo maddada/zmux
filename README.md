@@ -26,6 +26,16 @@ Download links:
 
 ## Screenshot
 
+### Revamped UI:
+
+<img width="3456" height="2063" alt="image" src="https://github.com/user-attachments/assets/5fcb8a4c-ebb0-408b-908d-565ddb5bdd77" />
+
+### Agent Manager X Companion mac app: Shows floating status indicators for all cli agents at all times
+
+<img width="1293" height="837" alt="image" src="https://github.com/user-attachments/assets/bdfc2e70-fa5a-4311-8bde-1c4d203bd18c" />
+
+### Main features:
+
 <img width="1000" alt="2026-0ffsafssfffsfs4-14_sfsdCodedsds_12-52-3d7@2x" src="https://github.com/user-attachments/assets/9ea0bcd8-38ea-4f87-9d78-ba91e76088c2" />
 
 ## Early Version Demo Video (Will rerecord soon)
