@@ -27,10 +27,12 @@ Download links:
 ## Screenshot
 
 ### Revamped UI:
+#### 10+ themes. Add your own actions and agents. All buttons/sections are optional (configure in settings)
 
 <img width="3456" height="2063" alt="image" src="https://github.com/user-attachments/assets/5fcb8a4c-ebb0-408b-908d-565ddb5bdd77" />
 
-### Agent Manager X Companion mac app: Shows floating status indicators for all cli agents at all times
+### Agent Manager X Companion mac app: 
+#### Shows floating status indicators for all cli agents at all times
 
 <img width="1293" height="837" alt="image" src="https://github.com/user-attachments/assets/bdfc2e70-fa5a-4311-8bde-1c4d203bd18c" />
 
