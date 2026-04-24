@@ -1,10 +1,13 @@
 import { describe, expect, test } from "vite-plus/test";
+import { getDisplaySessionIdsInOrder } from "../../shared/active-sessions-sort";
 import {
   createDefaultGroupedSessionWorkspaceSnapshot,
   createSessionRecord,
+  type SidebarSessionItem,
 } from "../../shared/session-grid-contract";
 import {
   getWorkspacePaneSessionRecords,
+  getWorkspaceSlotSessionRecords,
   sortWorkspacePaneSessionRecords,
 } from "./workspace-pane-session-projection";
 
@@ -65,6 +68,49 @@ describe("getWorkspacePaneSessionRecords", () => {
   });
 });
 
+describe("getWorkspaceSlotSessionRecords", () => {
+  test("should use visible workspace slots before sidebar activity order", () => {
+    const workspaceSnapshot = createDefaultGroupedSessionWorkspaceSnapshot();
+    const leftSession = createSessionRecord(1, 0);
+    const rightSession = createSessionRecord(2, 1);
+    const hiddenSession = createSessionRecord(3, 2);
+
+    workspaceSnapshot.groups[0]!.snapshot.sessions = [leftSession, rightSession, hiddenSession];
+    workspaceSnapshot.groups[0]!.snapshot.focusedSessionId = leftSession.sessionId;
+    workspaceSnapshot.groups[0]!.snapshot.visibleCount = 2;
+    workspaceSnapshot.groups[0]!.snapshot.visibleSessionIds = [
+      leftSession.sessionId,
+      rightSession.sessionId,
+    ];
+
+    const sidebarOrder = getDisplaySessionIdsInOrder({
+      sessionIdsByGroup: {
+        [workspaceSnapshot.groups[0]!.groupId]: [
+          leftSession.sessionId,
+          rightSession.sessionId,
+          hiddenSession.sessionId,
+        ],
+      },
+      sessionsById: {
+        [leftSession.sessionId]: createSidebarSession(leftSession.sessionId, "idle", 1),
+        [rightSession.sessionId]: createSidebarSession(rightSession.sessionId, "working", 3),
+        [hiddenSession.sessionId]: createSidebarSession(hiddenSession.sessionId, "idle", 2),
+      },
+      sortMode: "lastActivity",
+      workspaceGroupIds: [workspaceSnapshot.groups[0]!.groupId],
+    });
+
+    expect(sidebarOrder).toEqual([
+      rightSession.sessionId,
+      hiddenSession.sessionId,
+      leftSession.sessionId,
+    ]);
+    expect(
+      getWorkspaceSlotSessionRecords(workspaceSnapshot).map((session) => session.sessionId),
+    ).toEqual([leftSession.sessionId, rightSession.sessionId, hiddenSession.sessionId]);
+  });
+});
+
 describe("sortWorkspacePaneSessionRecords", () => {
   test("should prioritize the stored pane order and append the remaining sessions", () => {
     const sessionA = createSessionRecord(1, 0);
@@ -91,3 +137,33 @@ describe("sortWorkspacePaneSessionRecords", () => {
     ).toEqual([sessionB, sessionA]);
   });
 });
+
+function createSidebarSession(
+  sessionId: string,
+  activity: SidebarSessionItem["activity"],
+  lastInteractionMinutes: number,
+): SidebarSessionItem {
+  return {
+    activity,
+    alias: sessionId,
+    agentIcon: undefined,
+    column: 0,
+    detail: undefined,
+    isFocused: false,
+    isFavorite: false,
+    isGeneratingFirstPromptTitle: false,
+    isReloading: false,
+    isRunning: true,
+    isSleeping: false,
+    isVisible: true,
+    kind: "workspace",
+    lastInteractionAt: `2026-04-24T10:0${String(lastInteractionMinutes)}:00.000Z`,
+    lifecycleState: "running",
+    primaryTitle: sessionId,
+    row: 0,
+    sessionKind: "terminal",
+    sessionId,
+    shortcutLabel: "",
+    terminalTitle: undefined,
+  };
+}

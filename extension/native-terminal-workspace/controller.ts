@@ -170,6 +170,7 @@ import {
 } from "./session-close-state";
 import {
   getWorkspacePaneSessionRecords,
+  getWorkspaceSlotSessionRecords,
   sortWorkspacePaneSessionRecords,
 } from "./workspace-pane-session-projection";
 import {
@@ -1309,11 +1310,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     const workspaceSnapshot = this.getPresentedWorkspaceSnapshot();
-    const sessionActivityContext = this.createSessionActivityContext();
-    const session = this.getSidebarOrderedWorkspaceSessions(
-      workspaceSnapshot,
-      sessionActivityContext,
-    ).at(targetIndex);
+    const session = getWorkspaceSlotSessionRecords(workspaceSnapshot).at(targetIndex);
     if (session) {
       await this.focusSession(session.sessionId);
     }

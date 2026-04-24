@@ -2,6 +2,7 @@ import type {
   GroupedSessionWorkspaceSnapshot,
   SessionRecord,
 } from "../../shared/session-grid-contract";
+import { getOrderedSessions } from "../../shared/session-grid-contract";
 
 export function getWorkspacePaneSessionRecords(
   workspaceSnapshot: GroupedSessionWorkspaceSnapshot,
@@ -61,5 +62,38 @@ export function sortWorkspacePaneSessionRecords(
 
   return orderedRecords.concat(
     sessionRecords.filter((sessionRecord) => !orderedSessionIdSet.has(sessionRecord.sessionId)),
+  );
+}
+
+export function getWorkspaceSlotSessionRecords(
+  workspaceSnapshot: GroupedSessionWorkspaceSnapshot,
+): SessionRecord[] {
+  const activeGroup = workspaceSnapshot.groups.find(
+    (group) => group.groupId === workspaceSnapshot.activeGroupId,
+  );
+  if (!activeGroup) {
+    return [];
+  }
+
+  const orderedSessions = getOrderedSessions(activeGroup.snapshot);
+  const sessionById = new Map(
+    orderedSessions.map((sessionRecord): [string, SessionRecord] => [
+      sessionRecord.sessionId,
+      sessionRecord,
+    ]),
+  );
+  const visibleSessionIds = new Set<string>();
+  const visibleSessions = activeGroup.snapshot.visibleSessionIds.flatMap((sessionId) => {
+    const sessionRecord = sessionById.get(sessionId);
+    if (!sessionRecord || visibleSessionIds.has(sessionId)) {
+      return [];
+    }
+
+    visibleSessionIds.add(sessionId);
+    return [sessionRecord];
+  });
+
+  return visibleSessions.concat(
+    orderedSessions.filter((sessionRecord) => !visibleSessionIds.has(sessionRecord.sessionId)),
   );
 }
