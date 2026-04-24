@@ -1,5 +1,13 @@
 import { parseGhosttyTheme, type GhosttyTheme, type ResttyFontSource } from "restty";
 
+const bundledJetBrainsMonoUrl = new URL("./fonts/JetBrainsMono[wght].ttf", import.meta.url).href;
+const bundledJetBrainsMonoItalicUrl = new URL(
+  "./fonts/JetBrainsMono-Italic[wght].ttf",
+  import.meta.url,
+).href;
+const bundledMesloRegularUrl = new URL("./fonts/MesloLGLNerdFontMono-Regular.ttf", import.meta.url)
+  .href;
+
 const GENERIC_FONT_FAMILIES = new Set([
   "cursive",
   "emoji",
@@ -15,13 +23,6 @@ const GENERIC_FONT_FAMILIES = new Set([
   "ui-sans-serif",
   "ui-serif",
 ]);
-
-const FONT_VARIANTS = [
-  { label: "Regular", suffixes: ["regular", "book", "roman"] },
-  { label: "Bold", suffixes: ["bold"] },
-  { label: "Italic", suffixes: ["italic", "oblique"] },
-  { label: "Bold Italic", suffixes: ["bold italic", "italic bold", "bold oblique"] },
-] as const;
 
 const fallbackTheme = {
   background: "#080808",
@@ -51,22 +52,17 @@ const BUNDLED_FONT_SOURCES: ResttyFontSource[] = [
   {
     label: "Bundled JetBrains Mono",
     type: "url",
-    url: "../JetBrainsMono_wght_.ttf",
+    url: bundledJetBrainsMonoUrl,
   },
   {
     label: "Bundled JetBrains Mono Italic",
     type: "url",
-    url: "../JetBrainsMono-Italic_wght_.ttf",
+    url: bundledJetBrainsMonoItalicUrl,
   },
   {
     label: "Bundled Meslo Nerd Font Mono",
     type: "url",
-    url: "../MesloLGLNerdFontMono-Regular.ttf",
-  },
-  {
-    label: "Bundled Meslo Nerd Font Mono Bold",
-    type: "url",
-    url: "../MesloLGLNerdFontMono-Bold.ttf",
+    url: bundledMesloRegularUrl,
   },
 ];
 
@@ -108,34 +104,20 @@ export function getResttyTheme(): GhosttyTheme | undefined {
 }
 
 function createLocalFontSourcesForFamily(family: string): ResttyFontSource[] {
-  const baseMatchers = createFamilyMatchers(family);
-  return FONT_VARIANTS.map((variant) => ({
-    label: `${family} ${variant.label}`,
-    matchers: createVariantMatchers(baseMatchers, variant.suffixes),
-    required: false,
-    type: "local" as const,
-  }));
+  return [
+    {
+      label: family,
+      matchers: createFamilyMatchers(family),
+      required: false,
+      type: "local" as const,
+    },
+  ];
 }
 
 function createFamilyMatchers(family: string): string[] {
   const trimmedFamily = family.trim();
   const compactFamily = trimmedFamily.replace(/[\s_-]+/g, "");
   return dedupeMatchers([trimmedFamily, compactFamily]);
-}
-
-function createVariantMatchers(
-  baseMatchers: readonly string[],
-  suffixes: readonly string[],
-): string[] {
-  const nextMatchers = [...baseMatchers];
-  for (const suffix of suffixes) {
-    for (const baseMatcher of baseMatchers) {
-      nextMatchers.push(`${baseMatcher} ${suffix}`.trim());
-      nextMatchers.push(`${baseMatcher}${suffix.replace(/\s+/g, "")}`.trim());
-    }
-  }
-
-  return dedupeMatchers(nextMatchers);
 }
 
 function getConfiguredFontFamilies(fontFamily: string | undefined): string[] {
@@ -190,12 +172,27 @@ function getCssColor(
 }
 
 function canUseLocalFontSources(): boolean {
-  if (typeof globalThis.queryLocalFonts !== "function") {
+  const globalWithLocalFonts = globalThis as typeof globalThis & {
+    queryLocalFonts?: unknown;
+  };
+  const navigatorWithLocalFonts =
+    typeof navigator === "undefined"
+      ? undefined
+      : (navigator as Navigator & { queryLocalFonts?: unknown });
+  const hasQueryLocalFonts =
+    typeof globalWithLocalFonts.queryLocalFonts === "function" ||
+    typeof navigatorWithLocalFonts?.queryLocalFonts === "function";
+
+  if (!hasQueryLocalFonts) {
     return false;
   }
 
   if (typeof document === "undefined") {
     return true;
+  }
+
+  if (globalThis.location?.protocol === "vscode-webview:") {
+    return false;
   }
 
   const documentWithPolicy = document as Document & {

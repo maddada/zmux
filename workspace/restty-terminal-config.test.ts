@@ -3,7 +3,10 @@ import { getResttyFontSources } from "./restty-terminal-config";
 
 describe("getResttyFontSources", () => {
   test("should return bundled font sources when local fonts are unavailable", () => {
-    const originalQueryLocalFonts = globalThis.queryLocalFonts;
+    const globalWithLocalFonts = globalThis as typeof globalThis & {
+      queryLocalFonts?: unknown;
+    };
+    const originalQueryLocalFonts = globalWithLocalFonts.queryLocalFonts;
     // Mirror the VS Code webview case where the capability is not available at all.
     Object.defineProperty(globalThis, "queryLocalFonts", {
       configurable: true,
@@ -16,12 +19,12 @@ describe("getResttyFontSources", () => {
           expect.objectContaining({
             label: "Bundled JetBrains Mono",
             type: "url",
-            url: "../JetBrainsMono_wght_.ttf",
+            url: expect.stringContaining("JetBrainsMono"),
           }),
           expect.objectContaining({
             label: "Bundled Meslo Nerd Font Mono",
             type: "url",
-            url: "../MesloLGLNerdFontMono-Regular.ttf",
+            url: expect.stringContaining("MesloLGLNerdFontMono-Regular"),
           }),
         ]),
       );
@@ -39,7 +42,7 @@ describe("getResttyFontSources", () => {
         expect.objectContaining({
           label: "Bundled JetBrains Mono",
           type: "url",
-          url: "../JetBrainsMono_wght_.ttf",
+          url: expect.stringContaining("JetBrainsMono"),
         }),
       ]),
     );
@@ -51,14 +54,17 @@ describe("getResttyFontSources", () => {
         expect.objectContaining({
           label: "Bundled JetBrains Mono",
           type: "url",
-          url: "../JetBrainsMono_wght_.ttf",
+          url: expect.stringContaining("JetBrainsMono"),
         }),
       ]),
     );
   });
 
-  test("should build local variants for custom font families and append bundled fallbacks", () => {
-    const originalQueryLocalFonts = globalThis.queryLocalFonts;
+  test("should build plain local sources for custom font families and append bundled fallbacks", () => {
+    const globalWithLocalFonts = globalThis as typeof globalThis & {
+      queryLocalFonts?: unknown;
+    };
+    const originalQueryLocalFonts = globalWithLocalFonts.queryLocalFonts;
     Object.defineProperty(globalThis, "queryLocalFonts", {
       configurable: true,
       value: async () => [],
@@ -68,29 +74,42 @@ describe("getResttyFontSources", () => {
       expect(getResttyFontSources('"Fira Code", monospace')).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            label: "Fira Code Regular",
-            matchers: expect.arrayContaining([
-              "Fira Code",
-              "FiraCode",
-              "Fira Code regular",
-              "FiraCoderegular",
-            ]),
-            required: false,
-            type: "local",
-          }),
-          expect.objectContaining({
-            label: "Fira Code Bold Italic",
-            matchers: expect.arrayContaining(["Fira Code bold italic", "FiraCodebolditalic"]),
+            label: "Fira Code",
+            matchers: expect.arrayContaining(["Fira Code", "FiraCode"]),
             required: false,
             type: "local",
           }),
           expect.objectContaining({
             label: "Bundled Meslo Nerd Font Mono",
             type: "url",
-            url: "../MesloLGLNerdFontMono-Regular.ttf",
+            url: expect.stringContaining("MesloLGLNerdFontMono-Regular"),
           }),
         ]),
       );
+    } finally {
+      Object.defineProperty(globalThis, "queryLocalFonts", {
+        configurable: true,
+        value: originalQueryLocalFonts,
+      });
+    }
+  });
+
+  test("should not create bold-only sources that can override the configured regular family", () => {
+    const globalWithLocalFonts = globalThis as typeof globalThis & {
+      queryLocalFonts?: unknown;
+    };
+    const originalQueryLocalFonts = globalWithLocalFonts.queryLocalFonts;
+    Object.defineProperty(globalThis, "queryLocalFonts", {
+      configurable: true,
+      value: async () => [],
+    });
+
+    try {
+      expect(
+        getResttyFontSources('"JetBrains Mono", "MesloLGL Nerd Font Mono", monospace').filter(
+          (source) => /\bbold\b/i.test(source.label ?? ""),
+        ),
+      ).toEqual([]);
     } finally {
       Object.defineProperty(globalThis, "queryLocalFonts", {
         configurable: true,
