@@ -528,6 +528,8 @@ export function isSidebarMessage(candidate: unknown): candidate is SidebarToExte
         (message.worktreePath === undefined ||
           (typeof message.worktreePath === "string" && message.worktreePath.length > 0))
       );
+    case "endSidebarCommandRun":
+      return typeof message.commandId === "string" && message.commandId.length > 0;
     case "deleteSidebarCommand":
       return typeof message.commandId === "string" && message.commandId.length > 0;
 

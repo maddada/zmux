@@ -85,6 +85,22 @@ describe("sidebar store", () => {
     expect(useSidebarStore.getState().commandRunStates.build).toBeUndefined();
   });
 
+  test("should clear sidebar command run feedback from extension messages", () => {
+    useSidebarStore.getState().applyCommandRunStateMessage({
+      commandId: "build",
+      runId: "run-build",
+      state: "running",
+      type: "sidebarCommandRunStateChanged",
+    });
+
+    useSidebarStore.getState().applyCommandRunStateClearedMessage({
+      commandId: "build",
+      type: "sidebarCommandRunStateCleared",
+    });
+
+    expect(useSidebarStore.getState().commandRunStates.build).toBeUndefined();
+  });
+
   test("should update only the targeted session record on sessionPresentationChanged", () => {
     useSidebarStore
       .getState()

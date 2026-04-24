@@ -53,6 +53,15 @@ describe("isSidebarMessage", () => {
     ).toBe(false);
   });
 
+  test("should accept endSidebarCommandRun messages with a command id", () => {
+    expect(
+      isSidebarMessage({
+        commandId: "build",
+        type: "endSidebarCommandRun",
+      }),
+    ).toBe(true);
+  });
+
   test("should accept saveSidebarCommand messages with a valid icon and hex color", () => {
     expect(
       isSidebarMessage({

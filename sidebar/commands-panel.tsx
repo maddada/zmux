@@ -8,6 +8,7 @@ import {
   IconLoader2,
   IconPencil,
   IconPlayerPlayFilled,
+  IconPlayerStopFilled,
   IconPlus,
   IconTrash,
   IconWorldFilled,
@@ -78,6 +79,7 @@ type ContextMenuPosition = {
 type CommandMenuState = {
   anchor: ContextMenuPosition;
   command: SidebarCommandButton;
+  isRunActive: boolean;
   position: ContextMenuPosition;
   view: "root" | "worktrees";
   worktrees: SidebarProjectWorktree[];
@@ -102,7 +104,7 @@ type PendingCommandRunClear = {
 function clampContextMenuPosition(
   clientX: number,
   clientY: number,
-  menu: Pick<CommandMenuState, "command" | "view" | "worktrees">,
+  menu: Pick<CommandMenuState, "command" | "isRunActive" | "view" | "worktrees">,
 ): ContextMenuPosition {
   const menuHeight = getContextMenuHeight(menu);
 
@@ -119,7 +121,7 @@ function clampContextMenuPosition(
 }
 
 function getContextMenuHeight(
-  menu: Pick<CommandMenuState, "command" | "view" | "worktrees">,
+  menu: Pick<CommandMenuState, "command" | "isRunActive" | "view" | "worktrees">,
 ): number {
   if (menu.view === "worktrees") {
     return (
@@ -131,6 +133,7 @@ function getContextMenuHeight(
 
   const runActionCount =
     4 +
+    Number(menu.command.actionType === "terminal" && menu.isRunActive) +
     Number(menu.command.actionType === "terminal") +
     Number(menu.command.actionType === "terminal" && menu.worktrees.length > 0) * 2;
 
@@ -320,6 +323,23 @@ export function CommandsPanel({
     });
   };
 
+  /**
+   * CDXC:Actions 2026-04-24-20:10
+   * Terminal action buttons need an explicit stop affordance while a run is active: middle-click
+   * and the custom context menu both end the associated terminal instead of letting the browser
+   * show its native text menu while the spinner is visible.
+   */
+  const endCommandRun = (command: SidebarCommandButton) => {
+    if (command.actionType !== "terminal") {
+      return;
+    }
+
+    vscode.postMessage({
+      commandId: command.commandId,
+      type: "endSidebarCommandRun",
+    });
+  };
+
   useEffect(() => {
     setDraftCommandIds((previousDraft) => {
       const nextDraft = reconcileDraftCommandIds(previousDraft, commands);
@@ -458,6 +478,11 @@ export function CommandsPanel({
         y: clientY,
       },
       command,
+      isRunActive: isCommandRunActive(
+        command,
+        commandRunStates[command.commandId],
+        commandSessionIndicatorByCommandId.get(command.commandId),
+      ),
       position: {
         x: 0,
         y: 0,
@@ -694,6 +719,7 @@ export function CommandsPanel({
                             event.stopPropagation();
                             openCommandContextMenu(command, event.clientX, event.clientY);
                           }}
+                          onEndRun={() => endCommandRun(command)}
                           onRun={() => runOrConfigureCommand(command)}
                           vscode={vscode}
                         />
@@ -767,6 +793,24 @@ export function CommandsPanel({
                     Add Webpage
                   </button>
                   <div className="session-context-menu-divider" role="separator" />
+                  {contextMenu.command.actionType === "terminal" && contextMenu.isRunActive ? (
+                    <button
+                      className="session-context-menu-item"
+                      onClick={() => {
+                        setContextMenu(undefined);
+                        endCommandRun(contextMenu.command);
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconPlayerStopFilled
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      End run
+                    </button>
+                  ) : null}
                   {contextMenu.command.actionType === "terminal" ? (
                     <button
                       className="session-context-menu-item"
@@ -974,6 +1018,7 @@ type SortableCommandButtonProps = {
   isActiveSessionIndicator: boolean;
   isContextMenuOpen: boolean;
   onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onEndRun: () => void;
   onRun: () => void;
   vscode: WebviewApi;
 };
@@ -986,12 +1031,14 @@ function SortableCommandButton({
   isActiveSessionIndicator,
   isContextMenuOpen,
   onContextMenu,
+  onEndRun,
   onRun,
   vscode,
 }: SortableCommandButtonProps) {
   const trimmedName = command.name.trim();
   const isIconOnly = trimmedName.length === 0;
   const runStatus = commandRunState?.status ?? "idle";
+  const canEndRun = isCommandRunActive(command, commandRunState, commandSessionIndicator);
 
   const sortable = useSortable({
     accept: "sidebar-command",
@@ -1037,7 +1084,16 @@ function SortableCommandButton({
               data-run-status={runStatus}
               draggable={false}
               onClick={runStatus === "running" ? undefined : onRun}
-              onContextMenu={runStatus === "running" ? undefined : onContextMenu}
+              onContextMenu={onContextMenu}
+              onMouseDown={(event) => {
+                if (event.button !== 1 || !canEndRun) {
+                  return;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+                onEndRun();
+              }}
               ref={setButtonRef}
               type="button"
             >
@@ -1203,6 +1259,23 @@ function haveSameCommandOrder(left: readonly string[], right: readonly string[])
 
 function isConfigured(command: SidebarCommandButton): boolean {
   return command.actionType === "browser" ? Boolean(command.url) : Boolean(command.command);
+}
+
+/**
+ * CDXC:Actions 2026-04-24-20:10
+ * A terminal action is endable when either its close-on-exit spinner is active or its persistent
+ * command terminal is still running, so one End run path covers both action-button states.
+ */
+function isCommandRunActive(
+  command: SidebarCommandButton,
+  commandRunState: SidebarCommandRunFeedbackState | undefined,
+  commandSessionIndicator: SidebarCommandSessionIndicator | undefined,
+): boolean {
+  return (
+    command.actionType === "terminal" &&
+    ((commandRunState?.activeRunIds.length ?? 0) > 0 ||
+      commandSessionIndicator?.status === "running")
+  );
 }
 
 function getCommandSubject(command: SidebarCommandButton): string {

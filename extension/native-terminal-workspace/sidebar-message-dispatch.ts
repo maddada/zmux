@@ -36,6 +36,7 @@ export type SidebarMessageHandlers = {
   killT3RuntimeSession: (sessionId: string) => Promise<void>;
   deleteSidebarAgent: (agentId: string) => Promise<void>;
   deleteSidebarCommand: (commandId: string) => Promise<void>;
+  endSidebarCommandRun: (commandId: string) => Promise<void>;
   focusGroup: (groupId: string, source?: "sidebar") => Promise<void>;
   focusSession: (sessionId: string, source?: "sidebar" | "workspace") => Promise<void>;
   moveSessionToGroup: (sessionId: string, groupId: string, targetIndex?: number) => Promise<void>;
@@ -158,6 +159,9 @@ export async function dispatchSidebarMessage(
       return;
     case "runSidebarCommand":
       await handlers.runSidebarCommand(message.commandId, message.runMode, message.worktreePath);
+      return;
+    case "endSidebarCommandRun":
+      await handlers.endSidebarCommandRun(message.commandId);
       return;
     case "runSidebarGitAction":
       await handlers.runSidebarGitAction(message.action);

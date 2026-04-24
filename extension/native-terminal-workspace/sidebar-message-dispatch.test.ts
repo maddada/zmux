@@ -18,12 +18,15 @@ function createHandlers(): SidebarMessageHandlers {
     deletePreviousSession: vi.fn(async () => undefined),
     deleteSidebarAgent: vi.fn(async () => undefined),
     deleteSidebarCommand: vi.fn(async () => undefined),
+    endSidebarCommandRun: vi.fn(async () => undefined),
     focusGroup: vi.fn(async () => undefined),
     focusSession: vi.fn(async () => undefined),
     fullReloadGroup: vi.fn(async () => undefined),
     fullReloadSession: vi.fn(async () => undefined),
     killDaemonSession: vi.fn(async () => undefined),
     killTerminalDaemon: vi.fn(async () => undefined),
+    killT3RuntimeServer: vi.fn(async () => undefined),
+    killT3RuntimeSession: vi.fn(async () => undefined),
     moveSessionToGroup: vi.fn(async () => undefined),
     moveSidebarToOtherSide: vi.fn(async () => undefined),
     openBrowser: vi.fn(async () => undefined),
@@ -83,6 +86,20 @@ describe("dispatchSidebarMessage", () => {
       "debug",
       "/workspace/agent-tiler-feature",
     );
+  });
+
+  test("should route endSidebarCommandRun messages", async () => {
+    const handlers = createHandlers();
+
+    await dispatchSidebarMessage(
+      {
+        commandId: "build",
+        type: "endSidebarCommandRun",
+      },
+      handlers,
+    );
+
+    expect(handlers.endSidebarCommandRun).toHaveBeenCalledWith("build");
   });
 
   test("should route saveSidebarCommand icon metadata to the matching handler", async () => {

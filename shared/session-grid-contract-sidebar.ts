@@ -220,6 +220,11 @@ export type SidebarCommandRunStateChangedMessage = {
   type: "sidebarCommandRunStateChanged";
 };
 
+export type SidebarCommandRunStateClearedMessage = {
+  commandId: string;
+  type: "sidebarCommandRunStateCleared";
+};
+
 export type SidebarDaemonInfo = {
   pid: number;
   port: number;
@@ -306,6 +311,7 @@ export type ExtensionToSidebarMessage =
   | SidebarPlayCompletionSoundMessage
   | SidebarOrderSyncResultMessage
   | SidebarCommandRunStateChangedMessage
+  | SidebarCommandRunStateClearedMessage
   | SidebarDaemonSessionsStateMessage
   | SidebarPromptGitCommitMessage
   | SidebarShowT3BrowserAccessMessage;
@@ -506,6 +512,10 @@ export type SidebarToExtensionMessage =
       commandId: string;
       runMode?: SidebarCommandRunMode;
       worktreePath?: string;
+    }
+  | {
+      type: "endSidebarCommandRun";
+      commandId: string;
     }
   | {
       action: SidebarGitAction;

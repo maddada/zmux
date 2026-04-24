@@ -9,6 +9,7 @@ import {
 } from "../shared/session-grid-contract";
 import type {
   SidebarCollapsibleSection,
+  SidebarCommandRunStateClearedMessage,
   SidebarCommandRunStateChangedMessage,
   SidebarDaemonSessionsStateMessage,
   SidebarHydrateMessage,
@@ -52,6 +53,7 @@ type SidebarStoreDataState = {
 };
 
 type SidebarStoreActions = {
+  applyCommandRunStateClearedMessage: (message: SidebarCommandRunStateClearedMessage) => void;
   applyCommandRunStateMessage: (message: SidebarCommandRunStateChangedMessage) => void;
   applyOrderSyncResultMessage: (message: SidebarOrderSyncResultMessage) => void;
   applyLocalFocus: (groupId: string, sessionId: string) => void;
@@ -117,6 +119,19 @@ export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
 
 export const useSidebarStore = create<SidebarStoreState>((set) => ({
   ...createInitialSidebarStoreDataState(),
+  applyCommandRunStateClearedMessage: (message) => {
+    set((state) => {
+      if (!(message.commandId in state.commandRunStates)) {
+        return state;
+      }
+
+      const nextCommandRunStates = { ...state.commandRunStates };
+      delete nextCommandRunStates[message.commandId];
+      return {
+        commandRunStates: nextCommandRunStates,
+      };
+    });
+  },
   applyCommandRunStateMessage: (message) => {
     set((state) => {
       const nextCommandRunState = applySidebarCommandRunStateChangedMessage(
