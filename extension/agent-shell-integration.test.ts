@@ -7,7 +7,7 @@ import {
   parseAgentControlChunk,
   resolveActiveCodexHooksPath,
 } from "./agent-shell-integration";
-import { getOpenCodePluginContent } from "./agent-shell-integration-content";
+import { getOpenCodePluginContent, getZshRcShimContent } from "./agent-shell-integration-content";
 
 describe("parseAgentControlChunk", () => {
   test("should strip agent lifecycle markers from visible terminal output", () => {
@@ -154,6 +154,21 @@ describe("getClaudeHookSettingsContent", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("getZshRcShimContent", () => {
+  test("should make CLAUDE_BIN point at the VSmux Claude wrapper for user profile aliases", () => {
+    const content = getZshRcShimContent("/tmp/vsmux/bin");
+    const expectedExport = "export CLAUDE_BIN='/tmp/vsmux/bin/claude'";
+
+    expect(content).toContain(expectedExport);
+    expect(content.indexOf(expectedExport)).toBeLessThan(
+      content.indexOf('if [ -f "$HOME/.zshrc" ]'),
+    );
+    expect(content.lastIndexOf(expectedExport)).toBeGreaterThan(
+      content.indexOf("export PATH='/tmp/vsmux/bin':$PATH"),
+    );
   });
 });
 

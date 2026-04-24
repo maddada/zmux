@@ -135,12 +135,16 @@ fi
 
 export function getZshRcShimContent(binDir: string): string {
   const quotedBinDir = quoteShellLiteral(binDir);
+  const quotedClaudeWrapperPath = quoteShellLiteral(`${binDir}/claude`);
 
-  return `if [ -f "$HOME/.zshrc" ]; then
+  return `export CLAUDE_BIN=${quotedClaudeWrapperPath}
+
+if [ -f "$HOME/.zshrc" ]; then
   . "$HOME/.zshrc"
 fi
 
 export PATH=${quotedBinDir}:$PATH
+export CLAUDE_BIN=${quotedClaudeWrapperPath}
 rehash 2>/dev/null || true
 unalias claude 2>/dev/null || true
 unalias codex 2>/dev/null || true
