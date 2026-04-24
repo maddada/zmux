@@ -27,11 +27,13 @@ Download links:
 ## Screenshots
 
 ### Revamped UI:
+
 #### 10+ themes. Add your own actions and agents. All buttons/sections are optional (configure in settings)
 
 <img width="3456" height="2063" alt="image" src="https://github.com/user-attachments/assets/5fcb8a4c-ebb0-408b-908d-565ddb5bdd77" />
 
-### Agent Manager X Companion mac app: 
+### Agent Manager X Companion mac app:
+
 #### Shows floating status indicators for all cli agents at all times
 
 <img width="1293" height="837" alt="image" src="https://github.com/user-attachments/assets/bdfc2e70-fa5a-4311-8bde-1c4d203bd18c" />
@@ -50,15 +52,12 @@ VSmux works great with my other tool that shows all running agent sessions in a 
 
 ## Recent Updates
 
-### 4.4.0
+### 4.8.0
 
-- Managed embedded sessions launch with bundled T3 Code, with better packaged-versus-checkout resolution.
-- Embedded T3 reload, close, and thread-binding flows are safer and clearer, including visible reload state and confirmation before rebinding a live pane.
-- Auto-sleep and detached background-session retention now have separate settings, so you can tune one without changing the other.
-- Idle T3 sessions can join the auto-sleep flow.
-- Sleeping T3 panes now tear down stale runtimes more cleanly and stay projected across inactive groups more reliably.
-- Auto-sleep expanded to Claude and Codex sessions when `VSmux.autoSleepTimeoutMinutes` is enabled.
-- Session handling is calmer overall, with double-click rename, steadier attention state, and better resume-command fallbacks for custom agents.
+- The terminal workspace is smoother now, with better macOS shortcuts, safer restored-pane sizing, bundled font loading, and steadier Ghostty/Restty/WTerm behavior.
+- Browser tabs and workspace pane shortcuts are less jumpy, so Storybook-style tabs stay tracked and keyboard focus follows the visible pane slots.
+- Claude prompt-title handling, completion sounds, copy interactions, empty browser groups, and terminal action labels all got clearer feedback.
+- **Rich Prompt Editor:** press `Ctrl+G` to edit a prompt in a VS Code modal editor, then press `Ctrl+G` again to save and close it back into the active session.
 
 Full release notes: [CHANGELOG.md](./CHANGELOG.md)
 

@@ -2,6 +2,16 @@
 
 All notable user-facing changes are documented in this file.
 
+## 4.8.0 - 2026-04-24
+
+- The terminal experience is steadier now across xterm, Ghostty/Restty, and WTerm paths, with better macOS shortcut handling, safer restore sizing, bundled font loading, and direct non-persistent terminal session behavior.
+- VSmux now keeps workspace pane shortcuts aligned with the visible pane slots, so keyboard focus jumps target the same sessions you see in the workspace instead of being affected by sidebar activity sorting.
+- Browser tab tracking is less jumpy now, especially for Storybook and other title-changing browser tabs whose labels briefly stop looking like URLs.
+- Claude first-prompt rename tracking and hook setup are more reliable, with better diagnostics for prompt-submit handling and rename decisions when debugging is enabled.
+- Sidebar and copy flows are clearer now: project paths, prompt copy buttons, T3 browser-access copy, empty browser groups, command indicators, and terminal action labels all have more deliberate feedback.
+- Completion sounds have been refreshed with a larger built-in sound set, and changing completion sound settings can preview the selected sound without needing to wait for a session to finish.
+- Local development and packaging should be faster now because the chat-history webview and managed T3 provider builds can reuse cached outputs when their inputs have not changed.
+
 ## 4.7.0 - 2026-04-23
 
 - Managed embedded sessions are simpler now: VSmux now targets bundled or checkout-based T3 Code directly, without the older provider-switching path.
