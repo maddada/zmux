@@ -582,6 +582,7 @@ body {
 }
 
 .workspace-pane {
+  align-self: stretch;
   background: rgba(0, 0, 0, 0.94);
   --workspace-completion-flash-color: #65e58a;
   border: 1px solid transparent;
@@ -591,6 +592,8 @@ body {
   flex: 1 1 0;
   flex-direction: column;
   grid-area: 1 / 1;
+  height: 100%;
+  justify-self: stretch;
   min-width: 0;
   overflow: hidden;
   position: relative;

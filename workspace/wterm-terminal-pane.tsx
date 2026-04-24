@@ -9,6 +9,11 @@ import type {
   WorkspacePanelTerminalPane,
 } from "../shared/workspace-panel-contract";
 import { getWindowsCtrlWordDeleteInputSequence } from "./terminal-input-shortcuts";
+import {
+  createTerminalResizeStabilityState,
+  evaluateTerminalResizeBounds,
+  resetTerminalResizeStabilityState,
+} from "./terminal-resize-stability";
 import { logWorkspaceDebug } from "./workspace-debug";
 import { applyWtermHostAppearance, ensureWtermWebFontsLoaded } from "./wterm-appearance";
 import {
@@ -64,6 +69,13 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
   const previousIsVisibleRef = useRef(isVisible);
   const isInitializingRef = useRef(true);
   const restoreResizeSuppressedUntilRef = useRef(0);
+  const resizeStabilityStateRef = useRef(createTerminalResizeStabilityState());
+  const resizeStabilityRetryTimeoutRef = useRef<number | undefined>(undefined);
+  const lastAcceptedTerminalSizeRef = useRef<{ cols: number; rows: number } | undefined>(
+    pane.snapshot?.cols && pane.snapshot?.rows
+      ? { cols: pane.snapshot.cols, rows: pane.snapshot.rows }
+      : undefined,
+  );
   const isRevertingRestoreResizeRef = useRef(false);
   const lastFocusActivationAtRef = useRef(0);
   const lastFocusActivationTargetRef = useRef<EventTarget | null>(null);
@@ -226,6 +238,14 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
         onResize: (cols, rows) => {
           const snapshotCols = pane.snapshot?.cols;
           const snapshotRows = pane.snapshot?.rows;
+          const hostBounds = host.getBoundingClientRect();
+          const roundedHostBounds =
+            hostBounds.width > 0 && hostBounds.height > 0
+              ? {
+                  height: Math.round(hostBounds.height),
+                  width: Math.round(hostBounds.width),
+                }
+              : undefined;
           if (
             (!isVisibleRef.current ||
               restoreResizeSuppressedUntilRef.current > performance.now()) &&
@@ -248,11 +268,65 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
             });
             return;
           }
+          if (roundedHostBounds) {
+            const stabilityDecision = evaluateTerminalResizeBounds(
+              resizeStabilityStateRef.current,
+              roundedHostBounds,
+              performance.now(),
+            );
+            if (!stabilityDecision.accept) {
+              const lastAcceptedTerminalSize = lastAcceptedTerminalSizeRef.current;
+              reportDebug("wterm.resizeSuppressedTransientBounds", {
+                bounds: roundedHostBounds,
+                cols,
+                lastAcceptedCols: lastAcceptedTerminalSize?.cols,
+                lastAcceptedRows: lastAcceptedTerminalSize?.rows,
+                retryAfterMs: stabilityDecision.retryAfterMs,
+                rows,
+                sessionId: pane.sessionId,
+              });
+              if (lastAcceptedTerminalSize && !isRevertingRestoreResizeRef.current) {
+                isRevertingRestoreResizeRef.current = true;
+                requestAnimationFrame(() => {
+                  term.resize(lastAcceptedTerminalSize.cols, lastAcceptedTerminalSize.rows);
+                  isRevertingRestoreResizeRef.current = false;
+                });
+              }
+              if (resizeStabilityRetryTimeoutRef.current === undefined) {
+                resizeStabilityRetryTimeoutRef.current = window.setTimeout(
+                  () => {
+                    resizeStabilityRetryTimeoutRef.current = undefined;
+                    const nextHostBounds = host.getBoundingClientRect();
+                    if (nextHostBounds.width <= 0 || nextHostBounds.height <= 0) {
+                      return;
+                    }
+
+                    const nextRoundedHostBounds = {
+                      height: Math.round(nextHostBounds.height),
+                      width: Math.round(nextHostBounds.width),
+                    };
+                    const nextDecision = evaluateTerminalResizeBounds(
+                      resizeStabilityStateRef.current,
+                      nextRoundedHostBounds,
+                      performance.now(),
+                    );
+                    if (nextDecision.accept) {
+                      transportRef.current?.updateTerminalSize(term.cols, term.rows);
+                    }
+                  },
+                  Math.max(16, stabilityDecision.retryAfterMs),
+                );
+              }
+              return;
+            }
+          }
           reportDebug("wterm.resizeObserved", {
             cols,
+            hostBounds: roundedHostBounds,
             rows,
             sessionId: pane.sessionId,
           });
+          lastAcceptedTerminalSizeRef.current = { cols, rows };
           transportRef.current?.updateTerminalSize(cols, rows);
           requestAnimationFrame(() => {
             updateScrollButtons();
@@ -364,6 +438,10 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
       });
       isInitializingRef.current = false;
       didDispose = true;
+      if (resizeStabilityRetryTimeoutRef.current !== undefined) {
+        window.clearTimeout(resizeStabilityRetryTimeoutRef.current);
+        resizeStabilityRetryTimeoutRef.current = undefined;
+      }
       cleanupScrollListener?.();
       themeObserver?.disconnect();
       activeTransport?.disconnect();
@@ -372,6 +450,8 @@ export const WtermTerminalPane: React.FC<WtermTerminalPaneProps> = ({
       }
       termRef.current?.destroy();
       termRef.current = null;
+      lastAcceptedTerminalSizeRef.current = undefined;
+      resetTerminalResizeStabilityState(resizeStabilityStateRef.current);
       if (terminalHostRef.current) {
         terminalHostRef.current.innerHTML = "";
       }

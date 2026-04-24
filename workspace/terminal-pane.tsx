@@ -10,6 +10,11 @@ import type {
 } from "../shared/workspace-panel-contract";
 import { logWorkspaceDebug } from "./workspace-debug";
 import { getResttyFontSources, getResttyTheme } from "./restty-terminal-config";
+import {
+  createTerminalResizeStabilityState,
+  evaluateTerminalResizeBounds,
+  resetTerminalResizeStabilityState,
+} from "./terminal-resize-stability";
 import { TerminalLoadingOverlay } from "./terminal-loading-overlay";
 import {
   getGhosttyResttyKeyRemap,
@@ -200,6 +205,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const postSettleAppearanceAppliedRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const lastMeasuredBoundsRef = useRef<{ height: number; width: number } | null>(null);
+  const resizeStabilityStateRef = useRef(createTerminalResizeStabilityState());
+  const resizeStabilityRetryTimeoutRef = useRef<number | undefined>(undefined);
   const restoreResizeSuppressedUntilRef = useRef(0);
   const liveFontAppearanceRef = useRef({
     fontFamily: terminalAppearance.fontFamily,
@@ -559,6 +566,30 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       width: Math.round(bounds.width),
     };
     const previousBounds = lastMeasuredBoundsRef.current;
+    const stabilityDecision = evaluateTerminalResizeBounds(
+      resizeStabilityStateRef.current,
+      roundedBounds,
+      performance.now(),
+    );
+    if (!stabilityDecision.accept) {
+      reportDebug("terminal.resizeSuppressedTransientBounds", {
+        bounds: roundedBounds,
+        previousBounds,
+        retryAfterMs: stabilityDecision.retryAfterMs,
+        terminalCols: latestTermSizeRef.current?.cols,
+        terminalRows: latestTermSizeRef.current?.rows,
+      });
+      if (resizeStabilityRetryTimeoutRef.current === undefined) {
+        resizeStabilityRetryTimeoutRef.current = window.setTimeout(
+          () => {
+            resizeStabilityRetryTimeoutRef.current = undefined;
+            updateTerminalSize();
+          },
+          Math.max(16, stabilityDecision.retryAfterMs),
+        );
+      }
+      return false;
+    }
     if (
       restoreResizeSuppressedUntilRef.current > performance.now() &&
       connectPtyStartedRef.current &&
@@ -1508,6 +1539,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         ...collectSnapshotMetrics(),
       });
       appearanceRequestIdRef.current += 1;
+      if (resizeStabilityRetryTimeoutRef.current !== undefined) {
+        window.clearTimeout(resizeStabilityRetryTimeoutRef.current);
+        resizeStabilityRetryTimeoutRef.current = undefined;
+      }
       window.removeEventListener("focus", onWindowFocus);
       boundScrollHostRef.current?.removeEventListener("scroll", scrollHostListenerRef.current);
       syncRuntimeFromRefs();
@@ -1523,6 +1558,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       activePaneRef.current = null;
       resttyRef.current = null;
       runtimeRef.current = null;
+      lastMeasuredBoundsRef.current = null;
+      resetTerminalResizeStabilityState(resizeStabilityStateRef.current);
       canvasVisibleRef.current = false;
       maintenanceProbeIdRef.current += 1;
       rapidTypingCountRef.current = 0;

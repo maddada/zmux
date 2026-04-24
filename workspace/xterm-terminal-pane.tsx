@@ -31,6 +31,11 @@ import {
   getWindowsCtrlWordDeleteInputSequence,
 } from "./terminal-input-shortcuts";
 import { getTerminalTheme } from "./terminal-theme";
+import {
+  createTerminalResizeStabilityState,
+  evaluateTerminalResizeBounds,
+  resetTerminalResizeStabilityState,
+} from "./terminal-resize-stability";
 import { useTerminalLoadingOverlayProgress } from "./use-terminal-loading-overlay-progress";
 import { logWorkspaceDebug } from "./workspace-debug";
 import { getXtermViewportDimensions, measureTerminalFont } from "./xterm-font-metrics";
@@ -231,6 +236,8 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   >(null);
   const ensureTerminalVisibleReadyRef = useRef<(() => void) | null>(null);
   const lastMeasuredSizeRef = useRef<{ height: number; width: number } | undefined>(undefined);
+  const resizeStabilityStateRef = useRef(createTerminalResizeStabilityState());
+  const resizeStabilityRetryTimeoutRef = useRef<number | undefined>(undefined);
   const restoreResizeSuppressedUntilRef = useRef(0);
   const preserveTerminalBottomLockRef = useRef<(<T>(applyLayoutChange: () => T) => T) | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
@@ -738,6 +745,36 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         width: Math.round(bounds.width),
       };
       const previousMeasuredSize = lastMeasuredSizeRef.current;
+      const stabilityDecision = evaluateTerminalResizeBounds(
+        resizeStabilityStateRef.current,
+        nextMeasuredSize,
+        performance.now(),
+      );
+      if (!stabilityDecision.accept) {
+        reportXtermResizeRepro("geometrySkipped", {
+          bounds: nextMeasuredSize,
+          previousBounds: previousMeasuredSize,
+          reason: stabilityDecision.reason,
+          retryAfterMs: stabilityDecision.retryAfterMs,
+          source: options?.source,
+          terminalCols: terminal.cols,
+          terminalRows: terminal.rows,
+        });
+        if (resizeStabilityRetryTimeoutRef.current === undefined) {
+          resizeStabilityRetryTimeoutRef.current = window.setTimeout(
+            () => {
+              resizeStabilityRetryTimeoutRef.current = undefined;
+              applyViewportGeometry({
+                force: true,
+                refresh: options?.refresh,
+                source: `${options?.source ?? "resize"}-stability-retry`,
+              });
+            },
+            Math.max(16, stabilityDecision.retryAfterMs),
+          );
+        }
+        return false;
+      }
       if (
         restoreResizeSuppressedUntilRef.current > performance.now() &&
         previousMeasuredSize &&
@@ -1262,11 +1299,13 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         const bounds = containerRef.current.getBoundingClientRect();
         const initialDimensions = getViewportDimensions(bounds);
         if (initialDimensions) {
-          terminal.resize(initialDimensions.cols, initialDimensions.rows);
-          lastMeasuredSizeRef.current = {
+          const initialBounds = {
             height: Math.round(bounds.height),
             width: Math.round(bounds.width),
           };
+          terminal.resize(initialDimensions.cols, initialDimensions.rows);
+          lastMeasuredSizeRef.current = initialBounds;
+          resizeStabilityStateRef.current.lastAcceptedBounds = initialBounds;
         }
       }
 
@@ -1451,7 +1490,6 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         return;
       }
 
-      lastMeasuredSizeRef.current = nextMeasuredSize;
       cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
         applyViewportGeometry({
@@ -1493,6 +1531,10 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         window.cancelAnimationFrame(reconnectLayoutFrame);
         reconnectLayoutFrame = 0;
       }
+      if (resizeStabilityRetryTimeoutRef.current !== undefined) {
+        window.clearTimeout(resizeStabilityRetryTimeoutRef.current);
+        resizeStabilityRetryTimeoutRef.current = undefined;
+      }
       clearPendingVisibleStartup();
       clearPendingWebglActivation();
       clearSocketIdleSummaryTimeout();
@@ -1517,6 +1559,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       ensureTerminalVisibleReadyRef.current = null;
       fontMetricsRef.current = null;
       lastMeasuredSizeRef.current = undefined;
+      resetTerminalResizeStabilityState(resizeStabilityStateRef.current);
       preserveTerminalBottomLockRef.current = null;
       setIsTerminalSurfaceReady(false);
       setShowScrollToBottomButton(false);
