@@ -29,6 +29,7 @@ import {
   shouldPreferPersistedSessionPresentation,
 } from "./terminal-daemon-session-state";
 import { appendFirstPromptAutoRenameReproLog } from "./first-prompt-auto-rename-repro-log";
+import { appendXtermResizeReproLog } from "./xterm-resize-repro-log";
 import {
   hasOpenCodeTitlePrefix,
   getTitleActivityWindowMs,
@@ -106,6 +107,7 @@ type ManagedSession = {
   shell: string;
   snapshot: TerminalSessionSnapshot;
   workspaceId: string;
+  workspaceRoot?: string;
   leaseExpiresAt?: number | null;
 };
 
@@ -378,7 +380,7 @@ async function handleCreateOrAttachRequest(
       : await createSession(request);
 
   if (session.cols !== request.cols || session.rows !== request.rows) {
-    resizeSession(session, request.cols, request.rows);
+    resizeSession(session, request.cols, request.rows, "create-or-attach-request");
   }
 
   sessions.set(sessionKey, session);
@@ -426,7 +428,7 @@ async function handleResizeRequest(
     createTerminalDaemonSessionKey(request.workspaceId, request.sessionId),
   );
   if (session) {
-    resizeSession(session, request.cols, request.rows);
+    resizeSession(session, request.cols, request.rows, "control-resize-request");
     const snapshot = await buildSnapshot(session, false);
     broadcastControlSessionState(snapshot);
   }
@@ -531,6 +533,7 @@ async function createSession(request: TerminalHostCreateOrAttachRequest): Promis
     terminalEngine,
     titleCarryover: "",
     workspaceId: request.workspaceId,
+    workspaceRoot: request.workspaceRoot,
     leaseExpiresAt: undefined,
   };
 
@@ -575,7 +578,19 @@ function getNodePty(): NodePtyModule {
   return nodePtyModule;
 }
 
-function resizeSession(session: ManagedSession, cols: number, rows: number): void {
+function resizeSession(session: ManagedSession, cols: number, rows: number, reason: string): void {
+  const previousCols = session.cols;
+  const previousRows = session.rows;
+  void appendXtermResizeReproLog(session.workspaceRoot, `daemon.resizeSession.${reason}`, {
+    cols,
+    isXtermSession: isXtermSession(session),
+    previousCols,
+    previousRows,
+    rows,
+    sessionId: session.sessionId,
+    terminalEngine: session.terminalEngine,
+    workspaceId: session.workspaceId,
+  });
   session.cols = cols;
   session.rows = rows;
   session.snapshot = {
@@ -703,7 +718,7 @@ async function handleSessionSocketMessage(
       await activatePendingSessionAttachment(session, sessionKey, socket, attachment);
       return;
     }
-    resizeSession(session, message.cols, message.rows);
+    resizeSession(session, message.cols, message.rows, message.type);
     if (attachment.activated) {
       const snapshot = await buildSnapshot(session, false);
       broadcastControlSessionState(snapshot);
@@ -1339,7 +1354,12 @@ async function activatePendingSessionAttachment(
   clearPendingSessionAttachmentTimeout(attachment);
 
   if (attachment.initialCols && attachment.initialRows) {
-    resizeSession(session, attachment.initialCols, attachment.initialRows);
+    resizeSession(
+      session,
+      attachment.initialCols,
+      attachment.initialRows,
+      "pending-attachment-initial-size",
+    );
   }
 
   const pendingAttachQueue = createPendingAttachQueue(session.historyBuffer.bytesWritten);

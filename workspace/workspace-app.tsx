@@ -415,7 +415,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     event: string,
     payload?: Record<string, unknown>,
   ) => {
-    if (!enabled || !isWtermDebugEvent(event)) {
+    if (!isAlwaysOnWorkspaceReproEvent(event) && (!enabled || !isWtermDebugEvent(event))) {
       return;
     }
 
@@ -2312,4 +2312,8 @@ function getWorkspacePaneDropTargetIdAtPoint(
 
 function isWtermDebugEvent(event: string): boolean {
   return event.startsWith("workspace.terminal");
+}
+
+function isAlwaysOnWorkspaceReproEvent(event: string): boolean {
+  return event.startsWith("workspace.terminal.xtermResize.");
 }

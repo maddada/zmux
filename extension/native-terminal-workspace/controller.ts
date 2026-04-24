@@ -231,6 +231,7 @@ import { appendT3CloseSessionReproLog } from "../t3-close-session-repro-log";
 import { appendTerminalRestartReproLog } from "../terminal-restart-repro-log";
 import { appendT3ThreadBindingReproLog } from "../t3-thread-binding-repro-log";
 import { appendWtermWorkspaceDebugLog } from "../wterm-workspace-debug-log";
+import { appendXtermResizeReproLog } from "../xterm-resize-repro-log";
 import {
   ACTION_COMPLETION_SOUND_SETTING,
   AGENT_MANAGER_ZOOM_SETTING,
@@ -650,6 +651,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         if (message.type === "workspaceDebugLog") {
           const event = `workspace.webview.${message.event}`;
           logVSmuxDebug(event, message.details);
+          if (message.event.startsWith("workspace.terminal.xtermResize.")) {
+            void appendXtermResizeReproLog(getDefaultWorkspaceCwd(), event, {
+              details: message.details,
+              workspaceId: this.workspaceId,
+            });
+          }
           if (message.event.startsWith("workspaceStartup.")) {
             void appendWorkspacePanelStartupReproLog(getDefaultWorkspaceCwd(), event, {
               details: message.details,

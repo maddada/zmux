@@ -227,7 +227,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   const isTerminalOpenRef = useRef(false);
   const needsReconnectRecoveryOnVisibleRef = useRef(false);
   const applyViewportGeometryRef = useRef<
-    ((options?: { force?: boolean; refresh?: boolean }) => boolean) | null
+    ((options?: { force?: boolean; refresh?: boolean; source?: string }) => boolean) | null
   >(null);
   const ensureTerminalVisibleReadyRef = useRef<(() => void) | null>(null);
   const lastMeasuredSizeRef = useRef<{ height: number; width: number } | undefined>(undefined);
@@ -267,11 +267,21 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
   }, [debuggingMode]);
 
   useEffect(() => {
+    const previousVisible = previousIsVisibleRef.current;
     if (!previousIsVisibleRef.current && isVisible && terminalRef.current) {
       restoreResizeSuppressedUntilRef.current = performance.now() + RESTORE_RESIZE_SUPPRESSION_MS;
     }
     previousIsVisibleRef.current = isVisible;
     isVisibleRef.current = isVisible;
+    reportXtermResizeRepro("visibilityChanged", {
+      isVisible,
+      previousVisible,
+      restoreResizeSuppressedUntil: restoreResizeSuppressedUntilRef.current || undefined,
+      snapshotCols: pane.snapshot?.cols,
+      snapshotRows: pane.snapshot?.rows,
+      terminalCols: terminalRef.current?.cols,
+      terminalRows: terminalRef.current?.rows,
+    });
   }, [isVisible]);
 
   useEffect(() => {
@@ -291,6 +301,21 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
     };
     logWorkspaceDebug(debuggingModeRef.current, event, decoratedPayload);
     debugLogRef.current?.(event, decoratedPayload);
+  };
+
+  const reportXtermResizeRepro = (event: string, payload?: Record<string, unknown>) => {
+    debugLogRef.current?.(`workspace.terminal.xtermResize.${event}`, {
+      focused: isFocusedRef.current,
+      isVisible: isVisibleRef.current,
+      lastMeasuredSize: lastMeasuredSizeRef.current,
+      renderNonce: pane.renderNonce,
+      restoreSuppressionActive: restoreResizeSuppressedUntilRef.current > performance.now(),
+      sessionId: pane.sessionId,
+      snapshotCols: pane.snapshot?.cols,
+      snapshotRows: pane.snapshot?.rows,
+      terminalEngine: pane.sessionRecord.terminalEngine,
+      ...payload,
+    });
   };
 
   const focusTerminal = (reason: string) => {
@@ -536,6 +561,11 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         return;
       }
 
+      reportXtermResizeRepro("readySent", {
+        cols: terminal.cols,
+        rows: terminal.rows,
+        socketConnectionId,
+      });
       websocket.send(createTerminalReadyMessage(pane.sessionId, terminal.cols, terminal.rows));
       readySent = true;
       for (const message of pendingSocketMessages) {
@@ -659,23 +689,47 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       });
     };
 
-    const applyViewportGeometry = (options?: { force?: boolean; refresh?: boolean }): boolean => {
+    const applyViewportGeometry = (options?: {
+      force?: boolean;
+      refresh?: boolean;
+      source?: string;
+    }): boolean => {
       if (!isTerminalOpenRef.current) {
+        reportXtermResizeRepro("geometrySkipped", {
+          reason: "terminal-not-open",
+          source: options?.source,
+        });
         return false;
       }
 
       if (!isVisibleRef.current) {
+        reportXtermResizeRepro("geometrySkipped", {
+          reason: "hidden",
+          source: options?.source,
+        });
         return false;
       }
 
       const currentContainer = containerRef.current;
       if (!currentContainer) {
+        reportXtermResizeRepro("geometrySkipped", {
+          reason: "missing-container",
+          source: options?.source,
+        });
         return false;
       }
 
       const bounds = currentContainer.getBoundingClientRect();
       if (bounds.width <= 0 || bounds.height <= 0) {
         lastMeasuredSizeRef.current = undefined;
+        reportXtermResizeRepro("geometrySkipped", {
+          bounds: {
+            height: bounds.height,
+            width: bounds.width,
+          },
+          reason: "empty-bounds",
+          source: options?.source,
+        });
         return false;
       }
 
@@ -698,6 +752,14 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
           previousBounds: previousMeasuredSize,
           rows: terminal.rows,
         });
+        reportXtermResizeRepro("geometrySkipped", {
+          bounds: nextMeasuredSize,
+          previousBounds: previousMeasuredSize,
+          reason: "restore-suppressed",
+          source: options?.source,
+          terminalCols: terminal.cols,
+          terminalRows: terminal.rows,
+        });
         return false;
       }
       if (
@@ -715,18 +777,50 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         previousMeasuredSize.width === nextMeasuredSize.width &&
         previousMeasuredSize.height === nextMeasuredSize.height
       ) {
+        reportXtermResizeRepro("geometrySkipped", {
+          bounds: nextMeasuredSize,
+          previousBounds: previousMeasuredSize,
+          reason: "bounds-unchanged",
+          source: options?.source,
+          terminalCols: terminal.cols,
+          terminalRows: terminal.rows,
+        });
         return false;
       }
 
       const nextDimensions = getViewportDimensions(bounds);
       if (!nextDimensions) {
+        reportXtermResizeRepro("geometrySkipped", {
+          bounds: nextMeasuredSize,
+          previousBounds: previousMeasuredSize,
+          reason: "missing-dimensions",
+          source: options?.source,
+        });
         return false;
       }
 
       lastMeasuredSizeRef.current = nextMeasuredSize;
       preserveTerminalBottomLock(() => {
         if (terminal.cols !== nextDimensions.cols || terminal.rows !== nextDimensions.rows) {
+          reportXtermResizeRepro("terminalResizeApplied", {
+            bounds: nextMeasuredSize,
+            nextCols: nextDimensions.cols,
+            nextRows: nextDimensions.rows,
+            previousBounds: previousMeasuredSize,
+            previousCols: terminal.cols,
+            previousRows: terminal.rows,
+            source: options?.source,
+          });
           terminal.resize(nextDimensions.cols, nextDimensions.rows);
+        } else {
+          reportXtermResizeRepro("terminalResizeSkipped", {
+            bounds: nextMeasuredSize,
+            cols: terminal.cols,
+            previousBounds: previousMeasuredSize,
+            reason: "cols-rows-unchanged",
+            rows: terminal.rows,
+            source: options?.source,
+          });
         }
         if (options?.refresh) {
           terminal.refresh(0, Math.max(0, terminal.rows - 1));
@@ -783,6 +877,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
               applyViewportGeometry({
                 force: true,
                 refresh: true,
+                source: "webgl-context-loss",
               });
             });
           }
@@ -822,6 +917,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
           applyViewportGeometry({
             force: true,
             refresh: true,
+            source: "webgl-activation",
           });
         });
       });
@@ -896,6 +992,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
           applyViewportGeometry({
             force: true,
             refresh: true,
+            source: "ensure-visible-ready",
           });
           scheduleWebglActivation();
           if (needsReconnectRecoveryOnVisibleRef.current) {
@@ -915,6 +1012,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
                 applyViewportGeometry({
                   force: true,
                   refresh: true,
+                  source: "reconnect-recovery",
                 });
               });
             }
@@ -935,6 +1033,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
                 applyViewportGeometry({
                   force: true,
                   refresh: true,
+                  source: "first-visible-paint",
                 });
                 setIsTerminalSurfaceReady(true);
               });
@@ -1272,6 +1371,13 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
 
     terminal.onResize(({ cols, rows }) => {
       socketResizeCount += 1;
+      reportXtermResizeRepro("resizeSent", {
+        cols,
+        readySent,
+        rows,
+        socketConnectionId,
+        socketResizeCount,
+      });
       sendSocketMessage(createTerminalResizeMessage(pane.sessionId, cols, rows));
     });
 
@@ -1329,6 +1435,13 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
         width: Math.round(width),
       };
       const previousMeasuredSize = lastMeasuredSizeRef.current;
+      reportXtermResizeRepro("resizeObserver", {
+        bounds: nextMeasuredSize,
+        isTerminalOpen: isTerminalOpenRef.current,
+        previousBounds: previousMeasuredSize,
+        terminalCols: terminal.cols,
+        terminalRows: terminal.rows,
+      });
       if (
         !isTerminalOpenRef.current ||
         (previousMeasuredSize &&
@@ -1343,6 +1456,7 @@ export const XtermTerminalPane: React.FC<XtermTerminalPaneProps> = ({
       rafId = requestAnimationFrame(() => {
         applyViewportGeometry({
           force: true,
+          source: "resize-observer",
         });
       });
     });
