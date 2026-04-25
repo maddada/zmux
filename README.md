@@ -52,11 +52,11 @@ VSmux works great with my other tool that shows all running agent sessions in a 
 
 ## Recent Updates
 
-### 4.8.0
+### 4.9.0
 
-- The terminal workspace is smoother now, with better macOS shortcuts, safer restored-pane sizing, bundled font loading, and steadier Ghostty/Restty/WTerm behavior.
-- Browser tabs and workspace pane shortcuts are less jumpy, so Storybook-style tabs stay tracked and keyboard focus follows the visible pane slots.
-- Claude prompt-title handling, completion sounds, copy interactions, empty browser groups, and terminal action labels all got clearer feedback.
+- Claude status indicators are more accurate now, with better handling for Claude spinner/done title markers and stale running updates.
+- Workspace restore and terminal sizing are steadier, with fresh restored-panel startup and more focused repro diagnostics.
+- Sidebar controls are cleaner: active terminal actions can be ended, the overflow menu floats globally, and the completion-sound bell has clearer on/off feedback.
 - **Rich Prompt Editor:** press `Ctrl+G` to edit a prompt in a VS Code modal editor, then press `Ctrl+G` again to save and close it back into the active session.
 
 Full release notes: [CHANGELOG.md](./CHANGELOG.md)
@@ -75,25 +75,25 @@ Then this is the extension for you! You get a very nice interface to work with y
 
 ## Main Features at a Glance
 
-| Feature                   | Description                                                                               |
-| ------------------------- | ----------------------------------------------------------------------------------------- |
-| **Remote Access**         | Control your sessions from your phone or another computer                                 |
-| **Split Views**           | Put terminals/t3code chats side-by-side to monitor multiple tasks at once                 |
-| **Universal Search**      | Find and access all your tool sessions from one central location                          |
-| **Session Organization**  | Group and sort your workspace to keep it clutter-free                                     |
-| **Resume Sessions**       | Instantly reload past sessions to pick up exactly where you left off                      |
-| **Quick Launch**          | Quickly find and reopen closed sessions using just your keyboard                          |
-| **Rich Prompt Editor**    | Open a VS Code modal prompt editor with `Ctrl+G`, then press `Ctrl+G` again to save/close |
-| **Session Forking**       | Branch off an active session into a new terminal without losing your original context     |
-| **Sleep Mode**            | Suspend inactive sessions to free up memory and boost system performance                  |
-| **Custom AI Profiles**    | Create and manage distinct profiles for different AI models and specific use cases        |
-| **Agent Handoff**         | Seamlessly transfer a conversation's context from one AI model directly to another        |
-| **Custom Action Buttons** | Turn any terminal command into a clickable, customizable shortcut                         |
-| **Pinned Prompts**        | Save frequently used instructions in the sidebar for quick access across projects         |
-| **Integrated Browser**    | Save bookmarks, open localhost, use DevTools, all without alt tabbing                     |
-| **Automated Git**         | Use built-in tools to automatically generate commit messages and push code                |
-| **Change Monitoring**     | Track AI-driven code edits in a dedicated panel while working on other tasks              |
-| **Advanced Settings**     | Highly configure the tool to match your exact workflow needs                              |
+| Feature                   | Description                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------- |
+| **Remote Access**         | Control your sessions from your phone or another computer                             |
+| **Split Views**           | Put terminals/t3code chats side-by-side to monitor multiple tasks at once             |
+| **Universal Search**      | Find and access all your tool sessions from one central location                      |
+| **Session Organization**  | Group and sort your workspace to keep it clutter-free                                 |
+| **Resume Sessions**       | Instantly reload past sessions to pick up exactly where you left off                  |
+| **Quick Launch**          | Quickly find and reopen closed sessions using just your keyboard                      |
+| **Rich Prompt Editor**    | Press `Ctrl+G` to edit in a VS Code modal, then `Ctrl+G` again to save and close      |
+| **Session Forking**       | Branch off an active session into a new terminal without losing your original context |
+| **Sleep Mode**            | Suspend inactive sessions to free up memory and boost system performance              |
+| **Custom AI Profiles**    | Create and manage distinct profiles for different AI models and specific use cases    |
+| **Agent Handoff**         | Seamlessly transfer a conversation's context from one AI model directly to another    |
+| **Custom Action Buttons** | Turn any terminal command into a clickable, customizable shortcut                     |
+| **Pinned Prompts**        | Save frequently used instructions in the sidebar for quick access across projects     |
+| **Integrated Browser**    | Save bookmarks, open localhost, use DevTools, all without alt tabbing                 |
+| **Automated Git**         | Use built-in tools to automatically generate commit messages and push code            |
+| **Change Monitoring**     | Track AI-driven code edits in a dedicated panel while working on other tasks          |
+| **Advanced Settings**     | Highly configure the tool to match your exact workflow needs                          |
 
 # Recommended VS Code Setup for Worktrees & Parallel Agents
 

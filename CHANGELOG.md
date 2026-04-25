@@ -2,6 +2,15 @@
 
 All notable user-facing changes are documented in this file.
 
+## 4.9.0 - 2026-04-25
+
+- Claude session status is more accurate now: VSmux keeps Claude's own terminal-title updates enabled, understands the newer Claude spinner and done markers, and avoids stale running markers after a completed title appears.
+- Workspace restore and terminal sizing are steadier now, with fresh workspace panel recreation for restored tabs, richer blank-gray startup diagnostics, and protection against transient collapsed terminal resize events.
+- Sidebar actions are easier to control now: active terminal action buttons can be ended directly, the overflow menu is available as a floating sidebar control, and the completion-sound bell has a clearer on/off state.
+- Visible sessions stay awake now, so auto-sleep does not suspend a surfaced session just because it is not focused.
+- Runtime diagnostics are more focused, with dedicated logs for terminal-title pipeline decisions, Claude status indicators, and completion-sound delivery.
+- The Rich Prompt Editor remains available from the active session with `Ctrl+G`: press `Ctrl+G` to edit in a VS Code modal, then press `Ctrl+G` again to save and close it back into the session.
+
 ## 4.8.0 - 2026-04-24
 
 - The terminal experience is steadier now across xterm, Ghostty/Restty, and WTerm paths, with better macOS shortcut handling, safer restore sizing, bundled font loading, and direct non-persistent terminal session behavior.
