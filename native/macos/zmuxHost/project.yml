@@ -32,7 +32,6 @@ targets:
     platform: macOS
     productName: zmux
     sources:
-      - path: Sources/Shared
       - path: Sources/zmuxHost
       - path: ${GHOSTTY_ROOT}/macos/Sources/Ghostty
         excludes:
@@ -90,51 +89,3 @@ targets:
         # uses the com.madda namespace expected by the brew publishing flow.
         PRODUCT_BUNDLE_IDENTIFIER: com.madda.zmux.host
         PRODUCT_NAME: zmux
-  zmuxGhosttySessionHost:
-    type: application
-    platform: macOS
-    productName: zmuxGhosttySessionHost
-    sources:
-      - path: Sources/Shared
-      - path: Sources/zmuxGhosttySessionHost
-      - path: Sources/zmuxHost/GhosttyCompatibilityStubs.swift
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Ghostty
-        excludes:
-          - Surface View/SurfaceView_UIKit.swift
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Helpers
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Secure Input
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Terminal/TerminalTabColor.swift
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Terminal/TerminalViewContainer.swift
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/QuickTerminal/QuickTerminalPosition.swift
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/QuickTerminal/QuickTerminalScreen.swift
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/QuickTerminal/QuickTerminalSize.swift
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/QuickTerminal/QuickTerminalSpaceBehavior.swift
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Splits/SplitTree.swift
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Splits/SplitView.swift
-      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Splits/SplitView.Divider.swift
-      # CDXC:NativeTerminalSurvival 2026-04-27-16:41: The helper owns the
-      # long-lived Ghostty surfaces, so it needs the same runtime resources as
-      # the UI app while terminals survive zmux updates.
-      - path: ${GHOSTTY_ROOT}/zig-out/share/ghostty
-        buildPhase: resources
-        type: folder
-      - path: ${GHOSTTY_ROOT}/zig-out/share/terminfo
-        buildPhase: resources
-        type: folder
-    dependencies:
-      - framework: ${GHOSTTY_ROOT}/macos/GhosttyKit.xcframework
-        embed: false
-    settings:
-      base:
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
-        EXECUTABLE_NAME: zmuxGhosttySessionHost
-        INFOPLIST_KEY_CFBundleDisplayName: zmux Ghostty Session Host
-        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
-        INFOPLIST_KEY_LSUIElement: YES
-        INFOPLIST_KEY_NSLocalNetworkUsageDescription: zmux uses a local WebSocket bridge to keep native Ghostty terminals alive during app restarts.
-        INFOPLIST_KEY_NSHumanReadableCopyright: ""
-        OTHER_LDFLAGS:
-          - "$(inherited)"
-          - "-lc++"
-        PRODUCT_BUNDLE_IDENTIFIER: com.madda.zmux.ghostty-session-host
-        PRODUCT_NAME: zmuxGhosttySessionHost

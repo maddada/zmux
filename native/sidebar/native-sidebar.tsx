@@ -117,7 +117,6 @@ import {
 import {
   DEFAULT_zmux_SETTINGS,
   normalizezmuxSettings,
-  type TerminalSessionPersistenceMode,
   type zmuxSettings,
 } from "../../shared/zmux-settings";
 import { getGhosttyTerminalConfigValues } from "../../shared/ghostty-terminal-settings";
@@ -170,11 +169,6 @@ type NativeHostCommand =
       fontThicken: boolean;
       fontThickenStrength: number;
       type: "syncGhosttyTerminalSettings";
-    }
-  | {
-      terminalRestartSurvivalTimeoutMinutes: number;
-      terminalSessionPersistenceMode: TerminalSessionPersistenceMode;
-      type: "syncGhosttySessionPersistenceSettings";
     }
   | { type: "openExternalUrl"; url: string }
   | { type: "openBrowserWindow"; url: string }
@@ -239,7 +233,6 @@ type NativeProcessResult = Extract<NativeHostEvent, { type: "processResult" }>;
 type NativeBootstrap = {
   cwd?: string;
   homeDir?: string;
-  terminalSessionPersistenceMode?: TerminalSessionPersistenceMode;
   workspaceName?: string;
   zedOverlayEnabled?: boolean;
   zedOverlayTargetApp?: "zed" | "zed-preview" | "vscode" | "vscode-insiders";
@@ -540,6 +533,7 @@ let projects: NativeProject[] = restoredProjectState.projects;
 let activeProjectId = restoredProjectState.activeProjectId;
 let settings = readStoredSettings();
 let revision = 0;
+let nextNativeSessionNumber = 1;
 const sidebarBus = new SurfaceMessageBus<ExtensionToSidebarMessage>();
 const terminalStateById = new Map<
   string,
@@ -572,22 +566,6 @@ const sidebarSessionIdByNativeSessionId = new Map<string, string>();
  * directly instead of relying on the VS Code extension bridge path.
  */
 const agentManagerXBridgeClient = new AgentManagerXNativeBridgeClient();
-
-/**
- * CDXC:NativeTerminalSurvival 2026-04-27-17:06
- * Helper-hosted Ghostty PTYs survive zmux UI restarts by reconnecting with the
- * same project/session id. Do not allocate process-local counters here.
- */
-function createDurableNativeSessionId(projectId: string, sidebarSessionId: string): string {
-  return `${projectId}:${sidebarSessionId}`;
-}
-
-function rememberNativeSessionMapping(projectId: string, sidebarSessionId: string): string {
-  const nativeSessionId = createDurableNativeSessionId(projectId, sidebarSessionId);
-  nativeSessionIdBySidebarSessionId.set(sidebarSessionId, nativeSessionId);
-  sidebarSessionIdByNativeSessionId.set(nativeSessionId, sidebarSessionId);
-  return nativeSessionId;
-}
 
 /**
  * CDXC:NativeSidebar 2026-04-26-00:47
@@ -891,9 +869,6 @@ function readStoredSettings(): zmuxSettings {
       ...(bootstrap?.zedOverlayTargetApp === undefined
         ? {}
         : { zedOverlayTargetApp: bootstrap.zedOverlayTargetApp }),
-      ...(bootstrap?.terminalSessionPersistenceMode === undefined
-        ? {}
-        : { terminalSessionPersistenceMode: bootstrap.terminalSessionPersistenceMode }),
     });
   } catch {
     return DEFAULT_zmux_SETTINGS;
@@ -904,7 +879,6 @@ function saveSettings(nextSettings: zmuxSettings): void {
   settings = normalizezmuxSettings(nextSettings);
   localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   syncGhosttyTerminalSettings(settings);
-  syncGhosttySessionPersistenceSettings(settings);
   postZedOverlaySettings();
   publish();
 }
@@ -919,21 +893,6 @@ function syncGhosttyTerminalSettings(nextSettings: zmuxSettings): void {
   postNative({
     ...getGhosttyTerminalConfigValues(nextSettings),
     type: "syncGhosttyTerminalSettings",
-  });
-}
-
-function syncGhosttySessionPersistenceSettings(nextSettings: zmuxSettings): void {
-  /**
-   * CDXC:NativeTerminalSurvival 2026-04-28-10:52
-   * The native process owns the terminal backend choice because it must decide
-   * whether to start the helper before the sidebar loads. Post both the
-   * restart-scoped mode and live helper timeout whenever settings are saved so
-   * the next launch and current persistent lease agree.
-   */
-  postNative({
-    terminalRestartSurvivalTimeoutMinutes: nextSettings.terminalRestartSurvivalTimeoutMinutes,
-    terminalSessionPersistenceMode: nextSettings.terminalSessionPersistenceMode,
-    type: "syncGhosttySessionPersistenceSettings",
   });
 }
 
@@ -2193,7 +2152,7 @@ function restoreNativeTerminalSession(
   session: TerminalSessionRecord,
   reason: string,
 ): void {
-  const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
+  const nativeSessionId = `${project.projectId}-session-${nextNativeSessionNumber++}`;
   const sessionStateFilePath = createNativeSessionStateFilePath(
     project.projectId,
     session.sessionId,
@@ -2202,6 +2161,8 @@ function restoreNativeTerminalSession(
   if (initialInput.trim()) {
     suppressNativeSessionActivityIndicators(session.sessionId, "restore-resume-command");
   }
+  nativeSessionIdBySidebarSessionId.set(session.sessionId, nativeSessionId);
+  sidebarSessionIdByNativeSessionId.set(nativeSessionId, session.sessionId);
   terminalStateById.set(session.sessionId, {
     activity: "idle",
     agentName: session.agentName,
@@ -2919,11 +2880,13 @@ function createTerminal(
   if (!generatedSession) {
     return undefined;
   }
-  const nativeSessionId = rememberNativeSessionMapping(project.projectId, generatedSession.sessionId);
+  const nativeSessionId = `${project.projectId}-session-${nextNativeSessionNumber++}`;
   const sessionStateFilePath = createNativeSessionStateFilePath(
     project.projectId,
     generatedSession.sessionId,
   );
+  nativeSessionIdBySidebarSessionId.set(generatedSession.sessionId, nativeSessionId);
+  sidebarSessionIdByNativeSessionId.set(nativeSessionId, generatedSession.sessionId);
   updateActiveProjectWorkspace(() => result.snapshot);
   const session = generatedSession;
   if (!session) {

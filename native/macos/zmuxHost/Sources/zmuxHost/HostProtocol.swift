@@ -20,7 +20,6 @@ enum HostCommand: Decodable {
   case appendWorkspaceDockIndicatorDebugLog(AppendWorkspaceDockIndicatorDebugLog)
   case runProcess(RunProcess)
   case syncGhosttyTerminalSettings(SyncGhosttyTerminalSettings)
-  case syncGhosttySessionPersistenceSettings(SyncGhosttySessionPersistenceSettings)
   case openExternalUrl(OpenExternalUrl)
   case openBrowserWindow(OpenBrowserWindow)
   case showBrowserWindow
@@ -52,7 +51,6 @@ enum HostCommand: Decodable {
     case appendWorkspaceDockIndicatorDebugLog
     case runProcess
     case syncGhosttyTerminalSettings
-    case syncGhosttySessionPersistenceSettings
     case openExternalUrl
     case openBrowserWindow
     case showBrowserWindow
@@ -103,9 +101,6 @@ enum HostCommand: Decodable {
       self = .runProcess(try RunProcess(from: decoder))
     case .syncGhosttyTerminalSettings:
       self = .syncGhosttyTerminalSettings(try SyncGhosttyTerminalSettings(from: decoder))
-    case .syncGhosttySessionPersistenceSettings:
-      self = .syncGhosttySessionPersistenceSettings(
-        try SyncGhosttySessionPersistenceSettings(from: decoder))
     case .openExternalUrl:
       self = .openExternalUrl(try OpenExternalUrl(from: decoder))
     case .openBrowserWindow:
@@ -210,16 +205,6 @@ struct SyncGhosttyTerminalSettings: Decodable {
   let fontSize: Double
   let fontThicken: Bool
   let fontThickenStrength: Int
-}
-
-enum NativeTerminalSessionPersistenceMode: String, Decodable {
-  case embedded
-  case persistent
-}
-
-struct SyncGhosttySessionPersistenceSettings: Decodable {
-  let terminalRestartSurvivalTimeoutMinutes: Double
-  let terminalSessionPersistenceMode: NativeTerminalSessionPersistenceMode?
 }
 
 struct OpenExternalUrl: Decodable {

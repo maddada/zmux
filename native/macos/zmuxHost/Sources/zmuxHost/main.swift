@@ -1,8 +1,6 @@
 import AppKit
 import GhosttyKit
 
-NativeGhosttyTerminalEnvironment.sanitizeProcessEnvironmentBeforeGhosttyInit()
-
 /**
  CDXC:NativeTerminals 2026-04-26-07:21
  Ghostty resolves bundled themes from global runtime state created during

@@ -24,8 +24,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   private var pendingGhosttyConfigReloadTimer: Timer?
   private weak var attachToIdeTitlebarButton: NSButton?
   private let nativeSettingsStore = NativeSettingsStore()
-  private var ghosttySessionHostClient: GhosttySessionHostClient?
-  private var localMouseDownMonitor: Any?
 
   override init() {
     let configSelection = Self.preferredGhosttyConfig()
@@ -49,23 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     )
     MainActor.assumeIsolated {
       /**
-       CDXC:NativeTerminalSurvival 2026-04-28-10:45
-       Terminal persistence mode is selected once during startup. Persistent
-       mode creates the long-lived helper client; Embedded mode leaves the
-       workspace on the original in-process Ghostty SurfaceView backend by
-       passing nil as terminalHostClient.
+       CDXC:NativeTerminals 2026-04-28-12:06
+       Persistent terminal mode is intentionally removed. The native host must
+       start only the embedded Ghostty SurfaceView backend and must not create
+       or reconnect to a long-lived helper process.
        */
-      let terminalPersistenceMode = nativeSettingsStore.readTerminalSessionPersistenceMode()
-      if terminalPersistenceMode == .persistent {
-        ghosttySessionHostClient = makeGhosttySessionHostClient()
-      }
       makeWindow()
       startBridge()
-      ghosttySessionHostClient?.start()
-      ghosttySessionHostClient?.setHostAppActive(NSApp.isActive)
-      if ghosttySessionHostClient != nil {
-        installLocalMouseDownMonitor()
-      }
     }
     tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
       self?.ghostty.appTick()
@@ -76,50 +64,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     Self.appendNativeHostLifecycleLog(
       "applicationWillTerminate pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false)"
     )
-    MainActor.assumeIsolated {
-      ghosttySessionHostClient?.releaseLease()
-      if let localMouseDownMonitor {
-        NSEvent.removeMonitor(localMouseDownMonitor)
-        self.localMouseDownMonitor = nil
-      }
-    }
-  }
-
-  func applicationDidBecomeActive(_ notification: Notification) {
-    MainActor.assumeIsolated {
-      ghosttySessionHostClient?.setHostAppActive(true)
-      workspaceView?.syncHostedTerminalFrames()
-      ghosttySessionHostClient?.requestResurfaceVisibleTerminals(reason: "applicationDidBecomeActive")
-    }
-  }
-
-  func applicationDidResignActive(_ notification: Notification) {
-    MainActor.assumeIsolated {
-      ghosttySessionHostClient?.setHostAppActive(false)
-    }
-  }
-
-  @MainActor
-  private func makeGhosttySessionHostClient() -> GhosttySessionHostClient {
-    GhosttySessionHostClient(
-      timeoutSeconds: nativeSettingsStore.readTerminalSurvivalTimeoutSeconds()
-    ) { [weak self] event in
-      self?.bridge?.send(event)
-      (self?.window?.contentView as? zmuxRootView)?.postHostEvent(event)
-    }
-  }
-
-  @MainActor
-  private func installLocalMouseDownMonitor() {
-    guard localMouseDownMonitor == nil else { return }
-    localMouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) {
-      [weak self] event in
-      guard let self else { return event }
-      if event.window === self.window {
-        self.ghosttySessionHostClient?.requestResurfaceVisibleTerminals(reason: "zmuxWindowMouseDown")
-      }
-      return event
-    }
   }
 
   private struct GhosttyConfigSelection {
@@ -403,7 +347,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   private func makeWindow() {
     let root = zmuxRootView(
       ghostty: ghostty,
-      terminalHostClient: ghosttySessionHostClient,
       sendEvent: { [weak self] event in
         self?.bridge?.send(event)
         (self?.window?.contentView as? zmuxRootView)?.postHostEvent(event)
@@ -413,9 +356,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       },
       syncGhosttyTerminalSettings: { [weak self] command in
         self?.handle(.syncGhosttyTerminalSettings(command))
-      },
-      syncGhosttySessionPersistenceSettings: { [weak self] command in
-        self?.handle(.syncGhosttySessionPersistenceSettings(command))
       },
       openBrowserWindow: { [weak self] command in
         self?.handle(.openBrowserWindow(command))
@@ -434,32 +374,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     )
     window.onFirstResponderChanged = { [weak root] responder in
       root?.workspaceView.windowFirstResponderChanged(responder, reason: "windowMakeFirstResponder")
-    }
-    /**
-     CDXC:NativeTerminalSurvival 2026-04-27-16:48
-     Helper-owned Ghostty terminal windows are positioned in screen
-     coordinates. Resync their frames whenever the zmux window moves or
-     resizes so the helper remains visually embedded in the workspace.
-     */
-    NotificationCenter.default.addObserver(
-      forName: NSWindow.didMoveNotification,
-      object: window,
-      queue: .main
-    ) { [weak root] _ in
-      Task { @MainActor in
-        root?.workspaceView.syncHostedTerminalFrames()
-        root?.workspaceView.requestHostedTerminalResurface(reason: "windowMoved")
-      }
-    }
-    NotificationCenter.default.addObserver(
-      forName: NSWindow.didResizeNotification,
-      object: window,
-      queue: .main
-    ) { [weak root] _ in
-      Task { @MainActor in
-        root?.workspaceView.syncHostedTerminalFrames()
-        root?.workspaceView.requestHostedTerminalResurface(reason: "windowResized")
-      }
     }
     window.title = "zmux"
     window.titleVisibility = .hidden
@@ -671,8 +585,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       }
     case .syncGhosttyTerminalSettings(let command):
       syncGhosttyTerminalSettings(command)
-    case .syncGhosttySessionPersistenceSettings(let command):
-      syncGhosttySessionPersistenceSettings(command)
     case .openExternalUrl(let command):
       openExternalUrl(command)
     case .openBrowserWindow(let command):
@@ -850,27 +762,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     } catch {
       Self.logger.error("Failed to sync Ghostty terminal settings: \(error.localizedDescription)")
     }
-  }
-
-  @MainActor
-  private func syncGhosttySessionPersistenceSettings(
-    _ command: SyncGhosttySessionPersistenceSettings
-  ) {
-    /**
-     CDXC:NativeTerminalSurvival 2026-04-27-16:35
-     The sidebar owns the user-facing restart-survival setting, but the native
-     helper enforces it after zmux disconnects. Persist both the startup-scoped
-     terminal owner and timeout in the shared native settings file. The current
-     helper timeout updates immediately when persistent mode is active; owner
-     changes intentionally apply on the next restart.
-     */
-    nativeSettingsStore.persistTerminalSessionPersistenceSettings(
-      mode: command.terminalSessionPersistenceMode,
-      timeoutMinutes: command.terminalRestartSurvivalTimeoutMinutes
-    )
-    ghosttySessionHostClient?.configureTimeout(
-      seconds: max(0, command.terminalRestartSurvivalTimeoutMinutes) * 60
-    )
   }
 
   private func scheduleGhosttyConfigReload() {
@@ -1135,56 +1026,6 @@ private final class NativeSettingsStore {
     }
   }
 
-  func readTerminalSurvivalTimeoutSeconds() -> TimeInterval {
-    guard let settings = readSettingsDictionary() else {
-      return 15 * 60
-    }
-    let minutes = Self.readDouble(settings["terminalRestartSurvivalTimeoutMinutes"]) ?? 15
-    return max(0, minutes) * 60
-  }
-
-  /**
-   CDXC:NativeTerminalSurvival 2026-04-28-10:48
-   The terminal owner must be available before the sidebar webview loads, so
-   native startup reads this mode from the same settings file that the sidebar
-   updates. Default to persistent on this branch to preserve the survival-mode
-   behavior users are testing unless they explicitly choose Embedded.
-   */
-  func readTerminalSessionPersistenceMode() -> NativeTerminalSessionPersistenceMode {
-    guard let settings = readSettingsDictionary(),
-      let rawMode = settings["terminalSessionPersistenceMode"] as? String,
-      let mode = NativeTerminalSessionPersistenceMode(rawValue: rawMode)
-    else {
-      return .persistent
-    }
-    return mode
-  }
-
-  func persistTerminalSessionPersistenceSettings(
-    mode: NativeTerminalSessionPersistenceMode?,
-    timeoutMinutes: Double
-  ) {
-    do {
-      let url = settingsURL()
-      var settings = readSettingsDictionary() ?? [:]
-      if let mode {
-        settings["terminalSessionPersistenceMode"] = mode.rawValue
-      }
-      settings["terminalRestartSurvivalTimeoutMinutes"] = max(0, timeoutMinutes)
-      let data = try JSONSerialization.data(
-        withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
-      try FileManager.default.createDirectory(
-        at: url.deletingLastPathComponent(),
-        withIntermediateDirectories: true
-      )
-      try data.write(to: url, options: [.atomic])
-    } catch {
-      Self.logger.error(
-        "Failed to persist terminal session persistence settings: \(error.localizedDescription)"
-      )
-    }
-  }
-
   private func readSettingsDictionary() -> [String: Any]? {
     let url = settingsURL()
     guard let data = try? Data(contentsOf: url),
@@ -1228,16 +1069,6 @@ private final class NativeSettingsStore {
     }
     return nil
   }
-
-  private static func readDouble(_ value: Any?) -> Double? {
-    if let number = value as? NSNumber {
-      return Double(truncating: number)
-    }
-    if let string = value as? String, let double = Double(string) {
-      return double
-    }
-    return nil
-  }
 }
 
 final class zmuxRootView: NSView {
@@ -1259,7 +1090,6 @@ final class zmuxRootView: NSView {
   private let eventEncoder = JSONEncoder()
   private let configureZedOverlay: (ConfigureZedOverlay) -> Void
   private let syncGhosttyTerminalSettings: (SyncGhosttyTerminalSettings) -> Void
-  private let syncGhosttySessionPersistenceSettings: (SyncGhosttySessionPersistenceSettings) -> Void
   private let openBrowserWindow: (OpenBrowserWindow) -> Void
   private let showBrowserWindow: () -> Void
   private let nativeSettingsStore = NativeSettingsStore()
@@ -1281,23 +1111,16 @@ final class zmuxRootView: NSView {
    */
   init(
     ghostty: Ghostty.App,
-    terminalHostClient: GhosttySessionHostClient?,
     sendEvent: @escaping (HostEvent) -> Void,
     configureZedOverlay: @escaping (ConfigureZedOverlay) -> Void,
     syncGhosttyTerminalSettings: @escaping (SyncGhosttyTerminalSettings) -> Void,
-    syncGhosttySessionPersistenceSettings: @escaping (SyncGhosttySessionPersistenceSettings) -> Void,
     openBrowserWindow: @escaping (OpenBrowserWindow) -> Void,
     showBrowserWindow: @escaping () -> Void
   ) {
-    self.workspaceView = TerminalWorkspaceView(
-      ghostty: ghostty,
-      terminalHostClient: terminalHostClient,
-      sendEvent: sendEvent
-    )
+    self.workspaceView = TerminalWorkspaceView(ghostty: ghostty, sendEvent: sendEvent)
     self.scriptBridge = SidebarScriptBridge(router: sidebarCommandRouter)
     self.configureZedOverlay = configureZedOverlay
     self.syncGhosttyTerminalSettings = syncGhosttyTerminalSettings
-    self.syncGhosttySessionPersistenceSettings = syncGhosttySessionPersistenceSettings
     self.openBrowserWindow = openBrowserWindow
     self.showBrowserWindow = showBrowserWindow
     self.sidebarWidth = nativeSettingsStore.readSidebarChrome().width ?? Self.defaultSidebarWidth
@@ -1314,11 +1137,9 @@ final class zmuxRootView: NSView {
     var bootstrap: [String: Any] = [
       "cwd": cwd,
       "homeDir": FileManager.default.homeDirectoryForCurrentUser.path,
-      "terminalSessionPersistenceMode": nativeSettingsStore
-        .readTerminalSessionPersistenceMode().rawValue,
       "workspaceName": workspaceName.isEmpty ? "zmux" : workspaceName,
     ]
-    let storedZedOverlay = nativeSettingsStore.readZedOverlay()
+    let storedZedOverlay = NativeSettingsStore().readZedOverlay()
     if let enabled = storedZedOverlay.enabled {
       bootstrap["zedOverlayEnabled"] = enabled
     }
@@ -1470,8 +1291,6 @@ final class zmuxRootView: NSView {
       runProcess(command)
     case .syncGhosttyTerminalSettings(let command):
       syncGhosttyTerminalSettings(command)
-    case .syncGhosttySessionPersistenceSettings(let command):
-      syncGhosttySessionPersistenceSettings(command)
     case .openExternalUrl(let command):
       openExternalUrl(command)
     case .openBrowserWindow(let command):
@@ -1634,14 +1453,6 @@ final class zmuxRootView: NSView {
         self.pendingModalHostOpenMessage = nil
       }
     case "open":
-      /**
-       CDXC:AppModals 2026-04-28-10:59
-       Helper-owned Ghostty terminals are separate native windows, so a
-       full-window modal cannot rely on WKWebView z-order alone. Pause terminal
-       resurfacing while the modal host is visible, then let the workspace
-       restore helper windows when the modal closes.
-       */
-      workspaceView.setModalPresentationActive(true)
       modalHostView.isHidden = false
       pendingModalHostOpenMessage = isModalHostReady ? nil : message
       if let latestModalHostSidebarState {
@@ -1652,7 +1463,6 @@ final class zmuxRootView: NSView {
       dispatchModalHostMessage(["type": "close"])
       pendingModalHostOpenMessage = nil
       modalHostView.isHidden = true
-      workspaceView.setModalPresentationActive(false)
     case "sidebarState":
       latestModalHostSidebarState = message
       dispatchModalHostMessage(message)

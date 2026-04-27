@@ -287,24 +287,6 @@ export function SettingsModal({
                 step={0.05}
                 value={draft.terminalLineHeight}
               />
-              {/* CDXC:NativeTerminalSurvival 2026-04-27-16:03
-                  Users control how long real native Ghostty PTYs survive after
-                  the zmux UI app disconnects during an update or restart. Zero
-                  disables detached survival and closes sessions immediately. */}
-              {draft.terminalSessionPersistenceMode === "persistent" ? (
-                <SliderNumberField
-                  description="Minutes to keep terminals alive after zmux closes."
-                  label="Restart Survival"
-                  max={240}
-                  min={0}
-                  onCommit={(value) => updateDraft("terminalRestartSurvivalTimeoutMinutes", value)}
-                  onChange={(value) =>
-                    updateDraftDebounced("terminalRestartSurvivalTimeoutMinutes", value)
-                  }
-                  step={1}
-                  value={draft.terminalRestartSurvivalTimeoutMinutes}
-                />
-              ) : null}
               <SliderNumberField
                 description="Adjust spacing between glyphs."
                 label="Letter Spacing"

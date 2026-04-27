@@ -161,12 +161,6 @@ export GHOSTTY_ROOT
 xcodegen generate --spec "$SCRIPT_DIR/project.yml"
 xcodebuild \
 	-project "$PROJECT_PATH" \
-	-scheme zmuxGhosttySessionHost \
-	-configuration "$CONFIGURATION" \
-	-derivedDataPath "$DERIVED_DATA" \
-	build
-xcodebuild \
-	-project "$PROJECT_PATH" \
 	-scheme zmux \
 	-configuration "$CONFIGURATION" \
 	-derivedDataPath "$DERIVED_DATA" \

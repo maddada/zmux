@@ -21,7 +21,6 @@ import {
 } from "./terminal-font-preset";
 
 export type TerminalCursorStyle = "bar" | "block" | "underline";
-export type TerminalSessionPersistenceMode = "embedded" | "persistent";
 export type ZedOverlayTargetApp = "zed" | "zed-preview" | "vscode" | "vscode-insiders";
 
 /**
@@ -52,8 +51,6 @@ export type zmuxSettings = {
   terminalFontWeight: number;
   terminalLetterSpacing: number;
   terminalLineHeight: number;
-  terminalRestartSurvivalTimeoutMinutes: number;
-  terminalSessionPersistenceMode: TerminalSessionPersistenceMode;
   terminalScrollToBottomWhenTyping: boolean;
   workspaceActivePaneBorderColor: string;
   workspacePaneGap: number;
@@ -89,8 +86,6 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   terminalFontWeight: 300,
   terminalLetterSpacing: 0,
   terminalLineHeight: 1.2,
-  terminalRestartSurvivalTimeoutMinutes: 15,
-  terminalSessionPersistenceMode: "persistent",
   terminalScrollToBottomWhenTyping: true,
   workspaceActivePaneBorderColor: "#3b82f6",
   workspacePaneGap: 12,
@@ -124,23 +119,6 @@ export const TERMINAL_ENGINE_SETTING_OPTIONS: ReadonlyArray<{
   label: string;
   value: TerminalEngine;
 }> = [{ label: "Ghostty Native", value: "ghostty-native" }];
-
-export const TERMINAL_SESSION_PERSISTENCE_MODE_OPTIONS: ReadonlyArray<{
-  description: string;
-  label: string;
-  value: TerminalSessionPersistenceMode;
-}> = [
-  {
-    description: "Survives zmux restarts by keeping real Ghostty terminals in the helper.",
-    label: "Persistent",
-    value: "persistent",
-  },
-  {
-    description: "Original direct in-app Ghostty terminals; closes when zmux closes.",
-    label: "Embedded",
-    value: "embedded",
-  },
-];
 
 export const ZED_OVERLAY_TARGET_APP_OPTIONS: ReadonlyArray<{
   label: string;
@@ -246,30 +224,6 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
       2,
       DEFAULT_zmux_SETTINGS.terminalLineHeight,
     ),
-    /**
-     * CDXC:NativeTerminalSurvival 2026-04-27-16:01
-     * Native Ghostty terminals are kept alive by a helper lease while zmux is
-     * open. After the last compatible app disconnects, this user setting is
-     * the number of minutes the helper may keep shells running before closing
-     * the real Ghostty PTYs.
-     */
-    terminalRestartSurvivalTimeoutMinutes: clampNumber(
-      readNumber(
-        source,
-        "terminalRestartSurvivalTimeoutMinutes",
-        DEFAULT_zmux_SETTINGS.terminalRestartSurvivalTimeoutMinutes,
-      ),
-      0,
-      1440,
-      DEFAULT_zmux_SETTINGS.terminalRestartSurvivalTimeoutMinutes,
-    ),
-    terminalSessionPersistenceMode: normalizeTerminalSessionPersistenceMode(
-      readString(
-        source,
-        "terminalSessionPersistenceMode",
-        DEFAULT_zmux_SETTINGS.terminalSessionPersistenceMode,
-      ),
-    ),
     terminalScrollToBottomWhenTyping: readBoolean(
       source,
       "terminalScrollToBottomWhenTyping",
@@ -304,14 +258,6 @@ export function getTerminalFontFamilyForzmuxSettings(settings: zmuxSettings): st
 
 function normalizeTerminalCursorStyle(value: string | undefined): TerminalCursorStyle {
   return value === "block" || value === "underline" ? value : "bar";
-}
-
-function normalizeTerminalSessionPersistenceMode(
-  value: string | undefined,
-): TerminalSessionPersistenceMode {
-  return value === "embedded" || value === "persistent"
-    ? value
-    : DEFAULT_zmux_SETTINGS.terminalSessionPersistenceMode;
 }
 
 function normalizeZedOverlayTargetApp(value: string | undefined): ZedOverlayTargetApp {
