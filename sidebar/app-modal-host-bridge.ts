@@ -2,6 +2,7 @@ import type { AgentConfigDraft } from "./agent-config-modal";
 import { logAppModalError } from "./app-modal-error-log";
 import type { CommandConfigDraft } from "./command-config-modal";
 import type { SidebarActionType } from "../shared/sidebar-commands";
+import type { WorkspaceProjectConfigDraft } from "../shared/workspace-dock-icons";
 
 export type AppModalKind =
   | "agentConfig"
@@ -11,11 +12,15 @@ export type AppModalKind =
   | "previousSessions"
   | "renameSession"
   | "scratchPad"
-  | "settings";
+  | "settings"
+  | "workspaceConfig";
 
 export type OpenAppModalMessage =
   | {
-      modal: Exclude<AppModalKind, "agentConfig" | "commandConfig" | "renameSession">;
+      modal: Exclude<
+        AppModalKind,
+        "agentConfig" | "commandConfig" | "renameSession" | "workspaceConfig"
+      >;
       type: "open";
     }
   | { agentDraft: AgentConfigDraft; modal: "agentConfig"; type: "open" }
@@ -23,6 +28,11 @@ export type OpenAppModalMessage =
       commandDraft: CommandConfigDraft;
       lockedActionType?: SidebarActionType;
       modal: "commandConfig";
+      type: "open";
+    }
+  | {
+      modal: "workspaceConfig";
+      projectConfigDraft: WorkspaceProjectConfigDraft;
       type: "open";
     }
   | { initialTitle: string; modal: "renameSession"; sessionId: string; type: "open" };

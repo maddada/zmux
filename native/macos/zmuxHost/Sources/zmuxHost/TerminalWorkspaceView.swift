@@ -8,15 +8,19 @@ final class TerminalWorkspaceView: NSView {
   private struct TerminalSession {
     let sessionId: String
     let view: Ghostty.SurfaceView
+    let scrollView: SurfaceScrollView
+    let titleBarView: TerminalSessionTitleBarView
     let borderView: TerminalPaneBorderView
     var cancellables: Set<AnyCancellable> = []
   }
 
+  private static let terminalTitleBarHeight: CGFloat = 33
   private let ghostty: Ghostty.App
   private let sendEvent: (HostEvent) -> Void
   private var sessions: [String: TerminalSession] = [:]
   private var activeSessionIds = Set<String>()
   private var attentionSessionIds = Set<String>()
+  private var sessionActivities = [String: NativeTerminalActivity]()
   private var focusedSessionId: String?
   private var lastEmittedFocusedSessionId: String?
   private var programmaticFocusDepth = 0
@@ -60,17 +64,44 @@ final class TerminalWorkspaceView: NSView {
     config.workingDirectory = command.cwd
     config.environmentVariables = command.env ?? [:]
     config.initialInput = command.initialInput
-    let surfaceView = Ghostty.SurfaceView(app, baseConfig: config)
+    let surfaceView = ZmuxGhosttySurfaceView(app, baseConfig: config)
     surfaceView.translatesAutoresizingMaskIntoConstraints = false
+    /**
+     CDXC:NativeTerminals 2026-04-28-03:09
+     Embedded Ghostty terminals must expose the same visible scrollback
+     scrollbar as Ghostty windows. Mount the surface through Ghostty's native
+     scroll wrapper so scrollbar state, dragging, and scrollback positioning
+     are driven by the terminal core instead of a separate overlay.
+     */
+    let scrollView = SurfaceScrollView(contentSize: .zero, surfaceView: surfaceView)
+    scrollView.translatesAutoresizingMaskIntoConstraints = false
+    let titleBarView = TerminalSessionTitleBarView(
+      title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId)
+    )
+    titleBarView.translatesAutoresizingMaskIntoConstraints = false
+    titleBarView.onMouseDown = { [weak self] in
+      self?.focusTerminal(sessionId: command.sessionId, reason: "nativeTitleBarMouseDown")
+    }
+    titleBarView.onAction = { [weak self] action in
+      self?.focusTerminal(sessionId: command.sessionId, reason: "nativeTitleBarAction")
+      self?.sendEvent(.terminalTitleBarAction(sessionId: command.sessionId, action: action))
+    }
     let borderView = TerminalPaneBorderView()
     borderView.translatesAutoresizingMaskIntoConstraints = false
 
     var session = TerminalSession(
-      sessionId: command.sessionId, view: surfaceView, borderView: borderView)
+      sessionId: command.sessionId,
+      view: surfaceView,
+      scrollView: scrollView,
+      titleBarView: titleBarView,
+      borderView: borderView)
     surfaceView.$title
       .removeDuplicates()
       .sink { [weak self] title in
         guard !title.isEmpty else { return }
+        self?.sessions[command.sessionId]?.titleBarView.setTitle(
+          normalizedTerminalSessionTitle(title, sessionId: command.sessionId)
+        )
         self?.sendEvent(.terminalTitleChanged(sessionId: command.sessionId, title: title))
       }
       .store(in: &session.cancellables)
@@ -85,7 +116,8 @@ final class TerminalWorkspaceView: NSView {
 
     sessions[command.sessionId] = session
     activeSessionIds.insert(command.sessionId)
-    addSubview(surfaceView)
+    addSubview(scrollView)
+    addSubview(titleBarView)
     addSubview(borderView)
     terminalLayout = terminalLayout ?? .leaf(sessionId: command.sessionId)
     needsLayout = true
@@ -106,10 +138,12 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     activeSessionIds.remove(sessionId)
+    sessionActivities.removeValue(forKey: sessionId)
     if let surface = session.view.surface {
       ghostty.requestClose(surface: surface)
     }
-    session.view.removeFromSuperview()
+    session.scrollView.removeFromSuperview()
+    session.titleBarView.removeFromSuperview()
     session.borderView.removeFromSuperview()
     terminalLayout = prunedLayout(removing: sessionId, from: terminalLayout)
     attentionSessionIds.remove(sessionId)
@@ -289,10 +323,12 @@ final class TerminalWorkspaceView: NSView {
       activeSessionIds.insert(sessionId)
     } else {
       activeSessionIds.remove(sessionId)
-      moveOffscreen(session.view)
+      moveOffscreen(session.scrollView)
+      moveOffscreen(session.titleBarView)
       moveOffscreen(session.borderView)
     }
-    session.view.isHidden = false
+    session.scrollView.isHidden = false
+    session.titleBarView.isHidden = !visible
     session.borderView.isHidden = !visible
     needsLayout = true
     updateTerminalBorder(for: sessionId)
@@ -302,13 +338,16 @@ final class TerminalWorkspaceView: NSView {
     let responderBefore = responderSnapshot()
     activeSessionIds = Set(command.activeSessionIds)
     attentionSessionIds = Set(command.attentionSessionIds ?? [])
+    sessionActivities = command.sessionActivities ?? [:]
     focusedSessionId = command.focusedSessionId
     terminalLayout = command.layout
     for session in sessions.values {
-      session.view.isHidden = false
+      session.scrollView.isHidden = false
+      session.titleBarView.isHidden = false
       session.borderView.isHidden = false
       if !activeSessionIds.contains(session.sessionId) {
-        moveOffscreen(session.view)
+        moveOffscreen(session.scrollView)
+        moveOffscreen(session.titleBarView)
         moveOffscreen(session.borderView)
       }
     }
@@ -406,15 +445,34 @@ final class TerminalWorkspaceView: NSView {
     guard let session = sessions[sessionId] else {
       return
     }
-    let view = session.view
-    view.frame = rect
-    view.sizeDidChange(rect.size)
+    /**
+     CDXC:NativeTerminals 2026-04-28-12:49
+     Non-persistent native Ghostty panes must show the same per-session title
+     bar that the reference workspace renders in React. The AppKit surface is
+     therefore laid out below native chrome instead of covering the full pane.
+     */
+    let titleBarHeight = min(Self.terminalTitleBarHeight, max(rect.height, 0))
+    let titleBarRect = CGRect(
+      x: rect.minX,
+      y: rect.maxY - titleBarHeight,
+      width: rect.width,
+      height: titleBarHeight
+    )
+    let terminalRect = CGRect(
+      x: rect.minX,
+      y: rect.minY,
+      width: rect.width,
+      height: max(rect.height - titleBarHeight, 1)
+    )
+    session.titleBarView.frame = titleBarRect
+    session.titleBarView.needsLayout = true
+    session.titleBarView.layoutSubtreeIfNeeded()
+    session.scrollView.frame = terminalRect
+    session.view.sizeDidChange(terminalRect.size)
+    session.scrollView.needsLayout = true
+    session.scrollView.layoutSubtreeIfNeeded()
     session.borderView.frame = rect
     updateTerminalBorder(for: sessionId)
-  }
-
-  private func moveOffscreen(_ view: Ghostty.SurfaceView) {
-    moveOffscreen(view as NSView)
   }
 
   private func moveOffscreen(_ view: NSView) {
@@ -441,7 +499,11 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     let isActive = activeSessionIds.contains(sessionId)
+    session.titleBarView.isHidden = !isActive
     session.borderView.isHidden = !isActive
+    session.titleBarView.setState(
+      activity: sessionActivities[sessionId]
+    )
     session.borderView.setState(
       isFocused: focusedSessionId == sessionId,
       isAttention: attentionSessionIds.contains(sessionId)
@@ -592,6 +654,223 @@ final class TerminalWorkspaceView: NSView {
       return nextChildren.isEmpty
         ? nil : .split(direction: direction, ratio: ratio, children: nextChildren)
     }
+  }
+}
+
+private func normalizedTerminalSessionTitle(_ title: String?, sessionId: String) -> String {
+  let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  return trimmedTitle.isEmpty ? sessionId : trimmedTitle
+}
+
+private final class ZmuxGhosttySurfaceView: Ghostty.SurfaceView {
+  /**
+   CDXC:NativeTerminals 2026-04-28-03:17
+   Embedded Ghostty terminals must not paste text on middle click. Ghostty's
+   default selection-clipboard behavior always maps middle-button events to
+   paste, so zmux consumes button 2 before the terminal core sees it.
+   */
+  override func otherMouseDown(with event: NSEvent) {
+    if event.buttonNumber == 2 {
+      return
+    }
+    super.otherMouseDown(with: event)
+  }
+
+  override func otherMouseUp(with event: NSEvent) {
+    if event.buttonNumber == 2 {
+      return
+    }
+    super.otherMouseUp(with: event)
+  }
+
+  override func otherMouseDragged(with event: NSEvent) {
+    if event.buttonNumber == 2 {
+      return
+    }
+    super.otherMouseDragged(with: event)
+  }
+}
+
+private final class TerminalSessionTitleBarView: NSView {
+  private static let borderColor = NSColor(
+    calibratedRed: 0x58 / 255,
+    green: 0x6F / 255,
+    blue: 0x95 / 255,
+    alpha: 0.24
+  ).cgColor
+  private static let backgroundColor = NSColor(
+    calibratedRed: 0x05 / 255,
+    green: 0x06 / 255,
+    blue: 0x08 / 255,
+    alpha: 0.96
+  ).cgColor
+  private static let titleColor = NSColor(
+    calibratedRed: 0xE1 / 255,
+    green: 0xE1 / 255,
+    blue: 0xE1 / 255,
+    alpha: 1
+  )
+  private static let workingIndicatorColor = NSColor(
+    calibratedRed: 0xF5 / 255,
+    green: 0x9E / 255,
+    blue: 0x0B / 255,
+    alpha: 1
+  ).cgColor
+  private static let attentionIndicatorColor = NSColor(
+    calibratedRed: 0x65 / 255,
+    green: 0xE5 / 255,
+    blue: 0x8A / 255,
+    alpha: 1
+  ).cgColor
+
+  private let titleLabel = NSTextField(labelWithString: "")
+  private let activityIndicatorView = NSView(frame: .zero)
+  private let bottomBorderView = NSView(frame: .zero)
+  private let actionButtons: [(action: TerminalTitleBarAction, button: NSButton)]
+  private var activity: NativeTerminalActivity?
+  var onMouseDown: (() -> Void)?
+  var onAction: ((TerminalTitleBarAction) -> Void)?
+
+  override var isFlipped: Bool {
+    true
+  }
+
+  init(title: String) {
+    actionButtons = [
+      (.rename, Self.makeActionButton(systemSymbolName: "pencil", fallbackTitle: "R", tooltip: "Rename Session")),
+      (.fork, Self.makeActionButton(systemSymbolName: "arrow.triangle.branch", fallbackTitle: "F", tooltip: "Fork Session")),
+      (.reload, Self.makeActionButton(systemSymbolName: "arrow.clockwise", fallbackTitle: "R", tooltip: "Reload Session")),
+      (.sleep, Self.makeActionButton(systemSymbolName: "moon", fallbackTitle: "S", tooltip: "Sleep Session")),
+      (.close, Self.makeActionButton(systemSymbolName: "xmark", fallbackTitle: "X", tooltip: "Close Session")),
+    ]
+    super.init(frame: .zero)
+    wantsLayer = true
+    layer?.backgroundColor = Self.backgroundColor
+    layer?.borderColor = Self.borderColor
+    layer?.borderWidth = 0
+
+    titleLabel.stringValue = title
+    titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .bold)
+    titleLabel.textColor = Self.titleColor
+    titleLabel.lineBreakMode = .byTruncatingTail
+
+    activityIndicatorView.wantsLayer = true
+    activityIndicatorView.layer?.backgroundColor = NSColor.clear.cgColor
+    activityIndicatorView.layer?.cornerRadius = 4
+    activityIndicatorView.isHidden = true
+
+    bottomBorderView.wantsLayer = true
+    bottomBorderView.layer?.backgroundColor = Self.borderColor
+
+    addSubview(titleLabel)
+    addSubview(activityIndicatorView)
+    for item in actionButtons {
+      item.button.target = self
+      item.button.action = #selector(performTitleBarAction(_:))
+      addSubview(item.button)
+    }
+    addSubview(bottomBorderView)
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    onMouseDown?()
+    super.mouseDown(with: event)
+  }
+
+  override func layout() {
+    super.layout()
+    let insetX: CGFloat = 10
+    let buttonSize: CGFloat = 20
+    let buttonGap: CGFloat = 6
+    let indicatorSize: CGFloat = 8
+    let indicatorGap: CGFloat = 6
+    let centerY = floor((bounds.height - buttonSize) / 2)
+    var trailingX = bounds.width - insetX
+
+    for item in actionButtons.reversed() {
+      trailingX -= buttonSize
+      item.button.frame = CGRect(x: trailingX, y: centerY, width: buttonSize, height: buttonSize)
+      trailingX -= buttonGap
+    }
+
+    /**
+     CDXC:NativeTerminals 2026-04-28-03:37
+     Per-terminal title bars must not show the blue focused-session dot. Keep
+     focus state visible through the pane border while preserving a small
+     card-matched activity dot immediately after the title for done/working.
+     */
+    let titleTrailing = trailingX
+    let maxTitleWidth = max(
+      titleTrailing - insetX - (activity == nil ? 2 : indicatorSize + indicatorGap + 2),
+      0
+    )
+    let titleWidth = min(ceil(titleLabel.intrinsicContentSize.width), maxTitleWidth)
+    titleLabel.frame = CGRect(
+      x: insetX,
+      y: floor((bounds.height - 16) / 2),
+      width: titleWidth,
+      height: 16
+    )
+    activityIndicatorView.frame = CGRect(
+      x: titleLabel.frame.maxX + indicatorGap,
+      y: floor((bounds.height - indicatorSize) / 2),
+      width: indicatorSize,
+      height: indicatorSize
+    )
+    bottomBorderView.frame = CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
+  }
+
+  func setTitle(_ title: String) {
+    if titleLabel.stringValue != title {
+      titleLabel.stringValue = title
+    }
+  }
+
+  func setState(activity nextActivity: NativeTerminalActivity?) {
+    activity = nextActivity
+    switch nextActivity {
+    case .attention:
+      activityIndicatorView.isHidden = false
+      activityIndicatorView.layer?.backgroundColor = Self.attentionIndicatorColor
+    case .working:
+      activityIndicatorView.isHidden = false
+      activityIndicatorView.layer?.backgroundColor = Self.workingIndicatorColor
+    case .none:
+      activityIndicatorView.isHidden = true
+      activityIndicatorView.layer?.backgroundColor = NSColor.clear.cgColor
+    }
+    needsLayout = true
+  }
+
+  @objc private func performTitleBarAction(_ sender: NSButton) {
+    guard let item = actionButtons.first(where: { $0.button === sender }) else {
+      return
+    }
+    onAction?(item.action)
+  }
+
+  private static func makeActionButton(
+    systemSymbolName: String,
+    fallbackTitle: String,
+    tooltip: String
+  ) -> NSButton {
+    let button = NSButton(title: "", target: nil, action: nil)
+    button.bezelStyle = .texturedRounded
+    button.isBordered = false
+    button.imagePosition = .imageOnly
+    button.toolTip = tooltip
+    button.contentTintColor = NSColor(calibratedWhite: 0.88, alpha: 0.72)
+    if let image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: tooltip) {
+      button.image = image
+    } else {
+      button.title = fallbackTitle
+      button.font = NSFont.systemFont(ofSize: 11, weight: .bold)
+    }
+    return button
   }
 }
 

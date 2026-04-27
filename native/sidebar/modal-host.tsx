@@ -8,7 +8,12 @@ import { PreviousSessionsModal } from "../../sidebar/previous-sessions-modal";
 import { ScratchPadModal } from "../../sidebar/scratch-pad-modal";
 import { SettingsModal } from "../../sidebar/settings-modal";
 import { SessionRenameModal } from "../../sidebar/session-rename-modal";
+import {
+  WorkspaceConfigModal,
+  type WorkspaceConfigModalProps,
+} from "../../sidebar/workspace-config-modal";
 import type { SidebarActionType } from "../../shared/sidebar-commands";
+import type { WorkspaceProjectConfigDraft } from "../../shared/workspace-dock-icons";
 import {
   installAppModalGlobalErrorLogging,
   logAppModalError,
@@ -26,7 +31,8 @@ type AppModalKind =
   | "previousSessions"
   | "renameSession"
   | "scratchPad"
-  | "settings";
+  | "settings"
+  | "workspaceConfig";
 
 type AppModalHostMessage =
   | {
@@ -35,6 +41,7 @@ type AppModalHostMessage =
       initialTitle?: string;
       lockedActionType?: SidebarActionType;
       modal: AppModalKind;
+      projectConfigDraft?: WorkspaceProjectConfigDraft;
       sessionId?: string;
       type: "open";
     }
@@ -50,7 +57,22 @@ type ConfigModalState = {
   agentDraft?: AgentConfigDraft;
   commandDraft?: CommandConfigDraft;
   lockedActionType?: SidebarActionType;
+  projectConfigDraft?: WorkspaceProjectConfigDraft;
 };
+
+const WORKSPACE_CONFIG_THEME_OPTIONS = [
+  { label: "Plain Dark", value: "plain-dark" },
+  { label: "Plain Light", value: "plain-light" },
+  { label: "Dark Blue", value: "dark-blue" },
+  { label: "Dark Green", value: "dark-green" },
+  { label: "Dark Red", value: "dark-red" },
+  { label: "Dark Pink", value: "dark-pink" },
+  { label: "Dark Orange", value: "dark-orange" },
+  { label: "Light Blue", value: "light-blue" },
+  { label: "Light Green", value: "light-green" },
+  { label: "Light Pink", value: "light-pink" },
+  { label: "Light Orange", value: "light-orange" },
+] satisfies WorkspaceConfigModalProps["themeOptions"];
 
 declare global {
   interface Window {
@@ -163,6 +185,22 @@ function AppModalHost() {
           closeModal();
         }}
       />
+      <WorkspaceConfigModal
+        draft={config.projectConfigDraft ?? createEmptyWorkspaceConfigDraft()}
+        isOpen={activeModal === "workspaceConfig" && config.projectConfigDraft !== undefined}
+        onCancel={closeModal}
+        onSave={(draft) => {
+          vscode.postMessage({
+            icon: draft.icon,
+            name: draft.name,
+            projectId: draft.projectId,
+            theme: draft.theme,
+            type: "saveWorkspaceConfig",
+          });
+          closeModal();
+        }}
+        themeOptions={WORKSPACE_CONFIG_THEME_OPTIONS}
+      />
       <AgentConfigModal
         draft={config.agentDraft ?? createEmptyAgentDraft()}
         isOpen={activeModal === "agentConfig" && config.agentDraft !== undefined}
@@ -226,6 +264,12 @@ function useModalStateFromNative() {
             }
             setConfig({ agentDraft: message.agentDraft });
             setRenameSession(undefined);
+          } else if (message.modal === "workspaceConfig") {
+            if (!message.projectConfigDraft) {
+              throw new Error("Workspace config modal request is missing projectConfigDraft.");
+            }
+            setConfig({ projectConfigDraft: message.projectConfigDraft });
+            setRenameSession(undefined);
           } else {
             setConfig({});
             setRenameSession(undefined);
@@ -273,6 +317,13 @@ function createEmptyAgentDraft(): AgentConfigDraft {
   return {
     command: "",
     name: "",
+  };
+}
+
+function createEmptyWorkspaceConfigDraft(): WorkspaceProjectConfigDraft {
+  return {
+    name: "",
+    projectId: "",
   };
 }
 

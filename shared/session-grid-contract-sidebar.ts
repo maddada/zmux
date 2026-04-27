@@ -1,6 +1,7 @@
 import type { CompletionSoundSetting } from "./completion-sound";
 import type { SidebarAgentButton, SidebarAgentIcon } from "./sidebar-agents";
 import type { SidebarCommandIcon } from "./sidebar-command-icons";
+import type { WorkspaceDockIcon } from "./workspace-dock-icons";
 import type {
   SidebarActionType,
   SidebarCommandButton,
@@ -12,6 +13,7 @@ import type { SidebarPinnedPrompt } from "./sidebar-pinned-prompts";
 import type {
   SessionLifecycleState,
   SessionGridSnapshot,
+  SidebarTheme,
   TerminalViewMode,
   VisibleSessionCount,
 } from "./session-grid-contract-core";
@@ -566,6 +568,13 @@ export type SidebarToExtensionMessage =
       playCompletionSound: boolean;
       command?: string;
       url?: string;
+    }
+  | {
+      type: "saveWorkspaceConfig";
+      icon?: WorkspaceDockIcon;
+      name: string;
+      projectId: string;
+      theme?: SidebarTheme;
     }
   | {
       type: "deleteSidebarCommand";

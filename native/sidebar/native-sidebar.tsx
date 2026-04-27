@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import {
   IconChevronLeft,
   IconChevronRight,
-  IconPhoto,
+  IconSettings,
   IconPlus,
   IconPalette,
   IconTrash,
@@ -16,7 +16,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { installAppModalGlobalErrorLogging } from "../../sidebar/app-modal-error-log";
-import { postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
+import { openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
 import { SidebarApp } from "../../sidebar/sidebar-app";
 import {
   explainFirstPromptAutoRenameDecision,
@@ -56,6 +56,7 @@ import {
   type SidebarToExtensionMessage,
   type TerminalSessionRecord,
   type VisibleSessionCount,
+  type SidebarCommandSessionIndicator,
 } from "../../shared/session-grid-contract";
 import {
   createDefaultSidebarGitState,
@@ -108,12 +109,20 @@ import {
   normalizeStoredSidebarCommandOrder,
   normalizeStoredSidebarCommands,
   type SidebarCommandButton,
+  type SidebarCommandRunMode,
   type StoredSidebarCommand,
 } from "../../shared/sidebar-commands";
 import {
   DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
   normalizeSidebarCommandIconColor,
 } from "../../shared/sidebar-command-icons";
+import { SidebarCommandIconGlyph } from "../../sidebar/sidebar-command-icon";
+import {
+  normalizeWorkspaceDockIcon,
+  normalizeWorkspaceDockIconDataUrl,
+  type WorkspaceDockIcon,
+  type WorkspaceProjectConfigDraft,
+} from "../../shared/workspace-dock-icons";
 import {
   DEFAULT_zmux_SETTINGS,
   normalizezmuxSettings,
@@ -141,6 +150,7 @@ type NativeHostCommand =
       attentionSessionIds?: string[];
       focusedSessionId?: string;
       layout?: NativeTerminalLayout;
+      sessionActivities?: Record<string, "attention" | "working">;
       type: "setActiveTerminalSet";
     }
   | { layout?: NativeTerminalLayout; type: "setTerminalLayout" }
@@ -153,6 +163,11 @@ type NativeHostCommand =
   | { details?: string; event: string; type: "appendRestoreDebugLog" }
   | { details?: string; event: string; type: "appendSessionTitleDebugLog" }
   | { details?: string; event: string; type: "appendWorkspaceDockIndicatorDebugLog" }
+  | {
+      key: "previousSessions" | "projects" | "settings";
+      payloadJson: string;
+      type: "persistSharedSidebarStorage";
+    }
   | {
       args: string[];
       cwd?: string;
@@ -182,6 +197,7 @@ type NativeHostCommand =
     };
 
 export type WorkspaceBarProject = {
+  icon?: WorkspaceDockIcon;
   iconDataUrl?: string;
   isActive: boolean;
   path: string;
@@ -220,6 +236,11 @@ type NativeTerminalLayout =
 type NativeHostEvent =
   | { foregroundPid?: number; sessionId: string; ttyName?: string; type: "terminalReady" }
   | { sessionId: string; title: string; type: "terminalTitleChanged" }
+  | {
+      action: "close" | "fork" | "reload" | "rename" | "sleep";
+      sessionId: string;
+      type: "terminalTitleBarAction";
+    }
   | { cwd: string; sessionId: string; type: "terminalCwdChanged" }
   | { exitCode?: number; sessionId: string; type: "terminalExited" }
   | { sessionId: string; type: "terminalFocused" }
@@ -233,6 +254,12 @@ type NativeProcessResult = Extract<NativeHostEvent, { type: "processResult" }>;
 type NativeBootstrap = {
   cwd?: string;
   homeDir?: string;
+  sharedSidebarStorage?: {
+    previousSessions?: string;
+    projects?: string;
+    settings?: string;
+  };
+  zmuxHomeDir?: string;
   workspaceName?: string;
   zedOverlayEnabled?: boolean;
   zedOverlayTargetApp?: "zed" | "zed-preview" | "vscode" | "vscode-insiders";
@@ -264,6 +291,7 @@ declare global {
       removeProject: (projectId: string) => void;
       reorderProjects: (projectIds: string[]) => void;
       setProjectIcon: (projectId: string, iconDataUrl: string | undefined) => void;
+      setProjectConfig: (projectId: string, draft: WorkspaceProjectConfigDraft) => void;
       setProjectTheme: (projectId: string, theme: SidebarTheme) => void;
     };
     __zmux_NATIVE_SETTINGS__?: {
@@ -333,7 +361,7 @@ const FIRST_PROMPT_AUTO_RENAME_POLL_MS = 2_000;
 const AUTO_SUBMIT_STAGED_RENAME_DELAY_MS = 1_000;
 const NATIVE_INITIAL_ACTIVITY_SUPPRESSION_MS = 7_000;
 const NATIVE_MIN_WORKING_DURATION_BEFORE_ATTENTION_MS = 5_000;
-const zmux_AGENT_NOTIFY_HOOK_PATH = `${nativeHomeDirectory()}/.zmux/hooks/agent-shell-notify.sh`;
+const zmux_AGENT_NOTIFY_HOOK_PATH = `${nativeZmuxHomeDirectory()}/hooks/agent-shell-notify.sh`;
 /**
  * CDXC:WorkspaceDock 2026-04-27-08:48
  * Workspace context-menu themes use the same concrete theme palette names as
@@ -396,6 +424,7 @@ const pendingGitCommitRequests = new Map<
 >();
 
 type NativeProject = {
+  icon?: WorkspaceDockIcon;
   iconDataUrl?: string;
   name: string;
   path: string;
@@ -533,7 +562,6 @@ let projects: NativeProject[] = restoredProjectState.projects;
 let activeProjectId = restoredProjectState.activeProjectId;
 let settings = readStoredSettings();
 let revision = 0;
-let nextNativeSessionNumber = 1;
 const sidebarBus = new SurfaceMessageBus<ExtensionToSidebarMessage>();
 const terminalStateById = new Map<
   string,
@@ -551,6 +579,21 @@ const terminalStateById = new Map<
 const titleDerivedActivityBySessionId = new Map<string, TitleDerivedSessionActivity>();
 const nativeActivitySuppressedUntilBySessionId = new Map<string, number>();
 const nativeWorkingStartedAtBySessionId = new Map<string, number>();
+type NativeSidebarCommandSession = {
+  closeOnExit: boolean;
+  commandId: string;
+  playCompletionSound: boolean;
+  runId?: string;
+  sessionId: string;
+};
+/**
+ * CDXC:Actions 2026-04-28-02:54
+ * Native action buttons keep the same command-to-terminal association as the
+ * reference sidebar so background runs can show indicators, spinners, and
+ * close-on-exit completion state without appearing as normal session cards.
+ */
+const sidebarCommandSessionByCommandId = new Map<string, NativeSidebarCommandSession>();
+const sidebarCommandCommandIdBySessionId = new Map<string, string>();
 /**
  * CDXC:NativeTerminals 2026-04-26-06:45
  * Sidebar workspace snapshots normalize terminal ids back to canonical display
@@ -566,6 +609,23 @@ const sidebarSessionIdByNativeSessionId = new Map<string, string>();
  * directly instead of relying on the VS Code extension bridge path.
  */
 const agentManagerXBridgeClient = new AgentManagerXNativeBridgeClient();
+
+/**
+ * CDXC:NativeTerminals 2026-04-28-12:06
+ * Persistent helper mode was removed, but native terminal ids still need to be
+ * project-scoped so sidebar commands, layouts, and focus events never collide
+ * across workspaces during one embedded-host app session.
+ */
+function createDurableNativeSessionId(projectId: string, sidebarSessionId: string): string {
+  return `${projectId}:${sidebarSessionId}`;
+}
+
+function rememberNativeSessionMapping(projectId: string, sidebarSessionId: string): string {
+  const nativeSessionId = createDurableNativeSessionId(projectId, sidebarSessionId);
+  nativeSessionIdBySidebarSessionId.set(sidebarSessionId, nativeSessionId);
+  sidebarSessionIdByNativeSessionId.set(nativeSessionId, sidebarSessionId);
+  return nativeSessionId;
+}
 
 /**
  * CDXC:NativeSidebar 2026-04-26-00:47
@@ -857,9 +917,13 @@ function startFirstPromptAutoRenameMonitor(): void {
 
 function readStoredSettings(): zmuxSettings {
   try {
+    const sharedSettingsJson = window.__zmux_NATIVE_HOST__?.sharedSidebarStorage?.settings;
     const storedSettings = normalizezmuxSettings(
-      JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || "null"),
+      JSON.parse(sharedSettingsJson || localStorage.getItem(SETTINGS_STORAGE_KEY) || "null"),
     );
+    if (!sharedSettingsJson) {
+      persistSharedSettingsSnapshot(storedSettings);
+    }
     const bootstrap = window.__zmux_NATIVE_HOST__;
     return normalizezmuxSettings({
       ...storedSettings,
@@ -877,7 +941,7 @@ function readStoredSettings(): zmuxSettings {
 
 function saveSettings(nextSettings: zmuxSettings): void {
   settings = normalizezmuxSettings(nextSettings);
-  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  persistSharedSettingsSnapshot(settings);
   syncGhosttyTerminalSettings(settings);
   postZedOverlaySettings();
   publish();
@@ -902,10 +966,16 @@ function saveSettingsFromNative(nextSettings: zmuxSettings): void {
    * Native Detach has already persisted and applied the disabled Zed attach
    * state. Mirror that state into sidebar localStorage and React state without
    * posting a duplicate configure command back to the native host.
-   */
+  */
   settings = normalizezmuxSettings(nextSettings);
-  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  persistSharedSettingsSnapshot(settings);
   publish();
+}
+
+function persistSharedSettingsSnapshot(nextSettings: zmuxSettings): void {
+  const payloadJson = JSON.stringify(nextSettings);
+  localStorage.setItem(SETTINGS_STORAGE_KEY, payloadJson);
+  postNative({ key: "settings", payloadJson, type: "persistSharedSidebarStorage" });
 }
 
 function readStoredAgents(): StoredSidebarAgent[] {
@@ -1002,7 +1072,10 @@ function refreshCommands(): void {
 function readStoredProjects(): { activeProjectId: string; projects: NativeProject[] } {
   const fallbackProject = createInitialProject();
   try {
-    const candidate = JSON.parse(localStorage.getItem(PROJECTS_STORAGE_KEY) || "null");
+    const sharedProjectsJson = window.__zmux_NATIVE_HOST__?.sharedSidebarStorage?.projects;
+    const candidate = JSON.parse(
+      sharedProjectsJson || localStorage.getItem(PROJECTS_STORAGE_KEY) || "null",
+    );
     const candidateProjects: NativeProject[] = Array.isArray(candidate?.projects)
       ? candidate.projects.flatMap((project: unknown) => normalizeStoredNativeProject(project))
       : [];
@@ -1013,11 +1086,19 @@ function readStoredProjects(): { activeProjectId: string; projects: NativeProjec
         ? candidate.activeProjectId
         : projects[0]!.projectId;
     const startupProjects = normalizeStartupTerminalSleepState(projects, activeProjectId);
+    if (candidateProjects.length > 0) {
+      persistSharedProjectsSnapshot(activeProjectId, projects);
+    }
     appendRestoreDebugLog("nativeSidebar.projects.read", {
       activeProjectId,
       projectCount: startupProjects.length,
       projects: startupProjects.map(summarizeNativeProject),
-      source: candidateProjects.length > 0 ? "localStorage" : "fallback",
+      source:
+        candidateProjects.length > 0
+          ? sharedProjectsJson
+            ? "sharedStorage"
+            : "localStorage"
+          : "fallback",
     });
     return { activeProjectId, projects: startupProjects };
   } catch (error) {
@@ -1069,18 +1150,13 @@ function normalizeStartupTerminalSleepState(
 }
 
 function writeStoredProjects(reason: string): void {
-  localStorage.setItem(
-    PROJECTS_STORAGE_KEY,
-    JSON.stringify({
-      activeProjectId,
-      projects,
-    }),
-  );
+  persistSharedProjectsSnapshot(activeProjectId, projects);
   /**
    * CDXC:WorkspaceRestore 2026-04-26-10:00
-   * The packaged native app owns workspace/session state in the sidebar
-   * webview, so project additions and session grid mutations must persist to
-   * localStorage instead of relying on the older Bun workspaces.json store.
+   * CDXC:DevAppFlavor 2026-04-28-02:01
+   * zmux-dev and default zmux must share workspace/session state. Persist the
+   * canonical project snapshot to the native shared state file and mirror it to
+   * localStorage only as a same-webview cache.
    */
   appendRestoreDebugLog("nativeSidebar.projects.persist", {
     activeProjectId,
@@ -1088,6 +1164,18 @@ function writeStoredProjects(reason: string): void {
     projects: projects.map(summarizeNativeProject),
     reason,
   });
+}
+
+function persistSharedProjectsSnapshot(
+  nextActiveProjectId: string,
+  nextProjects: readonly NativeProject[],
+): void {
+  const payloadJson = JSON.stringify({
+    activeProjectId: nextActiveProjectId,
+    projects: nextProjects,
+  });
+  localStorage.setItem(PROJECTS_STORAGE_KEY, payloadJson);
+  postNative({ key: "projects", payloadJson, type: "persistSharedSidebarStorage" });
 }
 
 function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
@@ -1102,6 +1190,7 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
   const projectId = project.projectId?.trim() || createProjectId(path);
   return [
     {
+      icon: normalizeWorkspaceDockIcon(project.icon) ?? normalizeLegacyWorkspaceDockIcon(project),
       iconDataUrl: normalizeWorkspaceDockIconDataUrl(project.iconDataUrl),
       name: project.name?.trim() || projectNameFromPath(path),
       path,
@@ -1122,11 +1211,11 @@ function createInitialProject(): NativeProject {
   };
 }
 
-function normalizeWorkspaceDockIconDataUrl(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  return /^data:image\/(?:png|svg\+xml);base64,/u.test(value) ? value : undefined;
+function normalizeLegacyWorkspaceDockIcon(
+  project: Partial<NativeProject>,
+): WorkspaceDockIcon | undefined {
+  const legacyIconDataUrl = normalizeWorkspaceDockIconDataUrl(project.iconDataUrl);
+  return legacyIconDataUrl ? { dataUrl: legacyIconDataUrl, kind: "image" } : undefined;
 }
 
 function normalizeWorkspaceDockTheme(value: unknown): SidebarTheme | undefined {
@@ -1535,11 +1624,23 @@ async function openOrCreatePullRequest(): Promise<void> {
 
 function readPreviousSessions(): SidebarPreviousSessionItem[] {
   try {
-    const candidate = JSON.parse(localStorage.getItem(PREVIOUS_SESSIONS_STORAGE_KEY) || "null");
+    const sharedPreviousSessionsJson =
+      window.__zmux_NATIVE_HOST__?.sharedSidebarStorage?.previousSessions;
+    const candidate = JSON.parse(
+      sharedPreviousSessionsJson || localStorage.getItem(PREVIOUS_SESSIONS_STORAGE_KEY) || "null",
+    );
     if (!Array.isArray(candidate)) {
       return [];
     }
-    return candidate.filter(isSidebarPreviousSessionItem).slice(0, 80);
+    const sessions = candidate.filter(isSidebarPreviousSessionItem).slice(0, 80);
+    if (!sharedPreviousSessionsJson && sessions.length > 0) {
+      postNative({
+        key: "previousSessions",
+        payloadJson: JSON.stringify(sessions),
+        type: "persistSharedSidebarStorage",
+      });
+    }
+    return sessions;
   } catch {
     return [];
   }
@@ -1547,7 +1648,9 @@ function readPreviousSessions(): SidebarPreviousSessionItem[] {
 
 function writePreviousSessions(nextSessions: readonly SidebarPreviousSessionItem[]): void {
   previousSessions = nextSessions.slice(0, 80);
-  localStorage.setItem(PREVIOUS_SESSIONS_STORAGE_KEY, JSON.stringify(previousSessions));
+  const payloadJson = JSON.stringify(previousSessions);
+  localStorage.setItem(PREVIOUS_SESSIONS_STORAGE_KEY, payloadJson);
+  postNative({ key: "previousSessions", payloadJson, type: "persistSharedSidebarStorage" });
 }
 
 function rememberPreviousSession(sessionId: string): void {
@@ -1828,6 +1931,9 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
       const agentIcon = getSidebarAgentIconById(projectedAgentName);
       const shouldPreferTerminalTitle =
         Boolean(visibleTerminalTitle) && shouldPreferTerminalTitleForAgentIcon(agentIcon);
+      const hasTrustedStoredResumeTitle =
+        sessionRecord?.kind === "terminal" &&
+        getNativeStoredTrustedResumeTitle(sessionRecord).title !== undefined;
       const primaryTitle = shouldPreferTerminalTitle
         ? visibleTerminalTitle
         : visiblePrimaryTitle
@@ -1879,7 +1985,8 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
         isGeneratingFirstPromptTitle: terminalState?.firstPromptAutoRenameInProgress === true,
         isRunning: terminalState?.lifecycleState === "running",
         isPrimaryTitleTerminalTitle:
-          Boolean(visibleTerminalTitle) && (!visiblePrimaryTitle || shouldPreferTerminalTitle),
+          (Boolean(visibleTerminalTitle) && (!visiblePrimaryTitle || shouldPreferTerminalTitle)) ||
+          (!visibleTerminalTitle && hasTrustedStoredResumeTitle),
         primaryTitle,
         terminalTitle: secondaryTerminalTitle,
       };
@@ -1888,6 +1995,41 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
     viewMode: group.snapshot.viewMode,
     visibleCount: group.snapshot.visibleCount,
   }));
+}
+
+function getNativeSidebarCommandSessionIndicators(
+  commands: readonly { commandId: string }[],
+): SidebarCommandSessionIndicator[] {
+  const focusedSessionId = activeSnapshot().focusedSessionId;
+  return commands.flatMap((command) => {
+    const storedSession = sidebarCommandSessionByCommandId.get(command.commandId);
+    if (!storedSession) {
+      return [];
+    }
+
+    const session = findSessionRecord(storedSession.sessionId);
+    const terminalState = terminalStateById.get(storedSession.sessionId);
+    if (!session || !terminalState) {
+      return [];
+    }
+
+    const status =
+      terminalState.lifecycleState === "running"
+        ? "running"
+        : terminalState.lifecycleState === "error"
+          ? "error"
+          : "idle";
+
+    return [
+      {
+        commandId: command.commandId,
+        isActive: storedSession.sessionId === focusedSessionId,
+        sessionId: storedSession.sessionId,
+        status,
+        title: terminalState.terminalTitle ?? session.title.trim() ?? undefined,
+      },
+    ];
+  });
 }
 
 function buildSidebarMessage(): SidebarHydrateMessage {
@@ -1927,6 +2069,7 @@ function buildSidebarMessage(): SidebarHydrateMessage {
         activeSessionsSortMode,
         settings.createSessionOnSidebarDoubleClick,
         settings.renameSessionOnDoubleClick,
+        getNativeSidebarCommandSessionIndicators(commands),
       ),
       projectHeader: {
         directory: project.path,
@@ -2152,7 +2295,7 @@ function restoreNativeTerminalSession(
   session: TerminalSessionRecord,
   reason: string,
 ): void {
-  const nativeSessionId = `${project.projectId}-session-${nextNativeSessionNumber++}`;
+  const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
   const sessionStateFilePath = createNativeSessionStateFilePath(
     project.projectId,
     session.sessionId,
@@ -2161,8 +2304,6 @@ function restoreNativeTerminalSession(
   if (initialInput.trim()) {
     suppressNativeSessionActivityIndicators(session.sessionId, "restore-resume-command");
   }
-  nativeSessionIdBySidebarSessionId.set(session.sessionId, nativeSessionId);
-  sidebarSessionIdByNativeSessionId.set(nativeSessionId, session.sessionId);
   terminalStateById.set(session.sessionId, {
     activity: "idle",
     agentName: session.agentName,
@@ -2207,6 +2348,7 @@ function createWorkspaceBarState(): WorkspaceBarStateMessage {
   const workspaceBarState: WorkspaceBarStateMessage = {
     activeProjectId,
     projects: projects.map((project) => ({
+      icon: project.icon ?? normalizeLegacyWorkspaceDockIcon(project),
       iconDataUrl: project.iconDataUrl,
       isActive: project.projectId === activeProjectId,
       path: project.path,
@@ -2334,7 +2476,7 @@ function postWorkspaceBarState(): void {
 function createNativeSessionStateFilePath(projectId: string, sessionId: string): string {
   const safeProjectId = sanitizeNativePathPart(projectId);
   const safeSessionId = sanitizeNativePathPart(sessionId);
-  return `${nativeHomeDirectory()}/.zmux/session-state/${safeProjectId}/${safeSessionId}.env`;
+  return `${nativeZmuxHomeDirectory()}/session-state/${safeProjectId}/${safeSessionId}.env`;
 }
 
 function createNativeAgentSessionEnvironment(args: {
@@ -2379,6 +2521,19 @@ function nativeHomeDirectory(): string {
     window.__zmux_NATIVE_HOST__?.homeDir?.trim() ||
     inferHomeDirectoryFromPath(initialWorkspacePath) ||
     nativeFallbackHomeDirectory()
+  );
+}
+
+function nativeZmuxHomeDirectory(): string {
+  /**
+   * CDXC:DevAppFlavor 2026-04-28-02:01
+   * Native zmux-dev and default zmux intentionally share hook scripts and
+   * per-session state under ~/.zmux so both app identities show the same
+   * workspaces and restorable sessions.
+   */
+  return (
+    window.__zmux_NATIVE_HOST__?.zmuxHomeDir?.trim() ||
+    `${nativeHomeDirectory()}/.zmux`
   );
 }
 
@@ -2753,20 +2908,44 @@ function buildNativeOpenCodeCopyResumeCommand(
 }
 
 function getNativeTrustedResumeTitle(session: TerminalSessionRecord): string | undefined {
+  const result = getNativeStoredTrustedResumeTitle(session);
   /**
-   * CDXC:SessionRestore 2026-04-27-18:31
-   * Starred session-card titles are unsynced display titles, not confirmed
-   * agent session names. Automatic restore and resume-copy actions only trust
-   * terminal-auto titles captured from the running agent terminal.
+   * CDXC:SessionRestore 2026-04-28-03:37
+   * Restore trust is based on persisted title provenance plus title filtering,
+   * not the sidebar `∗` marker. Generated first-prompt titles and terminal-auto
+   * titles are resumable; placeholders, manual sidebar-only names, paths, bare
+   * agent names, and command noise remain rejected.
    */
-  if (session.titleSource !== "terminal-auto") {
-    return undefined;
+  appendRestoreDebugLog("nativeSidebar.resumeTitleTrust", {
+    reason: result.reason,
+    sessionId: session.sessionId,
+    title: session.title,
+    titleSource: session.titleSource,
+    trusted: result.title !== undefined,
+  });
+  return result.title;
+}
+
+function getNativeStoredTrustedResumeTitle(
+  session: TerminalSessionRecord,
+): { reason: string; title?: string } {
+  if (!isNativeTrustedResumeTitleSource(session.titleSource)) {
+    return { reason: `untrusted-title-source:${session.titleSource ?? "missing"}` };
   }
   const resumeTitle = getVisibleTerminalTitle(session.title)?.trim();
-  if (!resumeTitle || isRejectedNativeResumeTitle(resumeTitle)) {
-    return undefined;
+  if (!resumeTitle) {
+    return { reason: "title-empty-or-filtered" };
   }
-  return resumeTitle;
+  if (isRejectedNativeResumeTitle(resumeTitle)) {
+    return { reason: "title-rejected-as-command-or-noise" };
+  }
+  return { reason: "trusted-stored-title", title: resumeTitle };
+}
+
+function isNativeTrustedResumeTitleSource(
+  titleSource: TerminalSessionRecord["titleSource"],
+): boolean {
+  return titleSource === "terminal-auto" || titleSource === "generated";
 }
 
 function isRejectedNativeResumeTitle(title: string): boolean {
@@ -2866,6 +3045,10 @@ function createTerminal(
   initialInput = "",
   groupId?: string,
   agentName?: string,
+  options?: {
+    initialPresentation?: "background" | "focused";
+    focusAfterCreate?: boolean;
+  },
 ): TerminalSessionRecord | undefined {
   const project = activeProject();
   const targetWorkspace = groupId
@@ -2873,6 +3056,7 @@ function createTerminal(
     : project.workspace;
   const result = createSessionInSimpleWorkspace(targetWorkspace, {
     agentName,
+    initialPresentation: options?.initialPresentation,
     terminalEngine: "ghostty-native",
     title,
   });
@@ -2880,13 +3064,11 @@ function createTerminal(
   if (!generatedSession) {
     return undefined;
   }
-  const nativeSessionId = `${project.projectId}-session-${nextNativeSessionNumber++}`;
+  const nativeSessionId = rememberNativeSessionMapping(project.projectId, generatedSession.sessionId);
   const sessionStateFilePath = createNativeSessionStateFilePath(
     project.projectId,
     generatedSession.sessionId,
   );
-  nativeSessionIdBySidebarSessionId.set(generatedSession.sessionId, nativeSessionId);
-  sidebarSessionIdByNativeSessionId.set(nativeSessionId, generatedSession.sessionId);
   updateActiveProjectWorkspace(() => result.snapshot);
   const session = generatedSession;
   if (!session) {
@@ -2925,7 +3107,9 @@ function createTerminal(
     title,
     type: "createTerminal",
   });
-  postNative({ sessionId: nativeSessionId, type: "focusTerminal" });
+  if (options?.focusAfterCreate !== false) {
+    postNative({ sessionId: nativeSessionId, type: "focusTerminal" });
+  }
   publish();
   return session;
 }
@@ -3083,12 +3267,13 @@ async function processNativeFirstPromptAutoRename(
   const decision = explainFirstPromptAutoRenameDecision({
     agentName,
     /**
-     * CDXC:SessionTitleSync 2026-04-26-09:52
-     * Native first-prompt auto-rename should not skip just because a terminal
-     * or sidebar title already exists. Preserve zmux's slash/meta/pending
-     * guards, but always allow the first prompt to request `/rename <title>`.
+     * CDXC:SessionTitleSync 2026-04-28-03:49
+     * Native first-prompt auto-title may only name still-untitled sessions.
+     * Hooks can fire after resume or mid-conversation, so meaningful persisted,
+     * terminal-auto, generated, and user titles must block generation instead
+     * of being overwritten by a later prompt sample.
      */
-    currentTitle: undefined,
+    currentTitle,
     hasAutoTitleFromFirstPrompt: persistedState.hasAutoTitleFromFirstPrompt,
     pendingFirstPromptAutoRenamePrompt:
       terminalState.firstPromptAutoRenameProcessedPrompt === pendingPrompt
@@ -3097,11 +3282,22 @@ async function processNativeFirstPromptAutoRename(
     prompt: pendingPrompt,
   });
   if (!decision.shouldAutoName || !pendingPrompt) {
+    const shouldClearStalePendingPrompt =
+      Boolean(pendingPrompt) &&
+      (decision.reason === "nonGenericCurrentTitle" || decision.reason === "alreadyAutoNamed");
+    if (shouldClearStalePendingPrompt && pendingPrompt && terminalState.sessionStateFilePath) {
+      await clearNativeFirstPromptAutoRenamePendingPrompt(
+        terminalState.sessionStateFilePath,
+        pendingPrompt,
+      );
+      terminalState.firstPromptAutoRenameProcessedPrompt = pendingPrompt;
+    }
     logNativeFirstPromptAutoRenameSkipOnce(sessionId, terminalState, decision.reason, {
       agentName,
       currentTitle,
       hasAutoTitleFromFirstPrompt: persistedState.hasAutoTitleFromFirstPrompt,
       hasPendingPrompt: Boolean(pendingPrompt),
+      pendingPromptCleared: shouldClearStalePendingPrompt,
       sessionStateFilePath: terminalState.sessionStateFilePath,
       strategy: decision.strategy,
     });
@@ -3406,6 +3602,7 @@ function getNativePromptPreview(prompt: string | undefined): string | undefined 
 
 function closeTerminal(sessionId: string): void {
   const nativeSessionId = forgetNativeSessionMapping(sessionId);
+  clearNativeSidebarCommandSessionBySessionId(sessionId);
   rememberPreviousSession(sessionId);
   updateActiveProjectWorkspace(
     (workspace) => removeSessionInSimpleWorkspace(workspace, sessionId).snapshot,
@@ -3501,6 +3698,7 @@ function findTerminalSession(sessionId: string): TerminalSessionRecord | undefin
 
 function disposeNativeSleepingSessionSurface(sessionId: string): void {
   const nativeSessionId = forgetNativeSessionMapping(sessionId);
+  clearNativeSidebarCommandSessionBySessionId(sessionId);
   terminalStateById.delete(sessionId);
   titleDerivedActivityBySessionId.delete(sessionId);
   nativeActivitySuppressedUntilBySessionId.delete(sessionId);
@@ -3760,7 +3958,213 @@ function runCliCommandButton(commandId: string): TerminalSessionRecord | undefin
   if (!command.command) {
     throw new Error(`Command button is not configured: ${commandId}`);
   }
-  return createTerminal(command.name, `${command.command}\r`);
+  return runNativeSidebarCommand(command);
+}
+
+function getNativeSidebarCommandSessionTitle(command: SidebarCommandButton): string {
+  const normalizedActionName = command.name.trim();
+  return normalizedActionName.length > 0
+    ? normalizedActionName
+    : (command.command ?? "").trim().slice(0, 20);
+}
+
+function getNativeSidebarCommandExecutionText(command: string, closeOnExit: boolean): string {
+  if (!closeOnExit) {
+    return command;
+  }
+
+  return `${command}; __zmux_exit=$?; exit $__zmux_exit`;
+}
+
+function createNativeSidebarCommandRunId(commandId: string): string {
+  return `${commandId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function postNativeSidebarCommandRunState(
+  commandId: string,
+  runId: string,
+  state: "error" | "running" | "success",
+): void {
+  sidebarBus.post({
+    commandId,
+    runId,
+    state,
+    type: "sidebarCommandRunStateChanged",
+  });
+}
+
+function clearNativeSidebarCommandRunState(commandId: string): void {
+  sidebarBus.post({
+    commandId,
+    type: "sidebarCommandRunStateCleared",
+  });
+}
+
+function playNativeSidebarActionCompletionSound(sessionId?: string): void {
+  sidebarBus.post({
+    sessionId,
+    sound: settings.completionSound,
+    type: "playCompletionSound",
+  });
+}
+
+function setNativeSidebarCommandSession(
+  command: SidebarCommandButton,
+  sessionId: string,
+  closeOnExit: boolean,
+  runId?: string,
+): void {
+  const existingSession = sidebarCommandSessionByCommandId.get(command.commandId);
+  if (existingSession?.sessionId && existingSession.sessionId !== sessionId) {
+    sidebarCommandCommandIdBySessionId.delete(existingSession.sessionId);
+  }
+
+  sidebarCommandSessionByCommandId.set(command.commandId, {
+    closeOnExit,
+    commandId: command.commandId,
+    playCompletionSound: command.playCompletionSound,
+    runId,
+    sessionId,
+  });
+  sidebarCommandCommandIdBySessionId.set(sessionId, command.commandId);
+}
+
+function clearNativeSidebarCommandSessionBySessionId(sessionId: string): void {
+  const commandId = sidebarCommandCommandIdBySessionId.get(sessionId);
+  if (!commandId) {
+    return;
+  }
+
+  sidebarCommandCommandIdBySessionId.delete(sessionId);
+  const storedSession = sidebarCommandSessionByCommandId.get(commandId);
+  if (storedSession?.sessionId === sessionId) {
+    sidebarCommandSessionByCommandId.delete(commandId);
+  }
+}
+
+function closeNativeSidebarCommandSession(sessionId: string): void {
+  clearNativeSidebarCommandSessionBySessionId(sessionId);
+  closeTerminal(sessionId);
+}
+
+function writeNativeSidebarCommandToSession(
+  sessionId: string,
+  command: string,
+  closeOnExit: boolean,
+): void {
+  const nativeSessionId = nativeSessionIdForSidebarSession(sessionId);
+  postNative({
+    sessionId: nativeSessionId,
+    text: getNativeSidebarCommandExecutionText(command, closeOnExit),
+    type: "writeTerminalText",
+  });
+  postNative({ sessionId: nativeSessionId, type: "sendTerminalEnter" });
+}
+
+function handleNativeSidebarCommandSessionExit(
+  sessionId: string,
+  exitCode: number | undefined,
+): void {
+  const commandId = sidebarCommandCommandIdBySessionId.get(sessionId);
+  if (!commandId) {
+    return;
+  }
+
+  const storedSession = sidebarCommandSessionByCommandId.get(commandId);
+  if (!storedSession || storedSession.sessionId !== sessionId) {
+    return;
+  }
+
+  const didFail = (exitCode ?? 0) !== 0;
+  const runId = storedSession.runId ?? createNativeSidebarCommandRunId(commandId);
+  postNativeSidebarCommandRunState(commandId, runId, didFail ? "error" : "success");
+
+  if (didFail || storedSession.playCompletionSound) {
+    playNativeSidebarActionCompletionSound(sessionId);
+  }
+
+  if (storedSession.closeOnExit && !didFail) {
+    closeNativeSidebarCommandSession(sessionId);
+    return;
+  }
+
+  if (!storedSession.closeOnExit) {
+    sidebarCommandSessionByCommandId.set(commandId, {
+      ...storedSession,
+      runId: undefined,
+    });
+  }
+  publish();
+}
+
+/**
+ * CDXC:Actions 2026-04-28-02:54
+ * Native sidebar terminal actions must match the reference sidebar flow:
+ * default runs open managed background terminals with button spinner/status
+ * feedback, while Debug Action creates a normal visible session for inspection.
+ */
+function runNativeSidebarCommand(
+  command: SidebarCommandButton,
+  runMode: SidebarCommandRunMode = "default",
+): TerminalSessionRecord | undefined {
+  if (command.actionType === "browser" && command.url) {
+    openNativeBrowserWindow(command.url);
+    return undefined;
+  }
+  const commandText = command.command?.trim();
+  if (!commandText) {
+    return undefined;
+  }
+
+  const sessionTitle = getNativeSidebarCommandSessionTitle(command);
+  if (runMode === "debug") {
+    return createTerminal(`Debug: ${sessionTitle}`, `${commandText}\r`);
+  }
+
+  const existingSession = sidebarCommandSessionByCommandId.get(command.commandId);
+  if (command.closeTerminalOnExit && existingSession) {
+    closeNativeSidebarCommandSession(existingSession.sessionId);
+  }
+
+  if (command.closeTerminalOnExit) {
+    const session = createTerminal(sessionTitle, "", undefined, undefined, {
+      focusAfterCreate: false,
+      initialPresentation: "background",
+    });
+    if (!session) {
+      return undefined;
+    }
+
+    const runId = createNativeSidebarCommandRunId(command.commandId);
+    setNativeSidebarCommandSession(command, session.sessionId, true, runId);
+    postNativeSidebarCommandRunState(command.commandId, runId, "running");
+    writeNativeSidebarCommandToSession(session.sessionId, commandText, true);
+    publish();
+    return session;
+  }
+
+  const reusableSession =
+    existingSession && terminalStateById.get(existingSession.sessionId)?.lifecycleState === "running"
+      ? findTerminalSession(existingSession.sessionId)
+      : undefined;
+  if (existingSession && !reusableSession) {
+    closeNativeSidebarCommandSession(existingSession.sessionId);
+  }
+
+  const session =
+    reusableSession ??
+    createTerminal(sessionTitle, "", undefined, undefined, {
+      focusAfterCreate: false,
+      initialPresentation: "background",
+    });
+  if (!session) {
+    return undefined;
+  }
+
+  setNativeSidebarCommandSession(command, session.sessionId, false);
+  writeNativeSidebarCommandToSession(session.sessionId, commandText, false);
+  publish();
+  return session;
 }
 
 async function handleNativeCliCommand(action: string, payload: Record<string, unknown>) {
@@ -4064,6 +4468,8 @@ function closeAllNativeSessions(): void {
     terminalStateById.delete(sessionId);
     titleDerivedActivityBySessionId.delete(sessionId);
   }
+  sidebarCommandSessionByCommandId.clear();
+  sidebarCommandCommandIdBySessionId.clear();
   projects = projects.map((project) => ({
     ...project,
     workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
@@ -4147,15 +4553,54 @@ function removeProject(projectId: string): void {
 function setProjectIcon(projectId: string, iconDataUrl: string | undefined): void {
   /**
    * CDXC:WorkspaceDock 2026-04-27-08:48
-   * Workspace icons are user-picked PNG/SVG data URLs stored on the workspace
-   * record, so the React dock can render them without a second native file
-   * bridge and without losing the icon on restart.
+   * Native-picked workspace images still enter through the legacy data URL API.
+   * Convert them into the typed workspace icon model so the dock can share one
+   * renderer for image and Tabler icon variants.
    */
+  const icon = iconDataUrl
+    ? ({ dataUrl: iconDataUrl, kind: "image" } satisfies WorkspaceDockIcon)
+    : undefined;
   projects = projects.map((project) =>
-    project.projectId === projectId ? { ...project, iconDataUrl } : project,
+    project.projectId === projectId ? { ...project, icon, iconDataUrl } : project,
   );
   writeStoredProjects("setProjectIcon");
   publish();
+}
+
+function setProjectConfig(projectId: string, draft: WorkspaceProjectConfigDraft): void {
+  /**
+   * CDXC:WorkspaceConfig 2026-04-28-01:19
+   * The workspace configure modal saves name, theme, and either a Tabler icon,
+   * an uploaded image, or no icon in one transaction so Cancel never applies a
+   * partial workspace identity change.
+   */
+  const name = draft.name.trim();
+  const icon = normalizeWorkspaceDockIcon(draft.icon);
+  const theme = normalizeWorkspaceDockTheme(draft.theme);
+  projects = projects.map((project) =>
+    project.projectId === projectId
+      ? {
+          ...project,
+          icon,
+          iconDataUrl: icon?.kind === "image" ? icon.dataUrl : undefined,
+          name: name || project.name,
+          theme: theme ?? project.theme,
+        }
+      : project,
+  );
+  writeStoredProjects("setProjectConfig");
+  publish();
+}
+
+function saveWorkspaceConfig(
+  message: Extract<SidebarToExtensionMessage, { type: "saveWorkspaceConfig" }>,
+): void {
+  setProjectConfig(message.projectId, {
+    icon: message.icon,
+    name: message.name,
+    projectId: message.projectId,
+    theme: message.theme,
+  });
 }
 
 function setProjectTheme(projectId: string, theme: SidebarTheme): void {
@@ -4375,6 +4820,10 @@ function saveSidebarCommand(
 }
 
 function deleteSidebarCommand(commandId: string): void {
+  const existingSession = sidebarCommandSessionByCommandId.get(commandId);
+  if (existingSession) {
+    closeNativeSidebarCommandSession(existingSession.sessionId);
+  }
   writeStoredCommands(storedCommands.filter((command) => command.commandId !== commandId));
   writeStoredCommandOrder(
     storedCommandOrder.filter((candidateCommandId) => candidateCommandId !== commandId),
@@ -4722,18 +5171,26 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "runSidebarCommand": {
       const command = commands.find((candidate) => candidate.commandId === message.commandId);
-      if (command?.actionType === "browser" && command.url) {
-        openNativeBrowserWindow(command.url);
-      } else if (command?.command) {
-        createTerminal(command.name, `${command.command}\r`);
+      if (command) {
+        runNativeSidebarCommand(command, message.runMode);
       }
       return;
     }
     case "endSidebarCommandRun":
+      if (message.commandId) {
+        const existingSession = sidebarCommandSessionByCommandId.get(message.commandId);
+        if (existingSession) {
+          closeNativeSidebarCommandSession(existingSession.sessionId);
+        }
+        clearNativeSidebarCommandRunState(message.commandId);
+      }
       publish();
       return;
     case "saveSidebarCommand":
       saveSidebarCommand(message);
+      return;
+    case "saveWorkspaceConfig":
+      saveWorkspaceConfig(message);
       return;
     case "deleteSidebarCommand":
       deleteSidebarCommand(message.commandId);
@@ -4790,7 +5247,24 @@ function syncNativeLayout(): void {
       return terminalState?.activity === "attention";
     })
     .map((session) => nativeSessionIdForSidebarSession(session.sessionId));
+  const sessionActivities: Record<string, "attention" | "working"> = {};
+  for (const session of snapshot.sessions) {
+    if (session.kind !== "terminal" || !visibleIds.has(session.sessionId)) {
+      continue;
+    }
+    const activity = terminalStateById.get(session.sessionId)?.activity;
+    if (activity === "attention" || activity === "working") {
+      sessionActivities[nativeSessionIdForSidebarSession(session.sessionId)] = activity;
+    }
+  }
   const layout = buildLayout(visibleSessionIds, snapshot.visibleCount);
+  /**
+   * CDXC:NativeTerminals 2026-04-28-03:37
+   * Native title bars must mirror the same per-session state used by sidebar
+   * cards: green for done/attention and orange for working. Send the activity
+   * projection with the layout command so AppKit renders the indicator from
+   * the same source of truth as the React card indicator.
+   */
   postNative({
     activeSessionIds: visibleSessionIds,
     attentionSessionIds,
@@ -4798,6 +5272,7 @@ function syncNativeLayout(): void {
       ? nativeSessionIdForSidebarSession(snapshot.focusedSessionId)
       : undefined,
     layout,
+    sessionActivities,
     type: "setActiveTerminalSet",
   });
 }
@@ -4909,10 +5384,14 @@ window.addEventListener("zmux-native-host-event", (event) => {
       hostEvent.title,
       previousTerminalTitle,
     );
+  } else if (hostEvent.type === "terminalTitleBarAction") {
+    handleNativeTerminalTitleBarAction(sidebarSessionId, hostEvent.action);
+    return;
   } else if (hostEvent.type === "terminalExited") {
     terminalState.lifecycleState = "done";
     terminalState.activity = "idle";
     nativeWorkingStartedAtBySessionId.delete(sidebarSessionId);
+    handleNativeSidebarCommandSessionExit(sidebarSessionId, hostEvent.exitCode);
   } else if (hostEvent.type === "terminalError") {
     terminalState.lifecycleState = "error";
     terminalState.activity = "attention";
@@ -4978,6 +5457,45 @@ window.addEventListener("zmux-native-host-event", (event) => {
   publish();
 });
 
+function handleNativeTerminalTitleBarAction(
+  sessionId: string,
+  action: Extract<NativeHostEvent, { type: "terminalTitleBarAction" }>["action"],
+): void {
+  const session = findTerminalSession(sessionId);
+  if (!session) {
+    return;
+  }
+  /**
+   * CDXC:NativeTerminals 2026-04-28-13:20
+   * Native per-session title bars must expose the same right-side actions as
+   * the reference workspace pane header. Route AppKit button clicks back into
+   * the sidebar's existing session handlers so title-bar controls and sidebar
+   * card controls mutate one source of workspace truth.
+   */
+  switch (action) {
+    case "rename":
+      openAppModal({
+        initialTitle: session.title || DEFAULT_TERMINAL_SESSION_TITLE,
+        modal: "renameSession",
+        sessionId,
+        type: "open",
+      });
+      return;
+    case "fork":
+      forkNativeSession(sessionId);
+      return;
+    case "reload":
+      restartNativeSession(sessionId);
+      return;
+    case "sleep":
+      setNativeSessionSleeping(sessionId, true);
+      return;
+    case "close":
+      closeTerminal(sessionId);
+      return;
+  }
+}
+
 window.__zmux_NATIVE_WORKSPACE_BAR__ = {
   addProject,
   focusProject,
@@ -4985,6 +5503,7 @@ window.__zmux_NATIVE_WORKSPACE_BAR__ = {
   removeProject,
   reorderProjects,
   setProjectIcon,
+  setProjectConfig,
   setProjectTheme,
 };
 
@@ -5060,6 +5579,7 @@ type WorkspaceDockActions = {
   pickWorkspaceIcon: (projectId: string) => void;
   removeProject: (projectId: string) => void;
   reorderProjects: (projectIds: string[]) => void;
+  setProjectConfig: (projectId: string, draft: WorkspaceProjectConfigDraft) => void;
   setProjectTheme: (projectId: string, theme: SidebarTheme) => void;
 };
 
@@ -5092,6 +5612,7 @@ export function WorkspaceDock({
     pickWorkspaceIcon: (projectId) => postNative({ projectId, type: "pickWorkspaceIcon" }),
     removeProject,
     reorderProjects,
+    setProjectConfig,
     setProjectTheme,
     ...actions,
   };
@@ -5277,14 +5798,27 @@ export function WorkspaceDock({
     });
   };
 
-  const openIconPicker = (projectId: string) => {
+  const openWorkspaceConfig = (projectId: string) => {
     /**
-     * CDXC:WorkspaceDock 2026-04-27-08:53
-     * WKWebView file inputs are unreliable from custom context-menu clicks.
-     * Route workspace icon selection through the native macOS file picker and
-     * receive the PNG/SVG data URL back through the existing workspace API.
+     * CDXC:WorkspaceConfig 2026-04-28-01:19
+     * Workspace icon changes now happen inside a configure modal so Tabler
+     * glyphs, uploaded images, theme, and workspace name share the same Save
+     * and Cancel behavior as the existing Configure Action flow.
      */
-    workspaceActions.pickWorkspaceIcon(projectId);
+    const project = state.projects.find((candidate) => candidate.projectId === projectId);
+    if (!project) {
+      return;
+    }
+    openAppModal({
+      modal: "workspaceConfig",
+      projectConfigDraft: {
+        icon: project.icon ?? normalizeLegacyWorkspaceDockIcon(project),
+        name: project.title,
+        projectId: project.projectId,
+        theme: project.theme,
+      },
+      type: "open",
+    });
     setMenu(undefined);
   };
 
@@ -5334,13 +5868,7 @@ export function WorkspaceDock({
             title={workspaceDockTitle(project)}
             type="button"
           >
-            {project.iconDataUrl ? (
-              <img alt="" className="workspace-dock-icon-image" src={project.iconDataUrl} />
-            ) : (
-              <span className="workspace-dock-initials">
-                {workspaceDockInitials(project.title, index)}
-              </span>
-            )}
+            <WorkspaceDockProjectIcon project={project} projectIndex={index} />
             <WorkspaceDockIndicators project={project} />
           </button>
         ))}
@@ -5396,12 +5924,12 @@ export function WorkspaceDock({
             <>
               <button
                 className="session-context-menu-item"
-                onClick={() => openIconPicker(menu.projectId)}
+                onClick={() => openWorkspaceConfig(menu.projectId)}
                 role="menuitem"
                 type="button"
               >
-                <IconPhoto aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Pick icon
+                <IconSettings aria-hidden="true" className="session-context-menu-icon" size={14} />
+                Configure
               </button>
               <button
                 className="session-context-menu-item"
@@ -5469,6 +5997,37 @@ export function WorkspaceDock({
         </div>
       ) : null}
     </aside>
+  );
+}
+
+function WorkspaceDockProjectIcon({
+  project,
+  projectIndex,
+}: {
+  project: WorkspaceBarProject;
+  projectIndex: number;
+}) {
+  const icon =
+    project.icon ??
+    (project.iconDataUrl ? { dataUrl: project.iconDataUrl, kind: "image" as const } : undefined);
+  if (icon?.kind === "image") {
+    return <img alt="" className="workspace-dock-icon-image" src={icon.dataUrl} />;
+  }
+  if (icon?.kind === "tabler") {
+    return (
+      <SidebarCommandIconGlyph
+        className="workspace-dock-tabler-icon"
+        color={icon.color ?? "currentColor"}
+        icon={icon.icon}
+        size={22}
+        stroke={1.9}
+      />
+    );
+  }
+  return (
+    <span className="workspace-dock-initials">
+      {workspaceDockInitials(project.title, projectIndex)}
+    </span>
   );
 }
 

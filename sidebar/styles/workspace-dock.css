@@ -18,10 +18,27 @@ body.native-sidebar-body #root {
 }
 
 .native-sidebar-main {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
   padding: calc(12px * var(--sidebar-density-scale));
+}
+
+/* CDXC:NativeSidebarChrome 2026-04-28-03:33: The native sidebar webview must
+   keep long session/action content scrollable. The project header consumes
+   fixed vertical space, so the sidebar stack owns only the remaining height,
+   scrolls if its top panels exceed that space, and gives the session list a
+   bounded scroll viewport. */
+body.native-sidebar-body .stack {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .workspace-dock {
@@ -144,6 +161,11 @@ body.native-sidebar-body #root {
   height: 24px;
   object-fit: cover;
   width: 24px;
+}
+
+.workspace-dock-tabler-icon {
+  color: currentColor;
+  flex: none;
 }
 
 .workspace-dock-initials {
