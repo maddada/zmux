@@ -2,8 +2,8 @@
   "name": "zmux",
   "version": "1.0.2",
   "private": true,
-  "type": "module",
   "description": "zmux native macOS workarea and sessions UI.",
+  "type": "module",
   "scripts": {
     "start": "native/macos/zmuxHost/run-zmux-host.sh",
     "build": "native/macos/zmuxHost/build-zmux-host.sh",

@@ -82,9 +82,12 @@ async function sendSidebarCliCommand(action, payload, flags = {}) {
   const socket = await connectBridge(port);
   try {
     return await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error(`Timed out waiting for zmux sidebar CLI result (${action}).`));
-      }, Number(flags.timeout ?? 15_000));
+      const timeout = setTimeout(
+        () => {
+          reject(new Error(`Timed out waiting for zmux sidebar CLI result (${action}).`));
+        },
+        Number(flags.timeout ?? 15_000),
+      );
       socket.on("message", (data) => {
         const event = parseJson(String(data));
         if (event?.type !== "sidebarCliResult" || event.requestId !== requestId) {
@@ -157,7 +160,9 @@ async function bundleCommand(args) {
 async function captureScreenshot(output, flags = {}) {
   await mkdir(path.dirname(output), { recursive: true });
   if (flags.activate !== "false") {
-    await execFileAsync("osascript", ["-e", 'tell application "zmux" to activate']).catch(() => undefined);
+    await execFileAsync("osascript", ["-e", 'tell application "zmux" to activate']).catch(
+      () => undefined,
+    );
   }
   await execFileAsync("screencapture", ["-x", output]);
 }

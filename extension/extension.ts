@@ -55,9 +55,7 @@ export function activate(context: vscode.ExtensionContext): void {
       workspace.revealWorkspaceInBackground(),
     ),
     registerCommand("zmux.openSettings", () => workspace.openSettings()),
-    registerCommand("zmux.moveToSecondarySidebar", () =>
-      workspace.moveSidebarToSecondarySidebar(),
-    ),
+    registerCommand("zmux.moveToSecondarySidebar", () => workspace.moveSidebarToSecondarySidebar()),
     registerCommand("zmux.createSession", () => workspace.createSession()),
     registerCommand("zmux.revealSession", () => workspace.revealSession()),
     registerCommand("zmux.restartSession", () => workspace.restartSessionFromCommand()),
@@ -73,9 +71,7 @@ export function activate(context: vscode.ExtensionContext): void {
     registerCommand("zmux.focusPreviousSidebarSession", () =>
       workspace.focusAdjacentSidebarSession(-1),
     ),
-    registerCommand("zmux.focusNextSidebarSession", () =>
-      workspace.focusAdjacentSidebarSession(1),
-    ),
+    registerCommand("zmux.focusNextSidebarSession", () => workspace.focusAdjacentSidebarSession(1)),
     registerSlotFocusCommand("zmux.focusSessionSlot", workspace),
     registerVisibleCountCommand("zmux.showOne", workspace, 1),
     registerVisibleCountCommand("zmux.showTwo", workspace, 2),

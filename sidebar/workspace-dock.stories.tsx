@@ -80,7 +80,9 @@ export const Default: Story = {
                 .map((projectId) =>
                   previous.projects.find((project) => project.projectId === projectId),
                 )
-                .filter((project): project is (typeof previous.projects)[number] => Boolean(project)),
+                .filter((project): project is (typeof previous.projects)[number] =>
+                  Boolean(project),
+                ),
             }));
           },
           setProjectTheme: (projectId, theme) => {

@@ -118,9 +118,7 @@ export const SIDEBAR_THEME_SETTING_OPTIONS: ReadonlyArray<{
 export const TERMINAL_ENGINE_SETTING_OPTIONS: ReadonlyArray<{
   label: string;
   value: TerminalEngine;
-}> = [
-  { label: "Ghostty Native", value: "ghostty-native" },
-];
+}> = [{ label: "Ghostty Native", value: "ghostty-native" }];
 
 export const ZED_OVERLAY_TARGET_APP_OPTIONS: ReadonlyArray<{
   label: string;

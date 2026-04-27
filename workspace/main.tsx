@@ -16,9 +16,7 @@ declare global {
       postMessage: (message: unknown) => void;
     };
     __zmux_WORKSPACE_APP_MOUNTED__?: boolean;
-    __zmux_WORKSPACE_BOOTSTRAP__?:
-      | WorkspacePanelHydrateMessage
-      | WorkspacePanelSessionStateMessage;
+    __zmux_WORKSPACE_BOOTSTRAP__?: WorkspacePanelHydrateMessage | WorkspacePanelSessionStateMessage;
     __zmux_WORKSPACE_EARLY_LOG__?: (event: string, details?: Record<string, unknown>) => void;
     __zmux_WORKSPACE_REACT_RENDER_SCHEDULED__?: boolean;
     __zmux_WORKSPACE_READY_POSTED__?: boolean;

@@ -304,9 +304,12 @@ export function createSessionAlias(
 export function createAgentSessionDefaultTitle(agentName: string | undefined): string {
   const normalizedAgentName = agentName?.replace(/\s+/g, " ").trim();
   const defaultAgentTitleName = normalizedAgentName
-    ? (DEFAULT_SESSION_AGENT_TITLE_NAMES.get(normalizedAgentName.toLowerCase()) ?? normalizedAgentName)
+    ? (DEFAULT_SESSION_AGENT_TITLE_NAMES.get(normalizedAgentName.toLowerCase()) ??
+      normalizedAgentName)
     : undefined;
-  return defaultAgentTitleName ? `${defaultAgentTitleName} Session` : DEFAULT_TERMINAL_SESSION_TITLE;
+  return defaultAgentTitleName
+    ? `${defaultAgentTitleName} Session`
+    : DEFAULT_TERMINAL_SESSION_TITLE;
 }
 
 export function isNumericSessionAlias(alias: string | undefined): boolean {

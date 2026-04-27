@@ -34,7 +34,7 @@ async function main(): Promise<void> {
       T3CODE_NO_BROWSER: "true",
       T3CODE_PORT: String(options.port),
     },
-    // On Windows, ignoring stdio causes PowerShell-launched `npx --yes t3`
+    // On Windows, ignoring stdio causes PowerShell-launched `npx t3`
     // to exit immediately. Keep stdout/stderr piped and drain them instead.
     stdio: options.bootstrapJson ? ["ignore", "pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
   });

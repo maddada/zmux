@@ -1051,7 +1051,10 @@ export const T3Pane: React.FC<T3PaneProps> = ({
                       : "",
                 };
               })
-              .filter((file: T3ClipboardFilePayload | null): file is T3ClipboardFilePayload => file !== null)
+              .filter(
+                (file: T3ClipboardFilePayload | null): file is T3ClipboardFilePayload =>
+                  file !== null,
+              )
           : [];
         const payloadText = typeof event.data.text === "string" ? event.data.text : "";
         logPasteTrace("workspace.clipboard.nativeRead.resultSuccess", {

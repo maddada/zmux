@@ -151,11 +151,7 @@ const sessionIdForDisplay = (displayId: number | string): string => {
 
 describe("createTimestampedSessionId", () => {
   test("should include two-digit creation time and a three-character base36 suffix", () => {
-    const sessionId = createTimestampedSessionId(
-      [],
-      new Date(2026, 3, 26, 20, 54, 12),
-      () => 0.5,
-    );
+    const sessionId = createTimestampedSessionId([], new Date(2026, 3, 26, 20, 54, 12), () => 0.5);
 
     expect(sessionId).toBe("s-260426-205412-i00");
   });

@@ -104,11 +104,33 @@
   --tw-scroll-mask-right-size: 1rem;
   --tw-scroll-mask-top-size: 1rem;
   --tw-scroll-mask-bottom-size: 1rem;
-  --tw-scroll-mask-left: linear-gradient(to right, transparent, black var(--tw-scroll-mask-left-fade), black);
-  --tw-scroll-mask-right: linear-gradient(to left, transparent, black var(--tw-scroll-mask-right-fade), black);
-  --tw-scroll-mask-top: linear-gradient(to bottom, transparent, black var(--tw-scroll-mask-top-fade), black);
-  --tw-scroll-mask-bottom: linear-gradient(to top, transparent, black var(--tw-scroll-mask-bottom-fade), black);
-  mask-image: var(--tw-scroll-mask-left), var(--tw-scroll-mask-right), var(--tw-scroll-mask-top), var(--tw-scroll-mask-bottom);
+  --tw-scroll-mask-left: linear-gradient(
+    to right,
+    transparent,
+    black var(--tw-scroll-mask-left-fade),
+    black
+  );
+  --tw-scroll-mask-right: linear-gradient(
+    to left,
+    transparent,
+    black var(--tw-scroll-mask-right-fade),
+    black
+  );
+  --tw-scroll-mask-top: linear-gradient(
+    to bottom,
+    transparent,
+    black var(--tw-scroll-mask-top-fade),
+    black
+  );
+  --tw-scroll-mask-bottom: linear-gradient(
+    to top,
+    transparent,
+    black var(--tw-scroll-mask-bottom-fade),
+    black
+  );
+  mask-image:
+    var(--tw-scroll-mask-left), var(--tw-scroll-mask-right), var(--tw-scroll-mask-top),
+    var(--tw-scroll-mask-bottom);
   mask-composite: intersect;
 
   @media (prefers-reduced-motion: no-preference) {
@@ -124,10 +146,7 @@
         0 var(--tw-scroll-mask-top-size),
         calc(100% - var(--tw-scroll-mask-bottom-size)) 100%;
       animation-timeline:
-        scroll(self inline),
-        scroll(self inline),
-        scroll(self block),
-        scroll(self block);
+        scroll(self inline), scroll(self inline), scroll(self block), scroll(self block);
     }
   }
 }
@@ -141,11 +160,33 @@
   --tw-scroll-mask-top-size: --value([length], [percentage], [*]);
   --tw-scroll-mask-bottom-size: --spacing(--value(integer));
   --tw-scroll-mask-bottom-size: --value([length], [percentage], [*]);
-  --tw-scroll-mask-left: linear-gradient(to right, transparent, black var(--tw-scroll-mask-left-fade), black);
-  --tw-scroll-mask-right: linear-gradient(to left, transparent, black var(--tw-scroll-mask-right-fade), black);
-  --tw-scroll-mask-top: linear-gradient(to bottom, transparent, black var(--tw-scroll-mask-top-fade), black);
-  --tw-scroll-mask-bottom: linear-gradient(to top, transparent, black var(--tw-scroll-mask-bottom-fade), black);
-  mask-image: var(--tw-scroll-mask-left), var(--tw-scroll-mask-right), var(--tw-scroll-mask-top), var(--tw-scroll-mask-bottom);
+  --tw-scroll-mask-left: linear-gradient(
+    to right,
+    transparent,
+    black var(--tw-scroll-mask-left-fade),
+    black
+  );
+  --tw-scroll-mask-right: linear-gradient(
+    to left,
+    transparent,
+    black var(--tw-scroll-mask-right-fade),
+    black
+  );
+  --tw-scroll-mask-top: linear-gradient(
+    to bottom,
+    transparent,
+    black var(--tw-scroll-mask-top-fade),
+    black
+  );
+  --tw-scroll-mask-bottom: linear-gradient(
+    to top,
+    transparent,
+    black var(--tw-scroll-mask-bottom-fade),
+    black
+  );
+  mask-image:
+    var(--tw-scroll-mask-left), var(--tw-scroll-mask-right), var(--tw-scroll-mask-top),
+    var(--tw-scroll-mask-bottom);
   mask-composite: intersect;
 
   @media (prefers-reduced-motion: no-preference) {
@@ -161,10 +202,7 @@
         0 var(--tw-scroll-mask-top-size),
         calc(100% - var(--tw-scroll-mask-bottom-size)) 100%;
       animation-timeline:
-        scroll(self inline),
-        scroll(self inline),
-        scroll(self block),
-        scroll(self block);
+        scroll(self inline), scroll(self inline), scroll(self block), scroll(self block);
     }
   }
 }
@@ -172,9 +210,21 @@
 @utility scroll-mask-x {
   --tw-scroll-mask-left-size: 1rem;
   --tw-scroll-mask-right-size: 1rem;
-  --tw-scroll-mask-left: linear-gradient(to right, transparent, black var(--tw-scroll-mask-left-fade), black);
-  --tw-scroll-mask-right: linear-gradient(to left, transparent, black var(--tw-scroll-mask-right-fade), black);
-  mask-image: var(--tw-scroll-mask-left), var(--tw-scroll-mask-right), var(--tw-scroll-mask-top), var(--tw-scroll-mask-bottom);
+  --tw-scroll-mask-left: linear-gradient(
+    to right,
+    transparent,
+    black var(--tw-scroll-mask-left-fade),
+    black
+  );
+  --tw-scroll-mask-right: linear-gradient(
+    to left,
+    transparent,
+    black var(--tw-scroll-mask-right-fade),
+    black
+  );
+  mask-image:
+    var(--tw-scroll-mask-left), var(--tw-scroll-mask-right), var(--tw-scroll-mask-top),
+    var(--tw-scroll-mask-bottom);
   mask-composite: intersect;
 
   @media (prefers-reduced-motion: no-preference) {
@@ -190,10 +240,7 @@
         0 var(--tw-scroll-mask-top-size),
         calc(100% - var(--tw-scroll-mask-bottom-size)) 100%;
       animation-timeline:
-        scroll(self inline),
-        scroll(self inline),
-        scroll(self block),
-        scroll(self block);
+        scroll(self inline), scroll(self inline), scroll(self block), scroll(self block);
     }
   }
 }
@@ -201,9 +248,21 @@
 @utility scroll-mask-y {
   --tw-scroll-mask-top-size: 1rem;
   --tw-scroll-mask-bottom-size: 1rem;
-  --tw-scroll-mask-top: linear-gradient(to bottom, transparent, black var(--tw-scroll-mask-top-fade), black);
-  --tw-scroll-mask-bottom: linear-gradient(to top, transparent, black var(--tw-scroll-mask-bottom-fade), black);
-  mask-image: var(--tw-scroll-mask-left), var(--tw-scroll-mask-right), var(--tw-scroll-mask-top), var(--tw-scroll-mask-bottom);
+  --tw-scroll-mask-top: linear-gradient(
+    to bottom,
+    transparent,
+    black var(--tw-scroll-mask-top-fade),
+    black
+  );
+  --tw-scroll-mask-bottom: linear-gradient(
+    to top,
+    transparent,
+    black var(--tw-scroll-mask-bottom-fade),
+    black
+  );
+  mask-image:
+    var(--tw-scroll-mask-left), var(--tw-scroll-mask-right), var(--tw-scroll-mask-top),
+    var(--tw-scroll-mask-bottom);
   mask-composite: intersect;
 
   @media (prefers-reduced-motion: no-preference) {
@@ -219,10 +278,7 @@
         0 var(--tw-scroll-mask-top-size),
         calc(100% - var(--tw-scroll-mask-bottom-size)) 100%;
       animation-timeline:
-        scroll(self inline),
-        scroll(self inline),
-        scroll(self block),
-        scroll(self block);
+        scroll(self inline), scroll(self inline), scroll(self block), scroll(self block);
     }
   }
 }

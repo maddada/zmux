@@ -615,8 +615,6 @@ describe("buildManualResumePrefillAction", () => {
   });
 
   test("should return undefined when no visible restore title is available", () => {
-    expect(
-      buildManualResumePrefillAction("Session 12", "/workspace/demo-project"),
-    ).toBeUndefined();
+    expect(buildManualResumePrefillAction("Session 12", "/workspace/demo-project")).toBeUndefined();
   });
 });

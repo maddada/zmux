@@ -12,7 +12,7 @@ different term.
 - `activity`: Short-lived agent/session presentation state shown on session cards. Valid values are `idle`, `working`, and `attention`.
 - `idle`: The session is live or present, but no agent work is currently indicated.
 - `working`: The session is actively doing agent work. This is the orange session-card indicator and the orange workspace rail count.
-- `attention`: The session finished work and needs user attention. This is a  session-card activity state, not the workspace rail green count.
+- `attention`: The session finished work and needs user attention. This is a session-card activity state, not the workspace rail green count.
 - `lifecycleState`: Runtime lifecycle for a sidebar session. Valid values are `running`, `done`, `sleeping`, and `error`.
 - `running`: The session has live runtime. In the workspace rail this means live but not `working`, shown as the gray bottom-left count.
 - `done`: The session has completed without being live. In the workspace rail this is the green top-right count.

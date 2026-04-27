@@ -106,7 +106,18 @@ export type WorkspacePanelTerminalPresentationChangedMessage = {
   type: "terminalPresentationChanged";
 };
 
+export type WorkspacePanelDestroyTerminalRuntimeReason =
+  | "auto-sleep"
+  | "close-session"
+  | "full-reload-group"
+  | "full-reload-session"
+  | "manual-sleep"
+  | "reset-workspace"
+  | "sleep-group"
+  | "unknown";
+
 export type WorkspacePanelDestroyTerminalRuntimeMessage = {
+  reason: WorkspacePanelDestroyTerminalRuntimeReason;
   sessionId: string;
   type: "destroyTerminalRuntime";
 };

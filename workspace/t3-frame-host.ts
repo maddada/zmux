@@ -653,9 +653,7 @@ function installHistoryObservers(): void {
 
 function getCurrentThreadId(): string | undefined {
   return (
-    window.__zmux_T3_ACTIVE_THREAD_ID__ ??
-    currentThreadId ??
-    window.__zmux_T3_BOOTSTRAP__?.threadId
+    window.__zmux_T3_ACTIVE_THREAD_ID__ ?? currentThreadId ?? window.__zmux_T3_BOOTSTRAP__?.threadId
   );
 }
 

@@ -101,10 +101,12 @@ export function getTerminalFontFamilyForPreset(preset: TerminalFontPreset): stri
  */
 export function getGhosttyFontFamilyForPreset(preset: TerminalFontPreset): string {
   const fontFamily = getTerminalFontFamilyForPreset(preset);
-  return fontFamily
-    .split(",")
-    .map((part) => part.trim().replace(/^['"]|['"]$/g, ""))
-    .find((part) => part && part !== "monospace" && part !== "ui-monospace") ?? "monospace";
+  return (
+    fontFamily
+      .split(",")
+      .map((part) => part.trim().replace(/^['"]|['"]$/g, ""))
+      .find((part) => part && part !== "monospace" && part !== "ui-monospace") ?? "monospace"
+  );
 }
 
 export function getTerminalFontPresetFromFontFamily(

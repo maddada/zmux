@@ -50,6 +50,7 @@ import {
 import type {
   ExtensionToWorkspacePanelMessage,
   WorkspacePanelAutoFocusRequest,
+  WorkspacePanelDestroyTerminalRuntimeReason,
   WorkspacePanelHydrateMessage,
   WorkspacePanelSessionStateMessage,
 } from "../../shared/workspace-panel-contract";
@@ -1436,7 +1437,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       if (sessionRecord.kind === "terminal") {
         this.retireTerminalPaneRuntimeGeneration(sessionRecord.sessionId);
       }
-      await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord);
+      await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord, "reset-workspace");
       await this.deletePersistedSessionStateIfNeeded(sessionRecord);
       this.clearSessionPresentationState(sessionRecord.sessionId);
     }
@@ -2072,7 +2073,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         this.retireTerminalPaneRuntimeGeneration(sessionId);
       }
 
-      await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord);
+      await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord, "close-session");
       await this.deletePersistedSessionStateIfNeeded(sessionRecord);
       this.logT3CloseSessionRepro("controller.closeSession.afterRuntimeCleanup", {
         sessionId,
@@ -2152,7 +2153,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     if (sleeping) {
-      await this.disposeSleepingSessionSurface(sessionRecord);
+      await this.disposeSleepingSessionSurface(sessionRecord, "manual-sleep");
       await this.refreshSidebarFromCurrentState();
       await this.afterStateChange({ sidebarAlreadyRefreshed: true });
       return;
@@ -2209,7 +2210,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
 
     if (sleeping) {
-      await this.finalizeSessionsSleeping(sessionsToSleep);
+      await this.finalizeSessionsSleeping(sessionsToSleep, "sleep-group");
       return;
     }
 
@@ -2337,7 +2338,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         shouldAwaitFrontendConnection &&
         this.backend.getSessionSnapshot(sessionId)?.isAttached === true;
       this.retireTerminalPaneRuntimeGeneration(sessionId);
-      await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord);
+      await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord, "full-reload-session");
       const reloadedSessionRecord = await this.prepareSessionForTerminalRecreate(sessionRecord);
       await this.backend.restartSession(reloadedSessionRecord);
       await this.afterStateChange();
@@ -2451,7 +2452,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     try {
       for (const plan of fullReloadPlans) {
         this.bumpTerminalPaneRenderNonce(plan.sessionRecord.sessionId);
-        await this.destroyWorkspaceTerminalRuntimeIfNeeded(plan.sessionRecord);
+        await this.destroyWorkspaceTerminalRuntimeIfNeeded(plan.sessionRecord, "full-reload-group");
         const reloadedSessionRecord = await this.prepareSessionForTerminalRecreate(
           plan.sessionRecord,
         );
@@ -3400,7 +3401,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         if (sessionRecord.kind === "terminal") {
           this.retireTerminalPaneRuntimeGeneration(sessionRecord.sessionId);
         }
-        await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord);
+        await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord, "close-session");
         await this.deletePersistedSessionStateIfNeeded(sessionRecord);
         this.clearSessionPresentationState(sessionRecord.sessionId);
       }
@@ -3462,8 +3463,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
   }
 
-  private logWtermWorkspaceDebug(event: string, details?: unknown): void {
-  }
+  private logWtermWorkspaceDebug(event: string, details?: unknown): void {}
 
   private logCompletionSoundDebug(event: string, details?: unknown): void {
     if (!getDebuggingMode()) {
@@ -5019,7 +5019,9 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   private getAgentSessionDefaultTitle(agentId: string | undefined): string {
-    return createAgentSessionDefaultTitle(getSidebarAgentButtonById(agentId ?? "")?.name ?? agentId);
+    return createAgentSessionDefaultTitle(
+      getSidebarAgentButtonById(agentId ?? "")?.name ?? agentId,
+    );
   }
 
   private async launchSidebarCommandInWorkspace(
@@ -5187,14 +5189,17 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
   }
 
-  private async disposeSleepingSessionSurface(sessionRecord: SessionRecord): Promise<void> {
+  private async disposeSleepingSessionSurface(
+    sessionRecord: SessionRecord,
+    reason: WorkspacePanelDestroyTerminalRuntimeReason,
+  ): Promise<void> {
     await this.disposeSurface(sessionRecord);
     if (sessionRecord.kind !== "terminal") {
       return;
     }
 
     this.retireTerminalPaneRuntimeGeneration(sessionRecord.sessionId);
-    await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord);
+    await this.destroyWorkspaceTerminalRuntimeIfNeeded(sessionRecord, reason);
   }
 
   private syncSurfaceManagers(): void {
@@ -5362,15 +5367,41 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   private async destroyWorkspaceTerminalRuntimeIfNeeded(
     sessionRecord: SessionRecord,
+    reason: WorkspacePanelDestroyTerminalRuntimeReason,
   ): Promise<void> {
     if (sessionRecord.kind !== "terminal") {
       return;
     }
 
+    /**
+     * CDXC:CrashDiagnostics 2026-04-27-17:38
+     * Terminal runtime destruction must carry a user-action/system reason so
+     * future dock-level exits or webview resets can be correlated with the
+     * controller path that requested the teardown.
+     */
+    const sessionSnapshot = this.backend.getSessionSnapshot(sessionRecord.sessionId);
+    const payload = {
+      agentName: sessionSnapshot?.agentName,
+      agentStatus: sessionSnapshot?.agentStatus,
+      frontendAttachmentGeneration: sessionSnapshot?.frontendAttachmentGeneration,
+      isAttached: sessionSnapshot?.isAttached,
+      isSleeping: sessionRecord.isSleeping === true,
+      reason,
+      restoreState: sessionSnapshot?.restoreState,
+      sessionId: sessionRecord.sessionId,
+      status: sessionSnapshot?.status,
+      terminalEngine: sessionRecord.terminalEngine,
+      title: sessionRecord.title,
+      visibleInWorkspace: this.isSessionVisibleInWorkspace(sessionRecord.sessionId),
+      workspacePanelVisible: this.workspacePanel.isVisible(),
+    };
+    logzmuxDebug("controller.destroyWorkspaceTerminalRuntime.requested", payload);
     await this.workspacePanel.postMessage({
+      reason,
       sessionId: sessionRecord.sessionId,
       type: "destroyTerminalRuntime",
     });
+    logzmuxDebug("controller.destroyWorkspaceTerminalRuntime.posted", payload);
   }
 
   private async deletePersistedSessionStateIfNeeded(sessionRecord: SessionRecord): Promise<void> {
@@ -6821,12 +6852,15 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    await this.finalizeSessionsSleeping(changedSessions);
+    await this.finalizeSessionsSleeping(changedSessions, "auto-sleep");
   }
 
-  private async finalizeSessionsSleeping(sessionRecords: readonly SessionRecord[]): Promise<void> {
+  private async finalizeSessionsSleeping(
+    sessionRecords: readonly SessionRecord[],
+    reason: WorkspacePanelDestroyTerminalRuntimeReason,
+  ): Promise<void> {
     for (const sessionRecord of sessionRecords) {
-      await this.disposeSleepingSessionSurface(sessionRecord);
+      await this.disposeSleepingSessionSurface(sessionRecord, reason);
     }
     await this.refreshSidebarFromCurrentState();
     await this.afterStateChange({ sidebarAlreadyRefreshed: true });

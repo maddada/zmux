@@ -185,7 +185,9 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   const previousBrowserSessionCountsByGroupRef = useRef<Record<string, number>>({});
   const browserAutoCollapseSuppressedUntilRef = useRef(0);
   const previousNormalizedSessionSearchQueryRef = useRef("");
-  const pointerDownSessionTargetRef = useRef<SidebarPointerDownSessionTarget | undefined>(undefined);
+  const pointerDownSessionTargetRef = useRef<SidebarPointerDownSessionTarget | undefined>(
+    undefined,
+  );
   const sessionPointerDragStateRef = useRef<SidebarSessionPointerDragState | undefined>(undefined);
   const completionFlashTimeoutBySessionIdRef = useRef<Map<string, number>>(new Map());
   const sectionCollapsePersistTimeoutsRef = useRef<

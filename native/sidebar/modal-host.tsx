@@ -1,10 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import { AgentConfigModal, type AgentConfigDraft } from "../../sidebar/agent-config-modal";
-import {
-  CommandConfigModal,
-  type CommandConfigDraft,
-} from "../../sidebar/command-config-modal";
+import { CommandConfigModal, type CommandConfigDraft } from "../../sidebar/command-config-modal";
 import { DaemonSessionsModal } from "../../sidebar/daemon-sessions-modal";
 import { PinnedPromptsModal } from "../../sidebar/pinned-prompts-modal";
 import { PreviousSessionsModal } from "../../sidebar/previous-sessions-modal";
@@ -12,7 +9,10 @@ import { ScratchPadModal } from "../../sidebar/scratch-pad-modal";
 import { SettingsModal } from "../../sidebar/settings-modal";
 import { SessionRenameModal } from "../../sidebar/session-rename-modal";
 import type { SidebarActionType } from "../../shared/sidebar-commands";
-import { installAppModalGlobalErrorLogging, logAppModalError } from "../../sidebar/app-modal-error-log";
+import {
+  installAppModalGlobalErrorLogging,
+  logAppModalError,
+} from "../../sidebar/app-modal-error-log";
 import { postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
 import { useSidebarStore } from "../../sidebar/sidebar-store";
 import type { WebviewApi } from "../../sidebar/webview-api";
@@ -285,7 +285,9 @@ function applySidebarStateMessage(message: unknown) {
     useSidebarStore
       .getState()
       .applySidebarMessage(
-        message as Parameters<ReturnType<typeof useSidebarStore.getState>["applySidebarMessage"]>[0],
+        message as Parameters<
+          ReturnType<typeof useSidebarStore.getState>["applySidebarMessage"]
+        >[0],
       );
     return;
   }
@@ -294,7 +296,9 @@ function applySidebarStateMessage(message: unknown) {
     useSidebarStore
       .getState()
       .setDaemonSessionsState(
-        message as Parameters<ReturnType<typeof useSidebarStore.getState>["setDaemonSessionsState"]>[0],
+        message as Parameters<
+          ReturnType<typeof useSidebarStore.getState>["setDaemonSessionsState"]
+        >[0],
       );
   }
 }

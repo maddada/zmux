@@ -456,6 +456,64 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   }, []);
 
   useEffect(() => {
+    /**
+     * CDXC:CrashDiagnostics 2026-04-27-17:38
+     * The user saw the macOS app disappear from the Dock without a clear JS
+     * exception. Persist pagehide/beforeunload/error/rejection breadcrumbs so
+     * the next incident shows whether the webview, React tree, or native host
+     * began shutdown first.
+     */
+    const describeLifecycleState = () => ({
+      activeElement: describeActiveElement(),
+      bootId: workspaceBootIdRef.current,
+      documentHasFocus: document.hasFocus(),
+      focusedSessionId: workspaceStateRef.current?.focusedSessionId,
+      hidden: document.hidden,
+      paneSummary: summarizeWorkspacePaneState(workspaceStateRef.current?.panes ?? []),
+      visibilityState: document.visibilityState,
+    });
+    const logLifecycle = (event: string, payload?: Record<string, unknown>) => {
+      postWorkspaceDebugLog(true, event, {
+        ...describeLifecycleState(),
+        ...payload,
+      });
+    };
+    const handleBeforeUnload = () => logLifecycle("workspace.lifecycle.beforeunload");
+    const handlePageHide = (event: PageTransitionEvent) =>
+      logLifecycle("workspace.lifecycle.pagehide", { persisted: event.persisted });
+    const handleUnload = () => logLifecycle("workspace.lifecycle.unload");
+    const handleError = (event: ErrorEvent) =>
+      logLifecycle("workspace.lifecycle.error", {
+        column: event.colno,
+        line: event.lineno,
+        message: event.message,
+        source: event.filename,
+        stack: event.error instanceof Error ? event.error.stack : undefined,
+      });
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      logLifecycle("workspace.lifecycle.unhandledRejection", {
+        message: reason instanceof Error ? reason.message : String(reason),
+        stack: reason instanceof Error ? reason.stack : undefined,
+      });
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("unload", handleUnload);
+    window.addEventListener("error", handleError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("unload", handleUnload);
+      window.removeEventListener("error", handleError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+    };
+  }, []);
+
+  useEffect(() => {
     const syncWorkspaceFocusState = (source: string) => {
       const nextIsWorkspaceFocused = document.visibilityState === "visible" && document.hasFocus();
       setIsWorkspaceFocused(nextIsWorkspaceFocused);
@@ -592,7 +650,41 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       }
 
       if (nextMessage.type === "destroyTerminalRuntime") {
+        /**
+         * CDXC:CrashDiagnostics 2026-04-27-17:38
+         * Runtime teardown logs must include the controller-provided reason and
+         * current pane visibility so a future dock-level disappearance can be
+         * distinguished from an intentional sleep/reload/close path.
+         */
+        const pane = workspaceStateRef.current?.panes.find(
+          (candidate) => candidate.sessionId === nextMessage.sessionId,
+        );
+        postWorkspaceDebugLog(true, "workspace.terminal.runtimeDestroyReceived", {
+          bootId: workspaceBootIdRef.current,
+          focusedSessionId: workspaceStateRef.current?.focusedSessionId,
+          pane:
+            pane?.kind === "terminal"
+              ? {
+                  activity: pane.activity,
+                  isVisible: pane.isVisible,
+                  lifecycleState: pane.lifecycleState,
+                  renderNonce: pane.renderNonce,
+                  snapshotAgentName: pane.snapshot?.agentName,
+                  snapshotAgentStatus: pane.snapshot?.agentStatus,
+                  snapshotIsAttached: pane.snapshot?.isAttached,
+                  snapshotStatus: pane.snapshot?.status,
+                  terminalTitle: pane.terminalTitle,
+                }
+              : undefined,
+          reason: nextMessage.reason,
+          sessionId: nextMessage.sessionId,
+        });
         destroyCachedTerminalRuntime(getTerminalRuntimeCacheKey(nextMessage.sessionId));
+        postWorkspaceDebugLog(true, "workspace.terminal.runtimeDestroyCompleted", {
+          bootId: workspaceBootIdRef.current,
+          reason: nextMessage.reason,
+          sessionId: nextMessage.sessionId,
+        });
         return;
       }
 
@@ -2339,5 +2431,9 @@ function isWtermDebugEvent(event: string): boolean {
 }
 
 function isAlwaysOnWorkspaceReproEvent(event: string): boolean {
-  return event.startsWith("workspace.terminal.resize.");
+  return (
+    event.startsWith("workspace.lifecycle.") ||
+    event.startsWith("workspace.terminal.resize.") ||
+    event.startsWith("workspace.terminal.runtimeDestroy")
+  );
 }

@@ -10,7 +10,13 @@
   color: rgba(232, 236, 244, 0.72);
   cursor: default;
   display: flex;
-  font: 12px/1.4 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font:
+    12px/1.4 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   justify-content: center;
   outline: none;
   padding: 24px;

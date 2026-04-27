@@ -109,9 +109,7 @@ describe("zmux debug log", () => {
     const logPath = getWorkspacePanelBlankGrayReproLogPath(workspaceRoot);
     const contents = await readFile(logPath, "utf8");
 
-    expect(logPath).toBe(
-      path.join(workspaceRoot, ".zmux", "workspace-panel-blank-gray-repro.log"),
-    );
+    expect(logPath).toBe(path.join(workspaceRoot, ".zmux", "workspace-panel-blank-gray-repro.log"));
     expect(contents).toContain("workspace.panel.htmlAssigned");
     expect(contents).toContain("bootstrapMessageType");
   });

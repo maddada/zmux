@@ -137,7 +137,11 @@ export function SessionCardContent({
       </div>
       {isGeneratingFirstPromptTitle ? (
         <div className="session-title-generation-overlay" role="status">
-          <IconLoader2 aria-hidden="true" className="session-title-generation-overlay-icon" size={13} />
+          <IconLoader2
+            aria-hidden="true"
+            className="session-title-generation-overlay-icon"
+            size={13}
+          />
           <span>Generating title</span>
         </div>
       ) : null}

@@ -52,7 +52,11 @@ body.native-sidebar-body #root {
   background: var(--workspace-dock-button-background, #121a26);
   color: var(--workspace-dock-button-foreground, #d8e1f1);
   display: flex;
-  font: 700 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  font:
+    700 12px -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    sans-serif;
   height: 40px;
   justify-content: center;
   letter-spacing: 0;
@@ -126,7 +130,8 @@ body.native-sidebar-body #root {
 
 .workspace-dock-button[data-active="true"] {
   border-color: var(--workspace-dock-button-border, #5b8df6);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--workspace-dock-button-border, #5b8df6) 28%, transparent);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--workspace-dock-button-border, #5b8df6) 28%, transparent);
 }
 
 .workspace-dock-button[data-dragging="true"] {

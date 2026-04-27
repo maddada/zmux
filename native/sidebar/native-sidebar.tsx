@@ -151,7 +151,14 @@ type NativeHostCommand =
   | { details?: string; event: string; type: "appendRestoreDebugLog" }
   | { details?: string; event: string; type: "appendSessionTitleDebugLog" }
   | { details?: string; event: string; type: "appendWorkspaceDockIndicatorDebugLog" }
-  | { args: string[]; cwd?: string; env?: Record<string, string>; executable: string; requestId: string; type: "runProcess" }
+  | {
+      args: string[];
+      cwd?: string;
+      env?: Record<string, string>;
+      executable: string;
+      requestId: string;
+      type: "runProcess";
+    }
   | {
       adjustCellHeightPercent: number;
       adjustCellWidth: number;
@@ -367,7 +374,11 @@ let sidebarSide = readSidebarSide();
 let gitPrimaryAction = readGitPrimaryAction();
 let gitConfirmCommit = readBooleanStorage(GIT_CONFIRM_COMMIT_STORAGE_KEY, false);
 let gitGenerateCommitBody = readBooleanStorage(GIT_GENERATE_COMMIT_BODY_STORAGE_KEY, true);
-let gitState = createDefaultSidebarGitState(gitPrimaryAction, gitConfirmCommit, gitGenerateCommitBody);
+let gitState = createDefaultSidebarGitState(
+  gitPrimaryAction,
+  gitConfirmCommit,
+  gitGenerateCommitBody,
+);
 let isChromeCanaryRunning = false;
 const pendingProcessResults = new Map<
   string,
@@ -377,7 +388,10 @@ const pendingProcessResults = new Map<
     timeout: number;
   }
 >();
-const pendingGitCommitRequests = new Map<string, { action: SidebarGitAction; body?: string; subject: string }>();
+const pendingGitCommitRequests = new Map<
+  string,
+  { action: SidebarGitAction; body?: string; subject: string }
+>();
 
 type NativeProject = {
   iconDataUrl?: string;
@@ -535,7 +549,8 @@ function summarizeNativeFocusCommand(command: NativeHostCommand): Record<string,
     activeSessionIds: "activeSessionIds" in command ? command.activeSessionIds : undefined,
     focusedSessionId: "focusedSessionId" in command ? command.focusedSessionId : undefined,
     hasInitialInput: "initialInput" in command ? Boolean(command.initialInput) : undefined,
-    layoutLeafSessionIds: "layout" in command ? summarizeNativeLayoutLeafSessionIds(command.layout) : undefined,
+    layoutLeafSessionIds:
+      "layout" in command ? summarizeNativeLayoutLeafSessionIds(command.layout) : undefined,
     sessionId: "sessionId" in command ? command.sessionId : undefined,
     textLength: "text" in command ? command.text.length : undefined,
     textPreview: "text" in command ? summarizeTerminalText(command.text) : undefined,
@@ -638,16 +653,26 @@ function runNativeProcess(
   });
 }
 
-async function runGit(args: string[], options: { allowFailure?: boolean } = {}): Promise<NativeProcessResult> {
-  const result = await runNativeProcess("/usr/bin/env", ["git", ...args], { cwd: activeProject().path });
+async function runGit(
+  args: string[],
+  options: { allowFailure?: boolean } = {},
+): Promise<NativeProcessResult> {
+  const result = await runNativeProcess("/usr/bin/env", ["git", ...args], {
+    cwd: activeProject().path,
+  });
   if (!options.allowFailure && result.exitCode !== 0) {
     throw new Error(result.stderr.trim() || result.stdout.trim() || `git ${args.join(" ")} failed`);
   }
   return result;
 }
 
-async function runGh(args: string[], options: { allowFailure?: boolean } = {}): Promise<NativeProcessResult> {
-  const result = await runNativeProcess("/usr/bin/env", ["gh", ...args], { cwd: activeProject().path });
+async function runGh(
+  args: string[],
+  options: { allowFailure?: boolean } = {},
+): Promise<NativeProcessResult> {
+  const result = await runNativeProcess("/usr/bin/env", ["gh", ...args], {
+    cwd: activeProject().path,
+  });
   if (!options.allowFailure && result.exitCode !== 0) {
     throw new Error(result.stderr.trim() || result.stdout.trim() || `gh ${args.join(" ")} failed`);
   }
@@ -758,7 +783,9 @@ function saveSettingsFromNative(nextSettings: zmuxSettings): void {
 
 function readStoredAgents(): StoredSidebarAgent[] {
   try {
-    return normalizeStoredSidebarAgents(JSON.parse(localStorage.getItem(AGENTS_STORAGE_KEY) || "null"));
+    return normalizeStoredSidebarAgents(
+      JSON.parse(localStorage.getItem(AGENTS_STORAGE_KEY) || "null"),
+    );
   } catch {
     return [];
   }
@@ -1026,7 +1053,9 @@ function readPinnedPrompts(): SidebarPinnedPrompt[] {
   }
 }
 
-function savePinnedPrompt(message: Extract<SidebarToExtensionMessage, { type: "savePinnedPrompt" }>): void {
+function savePinnedPrompt(
+  message: Extract<SidebarToExtensionMessage, { type: "savePinnedPrompt" }>,
+): void {
   const now = new Date().toISOString();
   const promptId = message.promptId ?? `native-prompt-${Date.now().toString(36)}`;
   const existingPrompt = pinnedPrompts.find((prompt) => prompt.promptId === promptId);
@@ -1179,7 +1208,10 @@ async function refreshGitState(): Promise<void> {
     };
   } catch (error) {
     gitState = { ...baseState, isBusy: false, isRepo: false };
-    showNativeMessage("error", error instanceof Error ? error.message : "Failed to refresh git state.");
+    showNativeMessage(
+      "error",
+      error instanceof Error ? error.message : "Failed to refresh git state.",
+    );
   }
   publish();
 }
@@ -1267,14 +1299,18 @@ async function runSidebarGitAction(action: SidebarGitAction): Promise<void> {
   }
 }
 
-async function commitWorkingTreeIfNeeded(action: SidebarGitAction): Promise<"committed" | "pending" | "skipped"> {
+async function commitWorkingTreeIfNeeded(
+  action: SidebarGitAction,
+): Promise<"committed" | "pending" | "skipped"> {
   if (!gitState.hasWorkingTreeChanges) {
     return "skipped";
   }
   return commitWorkingTree(action);
 }
 
-async function commitWorkingTree(action: SidebarGitAction): Promise<"committed" | "pending" | "skipped"> {
+async function commitWorkingTree(
+  action: SidebarGitAction,
+): Promise<"committed" | "pending" | "skipped"> {
   if (!gitState.hasWorkingTreeChanges) {
     showNativeMessage("info", "There are no working tree changes to commit.");
     return "skipped";
@@ -1285,7 +1321,8 @@ async function commitWorkingTree(action: SidebarGitAction): Promise<"committed" 
     pendingGitCommitRequests.set(requestId, { action, ...draft });
     sidebarBus.post({
       action,
-      confirmLabel: action === "commit" ? "Commit" : action === "push" ? "Commit & Push" : "Commit, Push & PR",
+      confirmLabel:
+        action === "commit" ? "Commit" : action === "push" ? "Commit & Push" : "Commit, Push & PR",
       description: `Commit changes in ${activeProject().name}.`,
       requestId,
       suggestedBody: draft.body,
@@ -1309,7 +1346,10 @@ async function commitWithMessage(subject: string, body?: string): Promise<void> 
   await runGit(args);
 }
 
-async function continueGitActionAfterCommitConfirmation(requestId: string, message: string): Promise<void> {
+async function continueGitActionAfterCommitConfirmation(
+  requestId: string,
+  message: string,
+): Promise<void> {
   const pending = pendingGitCommitRequests.get(requestId);
   if (!pending) {
     return;
@@ -1544,8 +1584,9 @@ function findSessionRecord(sessionId: string): SessionRecord | undefined {
 }
 
 function setTerminalSessionAgentName(sessionId: string, agentName: string | undefined): void {
-  updateActiveProjectWorkspace((workspace) =>
-    setTerminalSessionAgentNameInSimpleWorkspace(workspace, sessionId, agentName).snapshot,
+  updateActiveProjectWorkspace(
+    (workspace) =>
+      setTerminalSessionAgentNameInSimpleWorkspace(workspace, sessionId, agentName).snapshot,
   );
 }
 
@@ -1638,97 +1679,100 @@ function buildSidebarMessage(): SidebarHydrateMessage {
    * passing them to shared sidebar HUD creation.
    */
   return {
-    groups: browserGroups.concat(workspace.groups.map((group) => ({
-      groupId: group.groupId,
-      isActive: group.groupId === workspace.activeGroupId,
-      isFocusModeActive: group.snapshot.visibleCount === 1,
-      kind: "workspace",
-      layoutVisibleCount: group.snapshot.visibleCount,
-      sessions: createSidebarSessionItems(group.snapshot, "mac").map((session) => {
-        const sessionRecord = group.snapshot.sessions.find(
-          (candidate) => candidate.sessionId === session.sessionId,
-        );
-        const persistedAgentName = sessionRecord?.kind === "terminal" ? sessionRecord.agentName : undefined;
-        const terminalState = terminalStateById.get(session.sessionId);
-        if (session.sessionKind !== "terminal") {
-          return session;
-        }
-        const visibleTerminalTitle = getVisibleTerminalTitle(terminalState?.terminalTitle);
-        const displayPrimaryTitle =
-          sessionRecord && sessionRecord.kind === "terminal"
-            ? getSessionCardPrimaryTitle(sessionRecord)
-            : session.primaryTitle;
-        const visiblePrimaryTitle = getVisiblePrimaryTitle(displayPrimaryTitle ?? "");
-        /**
-         * CDXC:AgentDetection 2026-04-27-02:36
-         * Session cards must show the detected agent from the canonical session
-         * record even when the native terminal state is not currently mounted.
-         * Live terminal state can still refine the value as title detection runs.
-         */
-        const projectedAgentName = terminalState?.agentName ?? persistedAgentName;
-        const agentIcon = getSidebarAgentIconById(projectedAgentName);
-        const shouldPreferTerminalTitle =
-          Boolean(visibleTerminalTitle) && shouldPreferTerminalTitleForAgentIcon(agentIcon);
-        const primaryTitle = shouldPreferTerminalTitle
-          ? visibleTerminalTitle
-          : visiblePrimaryTitle
-            ? displayPrimaryTitle
-            : (visibleTerminalTitle ?? displayPrimaryTitle);
-        const secondaryTerminalTitle = shouldPreferTerminalTitle
-          ? undefined
-          : displayPrimaryTitle
+    groups: browserGroups.concat(
+      workspace.groups.map((group) => ({
+        groupId: group.groupId,
+        isActive: group.groupId === workspace.activeGroupId,
+        isFocusModeActive: group.snapshot.visibleCount === 1,
+        kind: "workspace",
+        layoutVisibleCount: group.snapshot.visibleCount,
+        sessions: createSidebarSessionItems(group.snapshot, "mac").map((session) => {
+          const sessionRecord = group.snapshot.sessions.find(
+            (candidate) => candidate.sessionId === session.sessionId,
+          );
+          const persistedAgentName =
+            sessionRecord?.kind === "terminal" ? sessionRecord.agentName : undefined;
+          const terminalState = terminalStateById.get(session.sessionId);
+          if (session.sessionKind !== "terminal") {
+            return session;
+          }
+          const visibleTerminalTitle = getVisibleTerminalTitle(terminalState?.terminalTitle);
+          const displayPrimaryTitle =
+            sessionRecord && sessionRecord.kind === "terminal"
+              ? getSessionCardPrimaryTitle(sessionRecord)
+              : session.primaryTitle;
+          const visiblePrimaryTitle = getVisiblePrimaryTitle(displayPrimaryTitle ?? "");
+          /**
+           * CDXC:AgentDetection 2026-04-27-02:36
+           * Session cards must show the detected agent from the canonical session
+           * record even when the native terminal state is not currently mounted.
+           * Live terminal state can still refine the value as title detection runs.
+           */
+          const projectedAgentName = terminalState?.agentName ?? persistedAgentName;
+          const agentIcon = getSidebarAgentIconById(projectedAgentName);
+          const shouldPreferTerminalTitle =
+            Boolean(visibleTerminalTitle) && shouldPreferTerminalTitleForAgentIcon(agentIcon);
+          const primaryTitle = shouldPreferTerminalTitle
             ? visibleTerminalTitle
-            : undefined;
-        appendSessionTitleDebugLog("nativeSidebar.sidebarTitleProjection", {
-          agentIcon,
-          primaryTitle,
-          rawTerminalTitle: terminalState?.terminalTitle,
-          reason: getNativeSidebarTitleProjectionReason({
-            hasTerminalState: Boolean(terminalState),
-            shouldPreferTerminalTitle,
+            : visiblePrimaryTitle
+              ? displayPrimaryTitle
+              : (visibleTerminalTitle ?? displayPrimaryTitle);
+          const secondaryTerminalTitle = shouldPreferTerminalTitle
+            ? undefined
+            : displayPrimaryTitle
+              ? visibleTerminalTitle
+              : undefined;
+          appendSessionTitleDebugLog("nativeSidebar.sidebarTitleProjection", {
+            agentIcon,
+            primaryTitle,
+            rawTerminalTitle: terminalState?.terminalTitle,
+            reason: getNativeSidebarTitleProjectionReason({
+              hasTerminalState: Boolean(terminalState),
+              shouldPreferTerminalTitle,
+              visiblePrimaryTitle,
+              visibleTerminalTitle,
+            }),
+            sessionId: session.sessionId,
+            terminalTitle: secondaryTerminalTitle,
             visiblePrimaryTitle,
             visibleTerminalTitle,
-          }),
-          sessionId: session.sessionId,
-          terminalTitle: secondaryTerminalTitle,
-          visiblePrimaryTitle,
-          visibleTerminalTitle,
-        });
-        appendAgentDetectionDebugLog("nativeSidebar.sidebarCardProjection", {
-          agentIcon,
-          agentName: projectedAgentName,
-          hasTerminalState: Boolean(terminalState),
-          lifecycleState: terminalState?.lifecycleState,
-          persistedAgentName,
-          rawTerminalTitle: terminalState?.terminalTitle,
-          sessionActivity: session.activity,
-          sessionId: session.sessionId,
-          terminalActivity: terminalState?.activity,
-          titleProjectionReason: getNativeSidebarTitleProjectionReason({
+          });
+          appendAgentDetectionDebugLog("nativeSidebar.sidebarCardProjection", {
+            agentIcon,
+            agentName: projectedAgentName,
             hasTerminalState: Boolean(terminalState),
-            shouldPreferTerminalTitle,
-            visiblePrimaryTitle,
+            lifecycleState: terminalState?.lifecycleState,
+            persistedAgentName,
+            rawTerminalTitle: terminalState?.terminalTitle,
+            sessionActivity: session.activity,
+            sessionId: session.sessionId,
+            terminalActivity: terminalState?.activity,
+            titleProjectionReason: getNativeSidebarTitleProjectionReason({
+              hasTerminalState: Boolean(terminalState),
+              shouldPreferTerminalTitle,
+              visiblePrimaryTitle,
+              visibleTerminalTitle,
+            }),
             visibleTerminalTitle,
-          }),
-          visibleTerminalTitle,
-        });
-        return {
-          ...session,
-          activity: terminalState?.activity ?? session.activity,
-          agentIcon,
-          lifecycleState: terminalState?.lifecycleState ?? session.lifecycleState,
-          isGeneratingFirstPromptTitle: terminalState?.firstPromptAutoRenameInProgress === true,
-          isRunning: terminalState?.lifecycleState === "running",
-          isPrimaryTitleTerminalTitle:
-            Boolean(visibleTerminalTitle) && (!visiblePrimaryTitle || shouldPreferTerminalTitle),
-          primaryTitle,
-          terminalTitle: secondaryTerminalTitle,
-        };
-      }),
-      title: group.title,
-      viewMode: group.snapshot.viewMode,
-      visibleCount: group.snapshot.visibleCount,
-    }))),
+          });
+          return {
+            ...session,
+            activity: terminalState?.activity ?? session.activity,
+            agentIcon,
+            lifecycleState: terminalState?.lifecycleState ?? session.lifecycleState,
+            isGeneratingFirstPromptTitle: terminalState?.firstPromptAutoRenameInProgress === true,
+            isRunning: terminalState?.lifecycleState === "running",
+            isPrimaryTitleTerminalTitle:
+              Boolean(visibleTerminalTitle) && (!visiblePrimaryTitle || shouldPreferTerminalTitle),
+            primaryTitle,
+            terminalTitle: secondaryTerminalTitle,
+          };
+        }),
+        title: group.title,
+        viewMode: group.snapshot.viewMode,
+        visibleCount: group.snapshot.visibleCount,
+      })),
+    ),
     hud: {
       ...createSidebarHudState(
         snapshot,
@@ -1891,7 +1935,10 @@ function restoreNativeTerminalSession(
   reason: string,
 ): void {
   const nativeSessionId = `${project.projectId}-session-${nextNativeSessionNumber++}`;
-  const sessionStateFilePath = createNativeSessionStateFilePath(project.projectId, session.sessionId);
+  const sessionStateFilePath = createNativeSessionStateFilePath(
+    project.projectId,
+    session.sessionId,
+  );
   const initialInput = buildNativeRestoredTerminalInitialInput(session);
   if (initialInput.trim()) {
     suppressNativeSessionActivityIndicators(session.sessionId, "restore-resume-command");
@@ -2372,11 +2419,7 @@ function getNativeEffectiveTitleActivity(
 ): TitleDerivedSessionActivity {
   const now = Date.now();
   const suppressedUntil = getNativeActivitySuppressedUntil(sessionId);
-  if (
-    suppressedUntil !== undefined &&
-    Number.isFinite(suppressedUntil) &&
-    now < suppressedUntil
-  ) {
+  if (suppressedUntil !== undefined && Number.isFinite(suppressedUntil) && now < suppressedUntil) {
     nativeWorkingStartedAtBySessionId.delete(sessionId);
     return { ...nextDerivedActivity, activity: "idle" };
   }
@@ -2509,7 +2552,9 @@ sys.stdout.write(str(match["id"]))
 `;
 }
 
-function resolveNativeResumeAgentId(agentName: string | undefined): NativeResumeAgentId | undefined {
+function resolveNativeResumeAgentId(
+  agentName: string | undefined,
+): NativeResumeAgentId | undefined {
   const normalizedAgentName = agentName?.trim().toLowerCase();
   if (!normalizedAgentName) {
     return undefined;
@@ -2529,9 +2574,7 @@ function resolveNativeResumeAgentId(agentName: string | undefined): NativeResume
       agent.agentId.trim().toLowerCase() === normalizedAgentName ||
       agent.name.trim().toLowerCase() === normalizedAgentName,
   );
-  return isNativeResumeAgentId(matchingAgent?.agentId)
-    ? matchingAgent.agentId
-    : undefined;
+  return isNativeResumeAgentId(matchingAgent?.agentId) ? matchingAgent.agentId : undefined;
 }
 
 function isNativeResumeAgentId(agentId: string | undefined): agentId is NativeResumeAgentId {
@@ -2575,7 +2618,10 @@ function createTerminal(
     return undefined;
   }
   const nativeSessionId = `${project.projectId}-session-${nextNativeSessionNumber++}`;
-  const sessionStateFilePath = createNativeSessionStateFilePath(project.projectId, generatedSession.sessionId);
+  const sessionStateFilePath = createNativeSessionStateFilePath(
+    project.projectId,
+    generatedSession.sessionId,
+  );
   nativeSessionIdBySidebarSessionId.set(generatedSession.sessionId, nativeSessionId);
   sidebarSessionIdByNativeSessionId.set(nativeSessionId, generatedSession.sessionId);
   updateActiveProjectWorkspace(() => result.snapshot);
@@ -2665,8 +2711,8 @@ function syncSessionTitleFromNativeTerminalTitle(
     return;
   }
 
-  updateActiveProjectWorkspace((workspace) =>
-    setSessionTitleInSimpleWorkspace(workspace, sessionId, visibleTitle).snapshot,
+  updateActiveProjectWorkspace(
+    (workspace) => setSessionTitleInSimpleWorkspace(workspace, sessionId, visibleTitle).snapshot,
   );
   appendSessionTitleDebugLog("nativeSidebar.sessionRenameApplied", {
     agentName: terminalState.agentName,
@@ -2759,7 +2805,10 @@ type NativePersistedSessionState = {
 
 async function pollNativeFirstPromptAutoRenameSessions(): Promise<void> {
   for (const [sessionId, terminalState] of terminalStateById.entries()) {
-    if (terminalState.lifecycleState !== "running" || terminalState.firstPromptAutoRenameInProgress) {
+    if (
+      terminalState.lifecycleState !== "running" ||
+      terminalState.firstPromptAutoRenameInProgress
+    ) {
       continue;
     }
     await processNativeFirstPromptAutoRename(sessionId, terminalState);
@@ -2772,10 +2821,15 @@ async function processNativeFirstPromptAutoRename(
 ): Promise<void> {
   const session = findSessionRecord(sessionId);
   if (session?.kind !== "terminal" || !terminalState.sessionStateFilePath) {
-    logNativeFirstPromptAutoRenameSkipOnce(sessionId, terminalState, "missing-terminal-session-state", {
-      hasSessionRecord: Boolean(session),
-      sessionStateFilePath: terminalState.sessionStateFilePath,
-    });
+    logNativeFirstPromptAutoRenameSkipOnce(
+      sessionId,
+      terminalState,
+      "missing-terminal-session-state",
+      {
+        hasSessionRecord: Boolean(session),
+        sessionStateFilePath: terminalState.sessionStateFilePath,
+      },
+    );
     return;
   }
 
@@ -2794,7 +2848,9 @@ async function processNativeFirstPromptAutoRename(
     currentTitle: undefined,
     hasAutoTitleFromFirstPrompt: persistedState.hasAutoTitleFromFirstPrompt,
     pendingFirstPromptAutoRenamePrompt:
-      terminalState.firstPromptAutoRenameProcessedPrompt === pendingPrompt ? pendingPrompt : undefined,
+      terminalState.firstPromptAutoRenameProcessedPrompt === pendingPrompt
+        ? pendingPrompt
+        : undefined,
     prompt: pendingPrompt,
   });
   if (!decision.shouldAutoName || !pendingPrompt) {
@@ -2835,8 +2891,8 @@ async function processNativeFirstPromptAutoRename(
     await sendNativeFirstPromptRenameCommand(sessionId, strategy, title);
     terminalState.firstPromptAutoRenameProcessedPrompt = pendingPrompt;
     if (title) {
-      updateActiveProjectWorkspace((workspace) =>
-        setSessionTitleInSimpleWorkspace(workspace, sessionId, title).snapshot,
+      updateActiveProjectWorkspace(
+        (workspace) => setSessionTitleInSimpleWorkspace(workspace, sessionId, title).snapshot,
       );
     }
     appendSessionTitleDebugLog("nativeSidebar.firstPromptAutoRename.applied", {
@@ -2980,7 +3036,9 @@ async function generateNativeSessionTitleFromPrompt(cwd: string, prompt: string)
   ].join("");
   const result = await runNativeProcess("/bin/zsh", ["-lc", command], { cwd });
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || "Codex title generation failed.");
+    throw new Error(
+      result.stderr.trim() || result.stdout.trim() || "Codex title generation failed.",
+    );
   }
   return parseNativeGeneratedSessionTitleText(result.stdout);
 }
@@ -3052,7 +3110,8 @@ async function sendNativeFirstPromptRenameCommand(
   title: string | undefined,
 ): Promise<void> {
   const nativeSessionId = nativeSessionIdForSidebarSession(sessionId);
-  const commandText = strategy === "sendBareRenameCommand" ? "/rename" : `/rename ${title ?? ""}`.trim();
+  const commandText =
+    strategy === "sendBareRenameCommand" ? "/rename" : `/rename ${title ?? ""}`.trim();
   postNative({ sessionId: nativeSessionId, text: commandText, type: "writeTerminalText" });
   await new Promise((resolve) => window.setTimeout(resolve, AUTO_SUBMIT_STAGED_RENAME_DELAY_MS));
   /**
@@ -3102,7 +3161,9 @@ function getNativePromptPreview(prompt: string | undefined): string | undefined 
 function closeTerminal(sessionId: string): void {
   const nativeSessionId = forgetNativeSessionMapping(sessionId);
   rememberPreviousSession(sessionId);
-  updateActiveProjectWorkspace((workspace) => removeSessionInSimpleWorkspace(workspace, sessionId).snapshot);
+  updateActiveProjectWorkspace(
+    (workspace) => removeSessionInSimpleWorkspace(workspace, sessionId).snapshot,
+  );
   terminalStateById.delete(sessionId);
   titleDerivedActivityBySessionId.delete(sessionId);
   nativeActivitySuppressedUntilBySessionId.delete(sessionId);
@@ -3112,7 +3173,9 @@ function closeTerminal(sessionId: string): void {
 }
 
 function focusTerminal(sessionId: string): void {
-  updateActiveProjectWorkspace((workspace) => focusSessionInSimpleWorkspace(workspace, sessionId).snapshot);
+  updateActiveProjectWorkspace(
+    (workspace) => focusSessionInSimpleWorkspace(workspace, sessionId).snapshot,
+  );
   const session = findTerminalSession(sessionId);
   /**
    * CDXC:SessionSleep 2026-04-27-09:09
@@ -3204,8 +3267,8 @@ function setNativeSessionSleeping(sessionId: string, sleeping: boolean): void {
   if (!session) {
     return;
   }
-  updateActiveProjectWorkspace((workspace) =>
-    setSessionSleepingInSimpleWorkspace(workspace, sessionId, sleeping).snapshot,
+  updateActiveProjectWorkspace(
+    (workspace) => setSessionSleepingInSimpleWorkspace(workspace, sessionId, sleeping).snapshot,
   );
   if (sleeping) {
     disposeNativeSleepingSessionSurface(sessionId);
@@ -3229,20 +3292,23 @@ function setNativeGroupSleeping(groupId: string, sleeping: boolean): void {
           session.kind === "terminal" && session.isSleeping !== true,
       )
     : [];
-  updateActiveProjectWorkspace((workspace) =>
-    setGroupSleepingInSimpleWorkspace(
-      workspace,
-      groupId,
-      sleeping,
-      sleeping ? sessionsToSleep.map((session) => session.sessionId) : undefined,
-    ).snapshot,
+  updateActiveProjectWorkspace(
+    (workspace) =>
+      setGroupSleepingInSimpleWorkspace(
+        workspace,
+        groupId,
+        sleeping,
+        sleeping ? sessionsToSleep.map((session) => session.sessionId) : undefined,
+      ).snapshot,
   );
   if (sleeping) {
     for (const session of sessionsToSleep) {
       disposeNativeSleepingSessionSurface(session.sessionId);
     }
   } else {
-    const nextGroup = activeProject().workspace.groups.find((candidate) => candidate.groupId === groupId);
+    const nextGroup = activeProject().workspace.groups.find(
+      (candidate) => candidate.groupId === groupId,
+    );
     for (const session of nextGroup?.snapshot.sessions ?? []) {
       if (session.kind === "terminal" && !terminalStateById.has(session.sessionId)) {
         restoreNativeTerminalSession(activeProject(), session, "wake-group");
@@ -3322,7 +3388,12 @@ function restartNativeSession(sessionId: string): void {
    * agent-specific resume command instead of opening a fresh shell.
    */
   closeTerminal(sessionId);
-  createTerminal(session.title || DEFAULT_TERMINAL_SESSION_TITLE, initialInput, groupId, session.agentName);
+  createTerminal(
+    session.title || DEFAULT_TERMINAL_SESSION_TITLE,
+    initialInput,
+    groupId,
+    session.agentName,
+  );
 }
 
 function forkNativeSession(sessionId: string): void {
@@ -3432,10 +3503,14 @@ function assertCliSidebarCard(payload: Record<string, unknown>) {
   const expectedAgentName = typeof payload.agentName === "string" ? payload.agentName : undefined;
   const expectedVisible = typeof payload.visible === "boolean" ? payload.visible : undefined;
   if (expectedAgentIcon !== undefined && session.agentIcon !== expectedAgentIcon) {
-    failures.push(`agentIcon expected ${expectedAgentIcon}, received ${session.agentIcon ?? "<empty>"}`);
+    failures.push(
+      `agentIcon expected ${expectedAgentIcon}, received ${session.agentIcon ?? "<empty>"}`,
+    );
   }
   if (expectedAgentName !== undefined && terminalState?.agentName !== expectedAgentName) {
-    failures.push(`agentName expected ${expectedAgentName}, received ${terminalState?.agentName ?? "<empty>"}`);
+    failures.push(
+      `agentName expected ${expectedAgentName}, received ${terminalState?.agentName ?? "<empty>"}`,
+    );
   }
   if (expectedVisible !== undefined && session.isVisible !== expectedVisible) {
     failures.push(`visible expected ${expectedVisible}, received ${session.isVisible}`);
@@ -3468,7 +3543,12 @@ function runCliAgent(agentId: string, groupId?: string): TerminalSessionRecord |
   if (!agent?.command) {
     throw new Error(`Unknown or unconfigured agent: ${agentId}`);
   }
-  return createTerminal(createAgentSessionDefaultTitle(agent.name), `${agent.command}\r`, groupId, agent.agentId);
+  return createTerminal(
+    createAgentSessionDefaultTitle(agent.name),
+    `${agent.command}\r`,
+    groupId,
+    agent.agentId,
+  );
 }
 
 function runCliCommandButton(commandId: string): TerminalSessionRecord | undefined {
@@ -3509,7 +3589,10 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       case "createAgentSession":
       case "runAgent": {
         const agentId = typeof payload.agentId === "string" ? payload.agentId : "";
-        const session = runCliAgent(agentId, typeof payload.groupId === "string" ? payload.groupId : undefined);
+        const session = runCliAgent(
+          agentId,
+          typeof payload.groupId === "string" ? payload.groupId : undefined,
+        );
         return { ok: true, session, state: summarizeCliState() };
       }
       case "runCommand": {
@@ -3538,8 +3621,8 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         return { ok: true, session, state: summarizeCliState() };
       }
       case "focusGroup":
-        updateActiveProjectWorkspace((workspace) =>
-          focusGroupInSimpleWorkspace(workspace, String(payload.groupId)).snapshot,
+        updateActiveProjectWorkspace(
+          (workspace) => focusGroupInSimpleWorkspace(workspace, String(payload.groupId)).snapshot,
         );
         syncNativeTerminalSleepForVisibleLayout("cli-focus-group");
         publish();
@@ -3558,7 +3641,10 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         return { ok: true, state: summarizeCliState() };
       }
       case "addProject":
-        addProject(String(payload.path), typeof payload.name === "string" ? payload.name : undefined);
+        addProject(
+          String(payload.path),
+          typeof payload.name === "string" ? payload.name : undefined,
+        );
         return { ok: true, state: summarizeCliState() };
       case "closeSession": {
         const session = requireCliSession(payload);
@@ -3582,8 +3668,13 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       }
       case "renameSession": {
         const session = requireCliSession(payload);
-        updateActiveProjectWorkspace((workspace) =>
-          setSessionTitleInSimpleWorkspace(workspace, session.sessionId, String(payload.title ?? "")).snapshot,
+        updateActiveProjectWorkspace(
+          (workspace) =>
+            setSessionTitleInSimpleWorkspace(
+              workspace,
+              session.sessionId,
+              String(payload.title ?? ""),
+            ).snapshot,
         );
         publish();
         return { ok: true, state: summarizeCliState() };
@@ -3595,8 +3686,13 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       }
       case "favoriteSession": {
         const session = requireCliSession(payload);
-        updateActiveProjectWorkspace((workspace) =>
-          setSessionFavoriteInSimpleWorkspace(workspace, session.sessionId, payload.favorite !== false).snapshot,
+        updateActiveProjectWorkspace(
+          (workspace) =>
+            setSessionFavoriteInSimpleWorkspace(
+              workspace,
+              session.sessionId,
+              payload.favorite !== false,
+            ).snapshot,
         );
         publish();
         return { ok: true, state: summarizeCliState() };
@@ -3612,7 +3708,10 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       }
       case "sendEnter": {
         const session = requireCliSession(payload);
-        postNative({ sessionId: nativeSessionIdForSidebarSession(session.sessionId), type: "sendTerminalEnter" });
+        postNative({
+          sessionId: nativeSessionIdForSidebarSession(session.sessionId),
+          type: "sendTerminalEnter",
+        });
         return { ok: true, session };
       }
       case "sendKey": {
@@ -3636,7 +3735,10 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
           type: "writeTerminalText",
         });
         await new Promise((resolve) => window.setTimeout(resolve, 1_000));
-        postNative({ sessionId: nativeSessionIdForSidebarSession(session.sessionId), type: "sendTerminalEnter" });
+        postNative({
+          sessionId: nativeSessionIdForSidebarSession(session.sessionId),
+          type: "sendTerminalEnter",
+        });
         return { ok: true, session };
       }
       case "toggleSection":
@@ -3649,18 +3751,26 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         return { ok: true, state: summarizeCliState() };
       case "setVisibleCount":
         updateActiveProjectWorkspace((workspace) =>
-          setVisibleCountInSimpleWorkspace(workspace, clampVisibleSessionCount(Number(payload.count))),
+          setVisibleCountInSimpleWorkspace(
+            workspace,
+            clampVisibleSessionCount(Number(payload.count)),
+          ),
         );
         publish();
         return { ok: true, state: summarizeCliState() };
       case "setViewMode":
         updateActiveProjectWorkspace((workspace) =>
-          setViewModeInSimpleWorkspace(workspace, String(payload.mode) as "grid" | "horizontal" | "vertical"),
+          setViewModeInSimpleWorkspace(
+            workspace,
+            String(payload.mode) as "grid" | "horizontal" | "vertical",
+          ),
         );
         publish();
         return { ok: true, state: summarizeCliState() };
       case "openBrowser":
-        openNativeBrowserWindow(typeof payload.url === "string" ? payload.url : DEFAULT_BROWSER_LAUNCH_URL);
+        openNativeBrowserWindow(
+          typeof payload.url === "string" ? payload.url : DEFAULT_BROWSER_LAUNCH_URL,
+        );
         return { ok: true };
       case "showBrowser":
         showNativeBrowserWindow();
@@ -3908,7 +4018,9 @@ function reorderProjects(projectIds: string[]): void {
   publish();
 }
 
-function saveSidebarAgent(message: Extract<SidebarToExtensionMessage, { type: "saveSidebarAgent" }>): void {
+function saveSidebarAgent(
+  message: Extract<SidebarToExtensionMessage, { type: "saveSidebarAgent" }>,
+): void {
   const name = message.name.trim();
   const command = message.command.trim();
   if (!name || !command) {
@@ -3920,7 +4032,9 @@ function saveSidebarAgent(message: Extract<SidebarToExtensionMessage, { type: "s
   const selectedDefaultAgent = getDefaultSidebarAgentByIcon(message.icon);
   const shouldRestoreHiddenDefault =
     !requestedAgentId &&
-    Boolean(selectedDefaultAgent && !isSidebarAgentVisible(storedAgents, selectedDefaultAgent.agentId));
+    Boolean(
+      selectedDefaultAgent && !isSidebarAgentVisible(storedAgents, selectedDefaultAgent.agentId),
+    );
   const agentId =
     requestedAgentId ||
     (shouldRestoreHiddenDefault ? selectedDefaultAgent?.agentId : undefined) ||
@@ -3955,7 +4069,9 @@ function saveSidebarAgent(message: Extract<SidebarToExtensionMessage, { type: "s
 function deleteSidebarAgent(agentId: string): void {
   if (!isDefaultSidebarAgentId(agentId)) {
     writeStoredAgents(storedAgents.filter((agent) => agent.agentId !== agentId));
-    writeStoredAgentOrder(storedAgentOrder.filter((candidateAgentId) => candidateAgentId !== agentId));
+    writeStoredAgentOrder(
+      storedAgentOrder.filter((candidateAgentId) => candidateAgentId !== agentId),
+    );
     publish();
     return;
   }
@@ -3980,7 +4096,9 @@ function deleteSidebarAgent(agentId: string): void {
       : [...storedAgents, nextAgent];
 
   writeStoredAgents(nextAgents);
-  writeStoredAgentOrder(storedAgentOrder.filter((candidateAgentId) => candidateAgentId !== agentId));
+  writeStoredAgentOrder(
+    storedAgentOrder.filter((candidateAgentId) => candidateAgentId !== agentId),
+  );
   publish();
 }
 
@@ -4040,10 +4158,14 @@ function saveSidebarCommand(
   const existingIndex = storedCommands.findIndex((candidate) => candidate.commandId === commandId);
   const nextCommands =
     existingIndex >= 0
-      ? storedCommands.map((candidate, index) => (index === existingIndex ? nextCommand : candidate))
+      ? storedCommands.map((candidate, index) =>
+          index === existingIndex ? nextCommand : candidate,
+        )
       : [...storedCommands, nextCommand];
   const nextOrder =
-    existingIndex >= 0 || storedCommandOrder.includes(commandId) || isDefaultSidebarCommandId(commandId)
+    existingIndex >= 0 ||
+    storedCommandOrder.includes(commandId) ||
+    isDefaultSidebarCommandId(commandId)
       ? storedCommandOrder
       : currentCommandIds.includes(commandId)
         ? currentCommandIds
@@ -4174,15 +4296,16 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     }
     case "createGroupFromSession": {
-      updateActiveProjectWorkspace((workspace) =>
-        createGroupFromSessionInSimpleWorkspace(workspace, message.sessionId).snapshot,
+      updateActiveProjectWorkspace(
+        (workspace) =>
+          createGroupFromSessionInSimpleWorkspace(workspace, message.sessionId).snapshot,
       );
       publish();
       return;
     }
     case "focusGroup":
-      updateActiveProjectWorkspace((workspace) =>
-        focusGroupInSimpleWorkspace(workspace, message.groupId).snapshot,
+      updateActiveProjectWorkspace(
+        (workspace) => focusGroupInSimpleWorkspace(workspace, message.groupId).snapshot,
       );
       syncNativeTerminalSleepForVisibleLayout("sidebar-focus-group");
       publish();
@@ -4193,10 +4316,14 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "promptRenameSession": {
       const session = findTerminalSession(message.sessionId);
       if (session) {
-        const title = window.prompt("Rename session", session.title || DEFAULT_TERMINAL_SESSION_TITLE);
+        const title = window.prompt(
+          "Rename session",
+          session.title || DEFAULT_TERMINAL_SESSION_TITLE,
+        );
         if (title?.trim()) {
-          updateActiveProjectWorkspace((workspace) =>
-            setSessionTitleInSimpleWorkspace(workspace, message.sessionId, title.trim()).snapshot,
+          updateActiveProjectWorkspace(
+            (workspace) =>
+              setSessionTitleInSimpleWorkspace(workspace, message.sessionId, title.trim()).snapshot,
           );
           appendSessionTitleDebugLog("terminalRenameCommand.notSent", {
             reason: "sidebar-rename-updates-zmux-session-record-only",
@@ -4210,8 +4337,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     }
     case "renameSession":
-      updateActiveProjectWorkspace((workspace) =>
-        setSessionTitleInSimpleWorkspace(workspace, message.sessionId, message.title).snapshot,
+      updateActiveProjectWorkspace(
+        (workspace) =>
+          setSessionTitleInSimpleWorkspace(workspace, message.sessionId, message.title).snapshot,
       );
       appendSessionTitleDebugLog("terminalRenameCommand.notSent", {
         reason: "sidebar-rename-updates-zmux-session-record-only",
@@ -4222,8 +4350,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       publish();
       return;
     case "renameGroup":
-      updateActiveProjectWorkspace((workspace) =>
-        renameGroupInSimpleWorkspace(workspace, message.groupId, message.title).snapshot,
+      updateActiveProjectWorkspace(
+        (workspace) =>
+          renameGroupInSimpleWorkspace(workspace, message.groupId, message.title).snapshot,
       );
       publish();
       return;
@@ -4246,9 +4375,14 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       });
       return;
     case "fullReloadGroup": {
-      const group = activeProject().workspace.groups.find((candidate) => candidate.groupId === message.groupId);
+      const group = activeProject().workspace.groups.find(
+        (candidate) => candidate.groupId === message.groupId,
+      );
       for (const session of group?.snapshot.sessions ?? []) {
-        if (session.kind === "terminal" && buildNativeRestoredTerminalInitialInput(session).trim()) {
+        if (
+          session.kind === "terminal" &&
+          buildNativeRestoredTerminalInitialInput(session).trim()
+        ) {
           restartNativeSession(session.sessionId);
         }
       }
@@ -4258,11 +4392,16 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       copyResumeCommand(message.sessionId);
       return;
     case "requestT3SessionBrowserAccess":
-      showNativeMessage("info", "This native workspace does not have a T3 browser session to expose.");
+      showNativeMessage(
+        "info",
+        "This native workspace does not have a T3 browser session to expose.",
+      );
       return;
     case "closeGroup": {
       const project = activeProject();
-      const group = project.workspace.groups.find((candidate) => candidate.groupId === message.groupId);
+      const group = project.workspace.groups.find(
+        (candidate) => candidate.groupId === message.groupId,
+      );
       for (const session of group?.snapshot.sessions ?? []) {
         terminalStateById.delete(session.sessionId);
         titleDerivedActivityBySessionId.delete(session.sessionId);
@@ -4271,8 +4410,8 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
         const nativeSessionId = forgetNativeSessionMapping(session.sessionId);
         postNative({ sessionId: nativeSessionId, type: "closeTerminal" });
       }
-      updateActiveProjectWorkspace((workspace) =>
-        removeGroupInSimpleWorkspace(workspace, message.groupId).snapshot,
+      updateActiveProjectWorkspace(
+        (workspace) => removeGroupInSimpleWorkspace(workspace, message.groupId).snapshot,
       );
       publish();
       return;
@@ -4281,8 +4420,10 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       setNativeSessionSleeping(message.sessionId, message.sleeping);
       return;
     case "setSessionFavorite":
-      updateActiveProjectWorkspace((workspace) =>
-        setSessionFavoriteInSimpleWorkspace(workspace, message.sessionId, message.favorite).snapshot,
+      updateActiveProjectWorkspace(
+        (workspace) =>
+          setSessionFavoriteInSimpleWorkspace(workspace, message.sessionId, message.favorite)
+            .snapshot,
       );
       publish();
       return;
@@ -4290,23 +4431,26 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       setNativeGroupSleeping(message.groupId, message.sleeping);
       return;
     case "moveSessionToGroup":
-      updateActiveProjectWorkspace((workspace) =>
-        moveSessionToGroupInSimpleWorkspace(
-          workspace,
-          message.sessionId,
-          message.groupId,
-          message.targetIndex,
-        ).snapshot,
+      updateActiveProjectWorkspace(
+        (workspace) =>
+          moveSessionToGroupInSimpleWorkspace(
+            workspace,
+            message.sessionId,
+            message.groupId,
+            message.targetIndex,
+          ).snapshot,
       );
       publish();
       return;
     case "toggleFullscreenSession":
-      updateActiveProjectWorkspace((workspace) => toggleFullscreenSessionInSimpleWorkspace(workspace));
+      updateActiveProjectWorkspace((workspace) =>
+        toggleFullscreenSessionInSimpleWorkspace(workspace),
+      );
       publish();
       return;
     case "syncGroupOrder":
-      updateActiveProjectWorkspace((workspace) =>
-        syncGroupOrderInSimpleWorkspace(workspace, message.groupIds).snapshot,
+      updateActiveProjectWorkspace(
+        (workspace) => syncGroupOrderInSimpleWorkspace(workspace, message.groupIds).snapshot,
       );
       publish();
       return;
@@ -4368,7 +4512,12 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "runSidebarAgent": {
       const agent = agents.find((candidate) => candidate.agentId === message.agentId);
       if (agent?.command) {
-        createTerminal(createAgentSessionDefaultTitle(agent.name), `${agent.command}\r`, undefined, agent.agentId);
+        createTerminal(
+          createAgentSessionDefaultTitle(agent.name),
+          `${agent.command}\r`,
+          undefined,
+          agent.agentId,
+        );
       }
       return;
     }
@@ -4418,12 +4567,16 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       publish();
       return;
     case "setViewMode":
-      updateActiveProjectWorkspace((workspace) => setViewModeInSimpleWorkspace(workspace, message.viewMode));
+      updateActiveProjectWorkspace((workspace) =>
+        setViewModeInSimpleWorkspace(workspace, message.viewMode),
+      );
       publish();
       return;
     case "syncSessionOrder":
-      updateActiveProjectWorkspace((workspace) =>
-        syncSessionOrderInSimpleWorkspace(workspace, message.groupId, message.sessionIds).snapshot,
+      updateActiveProjectWorkspace(
+        (workspace) =>
+          syncSessionOrderInSimpleWorkspace(workspace, message.groupId, message.sessionIds)
+            .snapshot,
       );
       publish();
       return;
@@ -4478,7 +4631,9 @@ function buildLayout(
       kind: "leaf",
       sessionId,
     }));
-    rows.push(row.length === 1 ? row[0]! : { children: row, direction: "horizontal", kind: "split" });
+    rows.push(
+      row.length === 1 ? row[0]! : { children: row, direction: "horizontal", kind: "split" },
+    );
   }
   return rows.length === 1 ? rows[0] : { children: rows, direction: "vertical", kind: "split" };
 }
@@ -4559,7 +4714,11 @@ window.addEventListener("zmux-native-host-event", (event) => {
       sessionId: sidebarSessionId,
       title: hostEvent.title,
     });
-    syncSessionTitleFromNativeTerminalTitle(sidebarSessionId, hostEvent.title, previousTerminalTitle);
+    syncSessionTitleFromNativeTerminalTitle(
+      sidebarSessionId,
+      hostEvent.title,
+      previousTerminalTitle,
+    );
   } else if (hostEvent.type === "terminalExited") {
     terminalState.lifecycleState = "done";
     terminalState.activity = "idle";
@@ -4865,7 +5024,11 @@ export function WorkspaceDock({
     }
     drag.didDrag = true;
     const target = getDropTarget(event.clientY, drag.projectId);
-    const canDrop = wouldReorder(drag.projectId, target?.projectId, target?.placeAfterTarget ?? false);
+    const canDrop = wouldReorder(
+      drag.projectId,
+      target?.projectId,
+      target?.placeAfterTarget ?? false,
+    );
     drag.targetProjectId = canDrop ? target?.projectId : undefined;
     drag.placeAfterTarget = canDrop ? (target?.placeAfterTarget ?? false) : false;
     setDragVisual({
@@ -4942,15 +5105,11 @@ export function WorkspaceDock({
    * and cannot make the menu feel like it is navigating by itself.
    */
   const openThemeMenu = () => {
-    setMenu((currentMenu) =>
-      currentMenu ? { ...currentMenu, view: "themes" } : currentMenu,
-    );
+    setMenu((currentMenu) => (currentMenu ? { ...currentMenu, view: "themes" } : currentMenu));
   };
 
   const openRootMenu = () => {
-    setMenu((currentMenu) =>
-      currentMenu ? { ...currentMenu, view: "root" } : currentMenu,
-    );
+    setMenu((currentMenu) => (currentMenu ? { ...currentMenu, view: "root" } : currentMenu));
   };
 
   const chooseTheme = (projectId: string, theme: SidebarTheme) => {
@@ -5108,7 +5267,10 @@ export function WorkspaceDock({
                   role="menuitemradio"
                   type="button"
                 >
-                  <span className="workspace-dock-theme-swatch" data-workspace-theme={theme.value} />
+                  <span
+                    className="workspace-dock-theme-swatch"
+                    data-workspace-theme={theme.value}
+                  />
                   {theme.label}
                 </button>
               ))}

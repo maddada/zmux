@@ -1,22 +1,36 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldTitle } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
-import { Slider } from '@/components/ui/slider';
-import { Switch } from '@/components/ui/switch';
-import { COMPLETION_SOUND_OPTIONS, type CompletionSoundSetting } from '../shared/completion-sound';
-import { TERMINAL_FONT_PRESETS, type TerminalFontPreset } from '../shared/terminal-font-preset';
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldTitle,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
+import { COMPLETION_SOUND_OPTIONS, type CompletionSoundSetting } from "../shared/completion-sound";
+import { TERMINAL_FONT_PRESETS, type TerminalFontPreset } from "../shared/terminal-font-preset";
 import {
   resolveSidebarTheme,
   type SidebarTheme,
   type SidebarThemeSetting,
   type SidebarThemeVariant,
-} from '../shared/session-grid-contract';
+} from "../shared/session-grid-contract";
 import {
   DEFAULT_zmux_SETTINGS,
   SIDEBAR_THEME_SETTING_OPTIONS,
@@ -25,7 +39,7 @@ import {
   type TerminalCursorStyle,
   type ZedOverlayTargetApp,
   type zmuxSettings,
-} from '../shared/zmux-settings';
+} from "../shared/zmux-settings";
 
 const NUMERIC_SETTINGS_DEBOUNCE_MS = 180;
 
@@ -37,7 +51,13 @@ export type SettingsModalProps = {
   theme?: SidebarTheme;
 };
 
-export function SettingsModal({ isOpen, onChange, onClose, settings, theme = 'dark-blue' }: SettingsModalProps) {
+export function SettingsModal({
+  isOpen,
+  onChange,
+  onClose,
+  settings,
+  theme = "dark-blue",
+}: SettingsModalProps) {
   const [draft, setDraft] = useState<zmuxSettings>(normalizezmuxSettings(settings));
   const pendingSettingsRef = useRef<zmuxSettings | undefined>(undefined);
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -111,7 +131,10 @@ export function SettingsModal({ isOpen, onChange, onClose, settings, theme = 'da
   const updateDraft = <Key extends keyof zmuxSettings>(key: Key, value: zmuxSettings[Key]) => {
     applySettings({ ...(pendingSettingsRef.current ?? draft), [key]: value });
   };
-  const updateDraftDebounced = <Key extends keyof zmuxSettings>(key: Key, value: zmuxSettings[Key]) => {
+  const updateDraftDebounced = <Key extends keyof zmuxSettings>(
+    key: Key,
+    value: zmuxSettings[Key],
+  ) => {
     applySettingsDebounced({ ...(pendingSettingsRef.current ?? draft), [key]: value });
   };
 
@@ -128,102 +151,106 @@ export function SettingsModal({ isOpen, onChange, onClose, settings, theme = 'da
       open={isOpen}
     >
       <DialogContent
-        className='zmux-settings-shadcn max-h-[min(700px,calc(100vh-2rem))] gap-0 overflow-hidden p-0 font-sans sm:max-w-xl'
+        className="zmux-settings-shadcn max-h-[min(700px,calc(100vh-2rem))] gap-0 overflow-hidden p-0 font-sans sm:max-w-xl"
         data-sidebar-theme={modalTheme}
       >
-        <DialogHeader className='px-5 pt-5 pb-3'>
-          <DialogTitle className='text-xl'>Settings</DialogTitle>
+        <DialogHeader className="px-5 pt-5 pb-3">
+          <DialogTitle className="text-xl">Settings</DialogTitle>
         </DialogHeader>
 
         {/* CDXC:Settings 2026-04-26-10:43: The settings dialog lives inside a
             narrow sidebar webview, so the Radix scroll area needs an explicit
             height instead of letting Dialog crop an auto-height viewport. */}
-        <ScrollArea className='h-[min(560px,calc(100vh-9rem))] min-h-0'>
-          <div className='flex flex-col gap-6 px-5 pb-5'>
-            <SettingsSection title='Sidebar'>
+        <ScrollArea className="h-[min(560px,calc(100vh-9rem))] min-h-0">
+          <div className="flex flex-col gap-6 px-5 pb-5">
+            <SettingsSection title="Sidebar">
               <SelectField
-                description='Choose the sidebar color scheme.'
-                label='Theme'
-                onChange={(value) => updateDraft('sidebarTheme', value as SidebarThemeSetting)}
+                description="Choose the sidebar color scheme."
+                label="Theme"
+                onChange={(value) => updateDraft("sidebarTheme", value as SidebarThemeSetting)}
                 options={SIDEBAR_THEME_SETTING_OPTIONS}
                 value={draft.sidebarTheme}
               />
               <SliderNumberField
-                description='Scale the agent manager UI.'
-                label='Agent Manager Zoom'
+                description="Scale the agent manager UI."
+                label="Agent Manager Zoom"
                 max={200}
                 min={50}
-                onCommit={(value) => updateDraft('agentManagerZoomPercent', value)}
-                onChange={(value) => updateDraftDebounced('agentManagerZoomPercent', value)}
+                onCommit={(value) => updateDraft("agentManagerZoomPercent", value)}
+                onChange={(value) => updateDraftDebounced("agentManagerZoomPercent", value)}
                 step={1}
                 value={draft.agentManagerZoomPercent}
               />
               <ToggleField
                 checked={draft.showSidebarActions}
-                description='Show the command and action launcher.'
-                label='Show Actions section'
-                onChange={(checked) => updateDraft('showSidebarActions', checked)}
+                description="Show the command and action launcher."
+                label="Show Actions section"
+                onChange={(checked) => updateDraft("showSidebarActions", checked)}
               />
               <ToggleField
                 checked={draft.showSidebarAgents}
-                description='Show active agent sessions.'
-                label='Show Agents section'
-                onChange={(checked) => updateDraft('showSidebarAgents', checked)}
+                description="Show active agent sessions."
+                label="Show Agents section"
+                onChange={(checked) => updateDraft("showSidebarAgents", checked)}
               />
               <ToggleField
                 checked={draft.showSidebarGitButton}
-                description='Show git tools in the sidebar toolbar.'
-                label='Show Git button'
-                onChange={(checked) => updateDraft('showSidebarGitButton', checked)}
+                description="Show git tools in the sidebar toolbar."
+                label="Show Git button"
+                onChange={(checked) => updateDraft("showSidebarGitButton", checked)}
               />
               <ToggleField
                 checked={draft.createSessionOnSidebarDoubleClick}
-                description='Create a session from empty sidebar space.'
-                label='Double-click empty sidebar space to create a session'
-                onChange={(checked) => updateDraft('createSessionOnSidebarDoubleClick', checked)}
+                description="Create a session from empty sidebar space."
+                label="Double-click empty sidebar space to create a session"
+                onChange={(checked) => updateDraft("createSessionOnSidebarDoubleClick", checked)}
               />
               <ToggleField
                 checked={draft.renameSessionOnDoubleClick}
-                description='Rename sessions directly from their cards.'
-                label='Double-click session cards to rename'
-                onChange={(checked) => updateDraft('renameSessionOnDoubleClick', checked)}
+                description="Rename sessions directly from their cards."
+                label="Double-click session cards to rename"
+                onChange={(checked) => updateDraft("renameSessionOnDoubleClick", checked)}
               />
             </SettingsSection>
 
-            <SettingsSection title='Session Cards'>
+            <SettingsSection title="Session Cards">
               <ToggleField
                 checked={draft.showCloseButtonOnSessionCards}
-                description='Reveal the close control when hovering a card.'
-                label='Show close button on hover'
-                onChange={(checked) => updateDraft('showCloseButtonOnSessionCards', checked)}
+                description="Reveal the close control when hovering a card."
+                label="Show close button on hover"
+                onChange={(checked) => updateDraft("showCloseButtonOnSessionCards", checked)}
               />
               <ToggleField
                 checked={draft.showHotkeysOnSessionCards}
-                description='Display card shortcuts where available.'
-                label='Show hotkeys on cards'
-                onChange={(checked) => updateDraft('showHotkeysOnSessionCards', checked)}
+                description="Display card shortcuts where available."
+                label="Show hotkeys on cards"
+                onChange={(checked) => updateDraft("showHotkeysOnSessionCards", checked)}
               />
               <ToggleField
                 checked={draft.showLastInteractionTimeOnSessionCards}
-                description='Keep recent activity timestamps visible.'
-                label='Show last active time by default'
-                onChange={(checked) => updateDraft('showLastInteractionTimeOnSessionCards', checked)}
+                description="Keep recent activity timestamps visible."
+                label="Show last active time by default"
+                onChange={(checked) =>
+                  updateDraft("showLastInteractionTimeOnSessionCards", checked)
+                }
               />
             </SettingsSection>
 
-            <SettingsSection title='Terminal'>
+            <SettingsSection title="Terminal">
               {/* CDXC:TerminalSettings 2026-04-26-18:36: Terminal settings in
                   zmux edit the shared Ghostty config file, so users must see
                   that external Ghostty windows receive the same values and can
                   reload them with Ghostty's normal config shortcut. */}
-              <div className='rounded-lg border border-destructive/45 bg-destructive/10 px-4 py-3 text-sm leading-6 text-foreground'>
-                Whatever you set here also applies to your external Ghostty terminal because this Ghostty terminal uses the same settings file.
-                zmux reloads its embedded Ghostty terminal about 3 seconds after you stop changing these controls; external Ghostty windows may still need Cmd+Shift+, to reload.
+              <div className="rounded-lg border border-destructive/45 bg-destructive/10 px-4 py-3 text-sm leading-6 text-foreground">
+                Whatever you set here also applies to your external Ghostty terminal because this
+                Ghostty terminal uses the same settings file. zmux reloads its embedded Ghostty
+                terminal about 3 seconds after you stop changing these controls; external Ghostty
+                windows may still need Cmd+Shift+, to reload.
               </div>
               <SelectField
-                description='Pick the terminal typeface.'
-                label='Font Family'
-                onChange={(value) => updateDraft('terminalFontFamily', value as TerminalFontPreset)}
+                description="Pick the terminal typeface."
+                label="Font Family"
+                onChange={(value) => updateDraft("terminalFontFamily", value as TerminalFontPreset)}
                 options={TERMINAL_FONT_PRESETS.map((preset) => ({
                   label: preset.preset,
                   value: preset.preset,
@@ -231,133 +258,142 @@ export function SettingsModal({ isOpen, onChange, onClose, settings, theme = 'da
                 value={draft.terminalFontFamily}
               />
               <SliderNumberField
-                description='Set terminal text size.'
-                label='Font Size'
+                description="Set terminal text size."
+                label="Font Size"
                 max={32}
                 min={8}
-                onCommit={(value) => updateDraft('terminalFontSize', value)}
-                onChange={(value) => updateDraftDebounced('terminalFontSize', value)}
+                onCommit={(value) => updateDraft("terminalFontSize", value)}
+                onChange={(value) => updateDraftDebounced("terminalFontSize", value)}
                 step={1}
                 value={draft.terminalFontSize}
               />
               <SliderNumberField
-                description='Set terminal text weight.'
-                label='Font Weight'
+                description="Set terminal text weight."
+                label="Font Weight"
                 max={900}
                 min={100}
-                onCommit={(value) => updateDraft('terminalFontWeight', value)}
-                onChange={(value) => updateDraftDebounced('terminalFontWeight', value)}
+                onCommit={(value) => updateDraft("terminalFontWeight", value)}
+                onChange={(value) => updateDraftDebounced("terminalFontWeight", value)}
                 step={50}
                 value={draft.terminalFontWeight}
               />
               <SliderNumberField
-                description='Adjust terminal row height.'
-                label='Line Height'
+                description="Adjust terminal row height."
+                label="Line Height"
                 max={2}
                 min={0.8}
-                onCommit={(value) => updateDraft('terminalLineHeight', value)}
-                onChange={(value) => updateDraftDebounced('terminalLineHeight', value)}
+                onCommit={(value) => updateDraft("terminalLineHeight", value)}
+                onChange={(value) => updateDraftDebounced("terminalLineHeight", value)}
                 step={0.05}
                 value={draft.terminalLineHeight}
               />
               <SliderNumberField
-                description='Adjust spacing between glyphs.'
-                label='Letter Spacing'
+                description="Adjust spacing between glyphs."
+                label="Letter Spacing"
                 max={8}
                 min={-2}
-                onCommit={(value) => updateDraft('terminalLetterSpacing', value)}
-                onChange={(value) => updateDraftDebounced('terminalLetterSpacing', value)}
+                onCommit={(value) => updateDraft("terminalLetterSpacing", value)}
+                onChange={(value) => updateDraftDebounced("terminalLetterSpacing", value)}
                 step={0.1}
                 value={draft.terminalLetterSpacing}
               />
               <SelectField
-                description='Choose the cursor shape.'
-                label='Cursor Style'
-                onChange={(value) => updateDraft('terminalCursorStyle', value as TerminalCursorStyle)}
+                description="Choose the cursor shape."
+                label="Cursor Style"
+                onChange={(value) =>
+                  updateDraft("terminalCursorStyle", value as TerminalCursorStyle)
+                }
                 options={[
-                  { label: 'Line', value: 'bar' },
-                  { label: 'Block', value: 'block' },
-                  { label: 'Underline', value: 'underline' },
+                  { label: "Line", value: "bar" },
+                  { label: "Block", value: "block" },
+                  { label: "Underline", value: "underline" },
                 ]}
                 value={draft.terminalCursorStyle}
               />
               <ToggleField
                 checked={draft.terminalScrollToBottomWhenTyping}
-                description='Keep the prompt visible while typing.'
-                label='Scroll to bottom when typing'
-                onChange={(checked) => updateDraft('terminalScrollToBottomWhenTyping', checked)}
+                description="Keep the prompt visible while typing."
+                label="Scroll to bottom when typing"
+                onChange={(checked) => updateDraft("terminalScrollToBottomWhenTyping", checked)}
               />
             </SettingsSection>
 
-            <SettingsSection title='Workspace'>
+            <SettingsSection title="Workspace">
               <SliderNumberField
-                description='Control spacing between panes.'
-                label='Pane Gap'
+                description="Control spacing between panes."
+                label="Pane Gap"
                 max={48}
                 min={0}
-                onCommit={(value) => updateDraft('workspacePaneGap', value)}
-                onChange={(value) => updateDraftDebounced('workspacePaneGap', value)}
+                onCommit={(value) => updateDraft("workspacePaneGap", value)}
+                onChange={(value) => updateDraftDebounced("workspacePaneGap", value)}
                 step={1}
                 value={draft.workspacePaneGap}
               />
               <TextField
-                description='CSS color for the focused pane border.'
-                label='Active Pane Border'
-                onChange={(value) => updateDraft('workspaceActivePaneBorderColor', value)}
+                description="CSS color for the focused pane border."
+                label="Active Pane Border"
+                onChange={(value) => updateDraft("workspaceActivePaneBorderColor", value)}
                 value={draft.workspaceActivePaneBorderColor}
               />
               <ToggleField
                 checked={draft.debuggingMode}
-                description='Expose debugging-only sidebar controls.'
-                label='Show debugging UI'
-                onChange={(checked) => updateDraft('debuggingMode', checked)}
+                description="Expose debugging-only sidebar controls."
+                label="Show debugging UI"
+                onChange={(checked) => updateDraft("debuggingMode", checked)}
               />
             </SettingsSection>
 
-            <SettingsSection title='IDE Attachment'>
+            <SettingsSection title="IDE Attachment">
               {/* CDXC:IDEAttachment 2026-04-26-22:38: Settings select the IDE
                   that the workspace header link button attaches to. The
                   persisted keys remain zedOverlay* so existing installs keep
                   their saved attach state and target. */}
               <ToggleField
                 checked={draft.zedOverlayEnabled}
-                description='Attach zmux as an overlay to the selected IDE.'
-                label='Attach zmux to IDE'
-                onChange={(checked) => updateDraft('zedOverlayEnabled', checked)}
+                description="Attach zmux as an overlay to the selected IDE."
+                label="Attach zmux to IDE"
+                onChange={(checked) => updateDraft("zedOverlayEnabled", checked)}
               />
               <SelectField
-                description='Select which IDE should receive the overlay.'
-                label='Target IDE'
-                onChange={(value) => updateDraft('zedOverlayTargetApp', value as ZedOverlayTargetApp)}
+                description="Select which IDE should receive the overlay."
+                label="Target IDE"
+                onChange={(value) =>
+                  updateDraft("zedOverlayTargetApp", value as ZedOverlayTargetApp)
+                }
                 options={ZED_OVERLAY_TARGET_APP_OPTIONS}
                 value={draft.zedOverlayTargetApp}
               />
             </SettingsSection>
 
-            <SettingsSection title='Sounds'>
+            <SettingsSection title="Sounds">
               <ToggleField
                 checked={draft.completionBellEnabled}
-                description='Play a completion sound when work finishes.'
-                label='Enable completion bell'
-                onChange={(checked) => updateDraft('completionBellEnabled', checked)}
+                description="Play a completion sound when work finishes."
+                label="Enable completion bell"
+                onChange={(checked) => updateDraft("completionBellEnabled", checked)}
               />
               <SoundField
-                description='Sound for terminal completions.'
-                label='Completion Sound'
-                onChange={(value) => updateDraft('completionSound', value)}
+                description="Sound for terminal completions."
+                label="Completion Sound"
+                onChange={(value) => updateDraft("completionSound", value)}
                 value={draft.completionSound}
               />
               <SoundField
-                description='Sound for action completions.'
-                label='Action Completion Sound'
-                onChange={(value) => updateDraft('actionCompletionSound', value)}
+                description="Sound for action completions."
+                label="Action Completion Sound"
+                onChange={(value) => updateDraft("actionCompletionSound", value)}
                 value={draft.actionCompletionSound}
               />
             </SettingsSection>
 
-            <Separator className='bg-border' />
-            <div className='flex justify-between gap-3'>
-              <Button className='h-10 px-5 text-sm' onClick={resetSettings} type='button' variant='outline'>
+            <Separator className="bg-border" />
+            <div className="flex justify-between gap-3">
+              <Button
+                className="h-10 px-5 text-sm"
+                onClick={resetSettings}
+                type="button"
+                variant="outline"
+              >
                 Reset to defaults
               </Button>
             </div>
@@ -374,12 +410,12 @@ export function SettingsModal({ isOpen, onChange, onClose, settings, theme = 'da
  * without waiting for the native host to echo a new HUD snapshot.
  */
 function getSidebarThemeVariant(theme: SidebarTheme): SidebarThemeVariant {
-  return theme.startsWith('light-') || theme === 'plain-light' ? 'light' : 'dark';
+  return theme.startsWith("light-") || theme === "plain-light" ? "light" : "dark";
 }
 
 function SettingsSection({ children, title }: { children: ReactNode; title: string }) {
   return (
-    <Card className='relative mt-5 overflow-visible pt-8' size='sm'>
+    <Card className="relative mt-5 overflow-visible pt-8" size="sm">
       {/* CDXC:Settings 2026-04-26-12:31: The target settings examples stack the
           text above controls. Keeping rows vertical avoids squeezing labels in
           the narrow zmux sidebar modal. */}
@@ -395,11 +431,11 @@ function SettingsSection({ children, title }: { children: ReactNode; title: stri
       {/* CDXC:Settings 2026-04-27-01:01: The title pill cannot use shadcn
           CardHeader because its container-query size containment makes
           max-content resolve to the padding width instead of the text width. */}
-      <div className='settings-section-title-pill'>
-        <CardTitle className='settings-section-title-pill-text'>{title}</CardTitle>
+      <div className="settings-section-title-pill">
+        <CardTitle className="settings-section-title-pill-text">{title}</CardTitle>
       </div>
-      <CardContent className='pt-2'>
-        <FieldGroup className='gap-6'>{children}</FieldGroup>
+      <CardContent className="pt-2">
+        <FieldGroup className="gap-6">{children}</FieldGroup>
       </CardContent>
     </Card>
   );
@@ -453,7 +489,12 @@ function SliderNumberField({
   const updateInputText = (nextText: string) => {
     setInputText(nextText);
     const nextValue = Number(nextText);
-    if (nextText.trim() === '' || !Number.isFinite(nextValue) || nextValue < min || nextValue > max) {
+    if (
+      nextText.trim() === "" ||
+      !Number.isFinite(nextValue) ||
+      nextValue < min ||
+      nextValue > max
+    ) {
       return;
     }
     onChange(nextValue);
@@ -461,7 +502,7 @@ function SliderNumberField({
 
   return (
     <SettingRow description={description} htmlFor={id} label={label}>
-      <div className='grid grid-cols-[minmax(0,1fr)_4.75rem] items-center gap-3'>
+      <div className="grid grid-cols-[minmax(0,1fr)_4.75rem] items-center gap-3">
         <Slider
           aria-label={label}
           max={max}
@@ -473,7 +514,7 @@ function SliderNumberField({
         />
         <Input
           id={id}
-          className='h-10 px-3 text-sm tabular-nums'
+          className="h-10 px-3 text-sm tabular-nums"
           onBlur={(event) => commitValue(Number(event.currentTarget.value))}
           onChange={(event) => updateInputText(event.currentTarget.value)}
           onFocus={(event) => event.currentTarget.select()}
@@ -481,7 +522,7 @@ function SliderNumberField({
           min={min}
           ref={inputRef}
           step={step}
-          type='number'
+          type="number"
           value={inputText}
         />
       </div>
@@ -497,7 +538,7 @@ function formatSliderNumber(value: number, step: number): string {
   if (Number.isInteger(step)) {
     return String(Math.round(value));
   }
-  const decimals = Math.max(0, step.toString().split('.')[1]?.length ?? 0);
+  const decimals = Math.max(0, step.toString().split(".")[1]?.length ?? 0);
   return value.toFixed(decimals);
 }
 
@@ -518,7 +559,7 @@ function SelectField({
   return (
     <SettingRow description={description} htmlFor={id} label={label}>
       <Select onValueChange={onChange} value={value}>
-        <SelectTrigger className='h-10 w-full px-3 text-sm' id={id}>
+        <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -573,7 +614,7 @@ function TextField({
     <SettingRow description={description} htmlFor={id} label={label}>
       <Input
         id={id}
-        className='h-10 px-3 text-sm'
+        className="h-10 px-3 text-sm"
         onChange={(event) => onChange(event.currentTarget.value)}
         value={value}
       />
@@ -612,14 +653,18 @@ function SettingRow({
   label: string;
 }) {
   return (
-    <Field className='gap-2.5' orientation='vertical'>
+    <Field className="gap-2.5" orientation="vertical">
       <FieldContent>
-        <FieldTitle className='text-sm'>
-          <FieldLabel className='text-sm' htmlFor={htmlFor}>{label}</FieldLabel>
+        <FieldTitle className="text-sm">
+          <FieldLabel className="text-sm" htmlFor={htmlFor}>
+            {label}
+          </FieldLabel>
         </FieldTitle>
-        {description ? <FieldDescription className='text-sm'>{description}</FieldDescription> : null}
+        {description ? (
+          <FieldDescription className="text-sm">{description}</FieldDescription>
+        ) : null}
       </FieldContent>
-      <div className='min-w-0'>{children}</div>
+      <div className="min-w-0">{children}</div>
     </Field>
   );
 }

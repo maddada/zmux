@@ -14,7 +14,10 @@ export type AppModalKind =
   | "settings";
 
 export type OpenAppModalMessage =
-  | { modal: Exclude<AppModalKind, "agentConfig" | "commandConfig" | "renameSession">; type: "open" }
+  | {
+      modal: Exclude<AppModalKind, "agentConfig" | "commandConfig" | "renameSession">;
+      type: "open";
+    }
   | { agentDraft: AgentConfigDraft; modal: "agentConfig"; type: "open" }
   | {
       commandDraft: CommandConfigDraft;

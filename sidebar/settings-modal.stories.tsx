@@ -19,7 +19,11 @@ const modalSettings: zmuxSettings = {
   workspacePaneGap: 16,
 };
 
-function SettingsModalStory({ initialSettings = modalSettings }: { initialSettings?: zmuxSettings }) {
+function SettingsModalStory({
+  initialSettings = modalSettings,
+}: {
+  initialSettings?: zmuxSettings;
+}) {
   const [settings, setSettings] = useState<zmuxSettings>(initialSettings);
 
   return (

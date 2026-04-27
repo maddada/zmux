@@ -932,11 +932,7 @@ describe("WorkspacePanelManager", () => {
     emitViewStateChange(panel);
     await Promise.resolve();
 
-    expect(executeCommandMock).toHaveBeenCalledWith(
-      "setContext",
-      "zmux.workspacePanelFocus",
-      true,
-    );
+    expect(executeCommandMock).toHaveBeenCalledWith("setContext", "zmux.workspacePanelFocus", true);
 
     panel.active = false;
     emitViewStateChange(panel);

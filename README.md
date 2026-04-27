@@ -11,6 +11,7 @@ brew install --cask maddada/tap/zmux
 ```
 
 ## Native Ghostty terminals that integrate that integrate with the sidebar
+
 - Auto naming Codex/Claude/Gemini/Copilot terminal sessions (more soon).
 - Auto sync of the terminal title and status with UI.
 - Show status indicators for running/done.
@@ -55,7 +56,9 @@ brew install --cask maddada/tap/zmux
 3. Set your mcp to use canary channel:
 
 #### For Claude Code:
+
 ~/.claude.json
+
 ```
 {
   ...
@@ -76,7 +79,9 @@ brew install --cask maddada/tap/zmux
 ```
 
 #### For Codex:
+
 ~/.codex/config.toml
+
 ```
 [mcp_servers.chrome-devtools]
 command = "npx"

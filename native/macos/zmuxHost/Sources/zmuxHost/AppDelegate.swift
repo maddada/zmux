@@ -4,7 +4,7 @@ import GhosttyKit
 import OSLog
 import UniformTypeIdentifiers
 
-final class AppDelegate: NSObject, NSApplicationDelegate, GhosttyAppDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, GhosttyAppDelegate {
     static let logger = Logger(subsystem: "com.madda.zmux.host", category: "app")
 
     nonisolated(unsafe) let ghostty: Ghostty.App
@@ -41,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, GhosttyAppDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        Self.appendNativeHostLifecycleLog(
+            "applicationDidFinishLaunching pid=\(ProcessInfo.processInfo.processIdentifier) workspacePath=\(workspacePath)"
+        )
         MainActor.assumeIsolated {
             makeWindow()
             startBridge()
@@ -48,6 +51,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, GhosttyAppDelegate {
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             self?.ghostty.appTick()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Self.appendNativeHostLifecycleLog(
+            "applicationWillTerminate pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false)"
+        )
     }
 
     private struct GhosttyConfigSelection {
@@ -233,6 +242,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, GhosttyAppDelegate {
         appendLogLine("[\(area)] \(message)\(stackText)", to: logURL, logsDirectory: logsDirectory, label: "app modal error")
     }
 
+    fileprivate static func appendNativeHostLifecycleLog(_ message: String) {
+        /**
+         CDXC:CrashDiagnostics 2026-04-27-17:38
+         When the app disappears from the Dock, native lifecycle breadcrumbs must
+         survive outside WebKit and JS logs so close-button, last-window, and
+         termination paths can be separated from renderer crashes.
+         */
+        let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".zmux/logs", isDirectory: true)
+        let logURL = logsDirectory.appendingPathComponent("native-host-lifecycle.log")
+        appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "native host lifecycle")
+    }
+
     private static func appendLogLine(
         _ message: String,
         to logURL: URL,
@@ -263,7 +285,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, GhosttyAppDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        Self.appendNativeHostLifecycleLog("applicationShouldTerminateAfterLastWindowClosed result=true")
         true
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        Self.appendNativeHostLifecycleLog(
+            "windowWillClose title=\(window?.title ?? "<missing>") visibleBeforeClose=\(window?.isVisible ?? false)"
+        )
     }
 
     func findSurface(forUUID uuid: UUID) -> Ghostty.SurfaceView? {
@@ -323,6 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, GhosttyAppDelegate {
         window.title = "zmux"
         window.titleVisibility = .hidden
         window.contentView = root
+        window.delegate = self
         installAttachToIdeTitlebarButton(on: window)
         window.makeKeyAndOrderFront(nil)
         self.window = window
@@ -2177,6 +2207,17 @@ extension zmuxRootView: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Self.logger.error("Sidebar webview provisional navigation failed: \(error.localizedDescription, privacy: .public)")
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        /**
+         CDXC:CrashDiagnostics 2026-04-27-17:38
+         WebKit renderer exits can look like an app crash from the UI. Persist
+         this delegate callback so native process exits are not confused with
+         web content process termination.
+         */
+        Self.logger.error("Sidebar webview content process terminated")
+        AppDelegate.appendNativeHostLifecycleLog("sidebarWebContentProcessDidTerminate url=\(webView.url?.absoluteString ?? "<missing>")")
     }
 }
 
