@@ -1500,15 +1500,16 @@ final class zmuxRootView: NSView {
             return
         }
 
-        let repoRoot = Self.resolveRepoRoot()
-        let builtSidebar = repoRoot.appendingPathComponent("native/macos/zmuxHost/Web/index.html")
+        let webAssets = Self.resolveWebAssets()
+        let builtSidebar = webAssets.appendingPathComponent("index.html")
         if FileManager.default.fileExists(atPath: builtSidebar.path) {
             Self.logger.info("Loading built sidebar from \(builtSidebar.path, privacy: .public)")
-            sidebarView.loadFileURL(builtSidebar, allowingReadAccessTo: builtSidebar.deletingLastPathComponent())
+            sidebarView.loadFileURL(builtSidebar, allowingReadAccessTo: webAssets)
             return
         }
 
         Self.logger.error("Built sidebar not found at \(builtSidebar.path, privacy: .public)")
+        let repoRoot = Self.resolveRepoRoot()
         let html = """
         <!doctype html>
         <html>
@@ -1548,22 +1549,36 @@ final class zmuxRootView: NSView {
     }
 
     private func loadModalHost() {
-        let repoRoot = Self.resolveRepoRoot()
-        let builtModalHost = repoRoot.appendingPathComponent("native/macos/zmuxHost/Web/modal-host.html")
+        let webAssets = Self.resolveWebAssets()
+        let builtModalHost = webAssets.appendingPathComponent("modal-host.html")
         if FileManager.default.fileExists(atPath: builtModalHost.path) {
             Self.logger.info("Loading modal host from \(builtModalHost.path, privacy: .public)")
             modalHostView.loadFileURL(
                 builtModalHost,
-                allowingReadAccessTo: builtModalHost.deletingLastPathComponent()
+                allowingReadAccessTo: webAssets
             )
             return
         }
 
         Self.logger.error("Built modal host not found at \(builtModalHost.path, privacy: .public)")
+        let repoRoot = Self.resolveRepoRoot()
         modalHostView.loadHTMLString(
             "<!doctype html><html><body style=\"margin:0;background:transparent\"></body></html>",
             baseURL: repoRoot
         )
+    }
+
+    private static func resolveWebAssets() -> URL {
+        // CDXC:NativeSidebar 2026-04-27-06:19: Sidebar assets should be loaded
+        // from the app bundle first because users normally launch the installed
+        // app from /Applications, where FileManager.currentDirectoryPath is not
+        // the repository root.
+        if let bundledWebAssets = Bundle.main.resourceURL?.appendingPathComponent("Web", isDirectory: true),
+           FileManager.default.fileExists(atPath: bundledWebAssets.appendingPathComponent("index.html").path) {
+            return bundledWebAssets
+        }
+
+        return resolveRepoRoot().appendingPathComponent("native/macos/zmuxHost/Web", isDirectory: true)
     }
 
     private static func resolveRepoRoot() -> URL {
@@ -1675,9 +1690,9 @@ final class zmuxRootView: NSView {
             box-shadow: 0 0 0 2px rgba(91, 141, 246, 0.18);
           }
           .indicators {
-            /* CDXC:WorkspaceDock 2026-04-27-04:23: The native workspace rail
-               is narrow, so running/done badges must stay inside the button's
-               top-right corner instead of using the old side-dot placement. */
+            /* CDXC:WorkspaceDock 2026-04-27-06:19: Done and active badges sit
+               together at the top-right of the workspace button, ordered green
+               then orange from left to right. */
             align-items: center;
             display: flex;
             gap: 1px;
@@ -1701,11 +1716,20 @@ final class zmuxRootView: NSView {
             padding: 0 4px;
             white-space: nowrap;
           }
-          .indicator[data-status="running"] {
+          .indicator[data-status="active"] {
             background: #d08a2d;
           }
           .indicator[data-status="done"] {
             background: #2e9d68;
+          }
+          .indicator[data-status="running"] {
+            /* CDXC:WorkspaceDock 2026-04-27-06:27: The gray total-running
+               terminal count belongs at the bottom-left of each workspace
+               button, distinct from top-right done/active session badges. */
+            background: #6f7785;
+            bottom: -7px;
+            left: -1px;
+            position: absolute;
           }
           #add {
             flex: 0 0 auto;
@@ -1735,22 +1759,20 @@ final class zmuxRootView: NSView {
               const button = document.createElement("button");
               button.type = "button";
               button.dataset.active = project.isActive ? "true" : "false";
+              const active = Number(project.sessionCounts?.active || 0);
               const running = Number(project.sessionCounts?.running || 0);
               const done = Number(project.sessionCounts?.done || 0);
-              const summary = [running > 0 ? `${running} running` : "", done > 0 ? `${done} done` : ""].filter(Boolean).join(", ");
+              const summary = [
+                running > 0 ? `${running} running` : "",
+                active > 0 ? `${active} active` : "",
+                done > 0 ? `${done} done` : "",
+              ].filter(Boolean).join(", ");
               button.title = summary ? `${project.path || project.title} - ${summary}` : (project.path || project.title);
               button.textContent = initials(project.title, index);
               button.onclick = () => post({ type: "focusProject", projectId: project.projectId });
-              if (running > 0 || done > 0) {
+              if (done > 0 || active > 0) {
                 const indicators = document.createElement("span");
                 indicators.className = "indicators";
-                if (running > 0) {
-                  const runningIndicator = document.createElement("span");
-                  runningIndicator.className = "indicator";
-                  runningIndicator.dataset.status = "running";
-                  runningIndicator.textContent = formatCount(running);
-                  indicators.appendChild(runningIndicator);
-                }
                 if (done > 0) {
                   const doneIndicator = document.createElement("span");
                   doneIndicator.className = "indicator";
@@ -1758,7 +1780,21 @@ final class zmuxRootView: NSView {
                   doneIndicator.textContent = formatCount(done);
                   indicators.appendChild(doneIndicator);
                 }
+                if (active > 0) {
+                  const activeIndicator = document.createElement("span");
+                  activeIndicator.className = "indicator";
+                  activeIndicator.dataset.status = "active";
+                  activeIndicator.textContent = formatCount(active);
+                  indicators.appendChild(activeIndicator);
+                }
                 button.appendChild(indicators);
+              }
+              if (running > 0) {
+                const runningIndicator = document.createElement("span");
+                runningIndicator.className = "indicator";
+                runningIndicator.dataset.status = "running";
+                runningIndicator.textContent = formatCount(running);
+                button.appendChild(runningIndicator);
               }
               projectsElement.appendChild(button);
             });

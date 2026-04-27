@@ -57,6 +57,13 @@ targets:
       - path: ${GHOSTTY_ROOT}/zig-out/share/terminfo
         buildPhase: resources
         type: folder
+      # CDXC:NativeSidebar 2026-04-27-06:19: The installed native app must
+      # load the full sidebar when launched from /Applications. Bundle the
+      # generated Web assets so LaunchServices current-directory differences
+      # cannot send users to the minimal emergency shell UI.
+      - path: Web
+        buildPhase: resources
+        type: folder
     dependencies:
       - framework: ${GHOSTTY_ROOT}/macos/GhosttyKit.xcframework
         embed: false

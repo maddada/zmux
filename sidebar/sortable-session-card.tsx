@@ -633,6 +633,7 @@ export function SortableSessionCard({
           data-drop-target={String(isVisibleDropTarget)}
           data-focused={String(session.isFocused)}
           data-group-connector={String(showGroupConnector)}
+          data-has-agent-icon={String(Boolean(session.agentIcon) || session.isReloading === true)}
           data-lifecycle-state={lifecycleState}
           data-running={String(lifecycleState === "running")}
           data-sleeping={String(Boolean(session.isSleeping))}

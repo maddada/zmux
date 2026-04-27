@@ -1,13 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${GHOSTTY_ROOT:?Set GHOSTTY_ROOT to your local Ghostty checkout before building zmuxHost.}"
-GHOSTTY_KIT="$GHOSTTY_ROOT/macos/GhosttyKit.xcframework"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_PATH="$SCRIPT_DIR/zmux.xcodeproj"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 WEB_DIR="$SCRIPT_DIR/Web"
+GHOSTTY_ROOT="${GHOSTTY_ROOT:-}"
+DERIVED_DATA="${DERIVED_DATA:-$REPO_ROOT/build}"
+
+if [[ -z "$GHOSTTY_ROOT" ]]; then
+  # CDXC:NativeHost 2026-04-27-06:06: Local start/build commands should
+  # discover the adjacent Ghostty checkout that already contains the required
+  # xcframework so `bun start` launches the native host without per-shell setup.
+  for candidate in \
+    "$REPO_ROOT/../ghostty" \
+    "$REPO_ROOT/../ghostty-zmux-survival" \
+    "$REPO_ROOT/../../_forks/ghostty"
+  do
+    if [[ -d "$candidate/macos/GhosttyKit.xcframework" ]]; then
+      GHOSTTY_ROOT="$(cd "$candidate" && pwd)"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$GHOSTTY_ROOT" ]]; then
+  cat >&2 <<EOF
+Set GHOSTTY_ROOT to your local Ghostty checkout before building zmuxHost.
+
+Expected to find:
+  \$GHOSTTY_ROOT/macos/GhosttyKit.xcframework
+EOF
+  exit 1
+fi
+
+GHOSTTY_KIT="$GHOSTTY_ROOT/macos/GhosttyKit.xcframework"
 
 if [[ ! -d "$GHOSTTY_KIT" ]]; then
   cat >&2 <<EOF
@@ -129,12 +157,25 @@ xcodebuild \
   -project "$PROJECT_PATH" \
   -scheme zmux \
   -configuration "$CONFIGURATION" \
+  -derivedDataPath "$DERIVED_DATA" \
   build
+
+APP_PATH="$(
+  xcodebuild \
+    -project "$PROJECT_PATH" \
+    -scheme zmux \
+    -configuration "$CONFIGURATION" \
+    -derivedDataPath "$DERIVED_DATA" \
+    -showBuildSettings 2>/dev/null \
+    | awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }'
+)/zmux.app"
+
+"$SCRIPT_DIR/codesign-zmux-host.sh" "$APP_PATH"
 
 cat <<EOF
 
 Built zmux.
 
 Launch it from Xcode or with:
-  open "$(xcodebuild -project "$PROJECT_PATH" -scheme zmux -configuration "$CONFIGURATION" -showBuildSettings 2>/dev/null | awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }')/zmux.app"
+  open "$APP_PATH"
 EOF

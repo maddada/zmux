@@ -150,11 +150,13 @@ type WorkspaceBarProject = {
   path: string;
   projectId: string;
   /**
-   * CDXC:WorkspaceDock 2026-04-27-04:23
-   * The native workspace rail must show separate running and done badge counts
-   * from the same projected session-card lifecycle data used by the sidebar.
+   * CDXC:WorkspaceDock 2026-04-27-06:19
+   * The native workspace rail must split session-card state into three badges:
+   * idle running sessions are gray, active working sessions are orange, and
+   * completed sessions are green.
    */
   sessionCounts: {
+    active: number;
     done: number;
     running: number;
   };
@@ -1786,12 +1788,13 @@ function createWorkspaceBarState(): WorkspaceBarStateMessage {
 
 function countWorkspaceBarSessions(project: NativeProject): WorkspaceBarProject["sessionCounts"] {
   /**
-   * CDXC:WorkspaceDock 2026-04-27-04:23
-   * Count dock badges from the same lifecycle projection as session cards:
-   * live native terminal state wins, stored sleeping sessions are ignored, and
-   * non-error completed sessions contribute to the green done badge.
+   * CDXC:WorkspaceDock 2026-04-27-06:19
+   * Count dock badges from the same projection as session cards: the orange
+   * rail badge follows the session-card orange working dot, while running idle
+   * sessions remain gray at the bottom-right of the workspace button.
    */
   const counts: WorkspaceBarProject["sessionCounts"] = {
+    active: 0,
     done: 0,
     running: 0,
   };
@@ -1808,8 +1811,11 @@ function countWorkspaceBarSessions(project: NativeProject): WorkspaceBarProject[
         counts.done += 1;
         continue;
       }
-      const lifecycleState = terminalStateById.get(session.sessionId)?.lifecycleState ?? "done";
-      if (lifecycleState === "running") {
+      const terminalState = terminalStateById.get(session.sessionId);
+      const lifecycleState = terminalState?.lifecycleState ?? "done";
+      if (lifecycleState === "running" && terminalState?.activity === "working") {
+        counts.active += 1;
+      } else if (lifecycleState === "running") {
         counts.running += 1;
       } else if (lifecycleState === "done") {
         counts.done += 1;
@@ -1830,8 +1836,10 @@ function summarizeWorkspaceBarIndicatorProject(project: NativeProject) {
         countedAs: getWorkspaceBarIndicatorDecision(
           session.isSleeping === true,
           session.kind,
+          terminalStateById.get(session.sessionId)?.activity,
           terminalStateById.get(session.sessionId)?.lifecycleState,
         ),
+        activity: terminalStateById.get(session.sessionId)?.activity,
         kind: session.kind,
         lifecycleState: terminalStateById.get(session.sessionId)?.lifecycleState,
         sessionId: session.sessionId,
@@ -1845,8 +1853,9 @@ function summarizeWorkspaceBarIndicatorProject(project: NativeProject) {
 function getWorkspaceBarIndicatorDecision(
   isSleeping: boolean,
   kind: string,
+  activity: string | undefined,
   lifecycleState: string | undefined,
-): "done" | "running" | "ignored-error" | "ignored-sleeping" {
+): "active" | "done" | "running" | "ignored-error" | "ignored-sleeping" {
   if (isSleeping) {
     return "ignored-sleeping";
   }
@@ -1855,6 +1864,9 @@ function getWorkspaceBarIndicatorDecision(
   }
   if (kind === "t3") {
     return "done";
+  }
+  if (lifecycleState === "running" && activity === "working") {
+    return "active";
   }
   if (lifecycleState === "running") {
     return "running";

@@ -8,6 +8,8 @@ APP_NAME="zmux"
 BUNDLE_ID="com.zmux.host"
 INSTALL_DIR="${INSTALL_DIR:-/Applications}"
 INSTALLED_APP="$INSTALL_DIR/$APP_NAME.app"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+DERIVED_DATA="${DERIVED_DATA:-$REPO_ROOT/build}"
 
 "$SCRIPT_DIR/build-zmux-host.sh"
 
@@ -16,6 +18,7 @@ APP_PATH="$(
     -project "$PROJECT_PATH" \
     -scheme zmux \
     -configuration "$CONFIGURATION" \
+    -derivedDataPath "$DERIVED_DATA" \
     -showBuildSettings 2>/dev/null \
     | awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }'
 )/$APP_NAME.app"
@@ -29,4 +32,5 @@ sleep 0.3
 # stays attached to the same signed app identity across rebuilds.
 rm -rf "$INSTALLED_APP"
 cp -R "$APP_PATH" "$INSTALL_DIR/"
+"$SCRIPT_DIR/codesign-zmux-host.sh" "$INSTALLED_APP"
 open "$INSTALLED_APP"
