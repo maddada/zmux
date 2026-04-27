@@ -31,6 +31,15 @@ declare global {
         zmuxAppModalHost?: {
           postMessage: (message: unknown) => void;
         };
+        zmuxNativeHost?: {
+          postMessage: (message: unknown) => void;
+        };
+        zmuxNativeHostDiagnostics?: {
+          postMessage: (message: unknown) => void;
+        };
+        zmuxWorkspaceBar?: {
+          postMessage: (message: unknown) => void;
+        };
       };
     };
   }

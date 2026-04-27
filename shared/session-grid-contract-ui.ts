@@ -24,10 +24,10 @@ import {
 } from "./session-grid-contract-sidebar";
 import {
   getOrderedSessions,
+  getSessionCardPrimaryTitle,
   getSessionGridLayoutVisibleCount,
   getSessionShortcutLabel,
   getSlotLabel,
-  getVisiblePrimaryTitle,
   getVisibleSessionNumber,
   isSessionGridFocusModeActive,
 } from "./session-grid-contract-session";
@@ -111,7 +111,7 @@ export function createSidebarSessionItems(
     isRunning: session.kind === "browser",
     isVisible: visibleIds.has(session.sessionId),
     lastInteractionAt: undefined,
-    primaryTitle: getVisiblePrimaryTitle(session.title),
+    primaryTitle: getSessionCardPrimaryTitle(session),
     row: session.row,
     sessionId: session.sessionId,
     sessionKind: session.kind,

@@ -55,6 +55,17 @@ const IGNORED_PLACEHOLDER_SESSION_TITLES = new Set([
   "openai codex session",
   "t3 code session",
 ]);
+const DEFAULT_SESSION_AGENT_TITLE_NAMES = new Map<string, string>([
+  ["claude", "Claude"],
+  ["claude-code", "Claude"],
+  ["codex", "Codex"],
+  ["codex-cli", "Codex"],
+  ["copilot", "Copilot"],
+  ["gemini", "Gemini"],
+  ["opencode", "OpenCode"],
+  ["open-code", "OpenCode"],
+  ["t3", "T3 Code"],
+]);
 const ELLIPSIZED_PATH_TITLE_PATTERN = /^(?:…|\.\.\.)[\\/]/u;
 const WINDOWS_DEFAULT_POWERSHELL_TITLE_PATTERN =
   /^[a-z]:\\windows\\system32\\windowspowershell\\v1\.0\\powershell\.exe(?:\s+\.)?$/iu;
@@ -292,7 +303,10 @@ export function createSessionAlias(
  */
 export function createAgentSessionDefaultTitle(agentName: string | undefined): string {
   const normalizedAgentName = agentName?.replace(/\s+/g, " ").trim();
-  return normalizedAgentName ? `${normalizedAgentName} Session` : DEFAULT_TERMINAL_SESSION_TITLE;
+  const defaultAgentTitleName = normalizedAgentName
+    ? (DEFAULT_SESSION_AGENT_TITLE_NAMES.get(normalizedAgentName.toLowerCase()) ?? normalizedAgentName)
+    : undefined;
+  return defaultAgentTitleName ? `${defaultAgentTitleName} Session` : DEFAULT_TERMINAL_SESSION_TITLE;
 }
 
 export function isNumericSessionAlias(alias: string | undefined): boolean {
@@ -418,6 +432,28 @@ export function getVisiblePrimaryTitle(title: string): string | undefined {
   const normalizedTitle = title.trim();
   if (!normalizedTitle || isIgnoredPlaceholderSessionTitle(normalizedTitle)) {
     return undefined;
+  }
+
+  return normalizedTitle;
+}
+
+export function getSessionCardPrimaryTitle(
+  session: Pick<BaseSessionRecord, "title"> & { agentName?: string },
+): string | undefined {
+  const normalizedTitle = session.title.trim().replace(/\s+/g, " ");
+  /**
+   * CDXC:Session-title-defaults 2026-04-27-08:31
+   * Session cards still need a human placeholder while resume/persistence code
+   * treats placeholders and Ghostty cwd titles as not persisted. Show the
+   * neutral or agent-aware placeholder with the card's unsynced marker instead
+   * of falling through to opaque ids such as `s-260427-090032-rma`.
+   */
+  if (
+    !normalizedTitle ||
+    /^Session \d+$/iu.test(normalizedTitle) ||
+    isPathLikeTerminalTitle(normalizedTitle)
+  ) {
+    return createAgentSessionDefaultTitle(session.agentName);
   }
 
   return normalizedTitle;

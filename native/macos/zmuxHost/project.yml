@@ -1,6 +1,6 @@
 name: zmux
 options:
-  bundleIdPrefix: com.zmux
+  bundleIdPrefix: com.madda.zmux
   deploymentTarget:
     macOS: "13.0"
 configs:
@@ -19,7 +19,10 @@ settings:
       - "$(inherited)"
       - "@executable_path/../Frameworks"
     MACOSX_DEPLOYMENT_TARGET: "13.0"
-    MARKETING_VERSION: "0.1"
+    # CDXC:Distribution 2026-04-27-08:37: Homebrew cask release v1.0.0 must
+    # publish a notarized Developer ID app whose bundle metadata matches the
+    # GitHub release and brew artifact version.
+    MARKETING_VERSION: "1.0.0"
     SDKROOT: macosx
     SWIFT_VERSION: "5.0"
     SWIFT_OBJC_BRIDGING_HEADER: ${GHOSTTY_ROOT}/macos/Sources/App/macOS/ghostty-bridging-header.h
@@ -81,5 +84,8 @@ targets:
         OTHER_LDFLAGS:
           - "$(inherited)"
           - "-lc++"
-        PRODUCT_BUNDLE_IDENTIFIER: com.zmux.host
+        # CDXC:Distribution 2026-04-27-08:37: Public notarized releases are
+        # signed under Mohamad Youssef's Apple team, so the bundle identifier
+        # uses the com.madda namespace expected by the brew publishing flow.
+        PRODUCT_BUNDLE_IDENTIFIER: com.madda.zmux.host
         PRODUCT_NAME: zmux

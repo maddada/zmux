@@ -1,4 +1,20 @@
 import { createRoot } from "react-dom/client";
+import {
+  IconChevronLeft,
+  IconChevronRight,
+  IconPhoto,
+  IconPlus,
+  IconPalette,
+  IconTrash,
+} from "@tabler/icons-react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { installAppModalGlobalErrorLogging } from "../../sidebar/app-modal-error-log";
 import { postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
 import { SidebarApp } from "../../sidebar/sidebar-app";
@@ -13,13 +29,16 @@ import {
   type TitleDerivedSessionActivity,
 } from "../../extension/session-title-activity";
 import {
+  clampVisibleSessionCount,
   createAgentSessionDefaultTitle,
   createDefaultGroupedSessionWorkspaceSnapshot,
   createSidebarHudState,
   DEFAULT_TERMINAL_SESSION_TITLE,
   createSidebarSessionItems,
+  getSessionCardPrimaryTitle,
   getVisiblePrimaryTitle,
   getVisibleTerminalTitle,
+  resolveSidebarTheme,
   type ExtensionToSidebarMessage,
   type GroupedSessionWorkspaceSnapshot,
   type SessionRecord,
@@ -28,9 +47,12 @@ import {
   type SidebarCollapsibleSection,
   type SidebarDaemonSessionItem,
   type SidebarDaemonSessionsStateMessage,
+  type SidebarHydrateMessage,
   type SidebarPreviousSessionItem,
   type SidebarSectionCollapseState,
+  type SidebarSessionGroup,
   type SidebarSessionItem,
+  type SidebarTheme,
   type SidebarToExtensionMessage,
   type TerminalSessionRecord,
   type VisibleSessionCount,
@@ -122,6 +144,7 @@ type NativeHostCommand =
   | { layout?: NativeTerminalLayout; type: "setTerminalLayout" }
   | { sessionId: string; type: "setTerminalVisibility"; visible: boolean }
   | { type: "pickWorkspaceFolder" }
+  | { projectId: string; type: "pickWorkspaceIcon" }
   | { type: "showMessage"; level: "info" | "warning" | "error"; message: string }
   | { details?: string; event: string; type: "appendAgentDetectionDebugLog" }
   | { details?: string; event: string; type: "appendTerminalFocusDebugLog" }
@@ -149,7 +172,8 @@ type NativeHostCommand =
       workspacePath: string;
     };
 
-type WorkspaceBarProject = {
+export type WorkspaceBarProject = {
+  iconDataUrl?: string;
   isActive: boolean;
   path: string;
   projectId: string;
@@ -165,10 +189,11 @@ type WorkspaceBarProject = {
     running: number;
     working: number;
   };
+  theme?: SidebarTheme;
   title: string;
 };
 
-type WorkspaceBarStateMessage = {
+export type WorkspaceBarStateMessage = {
   activeProjectId: string;
   projects: WorkspaceBarProject[];
   type: "workspaceBarState";
@@ -218,13 +243,19 @@ declare global {
         zmuxWorkspaceBar?: {
           postMessage: (message: unknown) => void;
         };
+        zmuxNativeHostDiagnostics?: {
+          postMessage: (message: unknown) => void;
+        };
       };
     };
     __zmux_NATIVE_WORKSPACE_BAR__?: {
       addProject: (path: string, name?: string) => void;
       focusProject: (projectId: string) => void;
       getState: () => WorkspaceBarStateMessage;
+      removeProject: (projectId: string) => void;
       reorderProjects: (projectIds: string[]) => void;
+      setProjectIcon: (projectId: string, iconDataUrl: string | undefined) => void;
+      setProjectTheme: (projectId: string, theme: SidebarTheme) => void;
     };
     __zmux_NATIVE_SETTINGS__?: {
       attachZedOverlay: (targetApp: "zed" | "zed-preview" | "vscode" | "vscode-insiders") => void;
@@ -278,6 +309,7 @@ const SIDEBAR_SIDE_STORAGE_KEY = "zmux-native-sidebar-side";
 const GIT_PRIMARY_ACTION_STORAGE_KEY = "zmux-native-git-primary-action";
 const GIT_CONFIRM_COMMIT_STORAGE_KEY = "zmux-native-git-confirm-commit";
 const GIT_GENERATE_COMMIT_BODY_STORAGE_KEY = "zmux-native-git-generate-commit-body";
+const WORKSPACE_DOCK_STATE_EVENT = "zmux-workspace-dock-state";
 const CHROME_CANARY_PROCESS_NAME = "Google Chrome Canary";
 const CHROME_CANARY_RUNNING_POLL_MS = 2_000;
 const CHROME_CANARY_BROWSER_GROUP_ID = "browser-chrome-canary";
@@ -293,6 +325,24 @@ const AUTO_SUBMIT_STAGED_RENAME_DELAY_MS = 1_000;
 const NATIVE_INITIAL_ACTIVITY_SUPPRESSION_MS = 7_000;
 const NATIVE_MIN_WORKING_DURATION_BEFORE_ATTENTION_MS = 5_000;
 const zmux_AGENT_NOTIFY_HOOK_PATH = `${nativeHomeDirectory()}/.zmux/hooks/agent-shell-notify.sh`;
+/**
+ * CDXC:WorkspaceDock 2026-04-27-08:48
+ * Workspace context-menu themes use the same concrete theme palette names as
+ * Settings, excluding Auto because per-workspace selection must persist a
+ * deterministic color and apply that theme when the workspace becomes active.
+ */
+const WORKSPACE_DOCK_THEME_OPTIONS: ReadonlyArray<{ label: string; value: SidebarTheme }> = [
+  { label: "Dark Gray", value: "plain-dark" },
+  { label: "Dark Green", value: "dark-green" },
+  { label: "Dark Blue", value: "dark-blue" },
+  { label: "Dark Red", value: "dark-red" },
+  { label: "Dark Pink", value: "dark-pink" },
+  { label: "Dark Orange", value: "dark-orange" },
+  { label: "Light Blue", value: "light-blue" },
+  { label: "Light Green", value: "light-green" },
+  { label: "Light Pink", value: "light-pink" },
+  { label: "Light Orange", value: "light-orange" },
+];
 /**
  * CDXC:SessionTitleSync 2026-04-26-09:23
  * Native first-prompt title generation must match zmux's Codex `/rename`
@@ -330,9 +380,11 @@ const pendingProcessResults = new Map<
 const pendingGitCommitRequests = new Map<string, { action: SidebarGitAction; body?: string; subject: string }>();
 
 type NativeProject = {
+  iconDataUrl?: string;
   name: string;
   path: string;
   projectId: string;
+  theme?: SidebarTheme;
   workspace: GroupedSessionWorkspaceSnapshot;
 };
 
@@ -797,8 +849,8 @@ function readStoredProjects(): { activeProjectId: string; projects: NativeProjec
   const fallbackProject = createInitialProject();
   try {
     const candidate = JSON.parse(localStorage.getItem(PROJECTS_STORAGE_KEY) || "null");
-    const candidateProjects = Array.isArray(candidate?.projects)
-      ? candidate.projects.flatMap(normalizeStoredNativeProject)
+    const candidateProjects: NativeProject[] = Array.isArray(candidate?.projects)
+      ? candidate.projects.flatMap((project: unknown) => normalizeStoredNativeProject(project))
       : [];
     const projects = candidateProjects.length > 0 ? candidateProjects : [fallbackProject];
     const activeProjectId =
@@ -856,9 +908,11 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
   const projectId = project.projectId?.trim() || createProjectId(path);
   return [
     {
+      iconDataUrl: normalizeWorkspaceDockIconDataUrl(project.iconDataUrl),
       name: project.name?.trim() || projectNameFromPath(path),
       path,
       projectId,
+      theme: normalizeWorkspaceDockTheme(project.theme),
       workspace: normalizeSimpleGroupedSessionWorkspaceSnapshot(project.workspace),
     },
   ];
@@ -869,8 +923,22 @@ function createInitialProject(): NativeProject {
     name: initialWorkspaceName,
     path: initialWorkspacePath,
     projectId: createProjectId(initialWorkspacePath),
+    theme: resolveSidebarTheme(DEFAULT_zmux_SETTINGS.sidebarTheme, "dark"),
     workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
   };
+}
+
+function normalizeWorkspaceDockIconDataUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  return /^data:image\/(?:png|svg\+xml);base64,/u.test(value) ? value : undefined;
+}
+
+function normalizeWorkspaceDockTheme(value: unknown): SidebarTheme | undefined {
+  return WORKSPACE_DOCK_THEME_OPTIONS.some((theme) => theme.value === value)
+    ? (value as SidebarTheme)
+    : undefined;
 }
 
 function summarizeNativeProject(project: NativeProject) {
@@ -894,6 +962,7 @@ function summarizeNativeProject(project: NativeProject) {
     name: project.name,
     path: project.path,
     projectId: project.projectId,
+    theme: project.theme,
   };
 }
 
@@ -1517,11 +1586,17 @@ function buildChromeCanaryBrowserGroup(): SidebarSessionGroup {
   };
 }
 
-function buildSidebarMessage(): ExtensionToSidebarMessage {
+function buildSidebarMessage(): SidebarHydrateMessage {
   const project = activeProject();
   const workspace = project.workspace;
   const snapshot = activeSnapshot();
   const browserGroups = isChromeCanaryRunning ? [buildChromeCanaryBrowserGroup()] : [];
+  /**
+   * CDXC:NativeSidebar 2026-04-27-17:03
+   * Native sidebar editor checks must stay aligned with the shipped UX. Keep
+   * the hydrate payload exact and resolve persisted theme settings before
+   * passing them to shared sidebar HUD creation.
+   */
   return {
     groups: browserGroups.concat(workspace.groups.map((group) => ({
       groupId: group.groupId,
@@ -1539,7 +1614,11 @@ function buildSidebarMessage(): ExtensionToSidebarMessage {
           return session;
         }
         const visibleTerminalTitle = getVisibleTerminalTitle(terminalState?.terminalTitle);
-        const visiblePrimaryTitle = getVisiblePrimaryTitle(session.primaryTitle);
+        const displayPrimaryTitle =
+          sessionRecord && sessionRecord.kind === "terminal"
+            ? getSessionCardPrimaryTitle(sessionRecord)
+            : session.primaryTitle;
+        const visiblePrimaryTitle = getVisiblePrimaryTitle(displayPrimaryTitle ?? "");
         /**
          * CDXC:AgentDetection 2026-04-27-02:36
          * Session cards must show the detected agent from the canonical session
@@ -1552,10 +1631,12 @@ function buildSidebarMessage(): ExtensionToSidebarMessage {
           Boolean(visibleTerminalTitle) && shouldPreferTerminalTitleForAgentIcon(agentIcon);
         const primaryTitle = shouldPreferTerminalTitle
           ? visibleTerminalTitle
-          : (visiblePrimaryTitle ?? visibleTerminalTitle ?? session.primaryTitle);
+          : visiblePrimaryTitle
+            ? displayPrimaryTitle
+            : (visibleTerminalTitle ?? displayPrimaryTitle);
         const secondaryTerminalTitle = shouldPreferTerminalTitle
           ? undefined
-          : visiblePrimaryTitle
+          : displayPrimaryTitle
             ? visibleTerminalTitle
             : undefined;
         appendSessionTitleDebugLog("nativeSidebar.sidebarTitleProjection", {
@@ -1611,7 +1692,7 @@ function buildSidebarMessage(): ExtensionToSidebarMessage {
     hud: {
       ...createSidebarHudState(
         snapshot,
-        settings.sidebarTheme === "auto" ? "dark-blue" : settings.sidebarTheme,
+        project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
         settings.agentManagerZoomPercent,
         settings.showCloseButtonOnSessionCards,
         settings.showHotkeysOnSessionCards,
@@ -1805,10 +1886,12 @@ function createWorkspaceBarState(): WorkspaceBarStateMessage {
   const workspaceBarState: WorkspaceBarStateMessage = {
     activeProjectId,
     projects: projects.map((project) => ({
+      iconDataUrl: project.iconDataUrl,
       isActive: project.projectId === activeProjectId,
       path: project.path,
       projectId: project.projectId,
       sessionCounts: countWorkspaceBarSessions(project),
+      theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
       title: project.name,
     })),
     type: "workspaceBarState",
@@ -1913,7 +1996,18 @@ function getWorkspaceBarIndicatorDecision(
 }
 
 function postWorkspaceBarState(): void {
-  window.webkit?.messageHandlers?.zmuxWorkspaceBar?.postMessage(createWorkspaceBarState());
+  /**
+   * CDXC:WorkspaceDock 2026-04-27-08:45
+   * The workspace dock is rendered inside the same React sidebar tree as the
+   * session sidebar. Publish state through a browser event instead of the old
+   * second WKWebView bridge so context menus, drag feedback, and workspace
+   * buttons share one React surface.
+   */
+  window.dispatchEvent(
+    new CustomEvent<WorkspaceBarStateMessage>(WORKSPACE_DOCK_STATE_EVENT, {
+      detail: createWorkspaceBarState(),
+    }),
+  );
 }
 
 function createNativeSessionStateFilePath(projectId: string, sessionId: string): string {
@@ -3365,7 +3459,7 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         return { ok: true, state: summarizeCliState() };
       case "setVisibleCount":
         updateActiveProjectWorkspace((workspace) =>
-          setVisibleCountInSimpleWorkspace(workspace, Number(payload.count)),
+          setVisibleCountInSimpleWorkspace(workspace, clampVisibleSessionCount(Number(payload.count))),
         );
         publish();
         return { ok: true, state: summarizeCliState() };
@@ -3493,6 +3587,7 @@ function addProject(path: string, name = projectNameFromPath(path)): void {
         name: name.trim() || projectNameFromPath(normalizedPath),
         path: normalizedPath,
         projectId,
+        theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
         workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
       },
     ];
@@ -3503,6 +3598,75 @@ function addProject(path: string, name = projectNameFromPath(path)): void {
     createTerminal(DEFAULT_TERMINAL_SESSION_TITLE);
     return;
   }
+  publish();
+}
+
+function removeProject(projectId: string): void {
+  if (projects.length <= 1) {
+    showNativeMessage("warning", "Keep at least one workspace in zmux.");
+    return;
+  }
+  const projectIndex = projects.findIndex((project) => project.projectId === projectId);
+  if (projectIndex < 0) {
+    return;
+  }
+  const project = projects[projectIndex]!;
+  /**
+   * CDXC:WorkspaceDock 2026-04-27-08:45
+   * Right-click removal belongs to the React workspace dock context menu. When
+   * a workspace is removed, close its native terminal surfaces and delete the
+   * sidebar/native id mappings before persisting the remaining workspaces so
+   * removed sessions cannot keep drawing behind the new active project.
+   */
+  for (const group of project.workspace.groups) {
+    for (const session of group.snapshot.sessions) {
+      if (session.kind !== "terminal") {
+        continue;
+      }
+      const nativeSessionId = nativeSessionIdBySidebarSessionId.get(session.sessionId);
+      if (nativeSessionId) {
+        postNative({ sessionId: nativeSessionId, type: "closeTerminal" });
+        sidebarSessionIdByNativeSessionId.delete(nativeSessionId);
+      }
+      nativeSessionIdBySidebarSessionId.delete(session.sessionId);
+      terminalStateById.delete(session.sessionId);
+      titleDerivedActivityBySessionId.delete(session.sessionId);
+      nativeActivitySuppressedUntilBySessionId.delete(session.sessionId);
+      nativeWorkingStartedAtBySessionId.delete(session.sessionId);
+    }
+  }
+  const nextProjects = projects.filter((project) => project.projectId !== projectId);
+  projects = nextProjects;
+  if (activeProjectId === projectId) {
+    activeProjectId =
+      nextProjects[Math.min(projectIndex, nextProjects.length - 1)]?.projectId ??
+      nextProjects[0]!.projectId;
+    postZedOverlaySettings();
+    void refreshGitState();
+  }
+  writeStoredProjects("removeProject");
+  publish();
+}
+
+function setProjectIcon(projectId: string, iconDataUrl: string | undefined): void {
+  /**
+   * CDXC:WorkspaceDock 2026-04-27-08:48
+   * Workspace icons are user-picked PNG/SVG data URLs stored on the workspace
+   * record, so the React dock can render them without a second native file
+   * bridge and without losing the icon on restart.
+   */
+  projects = projects.map((project) =>
+    project.projectId === projectId ? { ...project, iconDataUrl } : project,
+  );
+  writeStoredProjects("setProjectIcon");
+  publish();
+}
+
+function setProjectTheme(projectId: string, theme: SidebarTheme): void {
+  projects = projects.map((project) =>
+    project.projectId === projectId ? { ...project, theme } : project,
+  );
+  writeStoredProjects("setProjectTheme");
   publish();
 }
 
@@ -4283,7 +4447,10 @@ window.__zmux_NATIVE_WORKSPACE_BAR__ = {
   addProject,
   focusProject,
   getState: createWorkspaceBarState,
+  removeProject,
   reorderProjects,
+  setProjectIcon,
+  setProjectTheme,
 };
 
 window.__zmux_NATIVE_SETTINGS__ = {
@@ -4309,22 +4476,541 @@ window.__zmux_NATIVE_CLI__ = {
   },
 };
 
+type WorkspaceDockMenuState = {
+  left: number;
+  projectId: string;
+  view: "root" | "themes";
+  top: number;
+};
+
+type WorkspaceDockDragState = {
+  didDrag: boolean;
+  ghostText: string;
+  pointerId: number;
+  projectId: string;
+  startX: number;
+  startY: number;
+  targetProjectId?: string;
+  placeAfterTarget: boolean;
+};
+
+function NativeSidebarRoot() {
+  const [workspaceDockState, setWorkspaceDockState] = useState(createWorkspaceBarState);
+
+  useEffect(() => {
+    document.body.classList.add("native-sidebar-body");
+    const handleState = (event: Event) => {
+      setWorkspaceDockState((event as CustomEvent<WorkspaceBarStateMessage>).detail);
+    };
+    window.addEventListener(WORKSPACE_DOCK_STATE_EVENT, handleState);
+    return () => {
+      document.body.classList.remove("native-sidebar-body");
+      window.removeEventListener(WORKSPACE_DOCK_STATE_EVENT, handleState);
+    };
+  }, []);
+
+  return (
+    <div className="native-sidebar-shell">
+      <WorkspaceDock state={workspaceDockState} />
+      <main className="native-sidebar-main">
+        <SidebarApp messageSource={sidebarBus} vscode={vscode} />
+      </main>
+    </div>
+  );
+}
+
+type WorkspaceDockActions = {
+  focusProject: (projectId: string) => void;
+  pickWorkspaceFolder: () => void;
+  pickWorkspaceIcon: (projectId: string) => void;
+  removeProject: (projectId: string) => void;
+  reorderProjects: (projectIds: string[]) => void;
+  setProjectTheme: (projectId: string, theme: SidebarTheme) => void;
+};
+
+/**
+ * CDXC:WorkspaceDock 2026-04-27-09:23
+ * Keep the React workspace dock action-driven so Storybook can exercise icon,
+ * remove, and theme menu UX without entering native publish/modal code paths.
+ */
+export function WorkspaceDock({
+  actions,
+  state,
+}: {
+  actions?: Partial<WorkspaceDockActions>;
+  state: WorkspaceBarStateMessage;
+}) {
+  const [dragVisual, setDragVisual] = useState<{
+    ghostText: string;
+    isDragging: boolean;
+    line?: { top: number; left: number; width: number };
+    pointerX: number;
+    pointerY: number;
+    sourceProjectId?: string;
+  }>({ ghostText: "", isDragging: false, pointerX: 0, pointerY: 0 });
+  const [menu, setMenu] = useState<WorkspaceDockMenuState>();
+  const dockRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<WorkspaceDockDragState | undefined>(undefined);
+  const workspaceActions: WorkspaceDockActions = {
+    focusProject,
+    pickWorkspaceFolder: () => postNative({ type: "pickWorkspaceFolder" }),
+    pickWorkspaceIcon: (projectId) => postNative({ projectId, type: "pickWorkspaceIcon" }),
+    removeProject,
+    reorderProjects,
+    setProjectTheme,
+    ...actions,
+  };
+
+  const activeProjectIds = useMemo(
+    () => new Set(state.projects.map((project) => project.projectId)),
+    [state.projects],
+  );
+
+  useEffect(() => {
+    const closeMenu = (event: MouseEvent) => {
+      if (!(event.target instanceof Node)) {
+        setMenu(undefined);
+        return;
+      }
+      if (!dockRef.current?.contains(event.target)) {
+        setMenu(undefined);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenu(undefined);
+      }
+    };
+    document.addEventListener("click", closeMenu);
+    document.addEventListener("contextmenu", closeMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("click", closeMenu);
+      document.removeEventListener("contextmenu", closeMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (menu && !activeProjectIds.has(menu.projectId)) {
+      setMenu(undefined);
+    }
+  }, [activeProjectIds, menu]);
+
+  const dragProjectIds = state.projects.map((project) => project.projectId);
+
+  const getDropTarget = (clientY: number, sourceProjectId: string) => {
+    const buttons = Array.from(
+      dockRef.current?.querySelectorAll<HTMLButtonElement>(".workspace-dock-button") ?? [],
+    ).filter((button) => button.dataset.projectId !== sourceProjectId);
+    for (const button of buttons) {
+      const bounds = button.getBoundingClientRect();
+      if (clientY < bounds.top + bounds.height / 2) {
+        return { bounds, placeAfterTarget: false, projectId: button.dataset.projectId };
+      }
+    }
+    const lastButton = buttons.at(-1);
+    if (!lastButton) {
+      return undefined;
+    }
+    const bounds = lastButton.getBoundingClientRect();
+    return { bounds, placeAfterTarget: true, projectId: lastButton.dataset.projectId };
+  };
+
+  const nextProjectOrder = (
+    sourceProjectId: string,
+    targetProjectId: string | undefined,
+    placeAfterTarget: boolean,
+  ) => {
+    if (!targetProjectId || sourceProjectId === targetProjectId) {
+      return undefined;
+    }
+    const ids = [...dragProjectIds];
+    const fromIndex = ids.indexOf(sourceProjectId);
+    if (fromIndex < 0 || !ids.includes(targetProjectId)) {
+      return undefined;
+    }
+    const [movedProjectId] = ids.splice(fromIndex, 1);
+    const targetIndex = ids.indexOf(targetProjectId);
+    ids.splice(targetIndex + (placeAfterTarget ? 1 : 0), 0, movedProjectId);
+    return ids;
+  };
+
+  const wouldReorder = (
+    sourceProjectId: string,
+    targetProjectId: string | undefined,
+    placeAfterTarget: boolean,
+  ) => {
+    const nextIds = nextProjectOrder(sourceProjectId, targetProjectId, placeAfterTarget);
+    return Boolean(
+      nextIds?.some((projectId, index) => projectId !== state.projects[index]?.projectId),
+    );
+  };
+
+  const handlePointerDown = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    project: WorkspaceBarProject,
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    dragRef.current = {
+      didDrag: false,
+      ghostText: workspaceDockInitials(project.title, state.projects.indexOf(project)),
+      pointerId: event.pointerId,
+      projectId: project.projectId,
+      startX: event.clientX,
+      startY: event.clientY,
+      placeAfterTarget: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.didDrag && Math.hypot(deltaX, deltaY) < 5) {
+      return;
+    }
+    drag.didDrag = true;
+    const target = getDropTarget(event.clientY, drag.projectId);
+    const canDrop = wouldReorder(drag.projectId, target?.projectId, target?.placeAfterTarget ?? false);
+    drag.targetProjectId = canDrop ? target?.projectId : undefined;
+    drag.placeAfterTarget = canDrop ? (target?.placeAfterTarget ?? false) : false;
+    setDragVisual({
+      ghostText: drag.ghostText,
+      isDragging: true,
+      line:
+        canDrop && target
+          ? {
+              left: target.bounds.left + 1,
+              top: target.placeAfterTarget ? target.bounds.bottom + 4 : target.bounds.top - 4,
+              width: Math.max(34, target.bounds.width - 2),
+            }
+          : undefined,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      sourceProjectId: drag.projectId,
+    });
+  };
+
+  const handlePointerUp = (event: ReactPointerEvent<HTMLButtonElement>, projectId: string) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    dragRef.current = undefined;
+    setDragVisual({ ghostText: "", isDragging: false, pointerX: 0, pointerY: 0 });
+    if (!drag.didDrag) {
+      workspaceActions.focusProject(projectId);
+      return;
+    }
+    const nextIds = nextProjectOrder(drag.projectId, drag.targetProjectId, drag.placeAfterTarget);
+    if (nextIds) {
+      workspaceActions.reorderProjects(nextIds);
+    }
+  };
+
+  const openMenu = (event: ReactMouseEvent<HTMLButtonElement>, projectId: string) => {
+    event.preventDefault();
+    const offset = 8;
+    const menuWidth = 184;
+    const rootMenuHeight = 112;
+    /**
+     * CDXC:WorkspaceDock 2026-04-27-09:40
+     * Opening the workspace context menu directly under the right-click point
+     * lets the release/click that opened the menu accidentally activate the
+     * first item. Offset the menu from the pointer and require explicit clicks
+     * for destructive/native actions such as picking an icon.
+     */
+    setMenu({
+      left: Math.min(event.clientX + offset, window.innerWidth - menuWidth),
+      projectId,
+      top: Math.min(event.clientY + offset, window.innerHeight - rootMenuHeight),
+      view: "root",
+    });
+  };
+
+  const openIconPicker = (projectId: string) => {
+    /**
+     * CDXC:WorkspaceDock 2026-04-27-08:53
+     * WKWebView file inputs are unreliable from custom context-menu clicks.
+     * Route workspace icon selection through the native macOS file picker and
+     * receive the PNG/SVG data URL back through the existing workspace API.
+     */
+    workspaceActions.pickWorkspaceIcon(projectId);
+    setMenu(undefined);
+  };
+
+  /**
+   * CDXC:WorkspaceDock 2026-04-27-09:17
+   * Workspace theme selection is a submenu, matching the worktree action menu
+   * UX. Open it only from an explicit click so hovering Theme previews nothing
+   * and cannot make the menu feel like it is navigating by itself.
+   */
+  const openThemeMenu = () => {
+    setMenu((currentMenu) =>
+      currentMenu ? { ...currentMenu, view: "themes" } : currentMenu,
+    );
+  };
+
+  const openRootMenu = () => {
+    setMenu((currentMenu) =>
+      currentMenu ? { ...currentMenu, view: "root" } : currentMenu,
+    );
+  };
+
+  const chooseTheme = (projectId: string, theme: SidebarTheme) => {
+    workspaceActions.setProjectTheme(projectId, theme);
+    setMenu(undefined);
+  };
+
+  const menuProject = menu
+    ? state.projects.find((project) => project.projectId === menu.projectId)
+    : undefined;
+
+  return (
+    <aside className="workspace-dock" ref={dockRef}>
+      <div className="workspace-dock-scroll">
+        {state.projects.map((project, index) => (
+          <button
+            aria-label={`Open ${project.title}`}
+            className="workspace-dock-button"
+            data-active={String(project.isActive)}
+            data-dragging={String(dragVisual.sourceProjectId === project.projectId)}
+            data-project-id={project.projectId}
+            data-workspace-theme={project.theme ?? "dark-blue"}
+            key={project.projectId}
+            onContextMenu={(event) => openMenu(event, project.projectId)}
+            onPointerCancel={() => {
+              dragRef.current = undefined;
+              setDragVisual({ ghostText: "", isDragging: false, pointerX: 0, pointerY: 0 });
+            }}
+            onPointerDown={(event) => handlePointerDown(event, project)}
+            onPointerMove={handlePointerMove}
+            onPointerUp={(event) => handlePointerUp(event, project.projectId)}
+            title={workspaceDockTitle(project)}
+            type="button"
+          >
+            {project.iconDataUrl ? (
+              <img alt="" className="workspace-dock-icon-image" src={project.iconDataUrl} />
+            ) : (
+              <span className="workspace-dock-initials">
+                {workspaceDockInitials(project.title, index)}
+              </span>
+            )}
+            <WorkspaceDockIndicators project={project} />
+          </button>
+        ))}
+      </div>
+      <button
+        aria-label="Add workspace"
+        className="workspace-dock-add-button"
+        onClick={workspaceActions.pickWorkspaceFolder}
+        title="Add workspace"
+        type="button"
+      >
+        <IconPlus aria-hidden="true" size={18} stroke={2.4} />
+      </button>
+      {dragVisual.isDragging ? (
+        <div
+          aria-hidden="true"
+          className="workspace-dock-drag-ghost"
+          style={{ left: dragVisual.pointerX, top: dragVisual.pointerY }}
+        >
+          {dragVisual.ghostText}
+        </div>
+      ) : null}
+      {dragVisual.line ? (
+        <div
+          aria-hidden="true"
+          className="workspace-dock-drop-line"
+          style={{
+            left: dragVisual.line.left,
+            top: dragVisual.line.top,
+            width: dragVisual.line.width,
+          }}
+        />
+      ) : null}
+      {menu && menuProject ? (
+        <div
+          className="session-context-menu workspace-dock-context-menu"
+          role="menu"
+          style={{ left: menu.left, top: menu.top }}
+          /**
+           * CDXC:WorkspaceDock 2026-04-27-09:46
+           * Workspace context-menu clicks are internal navigation/actions. Stop
+           * them at the menu boundary so the document outside-click listener
+           * does not close the menu before the Theme submenu can replace it.
+           */
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {menu.view === "root" ? (
+            <>
+              <button
+                className="session-context-menu-item"
+                onClick={() => openIconPicker(menu.projectId)}
+                role="menuitem"
+                type="button"
+              >
+                <IconPhoto aria-hidden="true" className="session-context-menu-icon" size={14} />
+                Pick icon
+              </button>
+              <button
+                className="session-context-menu-item"
+                onClick={openThemeMenu}
+                role="menuitem"
+                type="button"
+              >
+                <IconPalette aria-hidden="true" className="session-context-menu-icon" size={14} />
+                Theme
+                <IconChevronRight
+                  aria-hidden="true"
+                  className="session-context-menu-trailing-icon"
+                  size={14}
+                />
+              </button>
+              <div className="session-context-menu-divider" role="separator" />
+              <button
+                className="session-context-menu-item session-context-menu-item-danger"
+                disabled={state.projects.length <= 1}
+                onClick={() => {
+                  workspaceActions.removeProject(menu.projectId);
+                  setMenu(undefined);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <IconTrash aria-hidden="true" className="session-context-menu-icon" size={14} />
+                Remove
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="session-context-menu-item"
+                onClick={openRootMenu}
+                role="menuitem"
+                type="button"
+              >
+                <IconChevronLeft
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                />
+                Back
+              </button>
+              <div className="session-context-menu-divider" role="separator" />
+              {WORKSPACE_DOCK_THEME_OPTIONS.map((theme) => (
+                <button
+                  className="session-context-menu-item workspace-dock-theme-menu-item"
+                  data-selected={String((menuProject.theme ?? "dark-blue") === theme.value)}
+                  key={theme.value}
+                  onClick={() => chooseTheme(menu.projectId, theme.value)}
+                  role="menuitemradio"
+                  type="button"
+                >
+                  <span className="workspace-dock-theme-swatch" data-workspace-theme={theme.value} />
+                  {theme.label}
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      ) : null}
+    </aside>
+  );
+}
+
+function WorkspaceDockIndicators({ project }: { project: WorkspaceBarProject }) {
+  const { done, running, working } = project.sessionCounts;
+  return (
+    <>
+      {done > 0 || working > 0 ? (
+        <span className="workspace-dock-indicators">
+          {done > 0 ? (
+            <span className="workspace-dock-indicator" data-status="done">
+              {formatWorkspaceDockCount(done)}
+            </span>
+          ) : null}
+          {working > 0 ? (
+            <span className="workspace-dock-indicator" data-status="working">
+              {formatWorkspaceDockCount(working)}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+      {running > 0 ? (
+        <span className="workspace-dock-indicator" data-status="running">
+          {formatWorkspaceDockCount(running)}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+function workspaceDockInitials(title: string, index: number): string {
+  const trimmed = title.trim();
+  if (!trimmed) {
+    return String(index + 1);
+  }
+  const words = trimmed.split(/\s+/u).filter(Boolean);
+  if (words.length > 1) {
+    return words
+      .slice(0, 2)
+      .map((word) => word[0])
+      .join("")
+      .toUpperCase();
+  }
+  return trimmed.slice(0, 2).toUpperCase();
+}
+
+function workspaceDockTitle(project: WorkspaceBarProject): string {
+  const summary = [
+    project.sessionCounts.running > 0 ? `${project.sessionCounts.running} running` : "",
+    project.sessionCounts.working > 0 ? `${project.sessionCounts.working} working` : "",
+    project.sessionCounts.done > 0 ? `${project.sessionCounts.done} done` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return summary ? `${project.path || project.title} - ${summary}` : project.path || project.title;
+}
+
+function formatWorkspaceDockCount(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}
+
 const rootElement = document.getElementById("root");
-if (!rootElement) {
+const isStorybookPreview = "__STORYBOOK_PREVIEW__" in window;
+if (!rootElement && !isStorybookPreview) {
   throw new Error("Native sidebar root element was not found.");
 }
 
-installAppModalGlobalErrorLogging("AppModals:nativeSidebar");
-createRoot(rootElement).render(<SidebarApp messageSource={sidebarBus} vscode={vscode} />);
-queueMicrotask(() => {
-  postNative({ side: sidebarSide, type: "setSidebarSide" });
-  postZedOverlaySettings();
-  startChromeCanaryRunningMonitor();
-  startFirstPromptAutoRenameMonitor();
-  void refreshGitState();
-  if (activeSnapshot().sessions.length === 0) {
-    createTerminal(DEFAULT_TERMINAL_SESSION_TITLE);
-  } else {
-    publish();
-  }
-});
+if (rootElement && !isStorybookPreview) {
+  installAppModalGlobalErrorLogging("AppModals:nativeSidebar");
+  createRoot(rootElement).render(<NativeSidebarRoot />);
+  queueMicrotask(() => {
+    postNative({ side: sidebarSide, type: "setSidebarSide" });
+    postZedOverlaySettings();
+    startChromeCanaryRunningMonitor();
+    startFirstPromptAutoRenameMonitor();
+    void refreshGitState();
+    if (activeSnapshot().sessions.length === 0) {
+      createTerminal(DEFAULT_TERMINAL_SESSION_TITLE);
+    } else {
+      publish();
+    }
+  });
+}

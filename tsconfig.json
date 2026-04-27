@@ -1,7 +1,6 @@
 {
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
-    "baseUrl": ".",
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
@@ -10,6 +9,9 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "noEmit": true,
+    // CDXC:Typecheck 2026-04-27-17:12
+    // TypeScript 6 editor checks deprecate baseUrl. Paths are resolved
+    // relative to this config file, preserving the @/* alias without baseUrl.
     "paths": {
       "@/*": ["./*"]
     },
@@ -19,7 +21,7 @@
     "target": "ES2023",
     "types": ["node"]
   },
-  "include": ["src/**/*", "shared/**/*", "workspace/**/*", "sidebar/**/*"],
+  "include": ["src/**/*", "shared/**/*", "workspace/**/*", "sidebar/**/*", "native/sidebar/**/*"],
   "exclude": [
     "node_modules",
     "build",

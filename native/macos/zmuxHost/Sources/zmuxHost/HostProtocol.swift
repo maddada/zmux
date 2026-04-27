@@ -10,6 +10,7 @@ enum HostCommand: Decodable {
     case setTerminalLayout(SetTerminalLayout)
     case setTerminalVisibility(SetTerminalVisibility)
     case pickWorkspaceFolder
+    case pickWorkspaceIcon(PickWorkspaceIcon)
     case showMessage(ShowMessage)
     case appendAgentDetectionDebugLog(AppendAgentDetectionDebugLog)
     case appendTerminalFocusDebugLog(AppendTerminalFocusDebugLog)
@@ -39,6 +40,7 @@ enum HostCommand: Decodable {
         case setTerminalLayout
         case setTerminalVisibility
         case pickWorkspaceFolder
+        case pickWorkspaceIcon
         case showMessage
         case appendAgentDetectionDebugLog
         case appendTerminalFocusDebugLog
@@ -76,6 +78,8 @@ enum HostCommand: Decodable {
             self = .setTerminalVisibility(try SetTerminalVisibility(from: decoder))
         case .pickWorkspaceFolder:
             self = .pickWorkspaceFolder
+        case .pickWorkspaceIcon:
+            self = .pickWorkspaceIcon(try PickWorkspaceIcon(from: decoder))
         case .showMessage:
             self = .showMessage(try ShowMessage(from: decoder))
         case .appendAgentDetectionDebugLog:
@@ -139,6 +143,10 @@ struct SetTerminalLayout: Decodable {
 struct SetTerminalVisibility: Decodable {
     let sessionId: String
     let visible: Bool
+}
+
+struct PickWorkspaceIcon: Decodable {
+    let projectId: String
 }
 
 struct ShowMessage: Decodable {

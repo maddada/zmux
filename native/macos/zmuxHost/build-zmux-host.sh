@@ -64,12 +64,19 @@ fi
 
 mkdir -p "$WEB_DIR"
 cp "$REPO_ROOT/native/sidebar/index.html" "$WEB_DIR/index.html"
+# CDXC:NativeSidebarBuild 2026-04-27-09:32
+# The native sidebar is loaded by WKWebView as a classic script, while
+# Storybook imports some sidebar components as ES modules. Force the packaged
+# native bundle to IIFE so exported Storybook symbols never leave top-level
+# `export` syntax in /Applications/zmux.app and blank the app at startup.
 bun build "$REPO_ROOT/native/sidebar/native-sidebar.tsx" \
   --target browser \
+  --format iife \
   --asset-naming "[name].[ext]" \
   --outdir "$WEB_DIR"
 bun build "$REPO_ROOT/native/sidebar/modal-host.tsx" \
   --target browser \
+  --format iife \
   --asset-naming "[name].[ext]" \
   --outdir "$WEB_DIR"
 

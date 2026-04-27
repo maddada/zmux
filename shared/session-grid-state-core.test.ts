@@ -3,6 +3,7 @@ import {
   clampAgentManagerZoomPercent,
   clampTerminalViewMode,
   createDefaultSessionGridSnapshot,
+  createAgentSessionDefaultTitle,
   createSidebarHudState,
   createSidebarSessionItems,
   createSessionAlias,
@@ -482,7 +483,8 @@ describe("visible primary titles", () => {
     ).toBeUndefined();
   });
 
-  test("should only expose terminal-set primary titles through sidebar session items", () => {
+  test("should expose placeholder titles through sidebar session items without making them persisted titles", () => {
+    expect(createAgentSessionDefaultTitle("codex")).toBe("Codex Session");
     const items = createSidebarSessionItems(
       {
         focusedSessionId: "session-1",
@@ -498,7 +500,7 @@ describe("visible primary titles", () => {
     );
 
     expect(items[0]?.alias).toBe(createSessionAlias(1, 0));
-    expect(items[0]?.primaryTitle).toBeUndefined();
+    expect(items[0]?.primaryTitle).toBe(DEFAULT_TERMINAL_SESSION_TITLE);
     expect(items[1]?.alias).toBe(createSessionAlias(2, 1));
     expect(items[1]?.primaryTitle).toBe("Claude Code");
   });

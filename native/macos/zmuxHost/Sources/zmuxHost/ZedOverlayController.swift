@@ -26,7 +26,7 @@ final class ZedOverlayController: NSObject {
         let screen: NSScreen
     }
 
-    private static let logger = Logger(subsystem: "com.zmux.host", category: "zed-overlay")
+    private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "zed-overlay")
     private static let toggleButtonSize = CGSize(width: 132, height: 24)
     private static let buttonPanelSize = toggleButtonSize
     private static let attachedWindowInset: CGFloat = 40

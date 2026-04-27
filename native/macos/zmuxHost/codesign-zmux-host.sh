@@ -3,6 +3,10 @@ set -euo pipefail
 
 APP_PATH="${1:-}"
 CODE_SIGN_IDENTITY="${ZMUX_CODE_SIGN_IDENTITY:-}"
+# CDXC:Distribution 2026-04-27-08:37: Notarized Homebrew releases need Apple
+# Developer ID signatures with a secure timestamp. Dev builds keep the older
+# no-timestamp default unless the release command opts into --timestamp.
+CODE_SIGN_TIMESTAMP_FLAG="${ZMUX_CODE_SIGN_TIMESTAMP_FLAG:---timestamp=none}"
 
 if [[ -z "$APP_PATH" ]]; then
   echo "Usage: $0 /path/to/zmux.app" >&2
@@ -42,7 +46,7 @@ codesign \
   --force \
   --deep \
   --options runtime \
-  --timestamp=none \
+  "$CODE_SIGN_TIMESTAMP_FLAG" \
   --sign "$CODE_SIGN_IDENTITY" \
   "$APP_PATH"
 

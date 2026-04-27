@@ -1,0 +1,256 @@
+/* CDXC:WorkspaceDock 2026-04-27-08:45: The native workspace rail now lives
+   inside the React sidebar webview so workspace buttons, session cards, drag
+   feedback, and context menus share one UI tree and one theme surface. */
+body.native-sidebar-body {
+  padding: 0;
+}
+
+body.native-sidebar-body #root {
+  display: block;
+}
+
+.native-sidebar-shell {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.native-sidebar-main {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  padding: calc(12px * var(--sidebar-density-scale));
+}
+
+.workspace-dock {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 0;
+  padding: 10px 7px 12px;
+  border-right: 1px solid color-mix(in srgb, var(--app-border) 72%, transparent);
+  background: color-mix(in srgb, var(--app-background) 94%, black 6%);
+  position: relative;
+}
+
+.workspace-dock-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden auto;
+}
+
+.workspace-dock-button,
+.workspace-dock-add-button,
+.workspace-dock-drag-ghost {
+  align-items: center;
+  border: 1px solid var(--workspace-dock-button-border, #263346);
+  border-radius: 12px;
+  background: var(--workspace-dock-button-background, #121a26);
+  color: var(--workspace-dock-button-foreground, #d8e1f1);
+  display: flex;
+  font: 700 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  height: 40px;
+  justify-content: center;
+  letter-spacing: 0;
+  padding: 0;
+  position: relative;
+  width: 40px;
+}
+
+.workspace-dock-button[data-workspace-theme="plain-dark"],
+.workspace-dock-theme-swatch[data-workspace-theme="plain-dark"] {
+  --workspace-dock-button-background: #252525;
+  --workspace-dock-button-border: #525252;
+  --workspace-dock-button-foreground: #ffffff;
+}
+
+.workspace-dock-button[data-workspace-theme="plain-light"],
+.workspace-dock-theme-swatch[data-workspace-theme="plain-light"] {
+  --workspace-dock-button-background: #dddddd;
+  --workspace-dock-button-border: #969696;
+  --workspace-dock-button-foreground: #262626;
+}
+
+.workspace-dock-button[data-workspace-theme="dark-blue"],
+.workspace-dock-theme-swatch[data-workspace-theme="dark-blue"],
+.workspace-dock-button[data-workspace-theme="light-blue"],
+.workspace-dock-theme-swatch[data-workspace-theme="light-blue"] {
+  --workspace-dock-button-background: #1e3762;
+  --workspace-dock-button-border: #4f75bf;
+  --workspace-dock-button-foreground: #ffffff;
+}
+
+.workspace-dock-button[data-workspace-theme="dark-green"],
+.workspace-dock-theme-swatch[data-workspace-theme="dark-green"],
+.workspace-dock-button[data-workspace-theme="light-green"],
+.workspace-dock-theme-swatch[data-workspace-theme="light-green"] {
+  --workspace-dock-button-background: #1f4b31;
+  --workspace-dock-button-border: #4c9b63;
+  --workspace-dock-button-foreground: #ffffff;
+}
+
+.workspace-dock-button[data-workspace-theme="dark-red"],
+.workspace-dock-theme-swatch[data-workspace-theme="dark-red"] {
+  --workspace-dock-button-background: #662d36;
+  --workspace-dock-button-border: #b85b68;
+  --workspace-dock-button-foreground: #ffffff;
+}
+
+.workspace-dock-button[data-workspace-theme="dark-pink"],
+.workspace-dock-theme-swatch[data-workspace-theme="dark-pink"],
+.workspace-dock-button[data-workspace-theme="light-pink"],
+.workspace-dock-theme-swatch[data-workspace-theme="light-pink"] {
+  --workspace-dock-button-background: #67314f;
+  --workspace-dock-button-border: #b9638d;
+  --workspace-dock-button-foreground: #ffffff;
+}
+
+.workspace-dock-button[data-workspace-theme="dark-orange"],
+.workspace-dock-theme-swatch[data-workspace-theme="dark-orange"],
+.workspace-dock-button[data-workspace-theme="light-orange"],
+.workspace-dock-theme-swatch[data-workspace-theme="light-orange"] {
+  --workspace-dock-button-background: #6e421f;
+  --workspace-dock-button-border: #bb7740;
+  --workspace-dock-button-foreground: #ffffff;
+}
+
+.workspace-dock-button:hover,
+.workspace-dock-add-button:hover {
+  background: color-mix(in srgb, var(--workspace-dock-button-background, #172235) 84%, white 16%);
+  border-color: var(--workspace-dock-button-border, #3b4e69);
+}
+
+.workspace-dock-button[data-active="true"] {
+  border-color: var(--workspace-dock-button-border, #5b8df6);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--workspace-dock-button-border, #5b8df6) 28%, transparent);
+}
+
+.workspace-dock-button[data-dragging="true"] {
+  opacity: 0.28;
+  transform: scale(0.96);
+}
+
+.workspace-dock-icon-image {
+  border-radius: 8px;
+  height: 24px;
+  object-fit: cover;
+  width: 24px;
+}
+
+.workspace-dock-initials {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-dock-indicators {
+  align-items: center;
+  display: flex;
+  gap: 1px;
+  pointer-events: none;
+  position: absolute;
+  right: -1px;
+  top: -7px;
+  z-index: 2;
+}
+
+.workspace-dock-indicator {
+  align-items: center;
+  border: 2px solid #080d14;
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  height: 18px;
+  justify-content: center;
+  line-height: 1;
+  min-width: 18px;
+  padding: 0 4px;
+  pointer-events: none;
+}
+
+.workspace-dock-indicator[data-status="done"] {
+  background: #62d77b;
+  color: #07240d;
+}
+
+.workspace-dock-indicator[data-status="working"] {
+  background: #d7943e;
+  color: #241305;
+}
+
+.workspace-dock-indicator[data-status="running"] {
+  background: #1b2536;
+  bottom: -6px;
+  color: #aab6cb;
+  position: absolute;
+  right: auto;
+  left: -6px;
+}
+
+.workspace-dock-add-button {
+  background: #141d2b;
+  border-radius: 13px;
+  height: 40px;
+}
+
+.workspace-dock-drag-ghost {
+  left: 0;
+  opacity: 0.92;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+}
+
+.workspace-dock-drop-line {
+  background: #8fb4ff;
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 1px rgba(143, 180, 255, 0.34),
+    0 0 12px rgba(143, 180, 255, 0.42);
+  height: 3px;
+  pointer-events: none;
+  position: fixed;
+  transform: translateY(-50%);
+  z-index: 39;
+}
+
+.workspace-dock-file-input {
+  height: 1px;
+  left: -9999px;
+  opacity: 0;
+  position: fixed;
+  top: 0;
+  width: 1px;
+}
+
+.workspace-dock-context-menu {
+  min-width: 176px;
+  z-index: 50;
+}
+
+.workspace-dock-context-menu .session-context-menu-trailing-icon {
+  margin-left: auto;
+}
+
+.workspace-dock-theme-menu-item[data-selected="true"] {
+  background: color-mix(in srgb, var(--app-button-background) 24%, transparent);
+}
+
+.workspace-dock-theme-swatch {
+  border: 1px solid color-mix(in srgb, white 18%, transparent);
+  border-radius: 999px;
+  display: inline-block;
+  height: 12px;
+  margin-left: -2px;
+  background: var(--workspace-dock-button-background, #2f6feb);
+  width: 12px;
+}

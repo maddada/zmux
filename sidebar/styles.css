@@ -8,6 +8,7 @@
 @import "./styles/session-cards.css";
 @import "./styles/session-chrome.css";
 @import "./styles/session-overlays.css";
+@import "./styles/workspace-dock.css";
 
 .copy-cursor {
   cursor: pointer !important;

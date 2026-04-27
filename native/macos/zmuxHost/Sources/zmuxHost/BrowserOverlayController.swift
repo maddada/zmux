@@ -7,7 +7,7 @@ import OSLog
 final class BrowserOverlayController {
     static let chromeCanaryBundleIdentifier = "com.google.Chrome.canary"
 
-    private static let logger = Logger(subsystem: "com.zmux.host", category: "browser-overlay")
+    private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "browser-overlay")
     private static let chromeCanaryAppName = "Google Chrome Canary.app"
     private static let chromeCanaryFallbackPath = "/Applications/Google Chrome Canary.app"
     private static let chromeCanaryNewTabURL = URL(string: "chrome://newtab")!
@@ -435,7 +435,7 @@ final class BrowserOverlayController {
 }
 
 enum BrowserOverlayRestoreReproLog {
-    private static let logger = Logger(subsystem: "com.zmux.host", category: "browser-overlay-repro")
+    private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "browser-overlay-repro")
 
     /**
      CDXC:BrowserOverlay 2026-04-26-09:16

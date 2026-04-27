@@ -173,6 +173,23 @@ describe("formatSessionHeadingText", () => {
     ).toBe("∗ Claude Code");
   });
 
+  test("should append the unsynced marker when showing placeholder session titles", () => {
+    expect(
+      formatSessionHeadingText({
+        alias: "s-260427-090032-rma",
+        isPrimaryTitleTerminalTitle: false,
+        primaryTitle: "Terminal Session",
+      }),
+    ).toBe("∗ Terminal Session");
+    expect(
+      formatSessionHeadingText({
+        alias: "s-260427-090032-rma",
+        isPrimaryTitleTerminalTitle: false,
+        primaryTitle: "Codex Session",
+      }),
+    ).toBe("∗ Codex Session");
+  });
+
   test("should keep terminal-derived titles unmarked", () => {
     expect(
       formatSessionHeadingText({
