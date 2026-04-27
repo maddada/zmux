@@ -1,0 +1,78 @@
+name: zmux
+options:
+  bundleIdPrefix: com.zmux
+  deploymentTarget:
+    macOS: "13.0"
+configs:
+  Debug: debug
+  Release: release
+settings:
+  base:
+    CLANG_ENABLE_MODULES: YES
+    # CDXC:PublicRelease 2026-04-27-05:36: Public source must not commit a
+    # maintainer's Apple signing identity. Developers can set signing locally
+    # in Xcode or with an untracked config.
+    CODE_SIGN_STYLE: Automatic
+    CURRENT_PROJECT_VERSION: 1
+    GENERATE_INFOPLIST_FILE: YES
+    LD_RUNPATH_SEARCH_PATHS:
+      - "$(inherited)"
+      - "@executable_path/../Frameworks"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    MARKETING_VERSION: "0.1"
+    SDKROOT: macosx
+    SWIFT_VERSION: "5.0"
+    SWIFT_OBJC_BRIDGING_HEADER: ${GHOSTTY_ROOT}/macos/Sources/App/macOS/ghostty-bridging-header.h
+targets:
+  zmux:
+    type: application
+    platform: macOS
+    productName: zmux
+    sources:
+      - path: Sources/zmuxHost
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Ghostty
+        excludes:
+          - Surface View/SurfaceView_UIKit.swift
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Helpers
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Secure Input
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Terminal/TerminalTabColor.swift
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Terminal/TerminalViewContainer.swift
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/QuickTerminal/QuickTerminalPosition.swift
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/QuickTerminal/QuickTerminalScreen.swift
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/QuickTerminal/QuickTerminalSize.swift
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/QuickTerminal/QuickTerminalSpaceBehavior.swift
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Splits/SplitTree.swift
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Splits/SplitView.swift
+      - path: ${GHOSTTY_ROOT}/macos/Sources/Features/Splits/SplitView.Divider.swift
+      # CDXC:NativeTerminals 2026-04-26-07:11: Embedded Ghostty must ship
+      # Ghostty's runtime resources, especially bundled themes, so user
+      # settings such as `theme = GitHub Dark Default` resolve inside zmux.
+      - path: ${GHOSTTY_ROOT}/zig-out/share/ghostty
+        buildPhase: resources
+        type: folder
+      # CDXC:NativeTerminals 2026-04-26-07:29: When Ghostty has a resource
+      # directory it exports TERM=xterm-ghostty and TERMINFO beside that
+      # directory. Bundle matching terminfo data so zsh/readline input behaves
+      # normally instead of using a missing terminal description.
+      - path: ${GHOSTTY_ROOT}/zig-out/share/terminfo
+        buildPhase: resources
+        type: folder
+    dependencies:
+      - framework: ${GHOSTTY_ROOT}/macos/GhosttyKit.xcframework
+        embed: false
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        # CDXC:Branding 2026-04-26-04:18: The native app must be named
+        # "zmux" everywhere users see it, including the .app bundle,
+        # process/executable, menu title, and window title.
+        EXECUTABLE_NAME: zmux
+        INFOPLIST_KEY_CFBundleDisplayName: zmux
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: zmux uses a local WebSocket bridge between the sidebar and native terminal host.
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-lc++"
+        PRODUCT_BUNDLE_IDENTIFIER: com.zmux.host
+        PRODUCT_NAME: zmux

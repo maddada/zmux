@@ -1,0 +1,15 @@
+diff --git a/dist/chunk-zqscavsh.js b/dist/chunk-zqscavsh.js
+index e2c0d60898d5570cef004ce196335545aab4deeb..c738a3b1be84bd72f9b8d9461c0b47162c540fb7 100644
+--- a/dist/chunk-zqscavsh.js
++++ b/dist/chunk-zqscavsh.js
+@@ -67310,8 +67310,8 @@ function createResttyApp(options) {
+   let wasmHandle = 0;
+   let wasmReady = false;
+   let activeState = null;
+-  const RESIZE_OVERLAY_HOLD_MS = 500;
+-  const RESIZE_OVERLAY_FADE_MS = 400;
++  const RESIZE_OVERLAY_HOLD_MS = 0;
++  const RESIZE_OVERLAY_FADE_MS = 0;
+   const RESIZE_ACTIVE_MS = 180;
+   const resizeState = {
+     active: false,

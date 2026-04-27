@@ -1,0 +1,72 @@
+@import "./styles/shadcn.generated.css";
+@import "./styles/theme.css";
+@import "./styles/toolbar.css";
+@import "./styles/commands.css";
+@import "./styles/group-panels.css";
+@import "./styles/groups.css";
+@import "./styles/modals.css";
+@import "./styles/session-cards.css";
+@import "./styles/session-chrome.css";
+@import "./styles/session-overlays.css";
+
+.copy-cursor {
+  cursor: pointer !important;
+}
+
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+/* CDXC:Settings 2026-04-26-19:08: Keep the legacy sidebar button reset global
+   for handmade sidebar controls, but let shadcn button-based controls inside
+   the settings modal use their generated shadcn styles. */
+.zmux-settings-shadcn button[data-slot] {
+  background: revert-layer;
+  border: revert-layer;
+  border-radius: revert-layer;
+  color: revert-layer;
+  cursor: revert-layer;
+  font: revert-layer;
+  transition: revert-layer;
+}
+
+.zmux-settings-shadcn button[data-slot]:disabled {
+  cursor: revert-layer;
+  opacity: revert-layer;
+}
+
+/* CDXC:Settings 2026-04-26-22:29: Section title pills in the settings modal
+   must size to the full title in the native app as well as Storybook. A
+   scoped CSS class avoids shadcn CardHeader/container internals under-measuring
+   the text and clipping labels like "Sidebar". */
+.zmux-settings-shadcn .settings-section-title-pill {
+  align-items: center !important;
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 999px !important;
+  display: inline-flex !important;
+  gap: 0 !important;
+  left: 1rem !important;
+  max-width: calc(100% - 2rem) !important;
+  min-width: max-content !important;
+  overflow: visible !important;
+  padding: 0.25rem 0.75rem !important;
+  position: absolute !important;
+  top: -1rem !important;
+  width: max-content !important;
+}
+
+.zmux-settings-shadcn .settings-section-title-pill-text {
+  display: block;
+  font-size: 1.125rem;
+  line-height: 1;
+  min-width: max-content;
+  white-space: nowrap;
+}

@@ -1,0 +1,669 @@
+.action-row {
+  display: grid;
+  gap: calc(8px * var(--sidebar-density-scale));
+}
+
+.commands-section {
+  --sidebar-section-expanded-spacing: calc(20px * var(--sidebar-density-scale));
+  --sidebar-section-collapsed-spacing: calc(4px * var(--sidebar-density-scale));
+  display: grid;
+  gap: calc((10px * var(--sidebar-density-scale)) + 3px);
+  margin-bottom: var(--sidebar-section-collapsed-spacing);
+  --sidebar-tile-background: color-mix(in srgb, var(--app-card-active) 90%, transparent);
+  --sidebar-tile-border: color-mix(in srgb, var(--app-border) 92%, transparent);
+  --sidebar-tile-foreground: color-mix(in srgb, var(--app-foreground) 90%, var(--app-muted) 10%);
+  --sidebar-tile-hover-background: color-mix(
+    in srgb,
+    var(--app-button-background) 14%,
+    var(--app-card-active) 86%
+  );
+  --sidebar-tile-hover-border: color-mix(
+    in srgb,
+    var(--app-button-background) 48%,
+    var(--app-border)
+  );
+}
+
+.commands-section[data-collapsed="false"] {
+  margin-bottom: var(--sidebar-section-expanded-spacing);
+}
+
+.commands-section-agents {
+  margin-top: 0;
+}
+
+.commands-panel {
+  display: grid;
+  gap: calc(12px * var(--sidebar-density-scale));
+}
+
+.git-action-row {
+  container-type: inline-size;
+  position: relative;
+}
+
+.git-action-split-button {
+  display: grid;
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr) 38px;
+}
+
+.git-action-main-button,
+.git-action-toggle-button {
+  align-items: center;
+  background: var(--sidebar-tile-background);
+  border-color: var(--sidebar-tile-border);
+  color: var(--sidebar-tile-foreground);
+  display: inline-flex;
+  min-height: calc(38px * var(--sidebar-density-scale));
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+}
+
+.git-action-main-button:hover,
+.git-action-main-button:focus-visible,
+.git-action-toggle-button:hover,
+.git-action-toggle-button:focus-visible {
+  background: var(--sidebar-tile-hover-background);
+  border-color: var(--sidebar-tile-hover-border);
+  outline: none;
+}
+
+.git-action-main-button[data-disabled="true"],
+.git-action-toggle-button:disabled {
+  cursor: default;
+  opacity: 0.66;
+}
+
+.git-action-main-button {
+  border-radius: calc(12px * var(--sidebar-density-scale)) 0 0
+    calc(12px * var(--sidebar-density-scale));
+  gap: calc(8px * var(--sidebar-density-scale));
+  justify-content: flex-start;
+  min-width: 0;
+  padding: 0 calc(12px * var(--sidebar-density-scale));
+  width: 100%;
+}
+
+.git-action-toggle-button {
+  border-left-width: 0;
+  border-radius: 0 calc(12px * var(--sidebar-density-scale))
+    calc(12px * var(--sidebar-density-scale)) 0;
+  justify-content: center;
+  padding: 0;
+}
+
+.git-action-main-icon-shell,
+.git-action-main-icon,
+.git-action-toggle-icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.git-action-main-icon-spinning {
+  animation: agent-button-spin 0.9s linear infinite;
+}
+
+.git-action-main-label {
+  flex: 1 1 auto;
+  font-size: calc(11px * var(--sidebar-density-scale));
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-action-diff-stat {
+  display: inline-flex;
+  flex: none;
+  font-size: calc(10px * var(--sidebar-density-scale));
+  font-weight: 700;
+  gap: calc(1px * var(--sidebar-density-scale));
+  margin-inline-end: calc(5px * var(--sidebar-density-scale));
+  margin-inline-start: auto;
+}
+
+.git-action-diff-stat-additions {
+  color: color-mix(in srgb, #26b36a 88%, var(--app-foreground) 12%);
+}
+
+.git-action-diff-stat-divider {
+  color: color-mix(in srgb, var(--app-muted) 84%, var(--app-foreground) 16%);
+}
+
+.git-action-diff-stat-deletions {
+  color: color-mix(in srgb, #e05656 88%, var(--app-foreground) 12%);
+}
+
+@container (max-width: 220px) {
+  .git-action-diff-stat {
+    align-items: flex-end;
+    display: inline-grid;
+    gap: 0;
+    grid-template-columns: 1fr;
+    line-height: 1.05;
+    justify-items: end;
+    margin-inline-start: auto;
+    text-align: end;
+  }
+
+  .git-action-diff-stat-divider {
+    display: none;
+  }
+}
+
+.git-action-menu {
+  background: color-mix(in srgb, var(--app-card) 96%, black 4%);
+  border: 1px solid color-mix(in srgb, var(--app-border) 94%, transparent);
+  border-radius: calc(12px * var(--sidebar-density-scale));
+  box-shadow: 0 16px 40px color-mix(in srgb, black 24%, transparent);
+  display: grid;
+  gap: calc(4px * var(--sidebar-density-scale));
+  max-width: calc(100vw - 24px);
+  min-width: 0;
+  padding: calc(6px * var(--sidebar-density-scale));
+  position: fixed;
+  z-index: 40;
+}
+
+.git-action-menu-divider {
+  background: color-mix(in srgb, var(--app-border) 88%, transparent);
+  block-size: 1px;
+  inline-size: 100%;
+  margin: calc(2px * var(--sidebar-density-scale)) 0;
+}
+
+.git-action-menu-item {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: calc(10px * var(--sidebar-density-scale));
+  color: color-mix(in srgb, var(--app-foreground) 92%, var(--app-muted) 8%);
+  display: inline-flex;
+  gap: calc(8px * var(--sidebar-density-scale));
+  justify-content: flex-start;
+  min-height: calc(34px * var(--sidebar-density-scale));
+  padding: 0 calc(10px * var(--sidebar-density-scale));
+  text-align: left;
+  width: 100%;
+}
+
+.git-action-menu-item:hover,
+.git-action-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 14%, var(--app-card-active) 86%);
+  outline: none;
+}
+
+.git-action-menu-item[data-disabled="true"] {
+  cursor: default;
+  opacity: 0.56;
+}
+
+.git-action-menu-item-label {
+  flex: 1 1 auto;
+  font-size: calc(11px * var(--sidebar-density-scale));
+  font-weight: 700;
+  min-width: 0;
+}
+
+.git-action-menu-item-trailing-icon {
+  color: color-mix(in srgb, var(--app-muted) 84%, var(--app-foreground) 16%);
+  flex: none;
+}
+
+.git-action-menu-toggle-item {
+  gap: calc(10px * var(--sidebar-density-scale));
+}
+
+.git-action-menu-toggle-check {
+  align-items: center;
+  block-size: calc(16px * var(--sidebar-density-scale));
+  border: 1px solid color-mix(in srgb, var(--app-border) 88%, transparent);
+  border-radius: calc(5px * var(--sidebar-density-scale));
+  color: color-mix(in srgb, var(--app-button-background) 70%, var(--app-foreground) 30%);
+  display: inline-flex;
+  flex: none;
+  inline-size: calc(16px * var(--sidebar-density-scale));
+  justify-content: center;
+}
+
+.git-action-menu-toggle-check[data-selected="true"] {
+  background: color-mix(in srgb, var(--app-button-background) 18%, var(--app-card-active) 82%);
+  border-color: color-mix(in srgb, var(--app-button-background) 48%, var(--app-border));
+}
+
+.git-action-menu-toggle-state {
+  color: color-mix(in srgb, var(--app-muted) 82%, var(--app-foreground) 18%);
+  flex: none;
+  font-size: calc(10px * var(--sidebar-density-scale));
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+@container (max-width: 180px) {
+  .git-action-main-label {
+    display: none;
+  }
+}
+
+.agents-grid,
+.commands-grid {
+  display: grid;
+  gap: calc(8px * var(--sidebar-density-scale));
+  grid-template-columns: repeat(auto-fit, minmax(30px, 1fr));
+}
+
+.agents-grid > *,
+.commands-grid > * {
+  min-width: 0;
+}
+
+.agent-button,
+.command-button {
+  align-items: center;
+  background: var(--sidebar-tile-background);
+  border-color: var(--sidebar-tile-border);
+  border-radius: calc(12px * var(--sidebar-density-scale));
+  color: var(--sidebar-tile-foreground);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: calc(10px * var(--sidebar-density-scale));
+  font-weight: 700;
+  gap: 0;
+  justify-content: center;
+  letter-spacing: 0.02em;
+  max-width: 100%;
+  min-height: calc(36px * var(--sidebar-density-scale));
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+  padding: 0 calc(12px * var(--sidebar-density-scale));
+  box-sizing: border-box;
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.agent-button *,
+.command-button * {
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.agent-button-icon-shell,
+.agent-button-icon,
+.agent-button-fallback-icon,
+.agent-button-loading-icon,
+.command-button-kind-badge,
+.command-button-kind-icon,
+.command-button-leading-icon,
+.command-button-label {
+  pointer-events: none;
+}
+
+.agent-button:hover,
+.agent-button:focus-visible,
+.command-button:hover,
+.command-button:focus-visible {
+  background: var(--sidebar-tile-hover-background);
+  border-color: var(--sidebar-tile-hover-border);
+  outline: none;
+}
+
+.agent-button {
+  min-width: 0;
+  width: 100%;
+}
+
+.agent-button:disabled {
+  cursor: default;
+}
+
+.agent-button[data-dragging="true"] {
+  opacity: 0.6;
+}
+
+.agent-button[data-loading="true"] {
+  background: color-mix(in srgb, var(--app-button-background) 18%, var(--app-card-active) 82%);
+  border-color: color-mix(in srgb, var(--app-button-background) 44%, var(--app-border));
+  opacity: 0.92;
+}
+
+.command-button {
+  container-type: inline-size;
+  justify-content: center;
+  min-width: 0;
+  position: relative;
+  width: 100%;
+}
+
+.command-button-shell {
+  min-width: 0;
+  position: relative;
+  width: 100%;
+}
+
+.command-button[data-icon-only="true"] {
+  min-width: 0;
+  padding: 0;
+}
+
+.command-button::after {
+  border-radius: inherit;
+  content: "";
+  inset: -1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.command-button::after {
+  border: 2px solid transparent;
+  transition:
+    border-color 180ms ease,
+    opacity 180ms ease;
+}
+
+.agent-button[data-icon-only="true"],
+.command-button-add {
+  min-width: 0;
+  padding: 0;
+}
+
+.commands-panel-shell,
+.agents-panel-shell {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.sidebar-empty-create-button {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-card-active) 56%, transparent);
+  border: 1px dotted color-mix(in srgb, var(--app-button-background) 44%, var(--app-border));
+  border-radius: calc(18px * var(--sidebar-density-scale));
+  color: color-mix(in srgb, var(--app-foreground) 92%, var(--app-muted) 8%);
+  display: inline-flex;
+  gap: calc(10px * var(--sidebar-density-scale));
+  justify-content: flex-start;
+  min-height: calc(54px * var(--sidebar-density-scale));
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+  padding: calc(10px * var(--sidebar-density-scale)) calc(14px * var(--sidebar-density-scale));
+  text-align: left;
+  width: 100%;
+}
+
+.sidebar-empty-create-button:hover,
+.sidebar-empty-create-button:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 12%, var(--app-card-active) 88%);
+  border-color: color-mix(in srgb, var(--app-button-background) 58%, var(--app-border));
+  outline: none;
+}
+
+.sidebar-empty-create-button-icon {
+  align-items: center;
+  color: color-mix(in srgb, var(--app-button-background) 72%, var(--app-foreground) 28%);
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+}
+
+.sidebar-empty-create-button-copy {
+  display: grid;
+  gap: calc(2px * var(--sidebar-density-scale));
+  min-width: 0;
+}
+
+.sidebar-empty-create-button-label {
+  font-size: calc(11px * var(--sidebar-density-scale));
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.sidebar-empty-create-button-description {
+  color: color-mix(in srgb, var(--app-muted) 84%, var(--app-foreground) 16%);
+  font-size: calc(10px * var(--sidebar-density-scale));
+  line-height: 1.3;
+}
+
+.agent-button-icon-shell {
+  align-items: center;
+  display: inline-flex;
+  height: calc(18px * var(--sidebar-density-scale));
+  justify-content: center;
+  width: calc(18px * var(--sidebar-density-scale));
+}
+
+.agent-button-icon {
+  display: block;
+  height: calc(18px * var(--sidebar-density-scale));
+  object-fit: contain;
+  width: calc(18px * var(--sidebar-density-scale));
+}
+
+.agent-button-fallback-icon {
+  display: block;
+  height: 18px;
+  width: 18px;
+}
+
+.agent-button-loading-icon {
+  animation: agent-button-spin 0.9s linear infinite;
+  display: block;
+  height: 18px;
+  width: 18px;
+}
+
+.command-button-loading-icon {
+  animation: agent-button-spin 0.9s linear infinite;
+  display: block;
+  height: 15px;
+  width: 15px;
+}
+
+body[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="codex"],
+body[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="opencode"],
+body[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="t3"],
+body[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="browser"],
+.zmux-root[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="codex"],
+.zmux-root[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="opencode"],
+.zmux-root[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="t3"],
+.zmux-root[data-sidebar-theme="plain-dark"] .agent-button-icon[data-agent-icon="browser"],
+body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="codex"],
+body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="opencode"],
+body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="t3"],
+body[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"],
+.zmux-root[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="codex"],
+.zmux-root[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="opencode"],
+.zmux-root[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="t3"],
+.zmux-root[data-sidebar-theme^="dark-"] .agent-button-icon[data-agent-icon="browser"] {
+  filter: brightness(0) invert(1);
+}
+
+.agent-button-monogram {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-button-background) 20%, var(--app-card-active) 80%);
+  border: 1px solid color-mix(in srgb, var(--app-button-background) 34%, var(--app-border));
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--app-foreground) 94%, var(--app-muted) 6%);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  height: 18px;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  width: 18px;
+}
+
+@keyframes agent-button-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.command-button[data-configured="true"] {
+  background: var(--sidebar-tile-background);
+  border-color: var(--sidebar-tile-border);
+}
+
+.command-button[data-configured="false"] {
+  border-style: dashed;
+  color: color-mix(in srgb, var(--app-muted) 90%, var(--app-foreground) 10%);
+}
+
+.command-button[data-dragging="true"] {
+  opacity: 0.6;
+}
+
+.command-button[data-run-status="success"]::after {
+  border-color: color-mix(in srgb, #26b36a 84%, var(--app-foreground) 16%);
+  opacity: 1;
+}
+
+.command-button[data-run-status="error"]::after {
+  border-color: color-mix(in srgb, #e05656 86%, var(--app-foreground) 14%);
+  opacity: 1;
+}
+
+.command-button-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-button-kind-badge {
+  align-items: center;
+  color: color-mix(in srgb, var(--app-foreground) 88%, var(--app-muted) 12%);
+  display: none;
+  flex: none;
+  height: 16px;
+  justify-content: center;
+  padding: 0;
+  width: 16px;
+}
+
+.command-button-kind-icon {
+  display: block;
+  height: 15px;
+  width: 15px;
+}
+
+.command-button-leading-icon {
+  display: block;
+}
+
+.command-button[data-has-icon="true"] .command-button-kind-badge,
+.command-button[data-icon-only="true"] .command-button-kind-badge {
+  display: inline-flex;
+}
+
+.command-button-session-indicator {
+  --command-button-session-indicator-color: #1f75ca;
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  color: inherit;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: -2px;
+  top: -3px;
+  width: 18px;
+  z-index: 2;
+}
+
+.command-button-session-indicator::after {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  content: "";
+  inset: 1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease,
+    scale 180ms ease;
+}
+
+.command-button-session-indicator-dot {
+  background-color: var(--command-button-session-indicator-color);
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--command-button-session-indicator-color) 12%, transparent),
+    0 4px 12px color-mix(in srgb, var(--command-button-session-indicator-color) 18%, transparent);
+  display: block;
+  height: 10px;
+  transition:
+    box-shadow 180ms ease,
+    scale 180ms ease;
+  width: 10px;
+}
+
+.command-button-session-indicator:hover .command-button-session-indicator-dot,
+.command-button-session-indicator:focus-visible .command-button-session-indicator-dot {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--command-button-session-indicator-color) 18%, transparent),
+    0 5px 14px color-mix(in srgb, var(--command-button-session-indicator-color) 24%, transparent);
+  scale: 1.08;
+}
+
+.command-button-session-indicator[data-active-session="true"]
+  .command-button-session-indicator-dot {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--command-button-session-indicator-color) 12%, transparent),
+    0 4px 12px color-mix(in srgb, var(--command-button-session-indicator-color) 18%, transparent);
+}
+
+.command-button-session-indicator[data-active-session="true"]::after {
+  border-color: var(--session-focused-outline);
+  box-shadow: 0 0 0 1px var(--session-focused-ring);
+  opacity: 1;
+}
+
+.command-button-session-indicator[data-active-session="true"]:is(:hover, :focus-visible)
+  .command-button-session-indicator-dot {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--command-button-session-indicator-color) 18%, transparent),
+    0 5px 14px color-mix(in srgb, var(--command-button-session-indicator-color) 24%, transparent);
+}
+
+.command-button-session-indicator[data-active-session="true"]:is(:hover, :focus-visible)::after {
+  box-shadow: 0 0 0 1px var(--session-focused-ring);
+  scale: 1.04;
+}
+
+.command-button-session-indicator[data-session-status="running"]
+  .command-button-session-indicator-dot {
+  animation: session-status-dot-pulse 1.35s ease-in-out infinite;
+}
+
+@container (min-width: 80px) {
+  .command-button {
+    gap: 6px;
+  }
+
+  .command-button-kind-badge {
+    display: inline-flex;
+  }
+}

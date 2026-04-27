@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": ".",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./*"]
+    },
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2023",
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "shared/**/*", "workspace/**/*", "sidebar/**/*"],
+  "exclude": [
+    "node_modules",
+    "build",
+    "dist",
+    "out",
+    "extension",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "shared/vscode-workspace-log-context.ts"
+  ]
+}

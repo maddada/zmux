@@ -1,0 +1,457 @@
+:root {
+  color-scheme: light dark;
+  --sidebar-density-scale: 0.9;
+  --app-background: #0c1117;
+  --app-foreground: #dce6f8;
+  --app-muted: #90a0b8;
+  --app-border: color-mix(in srgb, #ffffff 10%, transparent);
+  --sidebar-chrome-separator: #343434;
+  --app-card: #121924;
+  --app-card-active: #182233;
+  --app-button-background: #2f6feb;
+  --app-button-foreground: #f7fbff;
+  --app-search-selection-border: color-mix(in srgb, #ffffff 92%, transparent);
+  --app-search-selection-ring: color-mix(in srgb, #ffffff 56%, transparent);
+  --app-input-background: #0f151d;
+  --app-tooltip-background: #151d29;
+  --app-tooltip-foreground: #edf4ff;
+  --working-primary: color-mix(in srgb, #2f6feb 60%, #ffb454 40%);
+  --working-secondary: color-mix(in srgb, #ffd27a 62%, #2f6feb 38%);
+  --attention-primary: color-mix(in srgb, #5ea0ff 68%, #2f6feb 32%);
+  --attention-secondary: color-mix(in srgb, #9dcbff 62%, #184896 38%);
+  --attention-dot: #63e58f;
+}
+
+body:not([data-sidebar-theme]),
+body[data-sidebar-theme="dark-blue"],
+body[data-sidebar-theme="light-blue"],
+.zmux-root[data-sidebar-theme="dark-blue"],
+.zmux-root[data-sidebar-theme="light-blue"],
+.zmux-settings-shadcn[data-sidebar-theme="dark-blue"],
+.zmux-settings-shadcn[data-sidebar-theme="light-blue"] {
+  --session-visible-surface: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--app-card-active) 92%, transparent),
+    color-mix(in srgb, var(--app-card) 96%, transparent)
+  );
+  --session-visible-glow: color-mix(in srgb, var(--app-button-background) 4%, transparent);
+  --session-visible-hover-border: color-mix(
+    in srgb,
+    var(--app-button-background) 40%,
+    var(--app-border)
+  );
+  --session-visible-hover-ring: color-mix(in srgb, var(--app-button-background) 6%, transparent);
+  --session-visible-hover-shadow: color-mix(in srgb, var(--app-button-background) 4%, transparent);
+  --session-visible-hover-overlay: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--app-button-background) 6%, transparent),
+    transparent 62%
+  );
+  --session-focused-border: color-mix(in srgb, var(--app-button-background) 48%, var(--app-border));
+  --session-focused-outline: color-mix(in srgb, var(--app-button-background) 42%, #ffffff 10%);
+  --session-focused-ring: color-mix(in srgb, var(--app-button-background) 20%, transparent);
+  --session-focus-visible-outline: color-mix(
+    in srgb,
+    var(--app-button-background) 48%,
+    #ffffff 18%
+  );
+}
+
+body[data-sidebar-theme="plain-dark"],
+.zmux-root[data-sidebar-theme="plain-dark"],
+.zmux-settings-shadcn[data-sidebar-theme="plain-dark"] {
+  color-scheme: dark;
+  --app-background: #111111;
+  --app-foreground: #e3e3e3;
+  --app-muted: #9b9b9b;
+  --app-border: color-mix(in srgb, #ffffff 11%, transparent);
+  --app-card: #1a1a1a;
+  --app-card-active: #232323;
+  --app-button-background: #4a4a4a;
+  --app-button-foreground: #ffffff;
+  --app-input-background: #181818;
+  --app-tooltip-background: #202020;
+  --app-tooltip-foreground: #f0f0f0;
+  --working-primary: color-mix(in srgb, #5d5d5d 60%, #ffb454 40%);
+  --working-secondary: color-mix(in srgb, #d3d3d3 64%, #5d5d5d 36%);
+  --attention-primary: color-mix(in srgb, #8b8b8b 68%, #5d5d5d 32%);
+  --attention-secondary: color-mix(in srgb, #c9c9c9 62%, #5d5d5d 38%);
+}
+
+body[data-sidebar-theme="plain-light"],
+.zmux-root[data-sidebar-theme="plain-light"],
+.zmux-settings-shadcn[data-sidebar-theme="plain-light"] {
+  color-scheme: light;
+  --app-background: #f3f3f3;
+  --app-foreground: #262626;
+  --app-muted: #717171;
+  --app-border: color-mix(in srgb, #000000 12%, transparent);
+  --app-card: #ffffff;
+  --app-card-active: #efefef;
+  --app-button-background: #6f6f6f;
+  --app-button-foreground: #ffffff;
+  --app-search-selection-border: color-mix(in srgb, #000000 78%, transparent);
+  --app-search-selection-ring: color-mix(in srgb, #000000 28%, transparent);
+  --app-input-background: #ffffff;
+  --app-tooltip-background: #ffffff;
+  --app-tooltip-foreground: #1f1f1f;
+  --working-primary: color-mix(in srgb, #6f6f6f 54%, #ffad42 46%);
+  --working-secondary: color-mix(in srgb, #dfdfdf 70%, #6f6f6f 30%);
+  --attention-primary: color-mix(in srgb, #8f8f8f 66%, #6f6f6f 34%);
+  --attention-secondary: color-mix(in srgb, #cbcbcb 68%, #6f6f6f 32%);
+}
+
+body[data-sidebar-theme="dark-green"],
+.zmux-root[data-sidebar-theme="dark-green"],
+.zmux-settings-shadcn[data-sidebar-theme="dark-green"] {
+  color-scheme: dark;
+  --app-background: #0b120d;
+  --app-foreground: #d8e3db;
+  --app-muted: #8ea196;
+  --app-border: color-mix(in srgb, #ffffff 10%, transparent);
+  --app-card: #111913;
+  --app-card-active: #17231a;
+  --app-button-background: #3f8f57;
+  --app-button-foreground: #f4fbf5;
+  --app-input-background: #0f1511;
+  --app-tooltip-background: #151d17;
+  --app-tooltip-foreground: #edf5ef;
+  --working-primary: color-mix(in srgb, #3f8f57 64%, #ffb857 36%);
+  --working-secondary: color-mix(in srgb, #ffd780 60%, #3f8f57 40%);
+  --attention-primary: color-mix(in srgb, #39c27d 76%, #3f8f57 24%);
+  --attention-secondary: color-mix(in srgb, #86efac 58%, #123922 42%);
+}
+
+body[data-sidebar-theme="dark-blue"],
+.zmux-root[data-sidebar-theme="dark-blue"],
+.zmux-settings-shadcn[data-sidebar-theme="dark-blue"] {
+  color-scheme: dark;
+  --app-background: #0c1117;
+  --app-foreground: #dce6f8;
+  --app-muted: #90a0b8;
+  --app-border: color-mix(in srgb, #ffffff 11%, transparent);
+  --app-card: #121924;
+  --app-card-active: #182233;
+  --app-button-background: #2f6feb;
+  --app-button-foreground: #f7fbff;
+  --app-input-background: #0f151d;
+  --app-tooltip-background: #151d29;
+  --app-tooltip-foreground: #edf4ff;
+  --working-primary: color-mix(in srgb, #2f6feb 60%, #ffb454 40%);
+  --working-secondary: color-mix(in srgb, #ffd27a 62%, #2f6feb 38%);
+  --attention-primary: color-mix(in srgb, #5ea0ff 68%, #2f6feb 32%);
+  --attention-secondary: color-mix(in srgb, #9dcbff 62%, #184896 38%);
+}
+
+body[data-sidebar-theme="dark-red"],
+.zmux-root[data-sidebar-theme="dark-red"],
+.zmux-settings-shadcn[data-sidebar-theme="dark-red"] {
+  color-scheme: dark;
+  --app-background: #140c0e;
+  --app-foreground: #f1dde1;
+  --app-muted: #b6939b;
+  --app-border: color-mix(in srgb, #ffffff 11%, transparent);
+  --app-card: #1b1114;
+  --app-card-active: #27171c;
+  --app-button-background: #c74b5a;
+  --app-button-foreground: #fff8f9;
+  --app-input-background: #160d10;
+  --app-tooltip-background: #201317;
+  --app-tooltip-foreground: #fff0f3;
+  --working-primary: color-mix(in srgb, #c74b5a 60%, #ffb454 40%);
+  --working-secondary: color-mix(in srgb, #ffd27a 54%, #c74b5a 46%);
+  --attention-primary: color-mix(in srgb, #f06f7e 70%, #c74b5a 30%);
+  --attention-secondary: color-mix(in srgb, #ffb2be 62%, #852f3d 38%);
+}
+
+body[data-sidebar-theme="dark-pink"],
+.zmux-root[data-sidebar-theme="dark-pink"],
+.zmux-settings-shadcn[data-sidebar-theme="dark-pink"] {
+  color-scheme: dark;
+  --app-background: #160d13;
+  --app-foreground: #f4deeb;
+  --app-muted: #b99bad;
+  --app-border: color-mix(in srgb, #ffffff 11%, transparent);
+  --app-card: #1e1219;
+  --app-card-active: #2a1822;
+  --app-button-background: #c65c8a;
+  --app-button-foreground: #fff7fb;
+  --app-input-background: #190f15;
+  --app-tooltip-background: #22141d;
+  --app-tooltip-foreground: #fff1f8;
+  --working-primary: color-mix(in srgb, #c65c8a 60%, #ffb454 40%);
+  --working-secondary: color-mix(in srgb, #ffd27a 54%, #c65c8a 46%);
+  --attention-primary: color-mix(in srgb, #ef7eb1 70%, #c65c8a 30%);
+  --attention-secondary: color-mix(in srgb, #ffc0db 62%, #8c3d60 38%);
+}
+
+body[data-sidebar-theme="dark-orange"],
+.zmux-root[data-sidebar-theme="dark-orange"],
+.zmux-settings-shadcn[data-sidebar-theme="dark-orange"] {
+  color-scheme: dark;
+  --app-background: #171008;
+  --app-foreground: #f0dfcf;
+  --app-muted: #baa08c;
+  --app-border: color-mix(in srgb, #ffffff 10%, transparent);
+  --app-card: #20160d;
+  --app-card-active: #2c1d11;
+  --app-button-background: #d17b31;
+  --app-button-foreground: #fff8f2;
+  --app-input-background: #1a1209;
+  --app-tooltip-background: #26190f;
+  --app-tooltip-foreground: #fff1e4;
+  --working-primary: color-mix(in srgb, #d17b31 62%, #ffd56f 38%);
+  --working-secondary: color-mix(in srgb, #ffe0a0 58%, #d17b31 42%);
+  --attention-primary: color-mix(in srgb, #f3a255 70%, #d17b31 30%);
+  --attention-secondary: color-mix(in srgb, #ffd1a3 62%, #964f14 38%);
+}
+
+body[data-sidebar-theme="light-blue"],
+.zmux-root[data-sidebar-theme="light-blue"],
+.zmux-settings-shadcn[data-sidebar-theme="light-blue"] {
+  color-scheme: light;
+  --app-background: #eef4fb;
+  --app-foreground: #203042;
+  --app-muted: #60748b;
+  --app-border: color-mix(in srgb, #0f172a 13%, transparent);
+  --app-card: #f8fbff;
+  --app-card-active: #edf4ff;
+  --app-button-background: #2f6feb;
+  --app-button-foreground: #ffffff;
+  --app-search-selection-border: color-mix(in srgb, #000000 78%, transparent);
+  --app-search-selection-ring: color-mix(in srgb, #000000 28%, transparent);
+  --app-input-background: #ffffff;
+  --app-tooltip-background: #ffffff;
+  --app-tooltip-foreground: #172334;
+  --working-primary: color-mix(in srgb, #2f6feb 54%, #ffad42 46%);
+  --working-secondary: color-mix(in srgb, #ffcf7a 70%, #2f6feb 30%);
+  --attention-primary: color-mix(in srgb, #5b96ff 66%, #2f6feb 34%);
+  --attention-secondary: color-mix(in srgb, #99beff 68%, #2f6feb 32%);
+}
+
+body[data-sidebar-theme="light-green"],
+.zmux-root[data-sidebar-theme="light-green"],
+.zmux-settings-shadcn[data-sidebar-theme="light-green"] {
+  color-scheme: light;
+  --app-background: #eef7f0;
+  --app-foreground: #203127;
+  --app-muted: #627765;
+  --app-border: color-mix(in srgb, #102415 13%, transparent);
+  --app-card: #f8fdf8;
+  --app-card-active: #eef8ef;
+  --app-button-background: #3f8f57;
+  --app-button-foreground: #ffffff;
+  --app-search-selection-border: color-mix(in srgb, #000000 78%, transparent);
+  --app-search-selection-ring: color-mix(in srgb, #000000 28%, transparent);
+  --app-input-background: #ffffff;
+  --app-tooltip-background: #ffffff;
+  --app-tooltip-foreground: #17251b;
+  --working-primary: color-mix(in srgb, #3f8f57 54%, #ffad42 46%);
+  --working-secondary: color-mix(in srgb, #ffcf7a 70%, #3f8f57 30%);
+  --attention-primary: color-mix(in srgb, #59b876 66%, #3f8f57 34%);
+  --attention-secondary: color-mix(in srgb, #99d7ac 68%, #3f8f57 32%);
+}
+
+body[data-sidebar-theme="light-pink"],
+.zmux-root[data-sidebar-theme="light-pink"],
+.zmux-settings-shadcn[data-sidebar-theme="light-pink"] {
+  color-scheme: light;
+  --app-background: #fbf0f6;
+  --app-foreground: #3a2431;
+  --app-muted: #856879;
+  --app-border: color-mix(in srgb, #3a1628 13%, transparent);
+  --app-card: #fff8fb;
+  --app-card-active: #fff0f7;
+  --app-button-background: #c65c8a;
+  --app-button-foreground: #ffffff;
+  --app-search-selection-border: color-mix(in srgb, #000000 78%, transparent);
+  --app-search-selection-ring: color-mix(in srgb, #000000 28%, transparent);
+  --app-input-background: #ffffff;
+  --app-tooltip-background: #ffffff;
+  --app-tooltip-foreground: #351a28;
+  --working-primary: color-mix(in srgb, #c65c8a 54%, #ffad42 46%);
+  --working-secondary: color-mix(in srgb, #ffcf7a 68%, #c65c8a 32%);
+  --attention-primary: color-mix(in srgb, #e789af 66%, #c65c8a 34%);
+  --attention-secondary: color-mix(in srgb, #f8bfd6 68%, #c65c8a 32%);
+}
+
+body[data-sidebar-theme="light-orange"],
+.zmux-root[data-sidebar-theme="light-orange"],
+.zmux-settings-shadcn[data-sidebar-theme="light-orange"] {
+  color-scheme: light;
+  --app-background: #fbf3ea;
+  --app-foreground: #402c1a;
+  --app-muted: #8a6d52;
+  --app-border: color-mix(in srgb, #3d2208 13%, transparent);
+  --app-card: #fffaf4;
+  --app-card-active: #fff1de;
+  --app-button-background: #d17b31;
+  --app-button-foreground: #ffffff;
+  --app-search-selection-border: color-mix(in srgb, #000000 78%, transparent);
+  --app-search-selection-ring: color-mix(in srgb, #000000 28%, transparent);
+  --app-input-background: #ffffff;
+  --app-tooltip-background: #ffffff;
+  --app-tooltip-foreground: #392312;
+  --working-primary: color-mix(in srgb, #d17b31 54%, #ffd36f 46%);
+  --working-secondary: color-mix(in srgb, #ffe09f 68%, #d17b31 32%);
+  --attention-primary: color-mix(in srgb, #eca15b 66%, #d17b31 34%);
+  --attention-secondary: color-mix(in srgb, #ffd1a3 68%, #d17b31 32%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  min-height: 100%;
+}
+
+#root {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 100%;
+}
+
+body {
+  overflow: hidden;
+  padding: calc(12px * var(--sidebar-density-scale));
+  zoom: var(--zmux-agent-manager-zoom, 100%);
+  font-family: var(
+    --vscode-font-family,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe WPC",
+    "Segoe UI",
+    sans-serif
+  );
+  font-size: calc(var(--vscode-font-size, 13px) * var(--sidebar-density-scale));
+  font-weight: var(--vscode-font-weight, 400);
+  line-height: 1.4;
+  color: var(--app-foreground);
+  background: var(--app-background);
+  -webkit-user-select: none;
+  user-select: none;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+button {
+  border: 1px solid var(--app-border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.stack {
+  display: grid;
+  gap: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 100%;
+  align-content: start;
+  overflow: hidden;
+  position: relative;
+}
+
+.sidebar-top-panels {
+  display: grid;
+  gap: 0;
+}
+
+.stack[data-dimmed="true"] {
+  filter: saturate(0.7);
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.sidebar-titlebar-controls {
+  display: inline-flex;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  position: relative;
+  transition:
+    opacity 160ms ease,
+    visibility 0s linear 160ms;
+  visibility: hidden;
+  z-index: 10;
+}
+
+.stack:hover .sidebar-titlebar-controls,
+.stack:has(:focus-visible) .sidebar-titlebar-controls,
+.sidebar-titlebar-controls[data-controls-visible="true"],
+.sidebar-titlebar-controls[data-menu-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 0s;
+  visibility: visible;
+}
+
+.sidebar-floating-overflow-trigger {
+  opacity: 0;
+  pointer-events: none;
+  position: fixed;
+  right: 4px;
+  top: 4px;
+  transition:
+    opacity 120ms ease,
+    visibility 0s linear 120ms;
+  visibility: hidden;
+  z-index: 260;
+}
+
+/*
+ * CDXC:Sidebar-controls 2026-04-25-10:01
+ * The floating overflow menu is a global sidebar control, but it should stay
+ * visually quiet until the user is interacting with the sidebar or its menu.
+ */
+body:hover .sidebar-floating-overflow-trigger,
+body:has(:focus-visible) .sidebar-floating-overflow-trigger,
+.sidebar-floating-overflow-trigger[data-selected="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 0s;
+  visibility: visible;
+}
+
+.card {
+  border: 1px solid var(--app-border);
+  border-radius: calc(16px * var(--sidebar-density-scale));
+  background: var(--app-card);
+  padding: calc(12px * var(--sidebar-density-scale));
+}
+
+.hud {
+  display: grid;
+  gap: calc(10px * var(--sidebar-density-scale));
+}
+
+.eyebrow {
+  color: var(--app-muted);
+  font-size: calc(11px * var(--sidebar-density-scale));
+  letter-spacing: 0.08em;
+  margin-bottom: calc(10px * var(--sidebar-density-scale));
+  text-transform: uppercase;
+}

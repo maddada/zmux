@@ -1,0 +1,1176 @@
+.confirm-modal-root {
+  display: grid;
+  inset: 0;
+  overflow: auto;
+  padding: 12px;
+  place-items: center;
+  position: fixed;
+  z-index: 1200;
+}
+
+/**
+ * CDXC:AppModals 2026-04-26-15:10
+ * The native full-window modal host uses the sidebar modal components without
+ * the sidebar shell. Keep that host transparent and restore full viewport width
+ * so dialogs are centered over the app instead of sized for sidebar chrome.
+ */
+.app-modal-host-body {
+  background: transparent;
+  padding: 0;
+  zoom: 1;
+}
+
+.app-modal-host-body #root {
+  display: block;
+}
+
+/**
+ * CDXC:AppModals 2026-04-26-15:47
+ * Full-app modal overlays should preserve terminal readability behind dialogs:
+ * no backdrop blur, and only a 10% dark scrim instead of the old heavy sidebar
+ * modal dimming.
+ */
+.app-modal-host-body .confirm-modal-backdrop,
+.app-modal-host-body [data-slot="dialog-overlay"] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: rgb(0 0 0 / 10%);
+}
+
+.confirm-modal-backdrop {
+  background: color-mix(in srgb, #05070a 68%, transparent);
+  border: 0;
+  border-radius: 0;
+  inset: 0;
+  position: absolute;
+}
+
+.confirm-modal {
+  background: var(--app-card);
+  border: 1px solid color-mix(in srgb, var(--app-border) 84%, transparent);
+  border-radius: 20px;
+  box-shadow:
+    0 24px 60px color-mix(in srgb, var(--app-shadow) 34%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--app-button-background) 12%, transparent);
+  color: inherit;
+  display: grid;
+  gap: 18px;
+  margin: auto;
+  max-height: calc(100vh - 24px);
+  max-width: min(420px, 100%);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 18px;
+  position: relative;
+  width: 100%;
+}
+
+.confirm-modal-header {
+  display: grid;
+  gap: 8px;
+}
+
+.confirm-modal-header-with-close {
+  padding-right: 28px;
+}
+
+.confirm-modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.confirm-modal-description {
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.confirm-modal-close-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--app-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+  width: 22px;
+}
+
+.confirm-modal-close-button:hover,
+.confirm-modal-close-button:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 10%, transparent);
+  color: var(--app-foreground);
+  outline: none;
+}
+
+.command-config-modal {
+  max-width: min(480px, 100%);
+}
+
+.session-rename-modal {
+  max-width: min(420px, 100%);
+}
+
+.settings-modal {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: min(760px, calc(100vh - 24px));
+  overflow: hidden;
+}
+
+.previous-sessions-modal {
+  gap: 14px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  max-height: 80vh;
+  max-width: min(280px, 100%);
+  overflow: hidden;
+  width: min(280px, 100%);
+}
+
+.app-modal-host-body .previous-sessions-modal,
+.app-modal-host-body .pinned-prompts-modal,
+.app-modal-host-body .pinned-prompt-editor-modal {
+  max-width: min(720px, calc(100vw - 32px));
+  width: min(720px, calc(100vw - 32px));
+}
+
+.pinned-prompts-modal,
+.pinned-prompt-editor-modal {
+  gap: 14px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: 80vh;
+  max-width: min(280px, 100%);
+  overflow: hidden;
+  width: min(280px, 100%);
+}
+
+.daemon-sessions-modal {
+  gap: 14px;
+  max-height: calc(100vh - 24px);
+  max-width: min(840px, 100%);
+  width: min(840px, 100%);
+}
+
+.t3-browser-access-modal {
+  max-width: min(520px, 100%);
+  width: min(520px, 100%);
+}
+
+.t3-browser-access-body {
+  align-items: start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 176px) minmax(0, 1fr);
+}
+
+.t3-browser-access-qr-shell {
+  align-items: center;
+  aspect-ratio: 1;
+  background: color-mix(in srgb, white 94%, var(--app-card));
+  border: 1px solid color-mix(in srgb, var(--app-border) 88%, transparent);
+  border-radius: 18px;
+  display: flex;
+  justify-content: center;
+  min-height: 176px;
+  overflow: hidden;
+  padding: 10px;
+}
+
+.t3-browser-access-qr {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  width: 100%;
+}
+
+.t3-browser-access-qr-placeholder {
+  align-items: center;
+  color: color-mix(in srgb, var(--app-muted) 85%, var(--app-foreground) 15%);
+  display: grid;
+  font-size: 12px;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+}
+
+.t3-browser-access-card {
+  background: color-mix(in srgb, var(--app-card-active) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 16px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.t3-browser-access-status-block {
+  display: grid;
+  gap: 8px;
+}
+
+.t3-browser-access-status-pill {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-card) 86%, transparent);
+  border: 1px solid color-mix(in srgb, #f87171 34%, var(--app-border));
+  border-radius: 999px;
+  color: #fca5a5;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  justify-content: center;
+  letter-spacing: 0.08em;
+  min-height: 30px;
+  padding: 0 12px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.t3-browser-access-status-pill[data-enabled="true"] {
+  border-color: color-mix(in srgb, #4ade80 34%, var(--app-border));
+  color: #4ade80;
+}
+
+.t3-browser-access-status-copy {
+  color: var(--app-foreground);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.t3-browser-access-label {
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.t3-browser-access-url {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.t3-browser-access-note {
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.t3-browser-access-guide {
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.t3-browser-access-guide a {
+  color: var(--app-button-background);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.t3-browser-access-guide a:hover,
+.t3-browser-access-guide a:focus-visible {
+  text-decoration: underline;
+}
+
+.t3-browser-access-tagline {
+  color: var(--app-foreground);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.t3-browser-access-local-link {
+  color: var(--app-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.t3-browser-access-local-link code {
+  overflow-wrap: anywhere;
+}
+
+.daemon-sessions-toolbar {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.daemon-sessions-search-input {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  min-width: 0;
+  text-transform: none;
+}
+
+.daemon-sessions-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.daemon-sessions-toolbar-button {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+  min-width: 0;
+}
+
+.daemon-sessions-toolbar-button-danger {
+  border-color: color-mix(in srgb, #b03a3a 56%, var(--app-border));
+  color: color-mix(in srgb, #e78484 72%, var(--app-foreground) 28%);
+}
+
+.daemon-sessions-toolbar-button-danger:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.daemon-sessions-modal-body {
+  display: grid;
+  gap: 14px;
+  max-height: calc(100vh - 184px);
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.daemon-sessions-summary {
+  background: color-mix(in srgb, var(--app-card-active) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 14px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.daemon-sessions-section {
+  display: grid;
+  gap: 12px;
+}
+
+.daemon-sessions-section-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.daemon-sessions-section-title {
+  color: color-mix(in srgb, var(--app-foreground) 84%, var(--app-muted) 16%);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.daemon-sessions-summary-row {
+  align-items: baseline;
+  column-gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 110px) minmax(0, 1fr);
+}
+
+.daemon-sessions-summary-label {
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.daemon-sessions-summary-value {
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.daemon-sessions-error-banner {
+  background: color-mix(in srgb, #712626 16%, var(--app-card));
+  border: 1px solid color-mix(in srgb, #b03a3a 38%, var(--app-border));
+  border-radius: 12px;
+  color: color-mix(in srgb, #efb2b2 80%, var(--app-foreground) 20%);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+
+.daemon-sessions-list {
+  display: grid;
+  gap: 12px;
+}
+
+.daemon-session-card {
+  background: color-mix(in srgb, var(--app-card-active) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 16px;
+  display: grid;
+  gap: 12px;
+  padding: 13px;
+}
+
+.daemon-session-card[data-current-workspace="true"] {
+  border-color: color-mix(in srgb, var(--app-button-background) 52%, var(--app-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--app-button-background) 12%, transparent);
+}
+
+.daemon-session-card-t3-server {
+  background: color-mix(in srgb, var(--app-button-background) 8%, var(--app-card-active) 92%);
+}
+
+.daemon-session-card-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.daemon-session-card-title-wrap {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.daemon-session-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.daemon-session-card-subtitle {
+  color: var(--app-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.daemon-session-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.daemon-session-badge {
+  background: color-mix(in srgb, var(--app-button-background) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-button-background) 24%, var(--app-border));
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 6px 8px;
+  text-transform: uppercase;
+}
+
+.daemon-session-badge-current {
+  background: color-mix(in srgb, var(--app-button-background) 18%, transparent);
+}
+
+.daemon-session-card-details {
+  column-gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  row-gap: 10px;
+}
+
+.daemon-session-detail {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.daemon-session-detail-label {
+  color: var(--app-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.daemon-session-detail-value {
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.daemon-session-card-error {
+  background: color-mix(in srgb, #712626 10%, transparent);
+  border: 1px solid color-mix(in srgb, #b03a3a 24%, var(--app-border));
+  border-radius: 12px;
+  color: color-mix(in srgb, #efb2b2 72%, var(--app-foreground) 28%);
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px 10px;
+}
+
+.daemon-session-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.daemon-session-action-button {
+  min-width: 112px;
+}
+
+.daemon-session-action-button-danger {
+  border-color: color-mix(in srgb, #b03a3a 56%, var(--app-border));
+  color: color-mix(in srgb, #e78484 72%, var(--app-foreground) 28%);
+}
+
+.daemon-sessions-empty-state {
+  line-height: 1.35;
+  min-height: 112px;
+  padding: 12px;
+  text-align: center;
+}
+
+.daemon-sessions-t3-empty {
+  min-height: 84px;
+}
+
+.previous-sessions-toolbar {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.previous-sessions-search-input {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  min-width: 0;
+  text-transform: none;
+}
+
+.previous-sessions-favorites-toggle {
+  align-items: center;
+  align-self: stretch;
+  background: color-mix(in srgb, var(--app-card-active) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 12px;
+  color: color-mix(in srgb, var(--app-muted) 54%, var(--app-foreground) 46%);
+  cursor: pointer;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  min-width: 32px;
+  padding: 0;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+  width: 32px;
+}
+
+.previous-sessions-find-button {
+  align-items: center;
+  align-self: stretch;
+  background: color-mix(in srgb, var(--app-button-background) 16%, var(--app-card-active) 84%);
+  border: 1px solid color-mix(in srgb, var(--app-button-background) 56%, var(--app-border));
+  border-radius: 12px;
+  color: color-mix(in srgb, var(--app-button-background) 88%, var(--app-foreground) 12%);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  min-height: 32px;
+  min-width: 0;
+  padding: 0 12px;
+  text-align: center;
+  text-transform: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+  width: 100%;
+}
+
+.previous-sessions-find-button:hover,
+.previous-sessions-find-button:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 24%, var(--app-card-active) 76%);
+  border-color: color-mix(in srgb, var(--app-button-background) 78%, var(--app-border));
+  color: var(--app-foreground);
+  outline: none;
+}
+
+.previous-sessions-favorites-toggle:hover,
+.previous-sessions-favorites-toggle:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 12%, var(--app-card-active) 88%);
+  border-color: color-mix(in srgb, var(--app-button-background) 54%, var(--app-border));
+  color: color-mix(in srgb, var(--app-button-background) 80%, var(--app-foreground) 20%);
+  outline: none;
+}
+
+.previous-sessions-favorites-toggle[data-selected="true"] {
+  background: color-mix(in srgb, var(--app-button-background) 16%, var(--app-card-active) 84%);
+  border-color: color-mix(in srgb, var(--app-button-background) 68%, var(--app-border));
+  color: color-mix(in srgb, var(--app-button-background) 86%, var(--app-foreground) 14%);
+}
+
+.previous-sessions-clear-button {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-card-active) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 12px;
+  color: color-mix(in srgb, var(--app-muted) 54%, var(--app-foreground) 46%);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  justify-content: center;
+  letter-spacing: 0.05em;
+  min-height: 32px;
+  min-width: 0;
+  padding: 0 12px;
+  text-align: center;
+  text-transform: uppercase;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.previous-sessions-footer {
+  display: flex;
+}
+
+.previous-sessions-clear-button:hover,
+.previous-sessions-clear-button:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 12%, var(--app-card-active) 88%);
+  border-color: color-mix(in srgb, var(--app-button-background) 54%, var(--app-border));
+  color: color-mix(in srgb, var(--app-button-background) 80%, var(--app-foreground) 20%);
+  outline: none;
+}
+
+.previous-sessions-clear-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.previous-sessions-modal-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.previous-sessions-day-group {
+  display: grid;
+  gap: 8px;
+}
+
+.previous-sessions-day-label {
+  color: color-mix(in srgb, var(--app-foreground) 76%, var(--app-muted) 24%);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.previous-sessions-empty-state {
+  line-height: 1.2;
+  min-height: 96px;
+  padding: 12px;
+  text-align: center;
+}
+
+.pinned-prompts-modal-body,
+.pinned-prompt-editor-body {
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+}
+
+.pinned-prompt-editor-body {
+  gap: 12px;
+}
+
+.pinned-prompt-editor-title-input {
+  background: color-mix(in srgb, var(--app-card-active) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-button-background) 32%, var(--app-border));
+  border-radius: 14px;
+  color: inherit;
+  font-size: var(--vscode-editor-font-size, 12px);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.55;
+  outline: none;
+  padding: 12px 13px;
+}
+
+.pinned-prompt-editor-title-input:focus {
+  border-color: color-mix(in srgb, var(--app-button-background) 68%, var(--app-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--app-button-background) 22%, transparent);
+}
+
+.pinned-prompt-editor-title-input::placeholder {
+  color: color-mix(in srgb, var(--app-muted) 88%, transparent);
+}
+
+.pinned-prompt-editor-textarea {
+  height: max(400px, 100%);
+  min-height: 400px;
+}
+
+.pinned-prompts-list {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.pinned-prompt-card {
+  background: color-mix(in srgb, var(--app-card-active) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 90%, transparent);
+  border-radius: 16px;
+  display: grid;
+  min-width: 0;
+  padding: 14px 12px;
+  position: relative;
+}
+
+.pinned-prompt-card-actions {
+  background: color-mix(in srgb, var(--app-card) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 999px;
+  display: inline-flex;
+  justify-self: end;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  transform: translateY(-2px);
+}
+
+.pinned-prompt-card:hover .pinned-prompt-card-actions,
+.pinned-prompt-card:focus-within .pinned-prompt-card-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.pinned-prompt-card-action {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: color-mix(in srgb, var(--app-muted) 34%, var(--app-foreground) 66%);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 700;
+  height: 24px;
+  justify-content: center;
+  min-width: 26px;
+  padding: 0 6px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.pinned-prompt-card-action + .pinned-prompt-card-action {
+  border-left: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+}
+
+.pinned-prompt-card-action:hover,
+.pinned-prompt-card-action:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 12%, var(--app-card-active) 88%);
+  color: var(--app-foreground);
+  outline: none;
+}
+
+.pinned-prompt-card-title {
+  box-sizing: border-box;
+  color: inherit;
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.45;
+  margin: 0;
+  max-height: calc(1.45em * 2);
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  width: 100%;
+  word-break: break-word;
+}
+
+.scratch-pad-modal {
+  gap: 14px;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: min(90vh, calc(100vh - 24px));
+  max-height: min(90vh, calc(100vh - 24px));
+  max-width: min(420px, 100%);
+  width: min(420px, 100%);
+}
+
+.scratch-pad-modal-body {
+  display: grid;
+  min-height: 0;
+}
+
+.scratch-pad-textarea {
+  background: color-mix(in srgb, var(--app-card-active) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-button-background) 32%, var(--app-border));
+  border-radius: 14px;
+  height: 100%;
+  color: inherit;
+  font-size: var(--vscode-editor-font-size, 12px);
+  line-height: 1.55;
+  min-height: 0;
+  outline: none;
+  padding: 12px 13px;
+  resize: vertical;
+  -webkit-user-select: text;
+  user-select: text;
+  width: 100%;
+}
+
+.scratch-pad-textarea:focus {
+  border-color: color-mix(in srgb, var(--app-button-background) 68%, var(--app-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--app-button-background) 22%, transparent);
+}
+
+.scratch-pad-textarea::placeholder {
+  color: color-mix(in srgb, var(--app-muted) 88%, transparent);
+}
+
+.command-config-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-modal-scroll {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.settings-modal-section {
+  border: 1px solid color-mix(in srgb, var(--app-border) 76%, transparent);
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.settings-modal-section-title {
+  color: var(--app-foreground);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.settings-modal-number-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.settings-modal-number-suffix {
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 24px;
+}
+
+.command-config-field {
+  display: grid;
+  gap: 6px;
+}
+
+.command-config-label {
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.command-config-input {
+  width: 100%;
+}
+
+.command-config-textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.git-commit-modal-textarea {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.5;
+  min-height: 400px;
+  text-transform: none;
+}
+
+.command-icon-picker-fields {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+
+.command-icon-picker-field {
+  position: relative;
+}
+
+.command-icon-picker-dropdown {
+  position: relative;
+}
+
+.command-icon-picker-trigger {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.command-icon-picker-trigger-value {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.command-icon-picker-none-label {
+  color: color-mix(in srgb, var(--app-muted) 88%, var(--app-foreground) 12%);
+}
+
+.command-icon-picker-trigger-chevron {
+  color: color-mix(in srgb, var(--app-muted) 84%, var(--app-foreground) 16%);
+  flex: none;
+}
+
+.command-icon-picker-menu {
+  background: color-mix(in srgb, var(--app-card-active) 96%, var(--app-background) 4%);
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 14px;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  margin-top: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 2;
+}
+
+.command-icon-picker-search {
+  margin-bottom: 4px;
+}
+
+.command-icon-picker-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  color: inherit;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: flex-start;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.command-icon-picker-option:hover,
+.command-icon-picker-option:focus-visible,
+.command-icon-picker-option[data-selected="true"] {
+  background: color-mix(in srgb, var(--app-button-background) 16%, var(--app-card-active) 84%);
+  outline: none;
+}
+
+.command-icon-picker-option-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-icon-picker-empty-state {
+  color: color-mix(in srgb, var(--app-muted) 88%, var(--app-foreground) 12%);
+  font-size: 12px;
+  padding: 10px;
+  text-align: center;
+}
+
+.command-icon-color-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.command-icon-color-swatch {
+  appearance: none;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 10px;
+  cursor: pointer;
+  height: 38px;
+  padding: 3px;
+  width: 40px;
+}
+
+.command-icon-color-swatch:disabled,
+.command-icon-color-text:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.command-icon-color-swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.command-icon-color-swatch::-webkit-color-swatch {
+  border: 0;
+  border-radius: 7px;
+}
+
+.command-icon-color-swatch::-moz-color-swatch {
+  border: 0;
+  border-radius: 7px;
+}
+
+.command-config-toggle {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--app-card-active) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  border-radius: 14px;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.command-config-checkbox {
+  accent-color: var(--app-button-background);
+  flex: none;
+  margin: 2px 0 0;
+}
+
+.command-config-toggle-copy {
+  color: color-mix(in srgb, var(--app-foreground) 88%, var(--app-muted) 12%);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.confirm-modal-button {
+  flex: 1 1 112px;
+  max-width: 100%;
+  min-width: 112px;
+}
+
+.confirm-modal-root-nested {
+  z-index: 1210;
+}
+
+@media (max-width: 280px) {
+  .confirm-modal-root {
+    padding: 8px;
+  }
+
+  .confirm-modal {
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .previous-sessions-clear-button {
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    padding: 8px 10px;
+    white-space: normal;
+  }
+
+  .previous-sessions-empty-state {
+    min-height: 84px;
+  }
+
+  .previous-sessions-search-input {
+    font-size: 11px;
+  }
+
+  .previous-sessions-find-button {
+    font-size: 10px;
+    letter-spacing: 0.03em;
+    padding: 0 10px;
+  }
+}
+
+@media (max-width: 640px) {
+  .t3-browser-access-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .t3-browser-access-qr-shell {
+    margin-inline: auto;
+    max-width: 220px;
+    width: 100%;
+  }
+
+  .daemon-session-card-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .daemon-session-card-header {
+    display: grid;
+  }
+
+  .daemon-session-card-badges {
+    justify-content: flex-start;
+  }
+
+  .daemon-sessions-summary-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

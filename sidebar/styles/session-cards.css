@@ -1,0 +1,797 @@
+.session-frame {
+  position: relative;
+}
+
+.session-frame[data-group-connector="true"] {
+  margin-left: calc(19px * var(--sidebar-density-scale));
+  z-index: 1;
+}
+
+.session-drop-target-surface {
+  inset-inline: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 5;
+}
+
+.session-drop-target-surface-before {
+  height: 50%;
+  top: 0;
+}
+
+.session-drop-target-surface-after {
+  bottom: 0;
+  height: 50%;
+}
+
+.session-frame::before,
+.session-frame::after {
+  content: "";
+  position: absolute;
+  left: calc(12px * var(--sidebar-density-scale));
+  right: calc(12px * var(--sidebar-density-scale));
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-button-background) 86%, #ffffff 14%);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--app-button-background) 22%, transparent),
+    0 0 14px color-mix(in srgb, var(--app-button-background) 28%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  z-index: 4;
+}
+
+.session-frame[data-drop-position="before"]::before {
+  opacity: 1;
+  top: calc(-5px * var(--sidebar-density-scale));
+}
+
+.session-frame[data-drop-position="after"]::after {
+  bottom: calc(-5px * var(--sidebar-density-scale));
+  opacity: 1;
+}
+
+.session {
+  --session-visible-surface: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--app-button-background) 10%, var(--app-card-active) 90%),
+    color-mix(in srgb, var(--app-button-background) 6%, var(--app-card) 94%)
+  );
+  --session-visible-glow: color-mix(in srgb, var(--app-button-background) 9%, transparent);
+  --session-visible-hover-border: color-mix(
+    in srgb,
+    var(--app-button-background) 22%,
+    var(--app-border)
+  );
+  --session-visible-hover-ring: color-mix(in srgb, var(--app-button-background) 6%, transparent);
+  --session-visible-hover-shadow: color-mix(in srgb, var(--app-button-background) 4%, transparent);
+  --session-visible-hover-overlay: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--app-button-background) 8%, transparent),
+    transparent 62%
+  );
+  --session-focused-border: color-mix(in srgb, var(--app-button-background) 42%, var(--app-border));
+  --session-focused-outline: color-mix(in srgb, var(--app-button-background) 56%, #ffffff 8%);
+  --session-focused-ring: color-mix(in srgb, var(--app-button-background) 52%, transparent);
+  --session-focus-visible-outline: color-mix(
+    in srgb,
+    var(--app-button-background) 72%,
+    #ffffff 28%
+  );
+  --session-surface: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--app-card) 94%, #ffffff 6%),
+    color-mix(in srgb, var(--app-card) 98%, #000000 2%)
+  );
+  --session-glow: transparent;
+  width: 100%;
+  padding: calc(11px * var(--sidebar-density-scale)) calc(11px * var(--sidebar-density-scale))
+    calc(11px * var(--sidebar-density-scale)) calc(13px * var(--sidebar-density-scale));
+  border: 1px solid transparent;
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+  border-radius: calc(10px * var(--sidebar-density-scale));
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  display: grid;
+  cursor: pointer;
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    outline-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.session[data-completion-flash="odd"] {
+  animation: session-completion-flash-a 3s cubic-bezier(0.22, 0.8, 0.24, 1);
+}
+
+.session[data-completion-flash="even"] {
+  animation: session-completion-flash-b 3s cubic-bezier(0.22, 0.8, 0.24, 1);
+}
+
+@keyframes session-completion-flash-a {
+  0%,
+  100% {
+    opacity: 1;
+    filter: none;
+  }
+
+  8%,
+  36%,
+  64% {
+    opacity: 0.9;
+    filter: brightness(1.03) saturate(1.02);
+  }
+
+  16%,
+  44%,
+  72% {
+    opacity: 0.58;
+    filter: brightness(0.96) saturate(0.98);
+  }
+
+  24%,
+  52%,
+  80% {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+@keyframes session-completion-flash-b {
+  0%,
+  100% {
+    opacity: 1;
+    filter: none;
+  }
+
+  8%,
+  36%,
+  64% {
+    opacity: 0.9;
+    filter: brightness(1.03) saturate(1.02);
+  }
+
+  16%,
+  44%,
+  72% {
+    opacity: 0.58;
+    filter: brightness(0.96) saturate(0.98);
+  }
+
+  24%,
+  52%,
+  80% {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+.session::before,
+.session::after {
+  content: "";
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 180ms ease,
+    background 180ms ease;
+}
+
+.session::before {
+  inset: -42%;
+  z-index: -2;
+}
+
+.session::after {
+  inset: 1px;
+  z-index: -1;
+  background: var(--session-surface);
+  opacity: 0;
+}
+
+.session[data-dragging="true"] {
+  opacity: 0.2;
+}
+
+.session[data-sleeping="true"] {
+  opacity: 0.52;
+}
+
+.session-frame[data-dragging="true"] .session-floating-agent-icon,
+.session-frame[data-dragging="true"] .session-floating-agent-tabler-icon,
+.session-frame[data-dragging="true"] .session-floating-reloading-icon {
+  opacity: 0;
+}
+
+.session-drag-overlay {
+  cursor: grabbing;
+  pointer-events: none;
+  box-shadow:
+    0 18px 36px color-mix(in srgb, #000000 18%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--app-button-background) 16%, transparent);
+  opacity: 0.98;
+}
+
+.session-history-frame,
+.session-history-frame[data-running="false"] {
+  opacity: 1;
+}
+
+.session:is(:hover, :focus-visible, [data-focused="true"], [data-search-selected="true"]) {
+  border-color: var(--app-border);
+}
+
+.session:is(:hover, :focus-visible, [data-focused="true"], [data-search-selected="true"])::after {
+  opacity: 1;
+}
+
+.session[data-visible="true"] {
+  --session-surface: var(--session-visible-surface);
+  --session-glow: var(--session-visible-glow);
+}
+
+.session[data-visible="true"]::after {
+  opacity: 1;
+}
+
+.session[data-visible="true"]:is(
+    :hover,
+    :focus-visible,
+    [data-focused="true"],
+    [data-search-selected="true"]
+  ) {
+  border-color: var(--session-visible-hover-border);
+  box-shadow:
+    0 0 0 1px var(--session-visible-hover-ring),
+    0 10px 22px var(--session-visible-hover-shadow);
+}
+
+.session[data-visible="true"]:is(
+    :hover,
+    :focus-visible,
+    [data-focused="true"],
+    [data-search-selected="true"]
+  )::before {
+  opacity: 0.72;
+  background:
+    radial-gradient(circle at 16% 18%, var(--session-glow), transparent 54%),
+    var(--session-visible-hover-overlay);
+}
+
+.session[data-focused="true"] {
+  border-color: var(--session-focused-border);
+  outline-color: var(--session-focused-outline);
+  box-shadow: inset 0 0 0 1px var(--session-focused-ring);
+}
+
+.session[data-search-selected="true"] {
+  border-color: var(--app-search-selection-border);
+  outline-color: var(--app-search-selection-border);
+  box-shadow: inset 0 0 0 1px var(--app-search-selection-ring);
+}
+
+.session:focus-visible {
+  outline-color: var(--session-focus-visible-outline);
+}
+
+.session-history-card {
+  cursor: default;
+  padding-left: calc(32px * var(--sidebar-density-scale));
+}
+
+.session-history-card[data-restorable="true"] {
+  cursor: pointer;
+}
+
+.session-frame:not(.session-history-frame) .session-floating-agent-icon,
+.session-frame:not(.session-history-frame) .session-floating-agent-tabler-icon {
+  display: none;
+}
+
+/*
+ * CDXC:AgentDetection 2026-04-27-03:37
+ * Agent identity is now present in the projected sidebar card data, so normal
+ * session cards must render the floating agent icon instead of leaving it
+ * hidden by the default non-history-card presentation rule.
+ */
+.session-frame:not(.session-history-frame):has(.session[data-has-agent-icon="true"])
+  .session-floating-agent-icon,
+.session-frame:not(.session-history-frame):has(.session[data-has-agent-icon="true"])
+  .session-floating-agent-tabler-icon {
+  display: block;
+  opacity: 0.74;
+}
+
+.session-history-frame .session-floating-agent-icon,
+.session-history-frame .session-floating-agent-tabler-icon {
+  left: calc(10px * var(--sidebar-density-scale));
+  opacity: 0.74;
+  top: 50%;
+  translate: 0 -50%;
+}
+
+.session-history-frame .session-floating-agent-icon[data-favorite="true"],
+.session-history-frame .session-floating-agent-tabler-icon[data-favorite="true"] {
+  opacity: 1;
+}
+
+.previous-session-delete-button {
+  align-items: center;
+  color: var(--app-muted);
+  display: inline-flex;
+  height: calc(18px * var(--sidebar-density-scale));
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  position: absolute;
+  right: calc(10px * var(--sidebar-density-scale));
+  top: calc(9px * var(--sidebar-density-scale));
+  transition:
+    opacity 120ms ease,
+    color 120ms ease;
+  width: calc(18px * var(--sidebar-density-scale));
+  z-index: 2;
+}
+
+.session-history-card:hover .previous-session-delete-button,
+.session-history-card:focus-visible .previous-session-delete-button,
+.session-history-card:focus-within .previous-session-delete-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.previous-session-delete-button:hover {
+  color: var(--app-foreground);
+}
+
+.session-status-dot {
+  --session-status-dot-color: var(--attention-dot);
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background-color: var(--session-status-dot-color);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--session-status-dot-color) 12%, transparent),
+    0 5px 14px color-mix(in srgb, var(--session-status-dot-color) 18%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  scale: 1;
+  translate: 3px -50%;
+  z-index: 2;
+  transition:
+    opacity 160ms ease,
+    background-color 500ms ease,
+    box-shadow 500ms ease,
+    scale 160ms ease;
+}
+
+.session-frame[data-activity="working"] .session-status-dot,
+.session-frame[data-activity="attention"] .session-status-dot,
+.session-frame[data-lifecycle-state="error"] .session-status-dot {
+  opacity: 1;
+}
+
+.session-frame[data-activity="working"] .session-status-dot {
+  --session-status-dot-color: #ffb454;
+  animation: session-status-dot-pulse 1.35s ease-in-out infinite;
+}
+
+.session-frame[data-lifecycle-state="error"] .session-status-dot {
+  --session-status-dot-color: #ff6b6b;
+}
+
+.session-frame .session-status-dot {
+  width: 10px;
+  height: 10px;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--session-status-dot-color) 12%, transparent),
+    0 4px 12px color-mix(in srgb, var(--session-status-dot-color) 18%, transparent);
+  translate: 6px -50%;
+}
+
+.session-status-dot-anchored {
+  margin-left: -8px;
+  position: absolute;
+  right: auto;
+  translate: 0 -50%;
+  transform: none;
+}
+
+.session-status-dot-anchored[data-activity="working"],
+.session-status-dot-anchored[data-activity="attention"],
+.session-status-dot-anchored[data-lifecycle-state="error"] {
+  opacity: 1;
+}
+
+.session-status-dot-anchored[data-activity="working"] {
+  --session-status-dot-color: #ffb454;
+  animation: session-status-dot-pulse 1.35s ease-in-out infinite;
+}
+
+.session-status-dot-anchored[data-lifecycle-state="error"] {
+  --session-status-dot-color: #ff6b6b;
+}
+
+@supports (position-anchor: --session-status-anchor) {
+  .session-frame[data-group-connector="true"] .session-status-dot-inline {
+    display: none;
+  }
+}
+
+.session-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(8px * var(--sidebar-density-scale));
+  min-width: 0;
+}
+
+.session-alias-heading {
+  width: 100%;
+  font-size: calc(13px * var(--sidebar-density-scale));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-head-trailing {
+  align-items: center;
+  display: grid;
+  justify-items: end;
+  min-width: 0;
+}
+
+.session-head-trailing[data-default-trailing-display="time"] .session-last-interaction-time {
+  opacity: 1;
+}
+
+.session-head-trailing[data-default-trailing-display="icon"] .session-last-interaction-time {
+  opacity: 0;
+}
+
+.session-head-trailing[data-default-trailing-display="icon"] .session-header-agent-icon,
+.session-head-trailing[data-default-trailing-display="icon"] .session-header-agent-tabler-icon,
+.session-head-trailing[data-default-trailing-display="icon"] .session-header-reloading-icon {
+  opacity: 0.5;
+}
+
+.session-floating-agent-icon {
+  position: absolute;
+  left: calc(-4px * var(--sidebar-density-scale));
+  top: calc(5px * var(--sidebar-density-scale));
+  width: calc(15px * var(--sidebar-density-scale));
+  height: calc(15px * var(--sidebar-density-scale));
+  background: var(--session-agent-icon-color, var(--app-foreground));
+  opacity: 0;
+  pointer-events: none;
+  translate: 0 0;
+  z-index: 3;
+  -webkit-mask-image: var(--session-agent-logo);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--session-agent-logo);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  transition: opacity 120ms ease;
+}
+
+.session-floating-agent-tabler-icon {
+  position: absolute;
+  left: calc(-4px * var(--sidebar-density-scale));
+  top: calc(5px * var(--sidebar-density-scale));
+  color: var(--session-agent-icon-color, var(--app-foreground));
+  opacity: 0;
+  pointer-events: none;
+  translate: 0 0;
+  z-index: 3;
+  transition: opacity 120ms ease;
+}
+
+.session-floating-reloading-icon {
+  animation: session-agent-icon-spin 0.9s linear infinite;
+  color: var(--session-agent-icon-color, var(--app-foreground));
+  left: calc(-4px * var(--sidebar-density-scale));
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: calc(5px * var(--sidebar-density-scale));
+  translate: 0 0;
+  transition: opacity 120ms ease;
+  z-index: 3;
+}
+
+.session-header-agent-icon {
+  width: calc(15px * var(--sidebar-density-scale));
+  height: calc(15px * var(--sidebar-density-scale));
+  background: var(--session-agent-icon-color, var(--app-foreground));
+  grid-area: 1 / 1;
+  justify-self: end;
+  opacity: 0;
+  pointer-events: none;
+  -webkit-mask-image: var(--session-agent-logo);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--session-agent-logo);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  transition: opacity 120ms ease;
+}
+
+.session-header-agent-tabler-icon {
+  color: var(--session-agent-icon-color, var(--app-foreground));
+  grid-area: 1 / 1;
+  justify-self: end;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.session-header-reloading-icon {
+  animation: session-agent-icon-spin 0.9s linear infinite;
+  color: var(--session-agent-icon-color, var(--app-foreground));
+  grid-area: 1 / 1;
+  justify-self: end;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.session-title-generation-overlay {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-card-active) 88%, #000000 12%);
+  border: 1px solid color-mix(in srgb, var(--app-button-background) 42%, var(--app-border));
+  border-radius: calc(7px * var(--sidebar-density-scale));
+  color: var(--app-foreground);
+  display: flex;
+  font-size: calc(11px * var(--sidebar-density-scale));
+  font-weight: 650;
+  gap: calc(6px * var(--sidebar-density-scale));
+  inset: calc(4px * var(--sidebar-density-scale));
+  justify-content: center;
+  line-height: 1;
+  pointer-events: none;
+  position: absolute;
+  z-index: 6;
+}
+
+.session-title-generation-overlay-icon {
+  animation: session-agent-icon-spin 0.9s linear infinite;
+  color: var(--session-agent-icon-color, var(--app-foreground));
+  flex: 0 0 auto;
+}
+
+.session-floating-agent-icon[data-agent-icon="codex"],
+.session-header-agent-icon[data-agent-icon="codex"] {
+  --session-agent-icon-color: #ffffff;
+}
+
+.session-floating-agent-tabler-icon[data-agent-icon="browser"],
+.session-header-agent-tabler-icon[data-agent-icon="browser"] {
+  --session-agent-icon-color: #82b7ff;
+}
+
+.session-floating-agent-icon[data-agent-icon="browser"],
+.session-header-agent-icon[data-agent-icon="browser"] {
+  --session-agent-icon-color: #82b7ff;
+}
+
+.session-floating-agent-icon[data-agent-icon="t3"],
+.session-header-agent-icon[data-agent-icon="t3"] {
+  --session-agent-icon-color: #ffa6fb;
+  width: calc(17px * var(--sidebar-density-scale));
+  height: calc(17px * var(--sidebar-density-scale));
+}
+
+.session-floating-agent-icon[data-agent-icon="claude"],
+.session-header-agent-icon[data-agent-icon="claude"] {
+  --session-agent-icon-color: #d97757;
+}
+
+.session-floating-agent-icon[data-agent-icon="gemini"],
+.session-header-agent-icon[data-agent-icon="gemini"] {
+  --session-agent-icon-color: #8b9aff;
+}
+
+.session-floating-agent-icon[data-agent-icon="opencode"],
+.session-header-agent-icon[data-agent-icon="opencode"] {
+  --session-agent-icon-color: #6d96c0;
+}
+
+.session-floating-agent-icon[data-favorite="true"],
+.session-floating-agent-tabler-icon[data-favorite="true"],
+.session-header-agent-icon[data-favorite="true"],
+.session-header-agent-tabler-icon[data-favorite="true"] {
+  --session-agent-icon-color: color-mix(in srgb, #ffdf75 78%, #c78b12 22%);
+  filter: brightness(1.04) saturate(1.08);
+}
+
+.session-frame:hover .session-floating-agent-icon,
+.session-frame:hover .session-floating-agent-tabler-icon,
+.session-frame:hover .session-floating-reloading-icon {
+  opacity: 0.74;
+}
+
+.session-frame:hover .session-floating-agent-icon[data-favorite="true"],
+.session-frame:hover .session-floating-agent-tabler-icon[data-favorite="true"] {
+  opacity: 1;
+}
+
+.session-head {
+  position: relative;
+  z-index: 1;
+}
+
+.session-last-interaction-time {
+  color: color-mix(in srgb, var(--app-muted) 88%, transparent);
+  font-size: calc(11px * var(--sidebar-density-scale));
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+  min-width: 0;
+  opacity: 0.35;
+  overflow: hidden;
+  grid-area: 1 / 1;
+  justify-self: end;
+  position: relative;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  z-index: 1;
+  transition: opacity 120ms ease;
+}
+
+.session-frame:not(.session-history-frame) .session-last-interaction-time {
+  top: calc(1px * var(--sidebar-density-scale));
+}
+
+.session:hover .session-last-interaction-time,
+.session:focus-visible .session-last-interaction-time {
+  opacity: 1;
+}
+
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-last-interaction-time,
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-last-interaction-time,
+.session-frame:not(.session-history-frame)
+  .session:has(:focus-visible)
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-last-interaction-time {
+  opacity: 0;
+}
+
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-agent-icon,
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-agent-tabler-icon,
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-reloading-icon,
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-agent-icon,
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-agent-tabler-icon,
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-reloading-icon,
+.session-frame:not(.session-history-frame)
+  .session:has(:focus-visible)
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-agent-icon,
+.session-frame:not(.session-history-frame)
+  .session:has(:focus-visible)
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-agent-tabler-icon,
+.session-frame:not(.session-history-frame)
+  .session:has(:focus-visible)
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-reloading-icon {
+  opacity: 0;
+}
+
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-icon,
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-tabler-icon,
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-reloading-icon,
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-icon,
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-tabler-icon,
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-reloading-icon,
+.session-frame:not(.session-history-frame)
+  .session:has(:focus-visible)
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-icon,
+.session-frame:not(.session-history-frame)
+  .session:has(:focus-visible)
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-tabler-icon,
+.session-frame:not(.session-history-frame)
+  .session:has(:focus-visible)
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-reloading-icon {
+  opacity: 0.74;
+}
+
+@keyframes session-agent-icon-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-icon[data-favorite="true"],
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-tabler-icon[data-favorite="true"],
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-icon[data-favorite="true"],
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-tabler-icon[data-favorite="true"] {
+  opacity: 1;
+}

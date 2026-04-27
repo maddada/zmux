@@ -1,0 +1,18 @@
+node_modules/
+build/
+dist/
+out/
+artifacts/
+.zmux/
+.vsmux/
+.DS_Store
+.vscode/
+AGENTS.md
+storybook-static/
+native/macos/zmuxHost/Web/
+native/macos/zmuxHost/zmuxHost.xcodeproj/
+native/macos/zmuxHost/zmux.xcodeproj/
+
+# CDXC:PublicRelease 2026-04-27-05:36: Keep local agent instructions,
+# generated Storybook output, native build products, and runtime logs out of
+# the public repository while preserving each developer's local copies.
