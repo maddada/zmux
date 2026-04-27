@@ -10,6 +10,8 @@ export type AgentManagerXSessionKind = "terminal" | "t3";
 
 export type AgentManagerXSessionStatus = "idle" | "working" | "attention";
 
+export type AgentManagerXSessionSource = "vsmux" | "zmux";
+
 export type AgentManagerXWorkspaceSession = {
   agent: string;
   alias: string;
@@ -27,6 +29,7 @@ export type AgentManagerXWorkspaceSession = {
 
 export type AgentManagerXWorkspaceSnapshotMessage = {
   sessions: AgentManagerXWorkspaceSession[];
+  source: AgentManagerXSessionSource;
   type: "workspaceSnapshot";
   updatedAt: string;
   workspaceFaviconDataUrl?: string;
@@ -79,6 +82,11 @@ export class AgentManagerXBridgeClient implements vscode.Disposable {
   }
 
   public updateSnapshot(snapshot: AgentManagerXWorkspaceSnapshotMessage): void {
+    /**
+     * CDXC:MuxSessionBroker 2026-04-27-19:04
+     * Agent Manager merges VSmux and zmux publishers on the same port, so each
+     * snapshot must declare its source instead of relying on the WebSocket URL.
+     */
     this.latestSnapshot = {
       ...snapshot,
       sessions: [...snapshot.sessions],

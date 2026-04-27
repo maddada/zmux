@@ -90,6 +90,7 @@ import {
 } from "../../shared/sidebar-pinned-prompts";
 import {
   createSidebarAgentButtons,
+  DEFAULT_SIDEBAR_AGENTS,
   getDefaultSidebarAgentByIcon,
   getDefaultSidebarAgentById,
   getSidebarAgentIconById,
@@ -2454,22 +2455,19 @@ function getNativeEffectiveTitleActivity(
 }
 
 function buildNativeRestoredTerminalInitialInput(session: TerminalSessionRecord): string {
-  const command = buildNativeResumeAgentCommand(session.agentName, session.title);
+  const command = buildNativeResumeAgentCommand(session);
   return command ? `${command}\r` : "";
 }
 
 type NativeResumeAgentId = "claude" | "codex" | "copilot" | "gemini" | "opencode";
 
-function buildNativeResumeAgentCommand(
-  agentName: string | undefined,
-  sessionTitle: string | undefined,
-): string | undefined {
-  const agentId = resolveNativeResumeAgentId(agentName);
+function buildNativeResumeAgentCommand(session: TerminalSessionRecord): string | undefined {
+  const agentId = resolveNativeResumeAgentId(session.agentName);
   if (agentId !== "claude" && agentId !== "codex" && agentId !== "opencode") {
     return undefined;
   }
   const agentCommand = resolveNativeAgentCommand(agentId);
-  const resumeTitle = getVisibleTerminalTitle(sessionTitle)?.trim();
+  const resumeTitle = getNativeTrustedResumeTitle(session);
   if (!agentId || !agentCommand || !resumeTitle) {
     return undefined;
   }
@@ -2494,15 +2492,14 @@ function buildNativeResumeAgentCommand(
 }
 
 function buildNativeCopyResumeCommand(
-  agentName: string | undefined,
-  sessionTitle: string | undefined,
+  session: TerminalSessionRecord,
 ): string | undefined {
-  const agentId = resolveNativeResumeAgentId(agentName);
+  const agentId = resolveNativeResumeAgentId(session.agentName);
   const agentCommand = resolveNativeAgentCommand(agentId);
   if (!agentId || !agentCommand) {
     return undefined;
   }
-  const resumeTitle = getVisibleTerminalTitle(sessionTitle)?.trim();
+  const resumeTitle = getNativeTrustedResumeTitle(session);
 
   switch (agentId) {
     case "codex":
@@ -2514,7 +2511,7 @@ function buildNativeCopyResumeCommand(
         ? `${agentCommand} --resume ${quoteNativeShellArg(resumeTitle)}`
         : `${agentCommand} --resume`;
     case "opencode":
-      return buildNativeOpenCodeCopyResumeCommand(agentCommand, sessionTitle);
+      return buildNativeOpenCodeCopyResumeCommand(agentCommand, session);
     case "gemini":
       return `${agentCommand} --list-sessions && echo 'Enter ${agentCommand} -r id' to resume a session`;
     case "copilot":
@@ -2530,12 +2527,61 @@ function buildNativeOpenCodeResumeCommand(agentCommand: string, resumeTitle: str
 
 function buildNativeOpenCodeCopyResumeCommand(
   agentCommand: string,
-  sessionTitle: string | undefined,
+  session: TerminalSessionRecord,
 ): string {
-  const resumeTitle = getVisibleTerminalTitle(sessionTitle)?.trim();
+  const resumeTitle = getNativeTrustedResumeTitle(session);
   return resumeTitle
     ? buildNativeOpenCodeResumeCommand(agentCommand, resumeTitle)
     : `${agentCommand} session list && echo 'Enter ${agentCommand} -s id' to resume a session`;
+}
+
+function getNativeTrustedResumeTitle(session: TerminalSessionRecord): string | undefined {
+  /**
+   * CDXC:SessionRestore 2026-04-27-18:31
+   * Starred session-card titles are unsynced display titles, not confirmed
+   * agent session names. Automatic restore and resume-copy actions only trust
+   * terminal-auto titles captured from the running agent terminal.
+   */
+  if (session.titleSource !== "terminal-auto") {
+    return undefined;
+  }
+  const resumeTitle = getVisibleTerminalTitle(session.title)?.trim();
+  if (!resumeTitle || isRejectedNativeResumeTitle(resumeTitle)) {
+    return undefined;
+  }
+  return resumeTitle;
+}
+
+function isRejectedNativeResumeTitle(title: string): boolean {
+  const normalizedTitle = title.trim();
+  const normalizedLowerTitle = normalizedTitle.toLowerCase();
+  /**
+   * CDXC:SessionRestore 2026-04-27-17:45
+   * Resume must never target transient terminal command titles. Ghostty can
+   * briefly publish the launched agent command (`x`, `codex`, etc.) or mojibake
+   * status bytes as the title; those values are display noise, not persisted
+   * agent session names.
+   */
+  return (
+    normalizedTitle === "ð^ß^Ñ»" ||
+    /[\u0000-\u001f\u007f]/u.test(normalizedTitle) ||
+    (normalizedTitle.startsWith("ð") && normalizedTitle.endsWith("»")) ||
+    getNativeAgentCommandExecutableNames().has(normalizedLowerTitle) ||
+    getNativeAgentCommandExecutableNames().has(getNativeCommandExecutableName(normalizedLowerTitle) ?? "")
+  );
+}
+
+function getNativeAgentCommandExecutableNames(): Set<string> {
+  return new Set(
+    [...DEFAULT_SIDEBAR_AGENTS.map((agent) => agent.command), ...storedAgents.map((agent) => agent.command)]
+      .map(getNativeCommandExecutableName)
+      .filter((commandName): commandName is string => Boolean(commandName)),
+  );
+}
+
+function getNativeCommandExecutableName(command: string | undefined): string | undefined {
+  const firstPart = command?.trim().split(/\s+/u)[0]?.trim();
+  return firstPart ? firstPart.replace(/^['"]|['"]$/gu, "").toLowerCase() : undefined;
 }
 
 function getNativeOpenCodeSessionLookupScript(): string {
@@ -2712,7 +2758,10 @@ function syncSessionTitleFromNativeTerminalTitle(
   }
 
   updateActiveProjectWorkspace(
-    (workspace) => setSessionTitleInSimpleWorkspace(workspace, sessionId, visibleTitle).snapshot,
+    (workspace) =>
+      setSessionTitleInSimpleWorkspace(workspace, sessionId, visibleTitle, {
+        titleSource: "terminal-auto",
+      }).snapshot,
   );
   appendSessionTitleDebugLog("nativeSidebar.sessionRenameApplied", {
     agentName: terminalState.agentName,
@@ -2741,60 +2790,37 @@ function getNativeTerminalTitleSessionSyncDecision(args: {
 
   const previousVisibleTitle = getVisibleTerminalTitle(args.previousTerminalTitle);
   /**
-   * CDXC:SessionTitleSync 2026-04-26-08:03
-   * Native-sidebar sessions are the packaged app path. They must apply the
-   * same terminal-title auto-renaming policy as the Bun controller: generated
-   * or generic agent titles may follow Ghostty pty titles, while deliberate
-   * user names remain authoritative.
+   * CDXC:SessionTitleSync 2026-04-27-17:45
+   * Terminal-title events are auto-captured unless they came through explicit
+   * zmux UI rename or first-prompt generation paths. Valid agent terminal titles
+   * may still replace user/generated titles so in-agent `/rename` remains useful,
+   * while command names, paths, placeholders, and mojibake stay blocked.
    */
-  if (isGeneratedSessionTitle(currentTitle)) {
-    return { reason: "generated-session-title", shouldSync: true };
+  if (isValidNativeAgentTerminalTitle(args.visibleTitle, args.agentName)) {
+    return {
+      reason: `valid-agent-terminal-title-from-${args.session.titleSource ?? "unknown"}`,
+      shouldSync: true,
+    };
   }
 
-  if (isGenericAgentTitle(currentTitle, args.agentName)) {
-    return { reason: "generic-agent-title", shouldSync: true };
-  }
-
-  if (previousVisibleTitle !== undefined && currentTitle === previousVisibleTitle) {
-    return { reason: "already-following-terminal-title", shouldSync: true };
-  }
-
-  return { reason: "manual-session-title", shouldSync: false };
+  return {
+    reason:
+      previousVisibleTitle !== undefined && currentTitle === previousVisibleTitle
+        ? "previous-terminal-title-not-trusted"
+        : "terminal-title-not-trusted",
+    shouldSync: false,
+  };
 }
 
-function isGeneratedSessionTitle(title: string): boolean {
-  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+function isValidNativeAgentTerminalTitle(title: string, agentName: string | undefined): boolean {
   return (
-    /^Session\s+\d+$/iu.test(normalizedTitle) ||
-    getVisiblePrimaryTitle(normalizedTitle) === undefined
+    resolveNativeResumeAgentId(agentName) !== undefined &&
+    title.trim().length > 1 &&
+    /[\p{L}\p{N}]/u.test(title) &&
+    getVisibleTerminalTitle(title) !== undefined &&
+    !isRejectedNativeResumeTitle(title)
   );
 }
-
-function isGenericAgentTitle(title: string, agentName: string | undefined): boolean {
-  const normalizedTitle = title.trim().toLowerCase();
-  const normalizedAgentName = agentName?.trim().toLowerCase();
-  if (!normalizedTitle) {
-    return true;
-  }
-
-  if (normalizedAgentName && normalizedTitle === normalizedAgentName) {
-    return true;
-  }
-
-  return GENERIC_AGENT_TITLES.has(normalizedTitle);
-}
-
-const GENERIC_AGENT_TITLES = new Set([
-  "claude",
-  "claude code",
-  "codex",
-  "codex cli",
-  "copilot",
-  "gemini",
-  "openai codex",
-  "opencode",
-  "open code",
-]);
 
 type NativePersistedSessionState = {
   agentName?: string;
@@ -2892,7 +2918,10 @@ async function processNativeFirstPromptAutoRename(
     terminalState.firstPromptAutoRenameProcessedPrompt = pendingPrompt;
     if (title) {
       updateActiveProjectWorkspace(
-        (workspace) => setSessionTitleInSimpleWorkspace(workspace, sessionId, title).snapshot,
+        (workspace) =>
+          setSessionTitleInSimpleWorkspace(workspace, sessionId, title, {
+            titleSource: "generated",
+          }).snapshot,
       );
     }
     appendSessionTitleDebugLog("nativeSidebar.firstPromptAutoRename.applied", {
@@ -3318,55 +3347,6 @@ function setNativeGroupSleeping(groupId: string, sleeping: boolean): void {
   publish();
 }
 
-function syncNativeTerminalSleepForVisibleLayout(reason: string): void {
-  let changed = false;
-  const closeSessionIds: string[] = [];
-  projects = projects.map((project) => ({
-    ...project,
-    workspace: {
-      ...project.workspace,
-      groups: project.workspace.groups.map((group) => {
-        const visibleIds = new Set(group.snapshot.visibleSessionIds);
-        const isActiveVisibleGroup =
-          project.projectId === activeProjectId &&
-          group.groupId === project.workspace.activeGroupId;
-        return {
-          ...group,
-          snapshot: {
-            ...group.snapshot,
-            sessions: group.snapshot.sessions.map((session) => {
-              if (session.kind !== "terminal") {
-                return session;
-              }
-              const shouldSleep = !(isActiveVisibleGroup && visibleIds.has(session.sessionId));
-              if (session.isSleeping === shouldSleep) {
-                return session;
-              }
-              changed = true;
-              if (shouldSleep) {
-                closeSessionIds.push(session.sessionId);
-              }
-              return { ...session, isSleeping: shouldSleep };
-            }),
-          },
-        };
-      }),
-    },
-  }));
-  for (const sessionId of closeSessionIds) {
-    disposeNativeSleepingSessionSurface(sessionId);
-  }
-  if (changed) {
-    appendRestoreDebugLog("nativeSidebar.visibleLayoutSleepSynced", {
-      activeProjectId,
-      closedSessionIds: closeSessionIds,
-      projects: projects.map(summarizeNativeProject),
-      reason,
-    });
-    writeStoredProjects(`syncNativeTerminalSleepForVisibleLayout:${reason}`);
-  }
-}
-
 function restartNativeSession(sessionId: string): void {
   const session = findTerminalSession(sessionId);
   const groupId = findSessionGroupId(sessionId);
@@ -3624,7 +3604,6 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         updateActiveProjectWorkspace(
           (workspace) => focusGroupInSimpleWorkspace(workspace, String(payload.groupId)).snapshot,
         );
-        syncNativeTerminalSleepForVisibleLayout("cli-focus-group");
         publish();
         return { ok: true, state: summarizeCliState() };
       case "switchProject": {
@@ -3798,7 +3777,7 @@ function copyResumeCommand(sessionId: string): void {
   if (!session) {
     return;
   }
-  const resumeCommand = buildNativeCopyResumeCommand(session.agentName, session.title);
+  const resumeCommand = buildNativeCopyResumeCommand(session);
   if (!resumeCommand) {
     showNativeMessage("info", "No resume command is available for this session.");
     return;
@@ -3974,12 +3953,7 @@ function focusProject(projectId: string): void {
   if (!projects.some((project) => project.projectId === projectId)) {
     return;
   }
-  if (activeProjectId === projectId) {
-    publish();
-    return;
-  }
   activeProjectId = projectId;
-  syncNativeTerminalSleepForVisibleLayout("focus-project");
   writeStoredProjects("focusProject");
   postZedOverlaySettings();
   void refreshGitState();
@@ -4307,7 +4281,6 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       updateActiveProjectWorkspace(
         (workspace) => focusGroupInSimpleWorkspace(workspace, message.groupId).snapshot,
       );
-      syncNativeTerminalSleepForVisibleLayout("sidebar-focus-group");
       publish();
       return;
     case "focusSession":

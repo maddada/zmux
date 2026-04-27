@@ -13,6 +13,7 @@ import {
   type GroupedSessionWorkspaceSnapshot,
   type SessionGroupRecord,
   type SessionRecord,
+  type SessionTitleSource,
   type TerminalEngine,
   type T3SessionMetadata,
   type TerminalViewMode,
@@ -472,6 +473,7 @@ export function setSessionTitleInSimpleWorkspace(
   snapshot: GroupedSessionWorkspaceSnapshot,
   sessionId: string,
   title: string,
+  options: { titleSource?: SessionTitleSource } = {},
 ): WorkspaceMutationResult {
   const nextTitle = title.trim();
   if (!nextTitle) {
@@ -481,6 +483,7 @@ export function setSessionTitleInSimpleWorkspace(
   return updateSession(snapshot, sessionId, (session) => ({
     ...session,
     title: nextTitle,
+    titleSource: options.titleSource ?? "user",
   }));
 }
 

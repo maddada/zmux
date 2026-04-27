@@ -12,6 +12,7 @@ import {
   type GroupedSessionWorkspaceSnapshot,
   type SessionGridSnapshot,
   type SessionRecord,
+  type SessionTitleSource,
   type SidebarTheme,
   type SidebarThemeSetting,
   type SidebarThemeVariant,
@@ -340,6 +341,7 @@ export function createSessionRecord(
   const alias = createSessionAlias(sessionNumber, slotIndex, displayId);
   const createdAt = new Date().toISOString();
   const title = options?.title?.trim() || DEFAULT_TERMINAL_SESSION_TITLE;
+  const titleSource = normalizeSessionTitleSource(options?.titleSource, title);
 
   if (options?.kind === "browser") {
     return {
@@ -353,6 +355,7 @@ export function createSessionRecord(
       sessionId,
       slotIndex,
       title,
+      titleSource,
     };
   }
 
@@ -368,6 +371,7 @@ export function createSessionRecord(
       slotIndex,
       t3: normalizeT3SessionMetadata(options.t3),
       title,
+      titleSource,
     };
   }
 
@@ -383,7 +387,23 @@ export function createSessionRecord(
     slotIndex,
     terminalEngine: normalizeTerminalEngine(options?.terminalEngine),
     title,
+    titleSource,
   };
+}
+
+function normalizeSessionTitleSource(
+  source: SessionTitleSource | undefined,
+  title: string,
+): SessionTitleSource {
+  if (
+    source === "generated" ||
+    source === "placeholder" ||
+    source === "terminal-auto" ||
+    source === "user"
+  ) {
+    return source;
+  }
+  return getVisiblePrimaryTitle(title) ? "user" : "placeholder";
 }
 
 export function normalizeTerminalSessionAgentName(value: string | undefined): string | undefined {

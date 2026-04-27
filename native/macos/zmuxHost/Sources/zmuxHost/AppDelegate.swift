@@ -299,8 +299,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    /**
+     CDXC:CrashDiagnostics 2026-04-27-18:31
+     The native host should terminate after its last window closes, and this
+     delegate decision must be an explicit Bool return so Swift compilation
+     cannot depend on expression-style behavior that methods do not support.
+     */
     Self.appendNativeHostLifecycleLog("applicationShouldTerminateAfterLastWindowClosed result=true")
-    true
+    return true
   }
 
   func windowWillClose(_ notification: Notification) {
@@ -1662,8 +1668,11 @@ final class zmuxRootView: NSView {
           stderr: error.localizedDescription
         )
       }
-      await MainActor.run {
-        self?.postHostEvent(result)
+      await MainActor.run { [weak self] in
+        guard let self else {
+          return
+        }
+        self.postHostEvent(result)
       }
     }
   }

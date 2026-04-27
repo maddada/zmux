@@ -3901,6 +3901,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
     return {
       sessions,
+      source: "zmux",
       type: "workspaceSnapshot",
       updatedAt: new Date().toISOString(),
       workspaceFaviconDataUrl: projectHeader?.faviconDataUrl,
