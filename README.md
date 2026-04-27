@@ -3,13 +3,19 @@
 Native ghostty terminals multiplexer and agent clis manager that in
 
 
-## Shows a button on the attached IDE to show zmux. Follows your IDE size/position. Project in IDE & zmux is mirrored. Hotkey to hide/show.
-Click on your IDE to hide zmux
+## Shows a button on the attached IDE to show zmux. 
+
+- Follows your IDE size/position. 
+- Project in IDE & zmux is mirrored. 
+- Hotkey to hide/show.
+- Click on your IDE to hide zmux
 
 <img width="600" src="https://github.com/user-attachments/assets/e68f9cce-897b-4cc4-97fa-7d229fb62899" />
 
 ## Native Ghostty terminals that integrate that integrate with the sidebar
-Auto naming Codex/Claude/Gemini/Copilot terminal sessions (more soon). Auto sync of the terminal title and status with UI. Show status indicators for running/done. 
+- Auto naming Codex/Claude/Gemini/Copilot terminal sessions (more soon). 
+- Auto sync of the terminal title and status with UI. 
+- Show status indicators for running/done. 
 
 <img width="600" src="https://github.com/user-attachments/assets/61d2cdf4-dcaf-409a-a292-477e0f78baf5" />
 
