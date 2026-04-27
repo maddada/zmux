@@ -1,8 +1,8 @@
-# zmux - The IDE Integrated Agents Manager (CLIs & T3code) 
+# zmux - The IDE Integrated Agents Manager (CLIs & T3code)
 
 Native ghostty terminals multiplexer and agent clis manager that in
 
-## Install
+## Install (macOS only for now. Need help with Windows/Linux ports)
 
 <!-- CDXC:Distribution 2026-04-27-09:49: The public 1.0.0 release is
 distributed through the maddada Homebrew tap so users can install the
@@ -12,19 +12,19 @@ notarized macOS app with one cask command. -->
 brew install --cask maddada/tap/zmux
 ```
 
-## Shows a button on the attached IDE to show zmux. 
+## Shows a button on the attached IDE to show zmux.
 
-- Follows your IDE size/position. 
-- Project in IDE & zmux is mirrored. 
+- Follows your IDE size/position.
+- Project in IDE & zmux is mirrored.
 - Hotkey to hide/show.
 - Click on your IDE to hide zmux
 
 <img width="600" src="https://github.com/user-attachments/assets/e68f9cce-897b-4cc4-97fa-7d229fb62899" />
 
 ## Native Ghostty terminals that integrate that integrate with the sidebar
-- Auto naming Codex/Claude/Gemini/Copilot terminal sessions (more soon). 
-- Auto sync of the terminal title and status with UI. 
-- Show status indicators for running/done. 
+- Auto naming Codex/Claude/Gemini/Copilot terminal sessions (more soon).
+- Auto sync of the terminal title and status with UI.
+- Show status indicators for running/done.
 
 <img width="600" src="https://github.com/user-attachments/assets/61d2cdf4-dcaf-409a-a292-477e0f78baf5" />
 
