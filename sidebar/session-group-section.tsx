@@ -747,15 +747,12 @@ export function SessionGroupSection({
                   </button>
                 </div>
                 <div className="group-title-spacer" />
-                {browserTabCount > 0 ? (
-                  <span
-                    aria-label={`${String(browserTabCount)} browser tab${browserTabCount === 1 ? "" : "s"}`}
-                    className="group-browser-tab-count"
-                    title={`${String(browserTabCount)} browser tab${browserTabCount === 1 ? "" : "s"}`}
-                  >
-                    {String(browserTabCount)}
-                  </span>
-                ) : null}
+                {/*
+                 * CDXC:SidebarGroups 2026-04-28-02:41
+                 * Browser section headers should stay visually quiet: do not
+                 * render the live tab-count badge next to "Browsers". Keep the
+                 * count only for empty-state and collapse behavior.
+                 */}
                 <div
                   className="group-header-actions"
                   data-open={String(openControlMenu !== undefined)}
