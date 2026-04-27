@@ -42,7 +42,7 @@ brew install --cask maddada/tap/zmux
 - T3code sessions support <- in testing
 - Much more!
 
-## Integrates very well with Chrome Canary as the integrated browser (use it specifically for your agent)
+## Integrates very well with Chrome Canary as the integrated browser agent browser (instructions below)
 
 <img width="600" src="https://github.com/user-attachments/assets/77f8cd07-e3fc-4c3f-9006-18c1835ff36f" />
 
