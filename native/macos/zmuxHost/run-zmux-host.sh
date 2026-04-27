@@ -14,13 +14,13 @@ DERIVED_DATA="${DERIVED_DATA:-$REPO_ROOT/build}"
 "$SCRIPT_DIR/build-zmux-host.sh"
 
 APP_PATH="$(
-  xcodebuild \
-    -project "$PROJECT_PATH" \
-    -scheme zmux \
-    -configuration "$CONFIGURATION" \
-    -derivedDataPath "$DERIVED_DATA" \
-    -showBuildSettings 2>/dev/null \
-    | awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }'
+	xcodebuild \
+		-project "$PROJECT_PATH" \
+		-scheme zmux \
+		-configuration "$CONFIGURATION" \
+		-derivedDataPath "$DERIVED_DATA" \
+		-showBuildSettings 2>/dev/null |
+		awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }'
 )/$APP_NAME.app"
 
 osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true

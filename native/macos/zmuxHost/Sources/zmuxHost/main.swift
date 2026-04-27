@@ -9,12 +9,12 @@ import GhosttyKit
  from zmux.app/Contents/Resources/ghostty.
  */
 if let resourcesPath = Bundle.main.resourceURL?.appendingPathComponent("ghostty").path {
-    setenv("GHOSTTY_RESOURCES_DIR", resourcesPath, 1)
+  setenv("GHOSTTY_RESOURCES_DIR", resourcesPath, 1)
 }
 
 if ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) != GHOSTTY_SUCCESS {
-    Ghostty.logger.critical("ghostty_init failed")
-    exit(1)
+  Ghostty.logger.critical("ghostty_init failed")
+  exit(1)
 }
 
 private let app = NSApplication.shared

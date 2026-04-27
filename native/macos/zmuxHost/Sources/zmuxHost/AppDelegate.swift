@@ -1,1698 +1,1781 @@
 import AppKit
-import WebKit
 import GhosttyKit
 import OSLog
 import UniformTypeIdentifiers
+import WebKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, GhosttyAppDelegate {
-    static let logger = Logger(subsystem: "com.madda.zmux.host", category: "app")
+  static let logger = Logger(subsystem: "com.madda.zmux.host", category: "app")
 
-    nonisolated(unsafe) let ghostty: Ghostty.App
-    let undoManager = UndoManager()
-    private let ghosttyConfigSelection: GhosttyConfigSelection
+  nonisolated(unsafe) let ghostty: Ghostty.App
+  let undoManager = UndoManager()
+  private let ghosttyConfigSelection: GhosttyConfigSelection
 
-    private var bridge: NativeHostBridge?
-    private var tickTimer: Timer?
-    private var window: NSWindow?
-    private var workspacePath = ProcessInfo.processInfo.environment["zmux_WORKSPACE_PATH"]
-        ?? FileManager.default.currentDirectoryPath
-    private weak var workspaceView: TerminalWorkspaceView?
-    private var zedOverlayController: ZedOverlayController?
-    private var browserOverlayController: BrowserOverlayController?
-    private var pendingZedOverlayConfiguration: ConfigureZedOverlay?
-    private var pendingGhosttyConfigReloadTimer: Timer?
-    private weak var attachToIdeTitlebarButton: NSButton?
-    private let nativeSettingsStore = NativeSettingsStore()
+  private var bridge: NativeHostBridge?
+  private var tickTimer: Timer?
+  private var window: NSWindow?
+  private var workspacePath =
+    ProcessInfo.processInfo.environment["zmux_WORKSPACE_PATH"]
+    ?? FileManager.default.currentDirectoryPath
+  private weak var workspaceView: TerminalWorkspaceView?
+  private var zedOverlayController: ZedOverlayController?
+  private var browserOverlayController: BrowserOverlayController?
+  private var pendingZedOverlayConfiguration: ConfigureZedOverlay?
+  private var pendingGhosttyConfigReloadTimer: Timer?
+  private weak var attachToIdeTitlebarButton: NSButton?
+  private let nativeSettingsStore = NativeSettingsStore()
 
-    override init() {
-        let configSelection = Self.preferredGhosttyConfig()
-        /**
-         CDXC:NativeTerminals 2026-04-26-06:50
-         Embedded Ghostty terminals should use the same user configuration as
-         Ghostty itself. Honor GHOSTTY_CONFIG_PATH when provided; otherwise let
-         Ghostty load its normal default config files from the user's machine.
-         */
-        ghosttyConfigSelection = configSelection
-        ghostty = Ghostty.App(configPath: configSelection.path)
-        super.init()
-        ghostty.delegate = self
-        logGhosttyConfigStartup()
+  override init() {
+    let configSelection = Self.preferredGhosttyConfig()
+    /**
+     CDXC:NativeTerminals 2026-04-26-06:50
+     Embedded Ghostty terminals should use the same user configuration as
+     Ghostty itself. Honor GHOSTTY_CONFIG_PATH when provided; otherwise let
+     Ghostty load its normal default config files from the user's machine.
+     */
+    ghosttyConfigSelection = configSelection
+    ghostty = Ghostty.App(configPath: configSelection.path)
+    super.init()
+    ghostty.delegate = self
+    logGhosttyConfigStartup()
+  }
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    NSApp.setActivationPolicy(.regular)
+    Self.appendNativeHostLifecycleLog(
+      "applicationDidFinishLaunching pid=\(ProcessInfo.processInfo.processIdentifier) workspacePath=\(workspacePath)"
+    )
+    MainActor.assumeIsolated {
+      makeWindow()
+      startBridge()
+    }
+    tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+      self?.ghostty.appTick()
+    }
+  }
+
+  func applicationWillTerminate(_ notification: Notification) {
+    Self.appendNativeHostLifecycleLog(
+      "applicationWillTerminate pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false)"
+    )
+  }
+
+  private struct GhosttyConfigSelection {
+    let path: String?
+    let source: String
+  }
+
+  private static func preferredGhosttyConfig() -> GhosttyConfigSelection {
+    let value = ProcessInfo.processInfo.environment["GHOSTTY_CONFIG_PATH"]?.trimmingCharacters(
+      in: .whitespacesAndNewlines)
+    if value?.isEmpty == false {
+      return GhosttyConfigSelection(path: value, source: "GHOSTTY_CONFIG_PATH")
     }
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        Self.appendNativeHostLifecycleLog(
-            "applicationDidFinishLaunching pid=\(ProcessInfo.processInfo.processIdentifier) workspacePath=\(workspacePath)"
+    let appSupportURL = FileManager.default.urls(
+      for: .applicationSupportDirectory, in: .userDomainMask
+    ).first
+    let macOSConfigPaths = [
+      appSupportURL?.appendingPathComponent("com.mitchellh.ghostty/config").path,
+      appSupportURL?.appendingPathComponent("com.ghostty.org/config").path,
+      appSupportURL?.appendingPathComponent("Ghostty/config").path,
+    ].compactMap { $0 }
+    /**
+     CDXC:NativeTerminals 2026-04-26-06:53
+     Installed Ghostty for macOS stores user settings in Application Support
+     on this machine. Prefer that real app config before falling back to
+     Ghostty's default loader so embedded terminals match the user's app.
+     */
+    if let path = macOSConfigPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) {
+      return GhosttyConfigSelection(path: path, source: "macOS Application Support")
+    }
+
+    return GhosttyConfigSelection(path: nil, source: "Ghostty default loader")
+  }
+
+  private func logGhosttyConfigStartup() {
+    /**
+     CDXC:NativeTerminals 2026-04-26-07:12
+     User Ghostty configuration must be diagnosable without noisy runtime
+     traces. Log one startup snapshot with the selected config path,
+     resource availability, representative loaded values, and diagnostics.
+     */
+    let resourcePath = Bundle.main.resourceURL?.appendingPathComponent("ghostty").path
+    let themesPath = Bundle.main.resourceURL?.appendingPathComponent("ghostty/themes").path
+    let fileManager = FileManager.default
+    let configPath = ghosttyConfigSelection.path ?? "<default>"
+    let configExists =
+      ghosttyConfigSelection.path.map { fileManager.fileExists(atPath: $0) } ?? false
+    let resourceExists = resourcePath.map { fileManager.fileExists(atPath: $0) } ?? false
+    let themesExists = themesPath.map { fileManager.fileExists(atPath: $0) } ?? false
+    let fontSize = ghosttyConfigFloat("font-size").map { String($0) } ?? "<unreadable>"
+    let cursorStyle = ghosttyConfigString("cursor-style") ?? "<unreadable>"
+    let background = ghosttyConfigColorHex("background") ?? "<unreadable>"
+    let diagnostics =
+      ghostty.config.errors.isEmpty ? "none" : ghostty.config.errors.joined(separator: " | ")
+    let logFields = [
+      "source=\(ghosttyConfigSelection.source)",
+      "configPath=\(configPath)",
+      "configExists=\(configExists)",
+      "resourcePath=\(resourcePath ?? "<missing>")",
+      "resourceExists=\(resourceExists)",
+      "themesExists=\(themesExists)",
+      "font-size=\(fontSize)",
+      "cursor-style=\(cursorStyle)",
+      "background=\(background)",
+      "diagnostics=\(diagnostics)",
+    ]
+    Self.appendGhosttyConfigLog(logFields.joined(separator: " "))
+  }
+
+  private func ghosttyConfigString(_ key: String) -> String? {
+    guard let config = ghostty.config.config else {
+      return nil
+    }
+    var value: UnsafePointer<Int8>?
+    guard ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8))),
+      let value
+    else {
+      return nil
+    }
+    return String(cString: value)
+  }
+
+  private func ghosttyConfigFloat(_ key: String) -> Float32? {
+    guard let config = ghostty.config.config else {
+      return nil
+    }
+    var value: Float32 = 0
+    guard ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8))) else {
+      return nil
+    }
+    return value
+  }
+
+  private func ghosttyConfigColorHex(_ key: String) -> String? {
+    guard let config = ghostty.config.config else {
+      return nil
+    }
+    var color = ghostty_config_color_s()
+    guard ghostty_config_get(config, &color, key, UInt(key.lengthOfBytes(using: .utf8))) else {
+      return nil
+    }
+    return String(format: "#%02X%02X%02X", color.r, color.g, color.b)
+  }
+
+  private static func appendGhosttyConfigLog(_ message: String) {
+    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logURL = logsDirectory.appendingPathComponent("native-ghostty-config.log")
+    appendLogLine(
+      message, to: logURL, logsDirectory: logsDirectory, label: "Ghostty config startup")
+  }
+
+  fileprivate static func appendSessionTitleDebugLog(event: String, details: String?) {
+    /**
+     CDXC:SessionTitleDiagnostics 2026-04-26-08:03
+     The native packaged app must write session-title diagnostics into the
+     same ~/.zmux/logs location as the Bun controller so missing Codex
+     auto-renames can be correlated with native Ghostty title events.
+     */
+    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logURL = logsDirectory.appendingPathComponent("session-title-sync-debug.log")
+    let message = details.map { "\(event) \($0)" } ?? event
+    appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "session title debug")
+  }
+
+  fileprivate static func appendAgentDetectionDebugLog(event: String, details: String?) {
+    /**
+     CDXC:AgentDetection 2026-04-26-11:14
+     Agent-icon debugging needs a dedicated ~/.zmux/logs file so native
+     title events, detector output, and sidebar projection can be correlated
+     without mixing them with session rename diagnostics.
+     */
+    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logURL = logsDirectory.appendingPathComponent("agent-detection-debug.log")
+    let message = details.map { "\(event) \($0)" } ?? event
+    appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "agent detection debug")
+  }
+
+  fileprivate static func appendTerminalFocusDebugLog(event: String, details: String?) {
+    TerminalFocusDebugLog.append(
+      event: event,
+      details: [
+        "details": nullableLogString(details),
+        "source": "native-sidebar",
+      ])
+  }
+
+  fileprivate static func appendRestoreDebugLog(event: String, details: String?) {
+    /**
+     CDXC:WorkspaceRestore 2026-04-26-10:00
+     The packaged native sidebar owns workspace/session persistence. Write
+     restore diagnostics into a dedicated ~/.zmux/logs file so project load,
+     localStorage persistence, and native terminal recreation can be traced
+     independently from session-title logs.
+     */
+    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logURL = logsDirectory.appendingPathComponent("workspace-restore-debug.log")
+    let message = details.map { "\(event) \($0)" } ?? event
+    appendLogLine(
+      message, to: logURL, logsDirectory: logsDirectory, label: "workspace restore debug")
+  }
+
+  fileprivate static func appendWorkspaceDockIndicatorDebugLog(event: String, details: String?) {
+    /**
+     CDXC:WorkspaceDock 2026-04-27-04:23
+     Native workspace rail indicator repros need a dedicated log file under
+     ~/.zmux/logs because this UI is rendered from the native sidebar webview,
+     not the older Electrobun mainview dock.
+     */
+    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logURL = logsDirectory.appendingPathComponent("workspace-dock-indicator-debug.log")
+    let message = details.map { "\(event) \($0)" } ?? event
+    appendLogLine(
+      message, to: logURL, logsDirectory: logsDirectory, label: "workspace dock indicator debug")
+  }
+
+  fileprivate static func appendAppModalErrorLog(area: String, message: String, stack: String?) {
+    /**
+     CDXC:AppModals 2026-04-27-14:25
+     Full-window modal failures must be persisted outside React debug mode.
+     Every modal host exception writes an area-tagged timestamped line under
+     ~/.zmux/logs so missing bridge, render, and command routing failures can
+     be diagnosed after the UI has already failed.
+     */
+    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logURL = logsDirectory.appendingPathComponent("app-modal-errors.log")
+    let stackText = stack.map { " stack=\($0)" } ?? ""
+    appendLogLine(
+      "[\(area)] \(message)\(stackText)", to: logURL, logsDirectory: logsDirectory,
+      label: "app modal error")
+  }
+
+  fileprivate static func appendNativeHostLifecycleLog(_ message: String) {
+    /**
+     CDXC:CrashDiagnostics 2026-04-27-17:38
+     When the app disappears from the Dock, native lifecycle breadcrumbs must
+     survive outside WebKit and JS logs so close-button, last-window, and
+     termination paths can be separated from renderer crashes.
+     */
+    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logURL = logsDirectory.appendingPathComponent("native-host-lifecycle.log")
+    appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "native host lifecycle")
+  }
+
+  private static func appendLogLine(
+    _ message: String,
+    to logURL: URL,
+    logsDirectory: URL,
+    label: String
+  ) {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = .current
+    let line = "[\(formatter.string(from: Date()))] \(message)\n"
+
+    do {
+      try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+      if FileManager.default.fileExists(atPath: logURL.path) {
+        let handle = try FileHandle(forWritingTo: logURL)
+        try handle.seekToEnd()
+        if let data = line.data(using: .utf8) {
+          try handle.write(contentsOf: data)
+        }
+        try handle.close()
+      } else {
+        try line.write(to: logURL, atomically: true, encoding: .utf8)
+      }
+    } catch {
+      logger.warning("failed to write \(label) log: \(error.localizedDescription)")
+    }
+  }
+
+  func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    Self.appendNativeHostLifecycleLog("applicationShouldTerminateAfterLastWindowClosed result=true")
+    true
+  }
+
+  func windowWillClose(_ notification: Notification) {
+    Self.appendNativeHostLifecycleLog(
+      "windowWillClose title=\(window?.title ?? "<missing>") visibleBeforeClose=\(window?.isVisible ?? false)"
+    )
+  }
+
+  func findSurface(forUUID uuid: UUID) -> Ghostty.SurfaceView? {
+    MainActor.assumeIsolated {
+      workspaceView?.subviews.compactMap { $0 as? Ghostty.SurfaceView }.first { $0.id == uuid }
+    }
+  }
+
+  func performGhosttyBindingMenuKeyEquivalent(with event: NSEvent) -> Bool {
+    NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
+  }
+
+  @IBAction nonisolated func checkForUpdates(_ sender: Any?) {}
+
+  @IBAction nonisolated func closeAllWindows(_ sender: Any?) {}
+
+  @IBAction nonisolated func toggleQuickTerminal(_ sender: Any?) {}
+
+  nonisolated func toggleVisibility(_ sender: Any?) {}
+
+  nonisolated func syncFloatOnTopMenu(_ window: NSWindow) {}
+
+  nonisolated func setSecureInput(_ mode: Ghostty.SetSecureInput) {}
+
+  @MainActor
+  private func makeWindow() {
+    let root = zmuxRootView(
+      ghostty: ghostty,
+      sendEvent: { [weak self] event in
+        self?.bridge?.send(event)
+        (self?.window?.contentView as? zmuxRootView)?.postHostEvent(event)
+      },
+      configureZedOverlay: { [weak self] command in
+        self?.handle(.configureZedOverlay(command))
+      },
+      syncGhosttyTerminalSettings: { [weak self] command in
+        self?.handle(.syncGhosttyTerminalSettings(command))
+      },
+      openBrowserWindow: { [weak self] command in
+        self?.handle(.openBrowserWindow(command))
+      },
+      showBrowserWindow: { [weak self] in
+        self?.handle(.showBrowserWindow)
+      }
+    )
+    workspaceView = root.workspaceView
+
+    let window = zmuxFocusReportingWindow(
+      contentRect: NSRect(x: 100, y: 80, width: 1440, height: 900),
+      styleMask: [.closable, .miniaturizable, .resizable, .titled],
+      backing: .buffered,
+      defer: false
+    )
+    window.onFirstResponderChanged = { [weak root] responder in
+      root?.workspaceView.windowFirstResponderChanged(responder, reason: "windowMakeFirstResponder")
+    }
+    window.title = "zmux"
+    window.titleVisibility = .hidden
+    window.contentView = root
+    window.delegate = self
+    installAttachToIdeTitlebarButton(on: window)
+    window.makeKeyAndOrderFront(nil)
+    self.window = window
+    let zedOverlayController = ZedOverlayController(
+      window: window,
+      workspacePathProvider: { [weak self] in
+        self?.workspacePath
+      },
+      didActivateAttachment: { [weak self] in
+        self?.browserOverlayController?.markBrowserNoLongerShownInAttachment(
+          reason: "zmuxActivated"
         )
-        MainActor.assumeIsolated {
-            makeWindow()
-            startBridge()
-        }
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.ghostty.appTick()
-        }
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        Self.appendNativeHostLifecycleLog(
-            "applicationWillTerminate pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false)"
+      },
+      didHideAttachment: { [weak self] in
+        self?.browserOverlayController?.logAttachmentEvent(
+          "appDelegate.didHideAttachment.beforeMoveBrowser")
+        self?.browserOverlayController?.moveBrowserOffscreen()
+        self?.browserOverlayController?.logAttachmentEvent(
+          "appDelegate.didHideAttachment.afterMoveBrowser")
+      },
+      didShowAttachment: { [weak self] in
+        self?.browserOverlayController?.logAttachmentEvent(
+          "appDelegate.didShowAttachment.beforeRestoreBrowser")
+        self?.browserOverlayController?.restoreBrowserIfNeeded()
+        self?.browserOverlayController?.logAttachmentEvent(
+          "appDelegate.didShowAttachment.afterRestoreBrowser")
+      },
+      didRequestDetach: { [weak self] targetApp in
+        self?.detachZedOverlayFromNativeButton(targetApp: targetApp)
+      }
+    )
+    self.zedOverlayController = zedOverlayController
+    self.browserOverlayController = BrowserOverlayController(
+      window: window,
+      workareaFrameProvider: { [weak root] in
+        root?.workspaceScreenFrame()
+      },
+      setCompanionBrowserActive: { [weak zedOverlayController] active in
+        zedOverlayController?.setCompanionApplicationBundleIdentifiers(
+          active ? [BrowserOverlayController.chromeCanaryBundleIdentifier] : []
         )
+      }
+    )
+    if let pendingZedOverlayConfiguration {
+      zedOverlayController.configure(pendingZedOverlayConfiguration)
+      updateAttachToIdeTitlebarButton(
+        enabled: pendingZedOverlayConfiguration.enabled,
+        targetApp: pendingZedOverlayConfiguration.targetApp
+      )
+      self.pendingZedOverlayConfiguration = nil
+    } else if let initialZedOverlayConfiguration = initialZedOverlayConfiguration() {
+      zedOverlayController.configure(initialZedOverlayConfiguration)
+      updateAttachToIdeTitlebarButton(
+        enabled: initialZedOverlayConfiguration.enabled,
+        targetApp: initialZedOverlayConfiguration.targetApp
+      )
     }
+    NSApp.activate(ignoringOtherApps: true)
+  }
 
-    private struct GhosttyConfigSelection {
-        let path: String?
-        let source: String
+  @MainActor private func installAttachToIdeTitlebarButton(on window: NSWindow) {
+    /**
+     CDXC:IDEAttachment 2026-04-27-00:54
+     The attach action belongs at the center of the native title bar and
+     should read as a text button, matching the rounded AppKit style of the
+     floating Show zmux/Show IDE buttons instead of using a blue link icon.
+     Its label names the currently selected IDE in the shortest requested
+     form and switches between Attach/Detach from the persisted
+     attach-enabled state.
+     */
+    let stored = nativeSettingsStore.readZedOverlay()
+    let targetApp = stored.targetApp ?? .zedPreview
+    let button = NSButton(
+      title: attachToIdeTitlebarButtonTitle(enabled: stored.enabled ?? false, targetApp: targetApp),
+      target: self,
+      action: #selector(handleAttachToIdeTitlebarButton)
+    )
+    button.bezelStyle = .rounded
+    button.controlSize = .small
+    button.font = .systemFont(ofSize: 12, weight: .semibold)
+    button.toolTip = "Attach to IDE"
+    button.setButtonType(.momentaryPushIn)
+    button.translatesAutoresizingMaskIntoConstraints = false
+
+    guard let titlebarView = window.standardWindowButton(.closeButton)?.superview else {
+      return
     }
+    titlebarView.addSubview(button)
+    let centerYAnchor =
+      window.standardWindowButton(.closeButton)?.centerYAnchor ?? titlebarView.centerYAnchor
+    NSLayoutConstraint.activate([
+      button.centerXAnchor.constraint(equalTo: titlebarView.centerXAnchor),
+      button.centerYAnchor.constraint(equalTo: centerYAnchor),
+      button.heightAnchor.constraint(equalToConstant: 24),
+      button.widthAnchor.constraint(greaterThanOrEqualToConstant: 132),
+    ])
+    attachToIdeTitlebarButton = button
+  }
 
-    private static func preferredGhosttyConfig() -> GhosttyConfigSelection {
-        let value = ProcessInfo.processInfo.environment["GHOSTTY_CONFIG_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value?.isEmpty == false {
-            return GhosttyConfigSelection(path: value, source: "GHOSTTY_CONFIG_PATH")
-        }
+  @objc @MainActor private func handleAttachToIdeTitlebarButton() {
+    let stored = nativeSettingsStore.readZedOverlay()
+    let targetApp = stored.targetApp ?? .zedPreview
+    let nextEnabled = !(stored.enabled ?? false)
+    let command = ConfigureZedOverlay(
+      enabled: nextEnabled,
+      targetApp: targetApp,
+      workspacePath: workspacePath
+    )
+    handle(.configureZedOverlay(command))
+    if nextEnabled {
+      (window?.contentView as? zmuxRootView)?.applyNativeZedOverlayAttached(targetApp: targetApp)
+    } else {
+      (window?.contentView as? zmuxRootView)?.applyNativeZedOverlayDetached(targetApp: targetApp)
+    }
+  }
 
-        let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        let macOSConfigPaths = [
-            appSupportURL?.appendingPathComponent("com.mitchellh.ghostty/config").path,
-            appSupportURL?.appendingPathComponent("com.ghostty.org/config").path,
-            appSupportURL?.appendingPathComponent("Ghostty/config").path,
-        ].compactMap { $0 }
+  @MainActor private func updateAttachToIdeTitlebarButton(
+    enabled: Bool,
+    targetApp: ZedOverlayTargetApp
+  ) {
+    attachToIdeTitlebarButton?.title = attachToIdeTitlebarButtonTitle(
+      enabled: enabled,
+      targetApp: targetApp
+    )
+  }
+
+  private func attachToIdeTitlebarButtonTitle(
+    enabled: Bool,
+    targetApp: ZedOverlayTargetApp
+  ) -> String {
+    let action = enabled ? "Detach" : "Attach"
+    switch targetApp {
+    case .zed:
+      return "\(action) Zed"
+    case .zedPreview:
+      return "\(action) Zed"
+    case .vscode:
+      return "\(action) VS Code"
+    case .vscodeInsiders:
+      return "\(action) VS Code"
+    }
+  }
+
+  @MainActor
+  private func startBridge() {
+    do {
+      let bridge = try NativeHostBridge { [weak self] command in
+        self?.handle(command)
+      }
+      self.bridge = bridge
+      bridge.start()
+    } catch {
+      workspaceView?.createTerminal(
+        CreateTerminal(
+          cwd: FileManager.default.currentDirectoryPath,
+          env: nil,
+          initialInput: "printf 'Failed to start zmux bridge: \(error.localizedDescription)\\n'\r",
+          sessionId: "bridge-error",
+          title: "Bridge error"
+        ))
+    }
+  }
+
+  @MainActor
+  private func handle(_ command: HostCommand) {
+    switch command {
+    case .createTerminal(let command):
+      workspaceView?.createTerminal(command)
+    case .closeTerminal(let command):
+      workspaceView?.closeTerminal(sessionId: command.sessionId)
+    case .focusTerminal(let command):
+      workspaceView?.focusTerminal(sessionId: command.sessionId)
+    case .writeTerminalText(let command):
+      workspaceView?.writeTerminalText(sessionId: command.sessionId, text: command.text)
+    case .sendTerminalEnter(let command):
+      workspaceView?.sendTerminalEnter(sessionId: command.sessionId)
+    case .setActiveTerminalSet(let command):
+      workspaceView?.setActiveTerminalSet(command)
+    case .setTerminalLayout(let command):
+      workspaceView?.setTerminalLayout(command.layout)
+    case .setTerminalVisibility(let command):
+      workspaceView?.setTerminalVisibility(sessionId: command.sessionId, visible: command.visible)
+    case .pickWorkspaceFolder:
+      break
+    case .pickWorkspaceIcon:
+      break
+    case .showMessage(let command):
+      showMessage(command)
+    case .appendAgentDetectionDebugLog(let command):
+      Self.appendAgentDetectionDebugLog(event: command.event, details: command.details)
+    case .appendTerminalFocusDebugLog(let command):
+      Self.appendTerminalFocusDebugLog(event: command.event, details: command.details)
+    case .appendRestoreDebugLog(let command):
+      Self.appendRestoreDebugLog(event: command.event, details: command.details)
+    case .appendSessionTitleDebugLog(let command):
+      Self.appendSessionTitleDebugLog(event: command.event, details: command.details)
+    case .appendWorkspaceDockIndicatorDebugLog(let command):
+      Self.appendWorkspaceDockIndicatorDebugLog(event: command.event, details: command.details)
+    case .runProcess(let command):
+      runProcess(command) { [weak self] event in
+        self?.bridge?.send(event)
+      }
+    case .syncGhosttyTerminalSettings(let command):
+      syncGhosttyTerminalSettings(command)
+    case .openExternalUrl(let command):
+      openExternalUrl(command)
+    case .openBrowserWindow(let command):
+      browserOverlayController?.open(command)
+    case .showBrowserWindow:
+      browserOverlayController?.showRunningChromeCanary()
+    case .setSidebarSide(let command):
+      (window?.contentView as? zmuxRootView)?.setSidebarSide(command.side)
+    case .configureZedOverlay(let command):
+      if let workspacePath = command.workspacePath {
+        self.workspacePath = workspacePath
+      }
+      updateAttachToIdeTitlebarButton(enabled: command.enabled, targetApp: command.targetApp)
+      nativeSettingsStore.persistZedOverlay(command)
+      guard let zedOverlayController else {
         /**
-         CDXC:NativeTerminals 2026-04-26-06:53
-         Installed Ghostty for macOS stores user settings in Application Support
-         on this machine. Prefer that real app config before falling back to
-         Ghostty's default loader so embedded terminals match the user's app.
+         CDXC:ZedOverlay 2026-04-26-03:29
+         The sidebar webview can send saved Zed overlay settings while
+         the AppKit window is still being assembled. Preserve that
+         command and apply it once the native overlay controller exists.
          */
-        if let path = macOSConfigPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) {
-            return GhosttyConfigSelection(path: path, source: "macOS Application Support")
+        pendingZedOverlayConfiguration = command
+        return
+      }
+      zedOverlayController.configure(command)
+    case .sidebarCliCommand(let command):
+      runSidebarCliCommand(command)
+    }
+  }
+
+  @MainActor private func runSidebarCliCommand(_ command: SidebarCliCommand) {
+    /**
+     CDXC:DebugCli 2026-04-27-07:18
+     The CLI must exercise the same sidebar/runtime code paths as a user
+     click. Forward debug commands into the sidebar webview and return the
+     JSON result through the existing bridge instead of creating orphan
+     native terminals behind the sidebar's state.
+     */
+    guard let sidebarView = (window?.contentView as? zmuxRootView)?.sidebarWebView else {
+      bridge?.send(
+        .sidebarCliResult(
+          requestId: command.requestId,
+          ok: false,
+          payloadJson: #"{"error":"sidebar-webview-missing"}"#
+        ))
+      return
+    }
+    guard
+      let actionJson = Self.javascriptStringLiteral(command.action),
+      let payloadJson = Self.javascriptStringLiteral(command.payloadJson ?? "{}")
+    else {
+      bridge?.send(
+        .sidebarCliResult(
+          requestId: command.requestId,
+          ok: false,
+          payloadJson: #"{"error":"sidebar-cli-command-encoding-failed"}"#
+        ))
+      return
+    }
+    let script = """
+      (async () => {
+        const handler = window.__zmux_NATIVE_CLI__;
+        if (!handler || typeof handler.handleCommand !== 'function') {
+          return JSON.stringify({ ok: false, error: 'sidebar-cli-handler-missing' });
         }
-
-        return GhosttyConfigSelection(path: nil, source: "Ghostty default loader")
+        return JSON.stringify(await handler.handleCommand(\(actionJson), JSON.parse(\(payloadJson))));
+      })()
+      """
+    sidebarView.evaluateJavaScript(script) { [weak self] result, error in
+      let payloadJson: String
+      let ok: Bool
+      if let error {
+        ok = false
+        payloadJson = Self.jsonObjectString(["error": error.localizedDescription])
+      } else if let result = result as? String {
+        ok = !result.contains(#""ok":false"#)
+        payloadJson = result
+      } else {
+        ok = false
+        payloadJson = #"{"error":"sidebar-cli-result-missing"}"#
+      }
+      self?.bridge?.send(
+        .sidebarCliResult(
+          requestId: command.requestId,
+          ok: ok,
+          payloadJson: payloadJson
+        ))
     }
+  }
 
-    private func logGhosttyConfigStartup() {
-        /**
-         CDXC:NativeTerminals 2026-04-26-07:12
-         User Ghostty configuration must be diagnosable without noisy runtime
-         traces. Log one startup snapshot with the selected config path,
-         resource availability, representative loaded values, and diagnostics.
-         */
-        let resourcePath = Bundle.main.resourceURL?.appendingPathComponent("ghostty").path
-        let themesPath = Bundle.main.resourceURL?.appendingPathComponent("ghostty/themes").path
-        let fileManager = FileManager.default
-        let configPath = ghosttyConfigSelection.path ?? "<default>"
-        let configExists = ghosttyConfigSelection.path.map { fileManager.fileExists(atPath: $0) } ?? false
-        let resourceExists = resourcePath.map { fileManager.fileExists(atPath: $0) } ?? false
-        let themesExists = themesPath.map { fileManager.fileExists(atPath: $0) } ?? false
-        let fontSize = ghosttyConfigFloat("font-size").map { String($0) } ?? "<unreadable>"
-        let cursorStyle = ghosttyConfigString("cursor-style") ?? "<unreadable>"
-        let background = ghosttyConfigColorHex("background") ?? "<unreadable>"
-        let diagnostics = ghostty.config.errors.isEmpty ? "none" : ghostty.config.errors.joined(separator: " | ")
-        let logFields = [
-            "source=\(ghosttyConfigSelection.source)",
-            "configPath=\(configPath)",
-            "configExists=\(configExists)",
-            "resourcePath=\(resourcePath ?? "<missing>")",
-            "resourceExists=\(resourceExists)",
-            "themesExists=\(themesExists)",
-            "font-size=\(fontSize)",
-            "cursor-style=\(cursorStyle)",
-            "background=\(background)",
-            "diagnostics=\(diagnostics)",
-        ]
-        Self.appendGhosttyConfigLog(logFields.joined(separator: " "))
+  private static func javascriptStringLiteral(_ value: String) -> String? {
+    guard let data = try? JSONEncoder().encode(value) else {
+      return nil
     }
+    return String(data: data, encoding: .utf8)
+  }
 
-    private func ghosttyConfigString(_ key: String) -> String? {
-        guard let config = ghostty.config.config else {
-            return nil
+  private static func jsonObjectString(_ value: [String: String]) -> String {
+    guard let data = try? JSONEncoder().encode(value),
+      let text = String(data: data, encoding: .utf8)
+    else {
+      return #"{"error":"json-encoding-failed"}"#
+    }
+    return text
+  }
+
+  @MainActor private func detachZedOverlayFromNativeButton(targetApp: ZedOverlayTargetApp) {
+    /**
+     CDXC:ZedOverlay 2026-04-26-10:54
+     The native Detach button must behave like turning off the sidebar
+     attach checkbox: persist the disabled attach setting, apply standalone
+     window behavior immediately, and update the sidebar settings UI.
+     */
+    let command = ConfigureZedOverlay(
+      enabled: false,
+      targetApp: targetApp,
+      workspacePath: workspacePath
+    )
+    handle(.configureZedOverlay(command))
+    (window?.contentView as? zmuxRootView)?.applyNativeZedOverlayDetached(targetApp: targetApp)
+  }
+
+  private func initialZedOverlayConfiguration() -> ConfigureZedOverlay? {
+    let environment = ProcessInfo.processInfo.environment
+    let stored = nativeSettingsStore.readZedOverlay()
+    let enabledValue =
+      environment["zmux_ZED_OVERLAY_ENABLED"].map { value in
+        value == "1" || value.lowercased() == "true"
+      } ?? stored.enabled
+    guard let enabledValue else {
+      return nil
+    }
+    let targetApp =
+      environment["zmux_ZED_OVERLAY_TARGET_APP"]
+      .flatMap(ZedOverlayTargetApp.init(rawValue:))
+      ?? stored.targetApp
+      ?? .zedPreview
+    return ConfigureZedOverlay(
+      enabled: enabledValue,
+      targetApp: targetApp,
+      workspacePath: workspacePath
+    )
+  }
+
+  private func syncGhosttyTerminalSettings(_ command: SyncGhosttyTerminalSettings) {
+    /**
+     CDXC:TerminalSettings 2026-04-26-19:02
+     zmux settings run in the native sidebar webview and must write the
+     same Ghostty config file selected for embedded terminals. Keep the
+     merge narrow so themes, keybinds, and unrelated Ghostty settings stay
+     user-owned.
+     */
+    do {
+      let configURL =
+        ghosttyConfigSelection.path.map { URL(fileURLWithPath: $0) }
+        ?? Self.defaultWritableGhosttyConfigURL()
+      let existingConfig = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+      let mergedConfig = Self.mergeGhosttyTerminalSettings(existingConfig, command)
+      try FileManager.default.createDirectory(
+        at: configURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+      )
+      try mergedConfig.write(to: configURL, atomically: true, encoding: .utf8)
+      scheduleGhosttyConfigReload()
+    } catch {
+      Self.logger.error("Failed to sync Ghostty terminal settings: \(error.localizedDescription)")
+    }
+  }
+
+  private func scheduleGhosttyConfigReload() {
+    /**
+     CDXC:TerminalSettings 2026-04-26-20:21
+     Slider drags can emit many terminal-setting writes. Reload embedded
+     Ghostty automatically only after the user stops changing values for
+     three seconds, matching Ghostty's reloadConfig API without causing
+     repeated font/metric rebuilds during a continuous drag.
+     */
+    pendingGhosttyConfigReloadTimer?.invalidate()
+    pendingGhosttyConfigReloadTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) {
+      [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self else {
+          return
         }
-        var value: UnsafePointer<Int8>?
-        guard ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8))),
-              let value else {
-            return nil
+        self.pendingGhosttyConfigReloadTimer = nil
+        self.ghostty.reloadConfig()
+      }
+    }
+  }
+
+  private static func defaultWritableGhosttyConfigURL() -> URL {
+    let appSupport = FileManager.default.urls(
+      for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    return appSupport.appendingPathComponent("com.mitchellh.ghostty/config")
+  }
+
+  private static func mergeGhosttyTerminalSettings(
+    _ config: String,
+    _ command: SyncGhosttyTerminalSettings
+  ) -> String {
+    var retainedLines =
+      config
+      .components(separatedBy: .newlines)
+      .filter { shouldRetainGhosttyConfigLine($0) }
+    while retainedLines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+      retainedLines.removeLast()
+    }
+    let lines =
+      retainedLines + [
+        "font-family = \(formatGhosttyString(command.fontFamily))",
+        "font-size = \(formatGhosttyNumber(command.fontSize))",
+        "font-thicken = \(command.fontThicken ? "true" : "false")",
+        "font-thicken-strength = \(max(0, min(255, command.fontThickenStrength)))",
+        "adjust-cell-height = \(formatGhosttyPercent(command.adjustCellHeightPercent))",
+        "adjust-cell-width = \(formatGhosttyNumber(command.adjustCellWidth))",
+      ]
+    return lines.joined(separator: "\n") + "\n"
+  }
+
+  private static func shouldRetainGhosttyConfigLine(_ line: String) -> Bool {
+    let managedKeys: Set<String> = [
+      "adjust-cell-height",
+      "adjust-cell-width",
+      "font-family",
+      "font-size",
+      "font-thicken",
+      "font-thicken-strength",
+    ]
+    let key = readGhosttyConfigKey(line)
+    if managedKeys.contains(key) {
+      return false
+    }
+    if key != "font-variation" {
+      return true
+    }
+    return !readGhosttyConfigValue(line)
+      .split(separator: ",")
+      .contains {
+        $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("wght=")
+      }
+  }
+
+  private static func readGhosttyConfigKey(_ line: String) -> String {
+    let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmedLine.isEmpty || trimmedLine.hasPrefix("#") {
+      return ""
+    }
+    return trimmedLine.split(separator: "=", maxSplits: 1).first.map {
+      String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+    } ?? ""
+  }
+
+  private static func readGhosttyConfigValue(_ line: String) -> String {
+    guard let equalsIndex = line.firstIndex(of: "=") else {
+      return ""
+    }
+    return String(line[line.index(after: equalsIndex)...]).trimmingCharacters(
+      in: .whitespacesAndNewlines)
+  }
+
+  private static func formatGhosttyString(_ value: String) -> String {
+    "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+  }
+
+  private static func formatGhosttyNumber(_ value: Double) -> String {
+    if value.rounded() == value {
+      return String(Int(value))
+    }
+    return String(format: "%.2f", value)
+      .replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression)
+      .replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
+  }
+
+  private static func formatGhosttyPercent(_ value: Double) -> String {
+    "\(formatGhosttyNumber(value * 100))%"
+  }
+
+  private func showMessage(_ command: ShowMessage) {
+    let alert = NSAlert()
+    switch command.level {
+    case .info:
+      alert.alertStyle = .informational
+    case .warning:
+      alert.alertStyle = .warning
+    case .error:
+      alert.alertStyle = .critical
+    }
+    alert.messageText = "zmux"
+    alert.informativeText = command.message
+    alert.addButton(withTitle: "OK")
+    if let window {
+      alert.beginSheetModal(for: window)
+    } else {
+      alert.runModal()
+    }
+  }
+
+  private func openExternalUrl(_ command: OpenExternalUrl) {
+    guard let url = URL(string: command.url) else {
+      return
+    }
+    NSWorkspace.shared.open(url)
+  }
+
+  private func runProcess(_ command: RunProcess, sendEvent: @escaping (HostEvent) -> Void) {
+    Task.detached {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: command.executable)
+      process.arguments = command.args
+      if let cwd = command.cwd {
+        process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+      }
+      if let env = command.env {
+        process.environment = ProcessInfo.processInfo.environment.merging(env) { _, newValue in
+          newValue
         }
-        return String(cString: value)
-    }
+      }
+      let stdoutPipe = Pipe()
+      let stderrPipe = Pipe()
+      process.standardInput = FileHandle.nullDevice
+      process.standardOutput = stdoutPipe
+      process.standardError = stderrPipe
 
-    private func ghosttyConfigFloat(_ key: String) -> Float32? {
-        guard let config = ghostty.config.config else {
-            return nil
-        }
-        var value: Float32 = 0
-        guard ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8))) else {
-            return nil
-        }
-        return value
-    }
-
-    private func ghosttyConfigColorHex(_ key: String) -> String? {
-        guard let config = ghostty.config.config else {
-            return nil
-        }
-        var color = ghostty_config_color_s()
-        guard ghostty_config_get(config, &color, key, UInt(key.lengthOfBytes(using: .utf8))) else {
-            return nil
-        }
-        return String(format: "#%02X%02X%02X", color.r, color.g, color.b)
-    }
-
-    private static func appendGhosttyConfigLog(_ message: String) {
-        let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".zmux/logs", isDirectory: true)
-        let logURL = logsDirectory.appendingPathComponent("native-ghostty-config.log")
-        appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "Ghostty config startup")
-    }
-
-    fileprivate static func appendSessionTitleDebugLog(event: String, details: String?) {
-        /**
-         CDXC:SessionTitleDiagnostics 2026-04-26-08:03
-         The native packaged app must write session-title diagnostics into the
-         same ~/.zmux/logs location as the Bun controller so missing Codex
-         auto-renames can be correlated with native Ghostty title events.
-         */
-        let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".zmux/logs", isDirectory: true)
-        let logURL = logsDirectory.appendingPathComponent("session-title-sync-debug.log")
-        let message = details.map { "\(event) \($0)" } ?? event
-        appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "session title debug")
-    }
-
-    fileprivate static func appendAgentDetectionDebugLog(event: String, details: String?) {
-        /**
-         CDXC:AgentDetection 2026-04-26-11:14
-         Agent-icon debugging needs a dedicated ~/.zmux/logs file so native
-         title events, detector output, and sidebar projection can be correlated
-         without mixing them with session rename diagnostics.
-         */
-        let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".zmux/logs", isDirectory: true)
-        let logURL = logsDirectory.appendingPathComponent("agent-detection-debug.log")
-        let message = details.map { "\(event) \($0)" } ?? event
-        appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "agent detection debug")
-    }
-
-    fileprivate static func appendTerminalFocusDebugLog(event: String, details: String?) {
-        TerminalFocusDebugLog.append(event: event, details: [
-            "details": nullableLogString(details),
-            "source": "native-sidebar",
-        ])
-    }
-
-    fileprivate static func appendRestoreDebugLog(event: String, details: String?) {
-        /**
-         CDXC:WorkspaceRestore 2026-04-26-10:00
-         The packaged native sidebar owns workspace/session persistence. Write
-         restore diagnostics into a dedicated ~/.zmux/logs file so project load,
-         localStorage persistence, and native terminal recreation can be traced
-         independently from session-title logs.
-         */
-        let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".zmux/logs", isDirectory: true)
-        let logURL = logsDirectory.appendingPathComponent("workspace-restore-debug.log")
-        let message = details.map { "\(event) \($0)" } ?? event
-        appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "workspace restore debug")
-    }
-
-    fileprivate static func appendWorkspaceDockIndicatorDebugLog(event: String, details: String?) {
-        /**
-         CDXC:WorkspaceDock 2026-04-27-04:23
-         Native workspace rail indicator repros need a dedicated log file under
-         ~/.zmux/logs because this UI is rendered from the native sidebar webview,
-         not the older Electrobun mainview dock.
-         */
-        let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".zmux/logs", isDirectory: true)
-        let logURL = logsDirectory.appendingPathComponent("workspace-dock-indicator-debug.log")
-        let message = details.map { "\(event) \($0)" } ?? event
-        appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "workspace dock indicator debug")
-    }
-
-    fileprivate static func appendAppModalErrorLog(area: String, message: String, stack: String?) {
-        /**
-         CDXC:AppModals 2026-04-27-14:25
-         Full-window modal failures must be persisted outside React debug mode.
-         Every modal host exception writes an area-tagged timestamped line under
-         ~/.zmux/logs so missing bridge, render, and command routing failures can
-         be diagnosed after the UI has already failed.
-         */
-        let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".zmux/logs", isDirectory: true)
-        let logURL = logsDirectory.appendingPathComponent("app-modal-errors.log")
-        let stackText = stack.map { " stack=\($0)" } ?? ""
-        appendLogLine("[\(area)] \(message)\(stackText)", to: logURL, logsDirectory: logsDirectory, label: "app modal error")
-    }
-
-    fileprivate static func appendNativeHostLifecycleLog(_ message: String) {
-        /**
-         CDXC:CrashDiagnostics 2026-04-27-17:38
-         When the app disappears from the Dock, native lifecycle breadcrumbs must
-         survive outside WebKit and JS logs so close-button, last-window, and
-         termination paths can be separated from renderer crashes.
-         */
-        let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".zmux/logs", isDirectory: true)
-        let logURL = logsDirectory.appendingPathComponent("native-host-lifecycle.log")
-        appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "native host lifecycle")
-    }
-
-    private static func appendLogLine(
-        _ message: String,
-        to logURL: URL,
-        logsDirectory: URL,
-        label: String
-    ) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        let line = "[\(formatter.string(from: Date()))] \(message)\n"
-
-        do {
-            try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
-            if FileManager.default.fileExists(atPath: logURL.path) {
-                let handle = try FileHandle(forWritingTo: logURL)
-                try handle.seekToEnd()
-                if let data = line.data(using: .utf8) {
-                    try handle.write(contentsOf: data)
-                }
-                try handle.close()
-            } else {
-                try line.write(to: logURL, atomically: true, encoding: .utf8)
-            }
-        } catch {
-            logger.warning("failed to write \(label) log: \(error.localizedDescription)")
-        }
-    }
-
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        Self.appendNativeHostLifecycleLog("applicationShouldTerminateAfterLastWindowClosed result=true")
-        true
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        Self.appendNativeHostLifecycleLog(
-            "windowWillClose title=\(window?.title ?? "<missing>") visibleBeforeClose=\(window?.isVisible ?? false)"
-        )
-    }
-
-    func findSurface(forUUID uuid: UUID) -> Ghostty.SurfaceView? {
-        MainActor.assumeIsolated {
-            workspaceView?.subviews.compactMap { $0 as? Ghostty.SurfaceView }.first { $0.id == uuid }
-        }
-    }
-
-    func performGhosttyBindingMenuKeyEquivalent(with event: NSEvent) -> Bool {
-        NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
-    }
-
-    @IBAction nonisolated func checkForUpdates(_ sender: Any?) {}
-
-    @IBAction nonisolated func closeAllWindows(_ sender: Any?) {}
-
-    @IBAction nonisolated func toggleQuickTerminal(_ sender: Any?) {}
-
-    nonisolated func toggleVisibility(_ sender: Any?) {}
-
-    nonisolated func syncFloatOnTopMenu(_ window: NSWindow) {}
-
-    nonisolated func setSecureInput(_ mode: Ghostty.SetSecureInput) {}
-
-    @MainActor
-    private func makeWindow() {
-        let root = zmuxRootView(
-            ghostty: ghostty,
-            sendEvent: { [weak self] event in
-                self?.bridge?.send(event)
-                (self?.window?.contentView as? zmuxRootView)?.postHostEvent(event)
-            },
-            configureZedOverlay: { [weak self] command in
-                self?.handle(.configureZedOverlay(command))
-            },
-            syncGhosttyTerminalSettings: { [weak self] command in
-                self?.handle(.syncGhosttyTerminalSettings(command))
-            },
-            openBrowserWindow: { [weak self] command in
-                self?.handle(.openBrowserWindow(command))
-            },
-            showBrowserWindow: { [weak self] in
-                self?.handle(.showBrowserWindow)
-            }
-        )
-        workspaceView = root.workspaceView
-
-        let window = zmuxFocusReportingWindow(
-            contentRect: NSRect(x: 100, y: 80, width: 1440, height: 900),
-            styleMask: [.closable, .miniaturizable, .resizable, .titled],
-            backing: .buffered,
-            defer: false
-        )
-        window.onFirstResponderChanged = { [weak root] responder in
-            root?.workspaceView.windowFirstResponderChanged(responder, reason: "windowMakeFirstResponder")
-        }
-        window.title = "zmux"
-        window.titleVisibility = .hidden
-        window.contentView = root
-        window.delegate = self
-        installAttachToIdeTitlebarButton(on: window)
-        window.makeKeyAndOrderFront(nil)
-        self.window = window
-        let zedOverlayController = ZedOverlayController(
-            window: window,
-            workspacePathProvider: { [weak self] in
-                self?.workspacePath
-            },
-            didActivateAttachment: { [weak self] in
-                self?.browserOverlayController?.markBrowserNoLongerShownInAttachment(
-                    reason: "zmuxActivated"
-                )
-            },
-            didHideAttachment: { [weak self] in
-                self?.browserOverlayController?.logAttachmentEvent("appDelegate.didHideAttachment.beforeMoveBrowser")
-                self?.browserOverlayController?.moveBrowserOffscreen()
-                self?.browserOverlayController?.logAttachmentEvent("appDelegate.didHideAttachment.afterMoveBrowser")
-            },
-            didShowAttachment: { [weak self] in
-                self?.browserOverlayController?.logAttachmentEvent("appDelegate.didShowAttachment.beforeRestoreBrowser")
-                self?.browserOverlayController?.restoreBrowserIfNeeded()
-                self?.browserOverlayController?.logAttachmentEvent("appDelegate.didShowAttachment.afterRestoreBrowser")
-            },
-            didRequestDetach: { [weak self] targetApp in
-                self?.detachZedOverlayFromNativeButton(targetApp: targetApp)
-            }
-        )
-        self.zedOverlayController = zedOverlayController
-        self.browserOverlayController = BrowserOverlayController(
-            window: window,
-            workareaFrameProvider: { [weak root] in
-                root?.workspaceScreenFrame()
-            },
-            setCompanionBrowserActive: { [weak zedOverlayController] active in
-                zedOverlayController?.setCompanionApplicationBundleIdentifiers(
-                    active ? [BrowserOverlayController.chromeCanaryBundleIdentifier] : []
-                )
-            }
-        )
-        if let pendingZedOverlayConfiguration {
-            zedOverlayController.configure(pendingZedOverlayConfiguration)
-            updateAttachToIdeTitlebarButton(
-                enabled: pendingZedOverlayConfiguration.enabled,
-                targetApp: pendingZedOverlayConfiguration.targetApp
-            )
-            self.pendingZedOverlayConfiguration = nil
-        } else if let initialZedOverlayConfiguration = initialZedOverlayConfiguration() {
-            zedOverlayController.configure(initialZedOverlayConfiguration)
-            updateAttachToIdeTitlebarButton(
-                enabled: initialZedOverlayConfiguration.enabled,
-                targetApp: initialZedOverlayConfiguration.targetApp
-            )
-        }
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    @MainActor private func installAttachToIdeTitlebarButton(on window: NSWindow) {
-        /**
-         CDXC:IDEAttachment 2026-04-27-00:54
-         The attach action belongs at the center of the native title bar and
-         should read as a text button, matching the rounded AppKit style of the
-         floating Show zmux/Show IDE buttons instead of using a blue link icon.
-         Its label names the currently selected IDE in the shortest requested
-         form and switches between Attach/Detach from the persisted
-         attach-enabled state.
-         */
-        let stored = nativeSettingsStore.readZedOverlay()
-        let targetApp = stored.targetApp ?? .zedPreview
-        let button = NSButton(
-            title: attachToIdeTitlebarButtonTitle(enabled: stored.enabled ?? false, targetApp: targetApp),
-            target: self,
-            action: #selector(handleAttachToIdeTitlebarButton)
-        )
-        button.bezelStyle = .rounded
-        button.controlSize = .small
-        button.font = .systemFont(ofSize: 12, weight: .semibold)
-        button.toolTip = "Attach to IDE"
-        button.setButtonType(.momentaryPushIn)
-        button.translatesAutoresizingMaskIntoConstraints = false
-
-        guard let titlebarView = window.standardWindowButton(.closeButton)?.superview else {
-            return
-        }
-        titlebarView.addSubview(button)
-        let centerYAnchor = window.standardWindowButton(.closeButton)?.centerYAnchor ?? titlebarView.centerYAnchor
-        NSLayoutConstraint.activate([
-            button.centerXAnchor.constraint(equalTo: titlebarView.centerXAnchor),
-            button.centerYAnchor.constraint(equalTo: centerYAnchor),
-            button.heightAnchor.constraint(equalToConstant: 24),
-            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 132)
-        ])
-        attachToIdeTitlebarButton = button
-    }
-
-    @objc @MainActor private func handleAttachToIdeTitlebarButton() {
-        let stored = nativeSettingsStore.readZedOverlay()
-        let targetApp = stored.targetApp ?? .zedPreview
-        let nextEnabled = !(stored.enabled ?? false)
-        let command = ConfigureZedOverlay(
-            enabled: nextEnabled,
-            targetApp: targetApp,
-            workspacePath: workspacePath
-        )
-        handle(.configureZedOverlay(command))
-        if nextEnabled {
-            (window?.contentView as? zmuxRootView)?.applyNativeZedOverlayAttached(targetApp: targetApp)
-        } else {
-            (window?.contentView as? zmuxRootView)?.applyNativeZedOverlayDetached(targetApp: targetApp)
-        }
-    }
-
-    @MainActor private func updateAttachToIdeTitlebarButton(
-        enabled: Bool,
-        targetApp: ZedOverlayTargetApp
-    ) {
-        attachToIdeTitlebarButton?.title = attachToIdeTitlebarButtonTitle(
-            enabled: enabled,
-            targetApp: targetApp
-        )
-    }
-
-    private func attachToIdeTitlebarButtonTitle(
-        enabled: Bool,
-        targetApp: ZedOverlayTargetApp
-    ) -> String {
-        let action = enabled ? "Detach" : "Attach"
-        switch targetApp {
-        case .zed:
-            return "\(action) Zed"
-        case .zedPreview:
-            return "\(action) Zed"
-        case .vscode:
-            return "\(action) VS Code"
-        case .vscodeInsiders:
-            return "\(action) VS Code"
-        }
-    }
-
-    @MainActor
-    private func startBridge() {
-        do {
-            let bridge = try NativeHostBridge { [weak self] command in
-                self?.handle(command)
-            }
-            self.bridge = bridge
-            bridge.start()
-        } catch {
-            workspaceView?.createTerminal(CreateTerminal(
-                cwd: FileManager.default.currentDirectoryPath,
-                env: nil,
-                initialInput: "printf 'Failed to start zmux bridge: \(error.localizedDescription)\\n'\r",
-                sessionId: "bridge-error",
-                title: "Bridge error"
+      do {
+        try process.run()
+        process.waitUntilExit()
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        await MainActor.run {
+          sendEvent(
+            .processResult(
+              requestId: command.requestId,
+              exitCode: process.terminationStatus,
+              stdout: stdout,
+              stderr: stderr
             ))
         }
-    }
-
-    @MainActor
-    private func handle(_ command: HostCommand) {
-        switch command {
-        case let .createTerminal(command):
-            workspaceView?.createTerminal(command)
-        case let .closeTerminal(command):
-            workspaceView?.closeTerminal(sessionId: command.sessionId)
-        case let .focusTerminal(command):
-            workspaceView?.focusTerminal(sessionId: command.sessionId)
-        case let .writeTerminalText(command):
-            workspaceView?.writeTerminalText(sessionId: command.sessionId, text: command.text)
-        case let .sendTerminalEnter(command):
-            workspaceView?.sendTerminalEnter(sessionId: command.sessionId)
-        case let .setActiveTerminalSet(command):
-            workspaceView?.setActiveTerminalSet(command)
-        case let .setTerminalLayout(command):
-            workspaceView?.setTerminalLayout(command.layout)
-        case let .setTerminalVisibility(command):
-            workspaceView?.setTerminalVisibility(sessionId: command.sessionId, visible: command.visible)
-        case .pickWorkspaceFolder:
-            break
-        case .pickWorkspaceIcon:
-            break
-        case let .showMessage(command):
-            showMessage(command)
-        case let .appendAgentDetectionDebugLog(command):
-            Self.appendAgentDetectionDebugLog(event: command.event, details: command.details)
-        case let .appendTerminalFocusDebugLog(command):
-            Self.appendTerminalFocusDebugLog(event: command.event, details: command.details)
-        case let .appendRestoreDebugLog(command):
-            Self.appendRestoreDebugLog(event: command.event, details: command.details)
-        case let .appendSessionTitleDebugLog(command):
-            Self.appendSessionTitleDebugLog(event: command.event, details: command.details)
-        case let .appendWorkspaceDockIndicatorDebugLog(command):
-            Self.appendWorkspaceDockIndicatorDebugLog(event: command.event, details: command.details)
-        case let .runProcess(command):
-            runProcess(command) { [weak self] event in
-                self?.bridge?.send(event)
-            }
-        case let .syncGhosttyTerminalSettings(command):
-            syncGhosttyTerminalSettings(command)
-        case let .openExternalUrl(command):
-            openExternalUrl(command)
-        case let .openBrowserWindow(command):
-            browserOverlayController?.open(command)
-        case .showBrowserWindow:
-            browserOverlayController?.showRunningChromeCanary()
-        case let .setSidebarSide(command):
-            (window?.contentView as? zmuxRootView)?.setSidebarSide(command.side)
-        case let .configureZedOverlay(command):
-            if let workspacePath = command.workspacePath {
-                self.workspacePath = workspacePath
-            }
-            updateAttachToIdeTitlebarButton(enabled: command.enabled, targetApp: command.targetApp)
-            nativeSettingsStore.persistZedOverlay(command)
-            guard let zedOverlayController else {
-                /**
-                 CDXC:ZedOverlay 2026-04-26-03:29
-                 The sidebar webview can send saved Zed overlay settings while
-                 the AppKit window is still being assembled. Preserve that
-                 command and apply it once the native overlay controller exists.
-                 */
-                pendingZedOverlayConfiguration = command
-                return
-            }
-            zedOverlayController.configure(command)
-        case let .sidebarCliCommand(command):
-            runSidebarCliCommand(command)
-        }
-    }
-
-    @MainActor private func runSidebarCliCommand(_ command: SidebarCliCommand) {
-        /**
-         CDXC:DebugCli 2026-04-27-07:18
-         The CLI must exercise the same sidebar/runtime code paths as a user
-         click. Forward debug commands into the sidebar webview and return the
-         JSON result through the existing bridge instead of creating orphan
-         native terminals behind the sidebar's state.
-         */
-        guard let sidebarView = (window?.contentView as? zmuxRootView)?.sidebarWebView else {
-            bridge?.send(.sidebarCliResult(
-                requestId: command.requestId,
-                ok: false,
-                payloadJson: #"{"error":"sidebar-webview-missing"}"#
-            ))
-            return
-        }
-        guard
-            let actionJson = Self.javascriptStringLiteral(command.action),
-            let payloadJson = Self.javascriptStringLiteral(command.payloadJson ?? "{}")
-        else {
-            bridge?.send(.sidebarCliResult(
-                requestId: command.requestId,
-                ok: false,
-                payloadJson: #"{"error":"sidebar-cli-command-encoding-failed"}"#
-            ))
-            return
-        }
-        let script = """
-        (async () => {
-          const handler = window.__zmux_NATIVE_CLI__;
-          if (!handler || typeof handler.handleCommand !== 'function') {
-            return JSON.stringify({ ok: false, error: 'sidebar-cli-handler-missing' });
-          }
-          return JSON.stringify(await handler.handleCommand(\(actionJson), JSON.parse(\(payloadJson))));
-        })()
-        """
-        sidebarView.evaluateJavaScript(script) { [weak self] result, error in
-            let payloadJson: String
-            let ok: Bool
-            if let error {
-                ok = false
-                payloadJson = Self.jsonObjectString(["error": error.localizedDescription])
-            } else if let result = result as? String {
-                ok = !result.contains(#""ok":false"#)
-                payloadJson = result
-            } else {
-                ok = false
-                payloadJson = #"{"error":"sidebar-cli-result-missing"}"#
-            }
-            self?.bridge?.send(.sidebarCliResult(
-                requestId: command.requestId,
-                ok: ok,
-                payloadJson: payloadJson
+      } catch {
+        await MainActor.run {
+          sendEvent(
+            .processResult(
+              requestId: command.requestId,
+              exitCode: 127,
+              stdout: "",
+              stderr: error.localizedDescription
             ))
         }
+      }
     }
-
-    private static func javascriptStringLiteral(_ value: String) -> String? {
-        guard let data = try? JSONEncoder().encode(value) else {
-            return nil
-        }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private static func jsonObjectString(_ value: [String: String]) -> String {
-        guard let data = try? JSONEncoder().encode(value),
-              let text = String(data: data, encoding: .utf8) else {
-            return #"{"error":"json-encoding-failed"}"#
-        }
-        return text
-    }
-
-    @MainActor private func detachZedOverlayFromNativeButton(targetApp: ZedOverlayTargetApp) {
-        /**
-         CDXC:ZedOverlay 2026-04-26-10:54
-         The native Detach button must behave like turning off the sidebar
-         attach checkbox: persist the disabled attach setting, apply standalone
-         window behavior immediately, and update the sidebar settings UI.
-         */
-        let command = ConfigureZedOverlay(
-            enabled: false,
-            targetApp: targetApp,
-            workspacePath: workspacePath
-        )
-        handle(.configureZedOverlay(command))
-        (window?.contentView as? zmuxRootView)?.applyNativeZedOverlayDetached(targetApp: targetApp)
-    }
-
-    private func initialZedOverlayConfiguration() -> ConfigureZedOverlay? {
-        let environment = ProcessInfo.processInfo.environment
-        let stored = nativeSettingsStore.readZedOverlay()
-        let enabledValue = environment["zmux_ZED_OVERLAY_ENABLED"].map { value in
-            value == "1" || value.lowercased() == "true"
-        } ?? stored.enabled
-        guard let enabledValue else {
-            return nil
-        }
-        let targetApp = environment["zmux_ZED_OVERLAY_TARGET_APP"]
-            .flatMap(ZedOverlayTargetApp.init(rawValue:))
-            ?? stored.targetApp
-            ?? .zedPreview
-        return ConfigureZedOverlay(
-            enabled: enabledValue,
-            targetApp: targetApp,
-            workspacePath: workspacePath
-        )
-    }
-
-    private func syncGhosttyTerminalSettings(_ command: SyncGhosttyTerminalSettings) {
-        /**
-         CDXC:TerminalSettings 2026-04-26-19:02
-         zmux settings run in the native sidebar webview and must write the
-         same Ghostty config file selected for embedded terminals. Keep the
-         merge narrow so themes, keybinds, and unrelated Ghostty settings stay
-         user-owned.
-         */
-        do {
-            let configURL = ghosttyConfigSelection.path.map { URL(fileURLWithPath: $0) }
-                ?? Self.defaultWritableGhosttyConfigURL()
-            let existingConfig = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
-            let mergedConfig = Self.mergeGhosttyTerminalSettings(existingConfig, command)
-            try FileManager.default.createDirectory(
-                at: configURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try mergedConfig.write(to: configURL, atomically: true, encoding: .utf8)
-            scheduleGhosttyConfigReload()
-        } catch {
-            Self.logger.error("Failed to sync Ghostty terminal settings: \(error.localizedDescription)")
-        }
-    }
-
-    private func scheduleGhosttyConfigReload() {
-        /**
-         CDXC:TerminalSettings 2026-04-26-20:21
-         Slider drags can emit many terminal-setting writes. Reload embedded
-         Ghostty automatically only after the user stops changing values for
-         three seconds, matching Ghostty's reloadConfig API without causing
-         repeated font/metric rebuilds during a continuous drag.
-         */
-        pendingGhosttyConfigReloadTimer?.invalidate()
-        pendingGhosttyConfigReloadTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else {
-                    return
-                }
-                self.pendingGhosttyConfigReloadTimer = nil
-                self.ghostty.reloadConfig()
-            }
-        }
-    }
-
-    private static func defaultWritableGhosttyConfigURL() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("com.mitchellh.ghostty/config")
-    }
-
-    private static func mergeGhosttyTerminalSettings(
-        _ config: String,
-        _ command: SyncGhosttyTerminalSettings
-    ) -> String {
-        var retainedLines = config
-            .components(separatedBy: .newlines)
-            .filter { shouldRetainGhosttyConfigLine($0) }
-        while retainedLines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-            retainedLines.removeLast()
-        }
-        let lines = retainedLines + [
-            "font-family = \(formatGhosttyString(command.fontFamily))",
-            "font-size = \(formatGhosttyNumber(command.fontSize))",
-            "font-thicken = \(command.fontThicken ? "true" : "false")",
-            "font-thicken-strength = \(max(0, min(255, command.fontThickenStrength)))",
-            "adjust-cell-height = \(formatGhosttyPercent(command.adjustCellHeightPercent))",
-            "adjust-cell-width = \(formatGhosttyNumber(command.adjustCellWidth))",
-        ]
-        return lines.joined(separator: "\n") + "\n"
-    }
-
-    private static func shouldRetainGhosttyConfigLine(_ line: String) -> Bool {
-        let managedKeys: Set<String> = [
-            "adjust-cell-height",
-            "adjust-cell-width",
-            "font-family",
-            "font-size",
-            "font-thicken",
-            "font-thicken-strength",
-        ]
-        let key = readGhosttyConfigKey(line)
-        if managedKeys.contains(key) {
-            return false
-        }
-        if key != "font-variation" {
-            return true
-        }
-        return !readGhosttyConfigValue(line)
-            .split(separator: ",")
-            .contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("wght=") }
-    }
-
-    private static func readGhosttyConfigKey(_ line: String) -> String {
-        let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedLine.isEmpty || trimmedLine.hasPrefix("#") {
-            return ""
-        }
-        return trimmedLine.split(separator: "=", maxSplits: 1).first.map {
-            String($0).trimmingCharacters(in: .whitespacesAndNewlines)
-        } ?? ""
-    }
-
-    private static func readGhosttyConfigValue(_ line: String) -> String {
-        guard let equalsIndex = line.firstIndex(of: "=") else {
-            return ""
-        }
-        return String(line[line.index(after: equalsIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func formatGhosttyString(_ value: String) -> String {
-        "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
-    }
-
-    private static func formatGhosttyNumber(_ value: Double) -> String {
-        if value.rounded() == value {
-            return String(Int(value))
-        }
-        return String(format: "%.2f", value)
-            .replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
-    }
-
-    private static func formatGhosttyPercent(_ value: Double) -> String {
-        "\(formatGhosttyNumber(value * 100))%"
-    }
-
-    private func showMessage(_ command: ShowMessage) {
-        let alert = NSAlert()
-        switch command.level {
-        case .info:
-            alert.alertStyle = .informational
-        case .warning:
-            alert.alertStyle = .warning
-        case .error:
-            alert.alertStyle = .critical
-        }
-        alert.messageText = "zmux"
-        alert.informativeText = command.message
-        alert.addButton(withTitle: "OK")
-        if let window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
-        }
-    }
-
-    private func openExternalUrl(_ command: OpenExternalUrl) {
-        guard let url = URL(string: command.url) else {
-            return
-        }
-        NSWorkspace.shared.open(url)
-    }
-
-    private func runProcess(_ command: RunProcess, sendEvent: @escaping (HostEvent) -> Void) {
-        Task.detached {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: command.executable)
-            process.arguments = command.args
-            if let cwd = command.cwd {
-                process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
-            }
-            if let env = command.env {
-                process.environment = ProcessInfo.processInfo.environment.merging(env) { _, newValue in newValue }
-            }
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardInput = FileHandle.nullDevice
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-                let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-                await MainActor.run {
-                    sendEvent(.processResult(
-                        requestId: command.requestId,
-                        exitCode: process.terminationStatus,
-                        stdout: stdout,
-                        stderr: stderr
-                    ))
-                }
-            } catch {
-                await MainActor.run {
-                    sendEvent(.processResult(
-                        requestId: command.requestId,
-                        exitCode: 127,
-                        stdout: "",
-                        stderr: error.localizedDescription
-                    ))
-                }
-            }
-        }
-    }
+  }
 }
 
 private struct NativeZedOverlaySettings {
-    let enabled: Bool?
-    let targetApp: ZedOverlayTargetApp?
+  let enabled: Bool?
+  let targetApp: ZedOverlayTargetApp?
 }
 
 private struct NativeSidebarChromeSettings {
-    let width: CGFloat?
+  let width: CGFloat?
 }
 
 private final class NativeSettingsStore {
-    private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "settings")
+  private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "settings")
 
+  /**
+   CDXC:ZedOverlay 2026-04-26-04:14
+   The all-native host must keep the Zed overlay setting in native app state,
+   not only WKWebView localStorage. Reading and writing the same settings file
+   used by the packaged app keeps the overlay button enabled after restarts.
+   */
+  func readZedOverlay() -> NativeZedOverlaySettings {
+    guard let settings = readSettingsDictionary() else {
+      return NativeZedOverlaySettings(enabled: nil, targetApp: nil)
+    }
+    return NativeZedOverlaySettings(
+      enabled: settings["zedOverlayEnabled"] as? Bool,
+      targetApp: (settings["zedOverlayTargetApp"] as? String).flatMap(
+        ZedOverlayTargetApp.init(rawValue:))
+    )
+  }
+
+  func persistZedOverlay(_ command: ConfigureZedOverlay) {
+    do {
+      let url = settingsURL()
+      var settings = readSettingsDictionary() ?? [:]
+      settings["zedOverlayEnabled"] = command.enabled
+      settings["zedOverlayTargetApp"] = command.targetApp.rawValue
+      let data = try JSONSerialization.data(
+        withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+      try FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+      )
+      try data.write(to: url, options: [.atomic])
+    } catch {
+      Self.logger.error("Failed to persist Zed overlay settings: \(error.localizedDescription)")
+    }
+  }
+
+  /**
+   CDXC:NativeSidebarChrome 2026-04-26-07:16
+   The native sidebar width is user-resized AppKit chrome, so it must be
+   stored in the shared native settings file and restored before the first
+   layout after an app restart.
+   */
+  func readSidebarChrome() -> NativeSidebarChromeSettings {
+    guard let settings = readSettingsDictionary() else {
+      return NativeSidebarChromeSettings(width: nil)
+    }
+    return NativeSidebarChromeSettings(width: Self.readCGFloat(settings["sidebarWidth"]))
+  }
+
+  func persistSidebarWidth(_ width: CGFloat) {
+    do {
+      let url = settingsURL()
+      var settings = readSettingsDictionary() ?? [:]
+      settings["sidebarWidth"] = width
+      let data = try JSONSerialization.data(
+        withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+      try FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+      )
+      try data.write(to: url, options: [.atomic])
+    } catch {
+      Self.logger.error("Failed to persist sidebar width: \(error.localizedDescription)")
+    }
+  }
+
+  private func readSettingsDictionary() -> [String: Any]? {
+    let url = settingsURL()
+    guard let data = try? Data(contentsOf: url),
+      let object = try? JSONSerialization.jsonObject(with: data),
+      let settings = object as? [String: Any]
+    else {
+      return nil
+    }
+    return settings
+  }
+
+  private func settingsURL() -> URL {
+    if let override = ProcessInfo.processInfo.environment["zmux_SETTINGS_PATH"], !override.isEmpty {
+      return URL(fileURLWithPath: override)
+    }
+
+    let appSupport = FileManager.default.urls(
+      for: .applicationSupportDirectory, in: .userDomainMask)[0]
     /**
-     CDXC:ZedOverlay 2026-04-26-04:14
-     The all-native host must keep the Zed overlay setting in native app state,
-     not only WKWebView localStorage. Reading and writing the same settings file
-     used by the packaged app keeps the overlay button enabled after restarts.
+     CDXC:Distribution 2026-04-27-08:37
+     The notarized brew app stores new native settings under its
+     com.madda.zmux.host bundle identity, while still reading older local
+     development paths so existing sidebar preferences survive the 1.0.0
+     distribution rename.
      */
-    func readZedOverlay() -> NativeZedOverlaySettings {
-        guard let settings = readSettingsDictionary() else {
-            return NativeZedOverlaySettings(enabled: nil, targetApp: nil)
-        }
-        return NativeZedOverlaySettings(
-            enabled: settings["zedOverlayEnabled"] as? Bool,
-            targetApp: (settings["zedOverlayTargetApp"] as? String).flatMap(ZedOverlayTargetApp.init(rawValue:))
-        )
-    }
+    let existingCandidates = [
+      appSupport.appendingPathComponent("com.madda.zmux.host/state/settings.json"),
+      appSupport.appendingPathComponent("dev.maddada.zmux/dev/state/settings.json"),
+      appSupport.appendingPathComponent("com.zmux.host/state/settings.json"),
+    ]
+    return existingCandidates.first { FileManager.default.fileExists(atPath: $0.path) }
+      ?? existingCandidates[0]
+  }
 
-    func persistZedOverlay(_ command: ConfigureZedOverlay) {
-        do {
-            let url = settingsURL()
-            var settings = readSettingsDictionary() ?? [:]
-            settings["zedOverlayEnabled"] = command.enabled
-            settings["zedOverlayTargetApp"] = command.targetApp.rawValue
-            let data = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try data.write(to: url, options: [.atomic])
-        } catch {
-            Self.logger.error("Failed to persist Zed overlay settings: \(error.localizedDescription)")
-        }
+  private static func readCGFloat(_ value: Any?) -> CGFloat? {
+    if let number = value as? NSNumber {
+      return CGFloat(truncating: number)
     }
-
-    /**
-     CDXC:NativeSidebarChrome 2026-04-26-07:16
-     The native sidebar width is user-resized AppKit chrome, so it must be
-     stored in the shared native settings file and restored before the first
-     layout after an app restart.
-     */
-    func readSidebarChrome() -> NativeSidebarChromeSettings {
-        guard let settings = readSettingsDictionary() else {
-            return NativeSidebarChromeSettings(width: nil)
-        }
-        return NativeSidebarChromeSettings(width: Self.readCGFloat(settings["sidebarWidth"]))
+    if let string = value as? String, let double = Double(string) {
+      return CGFloat(double)
     }
-
-    func persistSidebarWidth(_ width: CGFloat) {
-        do {
-            let url = settingsURL()
-            var settings = readSettingsDictionary() ?? [:]
-            settings["sidebarWidth"] = width
-            let data = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try data.write(to: url, options: [.atomic])
-        } catch {
-            Self.logger.error("Failed to persist sidebar width: \(error.localizedDescription)")
-        }
-    }
-
-    private func readSettingsDictionary() -> [String: Any]? {
-        let url = settingsURL()
-        guard let data = try? Data(contentsOf: url),
-              let object = try? JSONSerialization.jsonObject(with: data),
-              let settings = object as? [String: Any] else {
-            return nil
-        }
-        return settings
-    }
-
-    private func settingsURL() -> URL {
-        if let override = ProcessInfo.processInfo.environment["zmux_SETTINGS_PATH"], !override.isEmpty {
-            return URL(fileURLWithPath: override)
-        }
-
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        /**
-         CDXC:Distribution 2026-04-27-08:37
-         The notarized brew app stores new native settings under its
-         com.madda.zmux.host bundle identity, while still reading older local
-         development paths so existing sidebar preferences survive the 1.0.0
-         distribution rename.
-         */
-        let existingCandidates = [
-            appSupport.appendingPathComponent("com.madda.zmux.host/state/settings.json"),
-            appSupport.appendingPathComponent("dev.maddada.zmux/dev/state/settings.json"),
-            appSupport.appendingPathComponent("com.zmux.host/state/settings.json")
-        ]
-        return existingCandidates.first { FileManager.default.fileExists(atPath: $0.path) }
-            ?? existingCandidates[0]
-    }
-
-    private static func readCGFloat(_ value: Any?) -> CGFloat? {
-        if let number = value as? NSNumber {
-            return CGFloat(truncating: number)
-        }
-        if let string = value as? String, let double = Double(string) {
-            return CGFloat(double)
-        }
-        return nil
-    }
+    return nil
+  }
 }
 
 final class zmuxRootView: NSView {
-    private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "webview")
+  private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "webview")
 
-    private static let workspaceBarWidth: CGFloat = 54
-    private static let sidebarMinWidth: CGFloat = 190
-    private static let sidebarMaxWidth: CGFloat = 520
-    private static let dividerWidth: CGFloat = 6
-    private static let defaultSidebarWidth: CGFloat = 320
+  private static let workspaceBarWidth: CGFloat = 54
+  private static let sidebarMinWidth: CGFloat = 190
+  private static let sidebarMaxWidth: CGFloat = 520
+  private static let dividerWidth: CGFloat = 6
+  private static let defaultSidebarWidth: CGFloat = 320
 
-    let workspaceView: TerminalWorkspaceView
-    var sidebarWebView: WKWebView { sidebarView }
-    private let sidebarView: WKWebView
-    private let modalHostView: WKWebView
-    private let scriptBridge: SidebarScriptBridge
-    private let sidebarCommandRouter = SidebarCommandRouter()
-    private let divider: PaneResizeHandleView
-    private let eventEncoder = JSONEncoder()
-    private let configureZedOverlay: (ConfigureZedOverlay) -> Void
-    private let syncGhosttyTerminalSettings: (SyncGhosttyTerminalSettings) -> Void
-    private let openBrowserWindow: (OpenBrowserWindow) -> Void
-    private let showBrowserWindow: () -> Void
-    private let nativeSettingsStore = NativeSettingsStore()
-    private var isModalHostReady = false
-    private var pendingModalHostOpenMessage: [String: Any]?
-    private var latestModalHostSidebarState: [String: Any]?
-    private var sidebarWidth: CGFloat
-    private var sidebarSide: SidebarSide = .left
+  let workspaceView: TerminalWorkspaceView
+  var sidebarWebView: WKWebView { sidebarView }
+  private let sidebarView: WKWebView
+  private let modalHostView: WKWebView
+  private let scriptBridge: SidebarScriptBridge
+  private let sidebarCommandRouter = SidebarCommandRouter()
+  private let divider: PaneResizeHandleView
+  private let eventEncoder = JSONEncoder()
+  private let configureZedOverlay: (ConfigureZedOverlay) -> Void
+  private let syncGhosttyTerminalSettings: (SyncGhosttyTerminalSettings) -> Void
+  private let openBrowserWindow: (OpenBrowserWindow) -> Void
+  private let showBrowserWindow: () -> Void
+  private let nativeSettingsStore = NativeSettingsStore()
+  private var isModalHostReady = false
+  private var pendingModalHostOpenMessage: [String: Any]?
+  private var latestModalHostSidebarState: [String: Any]?
+  private var sidebarWidth: CGFloat
+  private var sidebarSide: SidebarSide = .left
 
-    /**
-     CDXC:NativeWorkspaceChrome 2026-04-26-00:47
-     Native zmux keeps the project/workspace rail and main sidebar in one React
-     webview, and uses an AppKit drag handle to resize that combined sidebar
-     without disturbing the embedded Ghostty terminal area.
-     CDXC:NativeSidebarChrome 2026-04-26-07:16
-     Users need sidebar restarts to honor their chosen width, with a 190px
-     minimum so the sidebar can become 50px narrower than the earlier 240px
-     limit without adding fallback width behavior.
-     */
-    init(
-        ghostty: Ghostty.App,
-        sendEvent: @escaping (HostEvent) -> Void,
-        configureZedOverlay: @escaping (ConfigureZedOverlay) -> Void,
-        syncGhosttyTerminalSettings: @escaping (SyncGhosttyTerminalSettings) -> Void,
-        openBrowserWindow: @escaping (OpenBrowserWindow) -> Void,
-        showBrowserWindow: @escaping () -> Void
-    ) {
-        self.workspaceView = TerminalWorkspaceView(ghostty: ghostty, sendEvent: sendEvent)
-        self.scriptBridge = SidebarScriptBridge(router: sidebarCommandRouter)
-        self.configureZedOverlay = configureZedOverlay
-        self.syncGhosttyTerminalSettings = syncGhosttyTerminalSettings
-        self.openBrowserWindow = openBrowserWindow
-        self.showBrowserWindow = showBrowserWindow
-        self.sidebarWidth = nativeSettingsStore.readSidebarChrome().width ?? Self.defaultSidebarWidth
-        let configuration = WKWebViewConfiguration()
-        configuration.userContentController.add(scriptBridge, name: "zmuxNativeHost")
-        configuration.userContentController.add(scriptBridge, name: "zmuxAppModalHost")
-        configuration.userContentController.add(scriptBridge, name: "zmuxNativeHostDiagnostics")
-        let modalHostConfiguration = WKWebViewConfiguration()
-        modalHostConfiguration.userContentController.add(scriptBridge, name: "zmuxAppModalHost")
-        let cwd = ProcessInfo.processInfo.environment["zmux_WORKSPACE_PATH"]
-            ?? FileManager.default.currentDirectoryPath
-        let workspaceName = URL(fileURLWithPath: cwd).lastPathComponent
-        var bootstrap: [String: Any] = [
-            "cwd": cwd,
-            "homeDir": FileManager.default.homeDirectoryForCurrentUser.path,
-            "workspaceName": workspaceName.isEmpty ? "zmux" : workspaceName
-        ]
-        let storedZedOverlay = NativeSettingsStore().readZedOverlay()
-        if let enabled = storedZedOverlay.enabled {
-            bootstrap["zedOverlayEnabled"] = enabled
-        }
-        if let targetApp = storedZedOverlay.targetApp {
-            bootstrap["zedOverlayTargetApp"] = targetApp.rawValue
-        }
-        if let zedOverlayEnabled = ProcessInfo.processInfo.environment["zmux_ZED_OVERLAY_ENABLED"] {
-            bootstrap["zedOverlayEnabled"] = zedOverlayEnabled == "1" || zedOverlayEnabled.lowercased() == "true"
-        }
-        if let zedOverlayTargetApp = ProcessInfo.processInfo.environment["zmux_ZED_OVERLAY_TARGET_APP"] {
-            bootstrap["zedOverlayTargetApp"] = zedOverlayTargetApp
-        }
-        if let data = try? JSONSerialization.data(withJSONObject: bootstrap),
-           let json = String(data: data, encoding: .utf8) {
-            configuration.userContentController.addUserScript(WKUserScript(
-                source: "window.__zmux_NATIVE_HOST__ = \(json);",
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: true
-            ))
-        }
-        configuration.userContentController.addUserScript(WKUserScript(
-            source: Self.diagnosticsScript,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true
+  /**
+   CDXC:NativeWorkspaceChrome 2026-04-26-00:47
+   Native zmux keeps the project/workspace rail and main sidebar in one React
+   webview, and uses an AppKit drag handle to resize that combined sidebar
+   without disturbing the embedded Ghostty terminal area.
+   CDXC:NativeSidebarChrome 2026-04-26-07:16
+   Users need sidebar restarts to honor their chosen width, with a 190px
+   minimum so the sidebar can become 50px narrower than the earlier 240px
+   limit without adding fallback width behavior.
+   */
+  init(
+    ghostty: Ghostty.App,
+    sendEvent: @escaping (HostEvent) -> Void,
+    configureZedOverlay: @escaping (ConfigureZedOverlay) -> Void,
+    syncGhosttyTerminalSettings: @escaping (SyncGhosttyTerminalSettings) -> Void,
+    openBrowserWindow: @escaping (OpenBrowserWindow) -> Void,
+    showBrowserWindow: @escaping () -> Void
+  ) {
+    self.workspaceView = TerminalWorkspaceView(ghostty: ghostty, sendEvent: sendEvent)
+    self.scriptBridge = SidebarScriptBridge(router: sidebarCommandRouter)
+    self.configureZedOverlay = configureZedOverlay
+    self.syncGhosttyTerminalSettings = syncGhosttyTerminalSettings
+    self.openBrowserWindow = openBrowserWindow
+    self.showBrowserWindow = showBrowserWindow
+    self.sidebarWidth = nativeSettingsStore.readSidebarChrome().width ?? Self.defaultSidebarWidth
+    let configuration = WKWebViewConfiguration()
+    configuration.userContentController.add(scriptBridge, name: "zmuxNativeHost")
+    configuration.userContentController.add(scriptBridge, name: "zmuxAppModalHost")
+    configuration.userContentController.add(scriptBridge, name: "zmuxNativeHostDiagnostics")
+    let modalHostConfiguration = WKWebViewConfiguration()
+    modalHostConfiguration.userContentController.add(scriptBridge, name: "zmuxAppModalHost")
+    let cwd =
+      ProcessInfo.processInfo.environment["zmux_WORKSPACE_PATH"]
+      ?? FileManager.default.currentDirectoryPath
+    let workspaceName = URL(fileURLWithPath: cwd).lastPathComponent
+    var bootstrap: [String: Any] = [
+      "cwd": cwd,
+      "homeDir": FileManager.default.homeDirectoryForCurrentUser.path,
+      "workspaceName": workspaceName.isEmpty ? "zmux" : workspaceName,
+    ]
+    let storedZedOverlay = NativeSettingsStore().readZedOverlay()
+    if let enabled = storedZedOverlay.enabled {
+      bootstrap["zedOverlayEnabled"] = enabled
+    }
+    if let targetApp = storedZedOverlay.targetApp {
+      bootstrap["zedOverlayTargetApp"] = targetApp.rawValue
+    }
+    if let zedOverlayEnabled = ProcessInfo.processInfo.environment["zmux_ZED_OVERLAY_ENABLED"] {
+      bootstrap["zedOverlayEnabled"] =
+        zedOverlayEnabled == "1" || zedOverlayEnabled.lowercased() == "true"
+    }
+    if let zedOverlayTargetApp = ProcessInfo.processInfo.environment["zmux_ZED_OVERLAY_TARGET_APP"]
+    {
+      bootstrap["zedOverlayTargetApp"] = zedOverlayTargetApp
+    }
+    if let data = try? JSONSerialization.data(withJSONObject: bootstrap),
+      let json = String(data: data, encoding: .utf8)
+    {
+      configuration.userContentController.addUserScript(
+        WKUserScript(
+          source: "window.__zmux_NATIVE_HOST__ = \(json);",
+          injectionTime: .atDocumentStart,
+          forMainFrameOnly: true
         ))
-        self.sidebarView = WKWebView(frame: .zero, configuration: configuration)
-        self.modalHostView = WKWebView(frame: .zero, configuration: modalHostConfiguration)
-        self.divider = PaneResizeHandleView()
-        super.init(frame: .zero)
+    }
+    configuration.userContentController.addUserScript(
+      WKUserScript(
+        source: Self.diagnosticsScript,
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: true
+      ))
+    self.sidebarView = WKWebView(frame: .zero, configuration: configuration)
+    self.modalHostView = WKWebView(frame: .zero, configuration: modalHostConfiguration)
+    self.divider = PaneResizeHandleView()
+    super.init(frame: .zero)
 
-        sidebarCommandRouter.onCommand = { [weak self] command in
-            self?.handleSidebarCommand(command)
-        }
-        sidebarCommandRouter.onAppModalHostMessage = { [weak self] body in
-            self?.handleAppModalHostMessage(body)
-        }
-        divider.onDrag = { [weak self] deltaX in
-            self?.resizeSidebar(by: deltaX)
-        }
-        divider.onDragEnded = { [weak self] in
-            self?.persistSidebarWidth()
-        }
-
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        sidebarView.setValue(false, forKey: "drawsBackground")
-        modalHostView.setValue(false, forKey: "drawsBackground")
-        modalHostView.isHidden = true
-        sidebarView.navigationDelegate = self
-        addSubview(workspaceView)
-        /**
-         CDXC:NativeWorkspaceChrome 2026-04-26-05:40
-         Ghostty surfaces can keep native subviews/layers that draw and receive
-         events aggressively. Add the terminal workspace behind the sidebar
-         chrome so project/session controls always own their visible hit area.
-         */
-        addSubview(sidebarView)
-        addSubview(divider)
-        /**
-         CDXC:AppModals 2026-04-26-15:10
-         Sidebar dialogs need a full-window React host because WKWebView portals
-         cannot escape the sidebar's frame. Keep this transparent overlay above
-         terminal and sidebar chrome, and show it only while a modal is active.
-         */
-        addSubview(modalHostView)
-        loadSidebar()
-        loadModalHost()
+    sidebarCommandRouter.onCommand = { [weak self] command in
+      self?.handleSidebarCommand(command)
+    }
+    sidebarCommandRouter.onAppModalHostMessage = { [weak self] body in
+      self?.handleAppModalHostMessage(body)
+    }
+    divider.onDrag = { [weak self] deltaX in
+      self?.resizeSidebar(by: deltaX)
+    }
+    divider.onDragEnded = { [weak self] in
+      self?.persistSidebarWidth()
     }
 
-    func postHostEvent(_ event: HostEvent) {
-        guard let data = try? eventEncoder.encode(event),
-              let json = String(data: data, encoding: .utf8) else {
-            return
-        }
-        sidebarView.evaluateJavaScript("""
-        window.dispatchEvent(new CustomEvent('zmux-native-host-event', { detail: \(json) }));
-        """)
-    }
-
-    func applyNativeZedOverlayDetached(targetApp: ZedOverlayTargetApp) {
-        guard let data = try? JSONSerialization.data(withJSONObject: targetApp.rawValue),
-              let json = String(data: data, encoding: .utf8) else {
-            return
-        }
-        sidebarView.evaluateJavaScript("""
-        window.__zmux_NATIVE_SETTINGS__?.detachZedOverlay(\(json));
-        """)
-    }
-
-    func applyNativeZedOverlayAttached(targetApp: ZedOverlayTargetApp) {
-        guard let data = try? JSONSerialization.data(withJSONObject: targetApp.rawValue),
-              let json = String(data: data, encoding: .utf8) else {
-            return
-        }
-        sidebarView.evaluateJavaScript("""
-        window.__zmux_NATIVE_SETTINGS__?.attachZedOverlay(\(json));
-        """)
-    }
-
-    private func handleSidebarCommand(_ command: HostCommand) {
-        switch command {
-        case let .createTerminal(command):
-            workspaceView.createTerminal(command)
-        case let .closeTerminal(command):
-            workspaceView.closeTerminal(sessionId: command.sessionId)
-        case let .focusTerminal(command):
-            workspaceView.focusTerminal(sessionId: command.sessionId)
-        case let .writeTerminalText(command):
-            workspaceView.writeTerminalText(sessionId: command.sessionId, text: command.text)
-        case let .sendTerminalEnter(command):
-            workspaceView.sendTerminalEnter(sessionId: command.sessionId)
-        case let .setActiveTerminalSet(command):
-            workspaceView.setActiveTerminalSet(command)
-        case let .setTerminalLayout(command):
-            workspaceView.setTerminalLayout(command.layout)
-        case let .setTerminalVisibility(command):
-            workspaceView.setTerminalVisibility(sessionId: command.sessionId, visible: command.visible)
-        case .pickWorkspaceFolder:
-            presentWorkspaceFolderPicker()
-        case let .pickWorkspaceIcon(command):
-            presentWorkspaceIconPicker(command)
-        case let .showMessage(command):
-            showMessage(command)
-        case let .appendAgentDetectionDebugLog(command):
-            AppDelegate.appendAgentDetectionDebugLog(event: command.event, details: command.details)
-        case let .appendTerminalFocusDebugLog(command):
-            AppDelegate.appendTerminalFocusDebugLog(event: command.event, details: command.details)
-        case let .appendRestoreDebugLog(command):
-            AppDelegate.appendRestoreDebugLog(event: command.event, details: command.details)
-        case let .appendSessionTitleDebugLog(command):
-            AppDelegate.appendSessionTitleDebugLog(event: command.event, details: command.details)
-        case let .appendWorkspaceDockIndicatorDebugLog(command):
-            AppDelegate.appendWorkspaceDockIndicatorDebugLog(event: command.event, details: command.details)
-        case let .runProcess(command):
-            runProcess(command)
-        case let .syncGhosttyTerminalSettings(command):
-            syncGhosttyTerminalSettings(command)
-        case let .openExternalUrl(command):
-            openExternalUrl(command)
-        case let .openBrowserWindow(command):
-            /**
-             CDXC:BrowserOverlay 2026-04-26-05:14
-             Browser action buttons are routed out of the sidebar webview and
-             into AppDelegate so the native host can launch and position Chrome
-             Canary above the active zmux attachment window.
-             */
-            openBrowserWindow(command)
-        case .showBrowserWindow:
-            /**
-             CDXC:BrowserOverlay 2026-04-26-07:37
-             The restored Browsers sidebar section uses this command to raise
-             the already-running Canary window through AppDelegate, preserving
-             native workarea placement without creating a new browser tab.
-             */
-            showBrowserWindow()
-        case let .setSidebarSide(command):
-            setSidebarSide(command.side)
-        case let .configureZedOverlay(command):
-            /**
-             CDXC:ZedOverlay 2026-04-26-03:29
-             Zed overlay configuration comes from the sidebar webview, but the
-             native overlay controller lives in AppDelegate beside the window it
-             moves. Forward this command instead of consuming it in the sidebar
-             router so the native button can be positioned over Zed Preview.
-             */
-            configureZedOverlay(command)
-        case .sidebarCliCommand:
-            /**
-             CDXC:DebugCli 2026-04-27-07:18
-             Sidebar CLI commands are handled by AppDelegate before this
-             view-level router. Keep this case explicit so adding the command to
-             HostCommand does not make the sidebar command switch non-exhaustive.
-             */
-            break
-        }
-    }
-
-    private func showMessage(_ command: ShowMessage) {
-        let alert = NSAlert()
-        switch command.level {
-        case .info:
-            alert.alertStyle = .informational
-        case .warning:
-            alert.alertStyle = .warning
-        case .error:
-            alert.alertStyle = .critical
-        }
-        alert.messageText = "zmux"
-        alert.informativeText = command.message
-        alert.addButton(withTitle: "OK")
-        if let window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
-        }
-    }
-
-    func setSidebarSide(_ side: SidebarSide) {
-        sidebarSide = side
-        needsLayout = true
-    }
-
-    func workspaceScreenFrame() -> NSRect? {
-        guard let window = workspaceView.window else {
-            return nil
-        }
-        /**
-         CDXC:BrowserOverlay 2026-04-26-05:22
-         Chrome Canary should cover only the zmux workarea, leaving the
-         workspace switcher rail and sidebar visible for project/session
-         context while the browser is open above the attached app.
-         */
-        let windowFrame = workspaceView.convert(workspaceView.bounds, to: nil)
-        return window.convertToScreen(windowFrame)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    override func layout() {
-        super.layout()
-        let maxSidebarWidth = max(Self.sidebarMinWidth, min(Self.sidebarMaxWidth, bounds.width - Self.workspaceBarWidth - Self.dividerWidth - 240))
-        let sidebarWidth = min(max(self.sidebarWidth, Self.sidebarMinWidth), maxSidebarWidth)
-        self.sidebarWidth = sidebarWidth
-        let chromeWidth = Self.workspaceBarWidth + sidebarWidth + Self.dividerWidth
-        let chromeX: CGFloat = sidebarSide == .left ? 0 : max(bounds.width - chromeWidth, 0)
-        let workspaceX: CGFloat = sidebarSide == .left ? chromeWidth : 0
-        let workspaceWidth = max(bounds.width - chromeWidth, 1)
-
-        sidebarView.frame = CGRect(
-            x: chromeX,
-            y: 0,
-            width: Self.workspaceBarWidth + sidebarWidth,
-            height: bounds.height
-        )
-        divider.frame = CGRect(
-            x: chromeX + Self.workspaceBarWidth + sidebarWidth,
-            y: 0,
-            width: Self.dividerWidth,
-            height: bounds.height
-        )
-        workspaceView.frame = CGRect(
-            x: workspaceX,
-            y: 0,
-            width: workspaceWidth,
-            height: bounds.height
-        )
-        modalHostView.frame = bounds
-    }
-
-    private func resizeSidebar(by deltaX: CGFloat) {
-        let maxSidebarWidth = max(Self.sidebarMinWidth, min(Self.sidebarMaxWidth, bounds.width - Self.workspaceBarWidth - Self.dividerWidth - 240))
-        let effectiveDelta = sidebarSide == .left ? deltaX : -deltaX
-        sidebarWidth = min(max(sidebarWidth + effectiveDelta, Self.sidebarMinWidth), maxSidebarWidth)
-        needsLayout = true
-    }
-
-    private func persistSidebarWidth() {
-        nativeSettingsStore.persistSidebarWidth(sidebarWidth)
-    }
-
-    private func handleAppModalHostMessage(_ body: Any) {
-        guard let message = body as? [String: Any],
-              let type = message["type"] as? String else {
-            AppDelegate.appendAppModalErrorLog(
-                area: "AppModals:nativeBridge",
-                message: "Malformed modal host message: \(String(describing: body))",
-                stack: nil
-            )
-            return
-        }
-
-        switch type {
-        case "logError":
-            let area = message["area"] as? String ?? "AppModals:unknown"
-            let errorMessage = message["message"] as? String ?? String(describing: message)
-            let stack = message["stack"] as? String
-            AppDelegate.appendAppModalErrorLog(area: area, message: errorMessage, stack: stack)
-        case "ready":
-            isModalHostReady = true
-            if let latestModalHostSidebarState {
-                dispatchModalHostMessage(latestModalHostSidebarState)
-            }
-            if let pendingModalHostOpenMessage {
-                dispatchModalHostMessage(pendingModalHostOpenMessage)
-                self.pendingModalHostOpenMessage = nil
-            }
-        case "open":
-            modalHostView.isHidden = false
-            pendingModalHostOpenMessage = isModalHostReady ? nil : message
-            if let latestModalHostSidebarState {
-                dispatchModalHostMessage(latestModalHostSidebarState)
-            }
-            dispatchModalHostMessage(message)
-        case "close":
-            dispatchModalHostMessage(["type": "close"])
-            pendingModalHostOpenMessage = nil
-            modalHostView.isHidden = true
-        case "sidebarState":
-            latestModalHostSidebarState = message
-            dispatchModalHostMessage(message)
-        case "sidebarCommand":
-            guard let sidebarMessage = message["message"] else {
-                return
-            }
-            dispatchSidebarModalCommand(sidebarMessage)
-        default:
-            AppDelegate.appendAppModalErrorLog(
-                area: "AppModals:nativeBridge",
-                message: "Unknown modal host message type: \(type)",
-                stack: nil
-            )
-        }
-    }
-
-    private func dispatchModalHostMessage(_ message: [String: Any]) {
-        guard JSONSerialization.isValidJSONObject(message),
-              let data = try? JSONSerialization.data(withJSONObject: message),
-              let json = String(data: data, encoding: .utf8) else {
-            AppDelegate.appendAppModalErrorLog(
-                area: "AppModals:nativeBridge",
-                message: "Failed to serialize modal host message: \(message)",
-                stack: nil
-            )
-            return
-        }
-        modalHostView.evaluateJavaScript("""
-        window.dispatchEvent(new CustomEvent('zmux-app-modal-host-message', { detail: \(json) }));
-        """) { _, error in
-            if let error {
-                AppDelegate.appendAppModalErrorLog(
-                    area: "AppModals:nativeBridge",
-                    message: "Failed to dispatch modal host message: \(error.localizedDescription)",
-                    stack: nil
-                )
-            }
-        }
-    }
-
-    private func dispatchSidebarModalCommand(_ message: Any) {
-        guard JSONSerialization.isValidJSONObject(message),
-              let data = try? JSONSerialization.data(withJSONObject: message),
-              let json = String(data: data, encoding: .utf8) else {
-            AppDelegate.appendAppModalErrorLog(
-                area: "AppModals:sidebarCommand",
-                message: "Failed to serialize sidebar modal command: \(message)",
-                stack: nil
-            )
-            return
-        }
-        sidebarView.evaluateJavaScript("""
-        window.__zmux_NATIVE_MODAL_BRIDGE__?.handleSidebarMessage(\(json));
-        """) { _, error in
-            if let error {
-                AppDelegate.appendAppModalErrorLog(
-                    area: "AppModals:sidebarCommand",
-                    message: "Failed to dispatch sidebar modal command: \(error.localizedDescription)",
-                    stack: nil
-                )
-            }
-        }
-    }
-
-    private func presentWorkspaceFolderPicker() {
-        /**
-         CDXC:NativeWorkspacePicker 2026-04-26-00:47
-         The workspace rail plus button must use the native folder picker. The
-         selected project is sent back into the sidebar webview, which owns the
-         per-project session/sidebar state.
-         */
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Add Project"
-        panel.message = "Choose a project folder to add to zmux."
-
-        let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-            guard response == .OK,
-                  let url = panel.url else {
-                return
-            }
-            self?.addWorkspaceProject(path: url.path, name: url.lastPathComponent)
-        }
-
-        if let window {
-            panel.beginSheetModal(for: window, completionHandler: completion)
-        } else {
-            completion(panel.runModal())
-        }
-    }
-
-    private func addWorkspaceProject(path: String, name: String) {
-        let payload = ["path": path, "name": name]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let json = String(data: data, encoding: .utf8) else {
-            return
-        }
-        sidebarView.evaluateJavaScript("""
-        (() => {
-          const project = \(json);
-          window.__zmux_NATIVE_WORKSPACE_BAR__?.addProject(project.path, project.name);
-        })();
-        """)
-    }
-
-    private func presentWorkspaceIconPicker(_ command: PickWorkspaceIcon) {
-        /**
-         CDXC:WorkspaceDock 2026-04-27-08:53
-         Workspace icon selection must use the native macOS picker because the
-         React context menu lives inside WKWebView, where hidden file inputs can
-         fail to open from synthetic/custom menu activation. Return a PNG/SVG
-         data URL to the React workspace API so persistence stays with the
-         workspace record.
-         */
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.png, UTType(filenameExtension: "svg") ?? .image]
-        panel.prompt = "Pick Icon"
-        panel.message = "Choose a PNG or SVG icon for this workspace."
-
-        let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-            guard response == .OK,
-                  let url = panel.url else {
-                return
-            }
-            do {
-                let data = try Data(contentsOf: url)
-                let mimeType = url.pathExtension.lowercased() == "svg" ? "image/svg+xml" : "image/png"
-                self?.setWorkspaceIcon(
-                    projectId: command.projectId,
-                    iconDataUrl: "data:\(mimeType);base64,\(data.base64EncodedString())"
-                )
-            } catch {
-                self?.showMessage(ShowMessage(level: .error, message: "Could not read workspace icon: \(error.localizedDescription)"))
-            }
-        }
-
-        if let window {
-            panel.beginSheetModal(for: window, completionHandler: completion)
-        } else {
-            completion(panel.runModal())
-        }
-    }
-
-    private func setWorkspaceIcon(projectId: String, iconDataUrl: String) {
-        let payload = ["projectId": projectId, "iconDataUrl": iconDataUrl]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let json = String(data: data, encoding: .utf8) else {
-            return
-        }
-        sidebarView.evaluateJavaScript("""
-        (() => {
-          const icon = \(json);
-          window.__zmux_NATIVE_WORKSPACE_BAR__?.setProjectIcon(icon.projectId, icon.iconDataUrl);
-        })();
-        """)
-    }
-
-    private func openExternalUrl(_ command: OpenExternalUrl) {
-        guard let url = URL(string: command.url) else {
-            return
-        }
-        NSWorkspace.shared.open(url)
-    }
-
+    wantsLayer = true
+    layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    sidebarView.setValue(false, forKey: "drawsBackground")
+    modalHostView.setValue(false, forKey: "drawsBackground")
+    modalHostView.isHidden = true
+    sidebarView.navigationDelegate = self
+    addSubview(workspaceView)
     /**
-     CDXC:NativeCommandBridge 2026-04-26-03:16
-     Sidebar actions that need shell access, such as Git commit/push/PR, must
-     run in the background without opening macOS Terminal. Process output is
-     returned to the sidebar webview through HostEvent.processResult.
+     CDXC:NativeWorkspaceChrome 2026-04-26-05:40
+     Ghostty surfaces can keep native subviews/layers that draw and receive
+     events aggressively. Add the terminal workspace behind the sidebar
+     chrome so project/session controls always own their visible hit area.
      */
-    private func runProcess(_ command: RunProcess) {
-        Task.detached { [weak self] in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: command.executable)
-            process.arguments = command.args
-            if let cwd = command.cwd {
-                process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
-            }
-            if let env = command.env {
-                process.environment = ProcessInfo.processInfo.environment.merging(env) { _, newValue in newValue }
-            }
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardInput = FileHandle.nullDevice
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
+    addSubview(sidebarView)
+    addSubview(divider)
+    /**
+     CDXC:AppModals 2026-04-26-15:10
+     Sidebar dialogs need a full-window React host because WKWebView portals
+     cannot escape the sidebar's frame. Keep this transparent overlay above
+     terminal and sidebar chrome, and show it only while a modal is active.
+     */
+    addSubview(modalHostView)
+    loadSidebar()
+    loadModalHost()
+  }
 
-            let result: HostEvent
-            do {
-                try process.run()
-                process.waitUntilExit()
-                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                result = .processResult(
-                    requestId: command.requestId,
-                    exitCode: process.terminationStatus,
-                    stdout: String(data: stdoutData, encoding: .utf8) ?? "",
-                    stderr: String(data: stderrData, encoding: .utf8) ?? ""
-                )
-            } catch {
-                result = .processResult(
-                    requestId: command.requestId,
-                    exitCode: 127,
-                    stdout: "",
-                    stderr: error.localizedDescription
-                )
-            }
-            await MainActor.run {
-                self?.postHostEvent(result)
-            }
-        }
+  func postHostEvent(_ event: HostEvent) {
+    guard let data = try? eventEncoder.encode(event),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    sidebarView.evaluateJavaScript(
+      """
+      window.dispatchEvent(new CustomEvent('zmux-native-host-event', { detail: \(json) }));
+      """)
+  }
+
+  func applyNativeZedOverlayDetached(targetApp: ZedOverlayTargetApp) {
+    guard let data = try? JSONSerialization.data(withJSONObject: targetApp.rawValue),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    sidebarView.evaluateJavaScript(
+      """
+      window.__zmux_NATIVE_SETTINGS__?.detachZedOverlay(\(json));
+      """)
+  }
+
+  func applyNativeZedOverlayAttached(targetApp: ZedOverlayTargetApp) {
+    guard let data = try? JSONSerialization.data(withJSONObject: targetApp.rawValue),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    sidebarView.evaluateJavaScript(
+      """
+      window.__zmux_NATIVE_SETTINGS__?.attachZedOverlay(\(json));
+      """)
+  }
+
+  private func handleSidebarCommand(_ command: HostCommand) {
+    switch command {
+    case .createTerminal(let command):
+      workspaceView.createTerminal(command)
+    case .closeTerminal(let command):
+      workspaceView.closeTerminal(sessionId: command.sessionId)
+    case .focusTerminal(let command):
+      workspaceView.focusTerminal(sessionId: command.sessionId)
+    case .writeTerminalText(let command):
+      workspaceView.writeTerminalText(sessionId: command.sessionId, text: command.text)
+    case .sendTerminalEnter(let command):
+      workspaceView.sendTerminalEnter(sessionId: command.sessionId)
+    case .setActiveTerminalSet(let command):
+      workspaceView.setActiveTerminalSet(command)
+    case .setTerminalLayout(let command):
+      workspaceView.setTerminalLayout(command.layout)
+    case .setTerminalVisibility(let command):
+      workspaceView.setTerminalVisibility(sessionId: command.sessionId, visible: command.visible)
+    case .pickWorkspaceFolder:
+      presentWorkspaceFolderPicker()
+    case .pickWorkspaceIcon(let command):
+      presentWorkspaceIconPicker(command)
+    case .showMessage(let command):
+      showMessage(command)
+    case .appendAgentDetectionDebugLog(let command):
+      AppDelegate.appendAgentDetectionDebugLog(event: command.event, details: command.details)
+    case .appendTerminalFocusDebugLog(let command):
+      AppDelegate.appendTerminalFocusDebugLog(event: command.event, details: command.details)
+    case .appendRestoreDebugLog(let command):
+      AppDelegate.appendRestoreDebugLog(event: command.event, details: command.details)
+    case .appendSessionTitleDebugLog(let command):
+      AppDelegate.appendSessionTitleDebugLog(event: command.event, details: command.details)
+    case .appendWorkspaceDockIndicatorDebugLog(let command):
+      AppDelegate.appendWorkspaceDockIndicatorDebugLog(
+        event: command.event, details: command.details)
+    case .runProcess(let command):
+      runProcess(command)
+    case .syncGhosttyTerminalSettings(let command):
+      syncGhosttyTerminalSettings(command)
+    case .openExternalUrl(let command):
+      openExternalUrl(command)
+    case .openBrowserWindow(let command):
+      /**
+       CDXC:BrowserOverlay 2026-04-26-05:14
+       Browser action buttons are routed out of the sidebar webview and
+       into AppDelegate so the native host can launch and position Chrome
+       Canary above the active zmux attachment window.
+       */
+      openBrowserWindow(command)
+    case .showBrowserWindow:
+      /**
+       CDXC:BrowserOverlay 2026-04-26-07:37
+       The restored Browsers sidebar section uses this command to raise
+       the already-running Canary window through AppDelegate, preserving
+       native workarea placement without creating a new browser tab.
+       */
+      showBrowserWindow()
+    case .setSidebarSide(let command):
+      setSidebarSide(command.side)
+    case .configureZedOverlay(let command):
+      /**
+       CDXC:ZedOverlay 2026-04-26-03:29
+       Zed overlay configuration comes from the sidebar webview, but the
+       native overlay controller lives in AppDelegate beside the window it
+       moves. Forward this command instead of consuming it in the sidebar
+       router so the native button can be positioned over Zed Preview.
+       */
+      configureZedOverlay(command)
+    case .sidebarCliCommand:
+      /**
+       CDXC:DebugCli 2026-04-27-07:18
+       Sidebar CLI commands are handled by AppDelegate before this
+       view-level router. Keep this case explicit so adding the command to
+       HostCommand does not make the sidebar command switch non-exhaustive.
+       */
+      break
+    }
+  }
+
+  private func showMessage(_ command: ShowMessage) {
+    let alert = NSAlert()
+    switch command.level {
+    case .info:
+      alert.alertStyle = .informational
+    case .warning:
+      alert.alertStyle = .warning
+    case .error:
+      alert.alertStyle = .critical
+    }
+    alert.messageText = "zmux"
+    alert.informativeText = command.message
+    alert.addButton(withTitle: "OK")
+    if let window {
+      alert.beginSheetModal(for: window)
+    } else {
+      alert.runModal()
+    }
+  }
+
+  func setSidebarSide(_ side: SidebarSide) {
+    sidebarSide = side
+    needsLayout = true
+  }
+
+  func workspaceScreenFrame() -> NSRect? {
+    guard let window = workspaceView.window else {
+      return nil
+    }
+    /**
+     CDXC:BrowserOverlay 2026-04-26-05:22
+     Chrome Canary should cover only the zmux workarea, leaving the
+     workspace switcher rail and sidebar visible for project/session
+     context while the browser is open above the attached app.
+     */
+    let windowFrame = workspaceView.convert(workspaceView.bounds, to: nil)
+    return window.convertToScreen(windowFrame)
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
+  override func layout() {
+    super.layout()
+    let maxSidebarWidth = max(
+      Self.sidebarMinWidth,
+      min(Self.sidebarMaxWidth, bounds.width - Self.workspaceBarWidth - Self.dividerWidth - 240))
+    let sidebarWidth = min(max(self.sidebarWidth, Self.sidebarMinWidth), maxSidebarWidth)
+    self.sidebarWidth = sidebarWidth
+    let chromeWidth = Self.workspaceBarWidth + sidebarWidth + Self.dividerWidth
+    let chromeX: CGFloat = sidebarSide == .left ? 0 : max(bounds.width - chromeWidth, 0)
+    let workspaceX: CGFloat = sidebarSide == .left ? chromeWidth : 0
+    let workspaceWidth = max(bounds.width - chromeWidth, 1)
+
+    sidebarView.frame = CGRect(
+      x: chromeX,
+      y: 0,
+      width: Self.workspaceBarWidth + sidebarWidth,
+      height: bounds.height
+    )
+    divider.frame = CGRect(
+      x: chromeX + Self.workspaceBarWidth + sidebarWidth,
+      y: 0,
+      width: Self.dividerWidth,
+      height: bounds.height
+    )
+    workspaceView.frame = CGRect(
+      x: workspaceX,
+      y: 0,
+      width: workspaceWidth,
+      height: bounds.height
+    )
+    modalHostView.frame = bounds
+  }
+
+  private func resizeSidebar(by deltaX: CGFloat) {
+    let maxSidebarWidth = max(
+      Self.sidebarMinWidth,
+      min(Self.sidebarMaxWidth, bounds.width - Self.workspaceBarWidth - Self.dividerWidth - 240))
+    let effectiveDelta = sidebarSide == .left ? deltaX : -deltaX
+    sidebarWidth = min(max(sidebarWidth + effectiveDelta, Self.sidebarMinWidth), maxSidebarWidth)
+    needsLayout = true
+  }
+
+  private func persistSidebarWidth() {
+    nativeSettingsStore.persistSidebarWidth(sidebarWidth)
+  }
+
+  private func handleAppModalHostMessage(_ body: Any) {
+    guard let message = body as? [String: Any],
+      let type = message["type"] as? String
+    else {
+      AppDelegate.appendAppModalErrorLog(
+        area: "AppModals:nativeBridge",
+        message: "Malformed modal host message: \(String(describing: body))",
+        stack: nil
+      )
+      return
     }
 
-    private func loadSidebar() {
-        if let urlString = ProcessInfo.processInfo.environment["zmux_SIDEBAR_URL"],
-           let url = URL(string: urlString) {
-            Self.logger.info("Loading sidebar URL \(url.absoluteString, privacy: .public)")
-            sidebarView.load(URLRequest(url: url))
-            return
-        }
-
-        let webAssets = Self.resolveWebAssets()
-        let builtSidebar = webAssets.appendingPathComponent("index.html")
-        if FileManager.default.fileExists(atPath: builtSidebar.path) {
-            Self.logger.info("Loading built sidebar from \(builtSidebar.path, privacy: .public)")
-            sidebarView.loadFileURL(builtSidebar, allowingReadAccessTo: webAssets)
-            return
-        }
-
-        Self.logger.error("Built sidebar not found at \(builtSidebar.path, privacy: .public)")
-        let repoRoot = Self.resolveRepoRoot()
-        let html = """
-        <!doctype html>
-        <html>
-          <body style="margin:0;background:#111827;color:#d1d5db;font:13px -apple-system,BlinkMacSystemFont,sans-serif;height:100vh">
-            <div style="padding:18px;line-height:1.45">
-              <h1 style="font-size:14px;margin:0 0 14px">zmux Native Ghostty</h1>
-              <button id="shell" style="width:100%;margin:0 0 8px;padding:9px">New shell</button>
-              <button id="codex" style="width:100%;margin:0 0 8px;padding:9px">Codex agent</button>
-              <button id="close" style="width:100%;padding:9px">Close active</button>
-              <p style="color:#9ca3af;margin-top:16px">
-                Set zmux_SIDEBAR_URL to load the full sidebar bundle.
-              </p>
-            </div>
-            <script>
-              let activeSessionId = "";
-              function send(command) {
-                window.webkit.messageHandlers.zmuxNativeHost.postMessage(command);
-              }
-              function create(title, input) {
-                activeSessionId = crypto.randomUUID();
-                send({
-                  type: "createTerminal",
-                  sessionId: activeSessionId,
-                  cwd: "\(NSHomeDirectory())",
-                  title,
-                  initialInput: input || ""
-                });
-              }
-              shell.onclick = () => create("Shell", "");
-              codex.onclick = () => create("Codex", "codex\\r");
-              close.onclick = () => activeSessionId && send({ type: "closeTerminal", sessionId: activeSessionId });
-            </script>
-          </body>
-        </html>
-        """
-        sidebarView.loadHTMLString(html, baseURL: repoRoot)
+    switch type {
+    case "logError":
+      let area = message["area"] as? String ?? "AppModals:unknown"
+      let errorMessage = message["message"] as? String ?? String(describing: message)
+      let stack = message["stack"] as? String
+      AppDelegate.appendAppModalErrorLog(area: area, message: errorMessage, stack: stack)
+    case "ready":
+      isModalHostReady = true
+      if let latestModalHostSidebarState {
+        dispatchModalHostMessage(latestModalHostSidebarState)
+      }
+      if let pendingModalHostOpenMessage {
+        dispatchModalHostMessage(pendingModalHostOpenMessage)
+        self.pendingModalHostOpenMessage = nil
+      }
+    case "open":
+      modalHostView.isHidden = false
+      pendingModalHostOpenMessage = isModalHostReady ? nil : message
+      if let latestModalHostSidebarState {
+        dispatchModalHostMessage(latestModalHostSidebarState)
+      }
+      dispatchModalHostMessage(message)
+    case "close":
+      dispatchModalHostMessage(["type": "close"])
+      pendingModalHostOpenMessage = nil
+      modalHostView.isHidden = true
+    case "sidebarState":
+      latestModalHostSidebarState = message
+      dispatchModalHostMessage(message)
+    case "sidebarCommand":
+      guard let sidebarMessage = message["message"] else {
+        return
+      }
+      dispatchSidebarModalCommand(sidebarMessage)
+    default:
+      AppDelegate.appendAppModalErrorLog(
+        area: "AppModals:nativeBridge",
+        message: "Unknown modal host message type: \(type)",
+        stack: nil
+      )
     }
+  }
 
-    private func loadModalHost() {
-        let webAssets = Self.resolveWebAssets()
-        let builtModalHost = webAssets.appendingPathComponent("modal-host.html")
-        if FileManager.default.fileExists(atPath: builtModalHost.path) {
-            Self.logger.info("Loading modal host from \(builtModalHost.path, privacy: .public)")
-            modalHostView.loadFileURL(
-                builtModalHost,
-                allowingReadAccessTo: webAssets
-            )
-            return
-        }
-
-        Self.logger.error("Built modal host not found at \(builtModalHost.path, privacy: .public)")
-        let repoRoot = Self.resolveRepoRoot()
-        modalHostView.loadHTMLString(
-            "<!doctype html><html><body style=\"margin:0;background:transparent\"></body></html>",
-            baseURL: repoRoot
+  private func dispatchModalHostMessage(_ message: [String: Any]) {
+    guard JSONSerialization.isValidJSONObject(message),
+      let data = try? JSONSerialization.data(withJSONObject: message),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      AppDelegate.appendAppModalErrorLog(
+        area: "AppModals:nativeBridge",
+        message: "Failed to serialize modal host message: \(message)",
+        stack: nil
+      )
+      return
+    }
+    modalHostView.evaluateJavaScript(
+      """
+      window.dispatchEvent(new CustomEvent('zmux-app-modal-host-message', { detail: \(json) }));
+      """
+    ) { _, error in
+      if let error {
+        AppDelegate.appendAppModalErrorLog(
+          area: "AppModals:nativeBridge",
+          message: "Failed to dispatch modal host message: \(error.localizedDescription)",
+          stack: nil
         )
+      }
+    }
+  }
+
+  private func dispatchSidebarModalCommand(_ message: Any) {
+    guard JSONSerialization.isValidJSONObject(message),
+      let data = try? JSONSerialization.data(withJSONObject: message),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      AppDelegate.appendAppModalErrorLog(
+        area: "AppModals:sidebarCommand",
+        message: "Failed to serialize sidebar modal command: \(message)",
+        stack: nil
+      )
+      return
+    }
+    sidebarView.evaluateJavaScript(
+      """
+      window.__zmux_NATIVE_MODAL_BRIDGE__?.handleSidebarMessage(\(json));
+      """
+    ) { _, error in
+      if let error {
+        AppDelegate.appendAppModalErrorLog(
+          area: "AppModals:sidebarCommand",
+          message: "Failed to dispatch sidebar modal command: \(error.localizedDescription)",
+          stack: nil
+        )
+      }
+    }
+  }
+
+  private func presentWorkspaceFolderPicker() {
+    /**
+     CDXC:NativeWorkspacePicker 2026-04-26-00:47
+     The workspace rail plus button must use the native folder picker. The
+     selected project is sent back into the sidebar webview, which owns the
+     per-project session/sidebar state.
+     */
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.allowsMultipleSelection = false
+    panel.canCreateDirectories = true
+    panel.prompt = "Add Project"
+    panel.message = "Choose a project folder to add to zmux."
+
+    let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+      guard response == .OK,
+        let url = panel.url
+      else {
+        return
+      }
+      self?.addWorkspaceProject(path: url.path, name: url.lastPathComponent)
     }
 
-    private static func resolveWebAssets() -> URL {
-        // CDXC:NativeSidebar 2026-04-27-06:19: Sidebar assets should be loaded
-        // from the app bundle first because users normally launch the installed
-        // app from /Applications, where FileManager.currentDirectoryPath is not
-        // the repository root.
-        if let bundledWebAssets = Bundle.main.resourceURL?.appendingPathComponent("Web", isDirectory: true),
-           FileManager.default.fileExists(atPath: bundledWebAssets.appendingPathComponent("index.html").path) {
-            return bundledWebAssets
+    if let window {
+      panel.beginSheetModal(for: window, completionHandler: completion)
+    } else {
+      completion(panel.runModal())
+    }
+  }
+
+  private func addWorkspaceProject(path: String, name: String) {
+    let payload = ["path": path, "name": name]
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    sidebarView.evaluateJavaScript(
+      """
+      (() => {
+        const project = \(json);
+        window.__zmux_NATIVE_WORKSPACE_BAR__?.addProject(project.path, project.name);
+      })();
+      """)
+  }
+
+  private func presentWorkspaceIconPicker(_ command: PickWorkspaceIcon) {
+    /**
+     CDXC:WorkspaceDock 2026-04-27-08:53
+     Workspace icon selection must use the native macOS picker because the
+     React context menu lives inside WKWebView, where hidden file inputs can
+     fail to open from synthetic/custom menu activation. Return a PNG/SVG
+     data URL to the React workspace API so persistence stays with the
+     workspace record.
+     */
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = false
+    panel.canChooseFiles = true
+    panel.allowsMultipleSelection = false
+    panel.allowedContentTypes = [.png, UTType(filenameExtension: "svg") ?? .image]
+    panel.prompt = "Pick Icon"
+    panel.message = "Choose a PNG or SVG icon for this workspace."
+
+    let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+      guard response == .OK,
+        let url = panel.url
+      else {
+        return
+      }
+      do {
+        let data = try Data(contentsOf: url)
+        let mimeType = url.pathExtension.lowercased() == "svg" ? "image/svg+xml" : "image/png"
+        self?.setWorkspaceIcon(
+          projectId: command.projectId,
+          iconDataUrl: "data:\(mimeType);base64,\(data.base64EncodedString())"
+        )
+      } catch {
+        self?.showMessage(
+          ShowMessage(
+            level: .error, message: "Could not read workspace icon: \(error.localizedDescription)"))
+      }
+    }
+
+    if let window {
+      panel.beginSheetModal(for: window, completionHandler: completion)
+    } else {
+      completion(panel.runModal())
+    }
+  }
+
+  private func setWorkspaceIcon(projectId: String, iconDataUrl: String) {
+    let payload = ["projectId": projectId, "iconDataUrl": iconDataUrl]
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    sidebarView.evaluateJavaScript(
+      """
+      (() => {
+        const icon = \(json);
+        window.__zmux_NATIVE_WORKSPACE_BAR__?.setProjectIcon(icon.projectId, icon.iconDataUrl);
+      })();
+      """)
+  }
+
+  private func openExternalUrl(_ command: OpenExternalUrl) {
+    guard let url = URL(string: command.url) else {
+      return
+    }
+    NSWorkspace.shared.open(url)
+  }
+
+  /**
+   CDXC:NativeCommandBridge 2026-04-26-03:16
+   Sidebar actions that need shell access, such as Git commit/push/PR, must
+   run in the background without opening macOS Terminal. Process output is
+   returned to the sidebar webview through HostEvent.processResult.
+   */
+  private func runProcess(_ command: RunProcess) {
+    Task.detached { [weak self] in
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: command.executable)
+      process.arguments = command.args
+      if let cwd = command.cwd {
+        process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+      }
+      if let env = command.env {
+        process.environment = ProcessInfo.processInfo.environment.merging(env) { _, newValue in
+          newValue
         }
+      }
+      let stdoutPipe = Pipe()
+      let stderrPipe = Pipe()
+      process.standardInput = FileHandle.nullDevice
+      process.standardOutput = stdoutPipe
+      process.standardError = stderrPipe
 
-        return resolveRepoRoot().appendingPathComponent("native/macos/zmuxHost/Web", isDirectory: true)
+      let result: HostEvent
+      do {
+        try process.run()
+        process.waitUntilExit()
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        result = .processResult(
+          requestId: command.requestId,
+          exitCode: process.terminationStatus,
+          stdout: String(data: stdoutData, encoding: .utf8) ?? "",
+          stderr: String(data: stderrData, encoding: .utf8) ?? ""
+        )
+      } catch {
+        result = .processResult(
+          requestId: command.requestId,
+          exitCode: 127,
+          stdout: "",
+          stderr: error.localizedDescription
+        )
+      }
+      await MainActor.run {
+        self?.postHostEvent(result)
+      }
+    }
+  }
+
+  private func loadSidebar() {
+    if let urlString = ProcessInfo.processInfo.environment["zmux_SIDEBAR_URL"],
+      let url = URL(string: urlString)
+    {
+      Self.logger.info("Loading sidebar URL \(url.absoluteString, privacy: .public)")
+      sidebarView.load(URLRequest(url: url))
+      return
     }
 
-    private static func resolveRepoRoot() -> URL {
-        if let repoRootPath = ProcessInfo.processInfo.environment["zmux_REPO_ROOT"], !repoRootPath.isEmpty {
-            return URL(fileURLWithPath: repoRootPath, isDirectory: true)
-        }
-
-        // CDXC:PublicRelease 2026-04-27-05:36: The native host must discover
-        // local development assets without committing maintainer-specific
-        // absolute paths into public source.
-        let currentDirectory = FileManager.default.currentDirectoryPath
-        return URL(fileURLWithPath: currentDirectory, isDirectory: true)
+    let webAssets = Self.resolveWebAssets()
+    let builtSidebar = webAssets.appendingPathComponent("index.html")
+    if FileManager.default.fileExists(atPath: builtSidebar.path) {
+      Self.logger.info("Loading built sidebar from \(builtSidebar.path, privacy: .public)")
+      sidebarView.loadFileURL(builtSidebar, allowingReadAccessTo: webAssets)
+      return
     }
 
-    private static let diagnosticsScript = """
+    Self.logger.error("Built sidebar not found at \(builtSidebar.path, privacy: .public)")
+    let repoRoot = Self.resolveRepoRoot()
+    let html = """
+      <!doctype html>
+      <html>
+        <body style="margin:0;background:#111827;color:#d1d5db;font:13px -apple-system,BlinkMacSystemFont,sans-serif;height:100vh">
+          <div style="padding:18px;line-height:1.45">
+            <h1 style="font-size:14px;margin:0 0 14px">zmux Native Ghostty</h1>
+            <button id="shell" style="width:100%;margin:0 0 8px;padding:9px">New shell</button>
+            <button id="codex" style="width:100%;margin:0 0 8px;padding:9px">Codex agent</button>
+            <button id="close" style="width:100%;padding:9px">Close active</button>
+            <p style="color:#9ca3af;margin-top:16px">
+              Set zmux_SIDEBAR_URL to load the full sidebar bundle.
+            </p>
+          </div>
+          <script>
+            let activeSessionId = "";
+            function send(command) {
+              window.webkit.messageHandlers.zmuxNativeHost.postMessage(command);
+            }
+            function create(title, input) {
+              activeSessionId = crypto.randomUUID();
+              send({
+                type: "createTerminal",
+                sessionId: activeSessionId,
+                cwd: "\(NSHomeDirectory())",
+                title,
+                initialInput: input || ""
+              });
+            }
+            shell.onclick = () => create("Shell", "");
+            codex.onclick = () => create("Codex", "codex\\r");
+            close.onclick = () => activeSessionId && send({ type: "closeTerminal", sessionId: activeSessionId });
+          </script>
+        </body>
+      </html>
+      """
+    sidebarView.loadHTMLString(html, baseURL: repoRoot)
+  }
+
+  private func loadModalHost() {
+    let webAssets = Self.resolveWebAssets()
+    let builtModalHost = webAssets.appendingPathComponent("modal-host.html")
+    if FileManager.default.fileExists(atPath: builtModalHost.path) {
+      Self.logger.info("Loading modal host from \(builtModalHost.path, privacy: .public)")
+      modalHostView.loadFileURL(
+        builtModalHost,
+        allowingReadAccessTo: webAssets
+      )
+      return
+    }
+
+    Self.logger.error("Built modal host not found at \(builtModalHost.path, privacy: .public)")
+    let repoRoot = Self.resolveRepoRoot()
+    modalHostView.loadHTMLString(
+      "<!doctype html><html><body style=\"margin:0;background:transparent\"></body></html>",
+      baseURL: repoRoot
+    )
+  }
+
+  private static func resolveWebAssets() -> URL {
+    // CDXC:NativeSidebar 2026-04-27-06:19: Sidebar assets should be loaded
+    // from the app bundle first because users normally launch the installed
+    // app from /Applications, where FileManager.currentDirectoryPath is not
+    // the repository root.
+    if let bundledWebAssets = Bundle.main.resourceURL?.appendingPathComponent(
+      "Web", isDirectory: true),
+      FileManager.default.fileExists(
+        atPath: bundledWebAssets.appendingPathComponent("index.html").path)
+    {
+      return bundledWebAssets
+    }
+
+    return resolveRepoRoot().appendingPathComponent("native/macos/zmuxHost/Web", isDirectory: true)
+  }
+
+  private static func resolveRepoRoot() -> URL {
+    if let repoRootPath = ProcessInfo.processInfo.environment["zmux_REPO_ROOT"],
+      !repoRootPath.isEmpty
+    {
+      return URL(fileURLWithPath: repoRootPath, isDirectory: true)
+    }
+
+    // CDXC:PublicRelease 2026-04-27-05:36: The native host must discover
+    // local development assets without committing maintainer-specific
+    // absolute paths into public source.
+    let currentDirectory = FileManager.default.currentDirectoryPath
+    return URL(fileURLWithPath: currentDirectory, isDirectory: true)
+  }
+
+  private static let diagnosticsScript = """
     (() => {
       const post = (payload) => {
         try {
@@ -1726,7 +1809,7 @@ final class zmuxRootView: NSView {
     })();
     """
 
-    private static let workspaceBarHTML = """
+  private static let workspaceBarHTML = """
     <!doctype html>
     <html>
       <head>
@@ -2118,144 +2201,157 @@ final class zmuxRootView: NSView {
 }
 
 final class zmuxFocusReportingWindow: NSWindow {
-    var onFirstResponderChanged: ((NSResponder?) -> Void)?
+  var onFirstResponderChanged: ((NSResponder?) -> Void)?
 
-    /**
-     CDXC:NativeTerminalFocus 2026-04-26-21:32
-     User clicks inside split Ghostty surfaces change AppKit's first responder
-     without going through sidebar focus commands. Report every successful
-     responder transition so native terminal focus becomes the source that
-     updates sidebar/store focus before the next layout sync.
-     */
-    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
-        let previousResponder = firstResponder
-        let didBecomeFirstResponder = super.makeFirstResponder(responder)
-        if didBecomeFirstResponder && firstResponder !== previousResponder {
-            onFirstResponderChanged?(firstResponder)
-        }
-        return didBecomeFirstResponder
+  /**
+   CDXC:NativeTerminalFocus 2026-04-26-21:32
+   User clicks inside split Ghostty surfaces change AppKit's first responder
+   without going through sidebar focus commands. Report every successful
+   responder transition so native terminal focus becomes the source that
+   updates sidebar/store focus before the next layout sync.
+   */
+  override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+    let previousResponder = firstResponder
+    let didBecomeFirstResponder = super.makeFirstResponder(responder)
+    if didBecomeFirstResponder && firstResponder !== previousResponder {
+      onFirstResponderChanged?(firstResponder)
     }
+    return didBecomeFirstResponder
+  }
 }
 
 final class PaneResizeHandleView: NSView {
-    var onDrag: ((CGFloat) -> Void)?
-    var onDragEnded: (() -> Void)?
-    private var lastDragX: CGFloat = 0
+  var onDrag: ((CGFloat) -> Void)?
+  var onDragEnded: (() -> Void)?
+  private var lastDragX: CGFloat = 0
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
-    }
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layer?.backgroundColor = NSColor.clear.cgColor
+  }
 
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
-    }
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    wantsLayer = true
+    layer?.backgroundColor = NSColor.clear.cgColor
+  }
 
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .resizeLeftRight)
-    }
+  override func resetCursorRects() {
+    addCursorRect(bounds, cursor: .resizeLeftRight)
+  }
 
-    /**
-     CDXC:NativeSidebarChrome 2026-04-26-07:27
-     The resize hit target stays wide enough to drag comfortably, but the
-     visible sidebar edge should be a subtle true-pixel #343434 separator
-     instead of the previous filled black gutter or Retina-scaled two-pixel line.
-     */
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        NSColor(calibratedRed: 0x34 / 255, green: 0x34 / 255, blue: 0x34 / 255, alpha: 1).setFill()
-        let backingScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
-        let separatorWidth = 1 / backingScale
-        let separatorX = floor(bounds.midX * backingScale) / backingScale
-        NSRect(x: separatorX, y: 0, width: separatorWidth, height: bounds.height).fill()
-    }
+  /**
+   CDXC:NativeSidebarChrome 2026-04-26-07:27
+   The resize hit target stays wide enough to drag comfortably, but the
+   visible sidebar edge should be a subtle true-pixel #343434 separator
+   instead of the previous filled black gutter or Retina-scaled two-pixel line.
+   */
+  override func draw(_ dirtyRect: NSRect) {
+    super.draw(dirtyRect)
+    NSColor(calibratedRed: 0x34 / 255, green: 0x34 / 255, blue: 0x34 / 255, alpha: 1).setFill()
+    let backingScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+    let separatorWidth = 1 / backingScale
+    let separatorX = floor(bounds.midX * backingScale) / backingScale
+    NSRect(x: separatorX, y: 0, width: separatorWidth, height: bounds.height).fill()
+  }
 
-    override func mouseDown(with event: NSEvent) {
-        lastDragX = convert(event.locationInWindow, from: nil).x
-    }
+  override func mouseDown(with event: NSEvent) {
+    lastDragX = convert(event.locationInWindow, from: nil).x
+  }
 
-    override func mouseDragged(with event: NSEvent) {
-        let currentX = convert(event.locationInWindow, from: nil).x
-        let deltaX = currentX - lastDragX
-        lastDragX = currentX
-        onDrag?(deltaX)
-    }
+  override func mouseDragged(with event: NSEvent) {
+    let currentX = convert(event.locationInWindow, from: nil).x
+    let deltaX = currentX - lastDragX
+    lastDragX = currentX
+    onDrag?(deltaX)
+  }
 
-    override func mouseUp(with event: NSEvent) {
-        onDragEnded?()
-    }
+  override func mouseUp(with event: NSEvent) {
+    onDragEnded?()
+  }
 }
 
 extension zmuxRootView: WKNavigationDelegate {
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Self.logger.info("Sidebar webview finished loading")
-        webView.evaluateJavaScript("JSON.stringify({ text: document.body.innerText.slice(0, 240), rootHTML: document.getElementById('root')?.innerHTML.slice(0, 240) || '', bootError: window.__zmux_BOOT_ERROR__ || null })") { result, error in
-            if let error {
-            Self.logger.error("Sidebar DOM probe failed: \(error.localizedDescription, privacy: .public)")
-            return
-        }
-            Self.logger.info("Sidebar DOM probe: \(String(describing: result), privacy: .public)")
-        }
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    Self.logger.info("Sidebar webview finished loading")
+    webView.evaluateJavaScript(
+      "JSON.stringify({ text: document.body.innerText.slice(0, 240), rootHTML: document.getElementById('root')?.innerHTML.slice(0, 240) || '', bootError: window.__zmux_BOOT_ERROR__ || null })"
+    ) { result, error in
+      if let error {
+        Self.logger.error(
+          "Sidebar DOM probe failed: \(error.localizedDescription, privacy: .public)")
+        return
+      }
+      Self.logger.info("Sidebar DOM probe: \(String(describing: result), privacy: .public)")
     }
+  }
 
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        Self.logger.error("Sidebar webview navigation failed: \(error.localizedDescription, privacy: .public)")
-    }
+  func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+    Self.logger.error(
+      "Sidebar webview navigation failed: \(error.localizedDescription, privacy: .public)")
+  }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        Self.logger.error("Sidebar webview provisional navigation failed: \(error.localizedDescription, privacy: .public)")
-    }
+  func webView(
+    _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+    withError error: Error
+  ) {
+    Self.logger.error(
+      "Sidebar webview provisional navigation failed: \(error.localizedDescription, privacy: .public)"
+    )
+  }
 
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        /**
-         CDXC:CrashDiagnostics 2026-04-27-17:38
-         WebKit renderer exits can look like an app crash from the UI. Persist
-         this delegate callback so native process exits are not confused with
-         web content process termination.
-         */
-        Self.logger.error("Sidebar webview content process terminated")
-        AppDelegate.appendNativeHostLifecycleLog("sidebarWebContentProcessDidTerminate url=\(webView.url?.absoluteString ?? "<missing>")")
-    }
+  func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+    /**
+     CDXC:CrashDiagnostics 2026-04-27-17:38
+     WebKit renderer exits can look like an app crash from the UI. Persist
+     this delegate callback so native process exits are not confused with
+     web content process termination.
+     */
+    Self.logger.error("Sidebar webview content process terminated")
+    AppDelegate.appendNativeHostLifecycleLog(
+      "sidebarWebContentProcessDidTerminate url=\(webView.url?.absoluteString ?? "<missing>")")
+  }
 }
 
 final class SidebarScriptBridge: NSObject, WKScriptMessageHandler {
-    private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "webview")
-    private let decoder = JSONDecoder()
-    private let router: SidebarCommandRouter
+  private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "webview")
+  private let decoder = JSONDecoder()
+  private let router: SidebarCommandRouter
 
-    init(router: SidebarCommandRouter) {
-        self.router = router
+  init(router: SidebarCommandRouter) {
+    self.router = router
+  }
+
+  func userContentController(
+    _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
+  ) {
+    if message.name == "zmuxNativeHostDiagnostics" {
+      let diagnostic = String(describing: message.body)
+      if diagnostic.contains("diagnostics-ready") {
+        Self.logger.info("Sidebar diagnostic: \(diagnostic, privacy: .public)")
+      } else {
+        Self.logger.error("Sidebar diagnostic: \(diagnostic, privacy: .public)")
+      }
+      return
     }
 
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if message.name == "zmuxNativeHostDiagnostics" {
-            let diagnostic = String(describing: message.body)
-            if diagnostic.contains("diagnostics-ready") {
-                Self.logger.info("Sidebar diagnostic: \(diagnostic, privacy: .public)")
-            } else {
-                Self.logger.error("Sidebar diagnostic: \(diagnostic, privacy: .public)")
-            }
-            return
-        }
-
-        if message.name == "zmuxAppModalHost" {
-            router.onAppModalHostMessage?(message.body)
-            return
-        }
-
-        guard JSONSerialization.isValidJSONObject(message.body),
-              let data = try? JSONSerialization.data(withJSONObject: message.body),
-              let command = try? decoder.decode(HostCommand.self, from: data) else {
-            return
-        }
-        router.onCommand?(command)
+    if message.name == "zmuxAppModalHost" {
+      router.onAppModalHostMessage?(message.body)
+      return
     }
+
+    guard JSONSerialization.isValidJSONObject(message.body),
+      let data = try? JSONSerialization.data(withJSONObject: message.body),
+      let command = try? decoder.decode(HostCommand.self, from: data)
+    else {
+      return
+    }
+    router.onCommand?(command)
+  }
 }
 
 final class SidebarCommandRouter {
-    var onAppModalHostMessage: ((Any) -> Void)?
-    var onCommand: ((HostCommand) -> Void)?
+  var onAppModalHostMessage: ((Any) -> Void)?
+  var onCommand: ((HostCommand) -> Void)?
 }

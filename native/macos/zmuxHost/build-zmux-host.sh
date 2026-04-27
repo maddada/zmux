@@ -10,35 +10,34 @@ GHOSTTY_ROOT="${GHOSTTY_ROOT:-}"
 DERIVED_DATA="${DERIVED_DATA:-$REPO_ROOT/build}"
 
 if [[ -z "$GHOSTTY_ROOT" ]]; then
-  # CDXC:NativeHost 2026-04-27-06:06: Local start/build commands should
-  # discover the adjacent Ghostty checkout that already contains the required
-  # xcframework so `bun start` launches the native host without per-shell setup.
-  for candidate in \
-    "$REPO_ROOT/../ghostty" \
-    "$REPO_ROOT/../ghostty-zmux-survival" \
-    "$REPO_ROOT/../../_forks/ghostty"
-  do
-    if [[ -d "$candidate/macos/GhosttyKit.xcframework" ]]; then
-      GHOSTTY_ROOT="$(cd "$candidate" && pwd)"
-      break
-    fi
-  done
+	# CDXC:NativeHost 2026-04-27-06:06: Local start/build commands should
+	# discover the adjacent Ghostty checkout that already contains the required
+	# xcframework so `bun start` launches the native host without per-shell setup.
+	for candidate in \
+		"$REPO_ROOT/../ghostty" \
+		"$REPO_ROOT/../ghostty-zmux-survival" \
+		"$REPO_ROOT/../../_forks/ghostty"; do
+		if [[ -d "$candidate/macos/GhosttyKit.xcframework" ]]; then
+			GHOSTTY_ROOT="$(cd "$candidate" && pwd)"
+			break
+		fi
+	done
 fi
 
 if [[ -z "$GHOSTTY_ROOT" ]]; then
-  cat >&2 <<EOF
+	cat >&2 <<EOF
 Set GHOSTTY_ROOT to your local Ghostty checkout before building zmuxHost.
 
 Expected to find:
   \$GHOSTTY_ROOT/macos/GhosttyKit.xcframework
 EOF
-  exit 1
+	exit 1
 fi
 
 GHOSTTY_KIT="$GHOSTTY_ROOT/macos/GhosttyKit.xcframework"
 
 if [[ ! -d "$GHOSTTY_KIT" ]]; then
-  cat >&2 <<EOF
+	cat >&2 <<EOF
 GhosttyKit.xcframework is missing:
   $GHOSTTY_KIT
 
@@ -49,17 +48,17 @@ Build it first:
     GHOSTTY_METAL_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \\
     zig build -Demit-xcframework -Dxcframework-target=native -Demit-macos-app=false
 EOF
-  exit 1
+	exit 1
 fi
 
 if ! command -v xcodegen >/dev/null 2>&1; then
-  cat >&2 <<EOF
+	cat >&2 <<EOF
 xcodegen is required to generate the zmux project.
 
 Install it, then rerun this script:
   brew install xcodegen
 EOF
-  exit 1
+	exit 1
 fi
 
 mkdir -p "$WEB_DIR"
@@ -70,15 +69,15 @@ cp "$REPO_ROOT/native/sidebar/index.html" "$WEB_DIR/index.html"
 # native bundle to IIFE so exported Storybook symbols never leave top-level
 # `export` syntax in /Applications/zmux.app and blank the app at startup.
 bun build "$REPO_ROOT/native/sidebar/native-sidebar.tsx" \
-  --target browser \
-  --format iife \
-  --asset-naming "[name].[ext]" \
-  --outdir "$WEB_DIR"
+	--target browser \
+	--format iife \
+	--asset-naming "[name].[ext]" \
+	--outdir "$WEB_DIR"
 bun build "$REPO_ROOT/native/sidebar/modal-host.tsx" \
-  --target browser \
-  --format iife \
-  --asset-naming "[name].[ext]" \
-  --outdir "$WEB_DIR"
+	--target browser \
+	--format iife \
+	--asset-naming "[name].[ext]" \
+	--outdir "$WEB_DIR"
 
 WEB_DIR="$WEB_DIR" node <<'JS'
 const { readFileSync, writeFileSync } = require("node:fs");
@@ -161,20 +160,20 @@ JS
 export GHOSTTY_ROOT
 xcodegen generate --spec "$SCRIPT_DIR/project.yml"
 xcodebuild \
-  -project "$PROJECT_PATH" \
-  -scheme zmux \
-  -configuration "$CONFIGURATION" \
-  -derivedDataPath "$DERIVED_DATA" \
-  build
+	-project "$PROJECT_PATH" \
+	-scheme zmux \
+	-configuration "$CONFIGURATION" \
+	-derivedDataPath "$DERIVED_DATA" \
+	build
 
 APP_PATH="$(
-  xcodebuild \
-    -project "$PROJECT_PATH" \
-    -scheme zmux \
-    -configuration "$CONFIGURATION" \
-    -derivedDataPath "$DERIVED_DATA" \
-    -showBuildSettings 2>/dev/null \
-    | awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }'
+	xcodebuild \
+		-project "$PROJECT_PATH" \
+		-scheme zmux \
+		-configuration "$CONFIGURATION" \
+		-derivedDataPath "$DERIVED_DATA" \
+		-showBuildSettings 2>/dev/null |
+		awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }'
 )/zmux.app"
 
 "$SCRIPT_DIR/codesign-zmux-host.sh" "$APP_PATH"
