@@ -33,6 +33,24 @@ describe("shouldAutoNameSessionFromFirstPrompt", () => {
     ).toBe(true);
   });
 
+  test("auto names Codex sessions with placeholder or path-like titles", () => {
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "codex",
+        currentTitle: "Codex Session",
+        prompt: "How does terminal title syncing work here?",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldAutoNameSessionFromFirstPrompt({
+        agentName: "codex",
+        currentTitle: "…/dev/_active/zmux",
+        prompt: "How does terminal title syncing work here?",
+      }),
+    ).toBe(true);
+  });
+
   test("auto names Claude sessions with generic titles", () => {
     expect(
       shouldAutoNameSessionFromFirstPrompt({

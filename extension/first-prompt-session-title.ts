@@ -1,4 +1,4 @@
-import { normalizeTerminalTitle } from "../shared/session-grid-contract";
+import { getVisiblePrimaryTitle, normalizeTerminalTitle } from "../shared/session-grid-contract";
 
 export type FirstPromptAutoRenameStrategy = "sendBareRenameCommand" | "generateTitleAndRename";
 export type FirstPromptAutoRenameDecisionReason =
@@ -63,6 +63,17 @@ export function isGenericAgentSessionTitle(
   agentName: string | undefined,
   title: string | undefined,
 ): boolean {
+  /**
+   * CDXC:SessionTitleSync 2026-04-28-03:49
+   * First-prompt auto-title is allowed only while the session is effectively
+   * untitled. Placeholder creation names and path-like shell titles are not
+   * persisted names, but user/terminal/generated meaningful titles must block
+   * generation so hooks cannot overwrite established session titles.
+   */
+  if (title !== undefined && !getVisiblePrimaryTitle(title)) {
+    return true;
+  }
+
   const normalizedTitle = normalizeTerminalTitle(title)?.toLowerCase();
   if (!normalizedTitle) {
     return true;
