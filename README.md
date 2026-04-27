@@ -2,6 +2,8 @@
 
 Native ghostty terminals multiplexer and agent clis manager that integates with your IDE! (see screenshots)
 
+<img width="1295" height="953" alt="image" src="https://github.com/user-attachments/assets/7ed8791d-eae2-4951-a417-27f4b217eb9e" />
+
 ## Install (macOS only for now. Need help with Windows/Linux ports)
 
 ```bash
@@ -42,7 +44,7 @@ brew install --cask maddada/tap/zmux
 - T3code sessions support <- in testing
 - Much more!
 
-## Integrates very well with Chrome Canary as the integrated browser agent browser (instructions below)
+## Integrates with Chrome Canary as the dedicated agent browser (instructions below)
 
 <img width="600" src="https://github.com/user-attachments/assets/77f8cd07-e3fc-4c3f-9006-18c1835ff36f" />
 
