@@ -1,6 +1,23 @@
 # zmux - The IDE Integrated Agents Manager (CLIs & T3code)
 
-Native ghostty terminals multiplexer and agent clis manager that in
+Native ghostty terminals multiplexer and agent clis manager that integates with your IDE! (see screenshots)
+
+## Best features:
+
+- Use the Ghostty (native) in a very organized way with splits/groups/workspaces
+- Uses your own ghostty configuration out of the box
+- Stay close to the code and edit it easily with the IDE attachment integration (Zed, VS Code, more soon!)
+- Integrates with Chrome Canary as the "Agent Browser" (instructions below)
+- Automatic agent session naming (Claude / Codex / Others)
+- Automatic session resuming on restart
+- Search all previous sessions
+- Supports all agent clis (Codex/Claude/Pi/OpenCode/Copilot/Gemini/More) <- Please ask if missing any features
+- 1 click actions (run commands, tests, etc.)
+- Notification sounds for agent status or command completion
+- Floating status indicators for all agents using companion app: (github.com/maddada/agent-manager-x)
+- Rich text mode pop up (ctrl+g) <- in testing
+- T3code sessions support <- in testing
+- Much more!
 
 ## Install (macOS only for now. Need help with Windows/Linux ports)
 
