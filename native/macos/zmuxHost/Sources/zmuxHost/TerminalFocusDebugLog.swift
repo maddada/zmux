@@ -4,13 +4,12 @@ enum TerminalFocusDebugLog {
   /**
    CDXC:NativeTerminalFocus 2026-04-26-21:32
    Split Ghostty focus debugging must land in a completely separate
-   ~/.zmux/logs file. These native entries record AppKit first-responder
+   app storage logs file. These native entries record AppKit first-responder
    state around focus-sensitive actions so a repro can distinguish sidebar,
    bridge, layout-sync, and Ghostty responder causes.
    */
   static func append(event: String, details: [String: Any] = [:]) {
-    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("native-terminal-focus-debug.log")
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"

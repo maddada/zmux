@@ -8,6 +8,23 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 WEB_DIR="$SCRIPT_DIR/Web"
 GHOSTTY_ROOT="${GHOSTTY_ROOT:-}"
 DERIVED_DATA="${DERIVED_DATA:-$REPO_ROOT/build}"
+ZMUX_APP_VARIANT="${ZMUX_APP_VARIANT:-prod}"
+if [[ "$ZMUX_APP_VARIANT" == "dev" ]]; then
+	# CDXC:DevAppFlavor 2026-04-28-02:01: The dev build must generate a
+	# distinct macOS app with its own bundle id and ~/.zmux-dev diagnostics
+	# root, while sharing ~/.zmux hooks, workspaces, and sessions.
+	ZMUX_APP_NAME="${ZMUX_APP_NAME:-zmux-dev}"
+	ZMUX_APP_DISPLAY_NAME="${ZMUX_APP_DISPLAY_NAME:-zmux-dev}"
+	ZMUX_BUNDLE_ID="${ZMUX_BUNDLE_ID:-com.madda.zmux-dev.host}"
+	ZMUX_HOME_DIRECTORY_NAME="${ZMUX_HOME_DIRECTORY_NAME:-.zmux-dev}"
+	ZMUX_SHARED_HOME_DIRECTORY_NAME="${ZMUX_SHARED_HOME_DIRECTORY_NAME:-.zmux}"
+else
+	ZMUX_APP_NAME="${ZMUX_APP_NAME:-zmux}"
+	ZMUX_APP_DISPLAY_NAME="${ZMUX_APP_DISPLAY_NAME:-zmux}"
+	ZMUX_BUNDLE_ID="${ZMUX_BUNDLE_ID:-com.madda.zmux.host}"
+	ZMUX_HOME_DIRECTORY_NAME="${ZMUX_HOME_DIRECTORY_NAME:-.zmux}"
+	ZMUX_SHARED_HOME_DIRECTORY_NAME="${ZMUX_SHARED_HOME_DIRECTORY_NAME:-.zmux}"
+fi
 
 if [[ -z "$GHOSTTY_ROOT" ]]; then
 	# CDXC:NativeHost 2026-04-27-06:06: Local start/build commands should
@@ -158,6 +175,11 @@ JS
 # maintainer-specific Ghostty checkout path; project.yml reads GHOSTTY_ROOT
 # from the caller's environment when XcodeGen resolves native host paths.
 export GHOSTTY_ROOT
+export ZMUX_APP_NAME
+export ZMUX_APP_DISPLAY_NAME
+export ZMUX_BUNDLE_ID
+export ZMUX_HOME_DIRECTORY_NAME
+export ZMUX_SHARED_HOME_DIRECTORY_NAME
 xcodegen generate --spec "$SCRIPT_DIR/project.yml"
 xcodebuild \
 	-project "$PROJECT_PATH" \
@@ -174,13 +196,13 @@ APP_PATH="$(
 		-derivedDataPath "$DERIVED_DATA" \
 		-showBuildSettings 2>/dev/null |
 		awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }'
-)/zmux.app"
+)/$ZMUX_APP_NAME.app"
 
 "$SCRIPT_DIR/codesign-zmux-host.sh" "$APP_PATH"
 
 cat <<EOF
 
-Built zmux.
+Built $ZMUX_APP_NAME.
 
 Launch it from Xcode or with:
   open "$APP_PATH"

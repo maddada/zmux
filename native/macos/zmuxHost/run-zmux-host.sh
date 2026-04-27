@@ -4,8 +4,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_PATH="$SCRIPT_DIR/zmux.xcodeproj"
 CONFIGURATION="${CONFIGURATION:-Debug}"
-APP_NAME="zmux"
-BUNDLE_ID="com.madda.zmux.host"
+ZMUX_APP_VARIANT="${ZMUX_APP_VARIANT:-prod}"
+if [[ "$ZMUX_APP_VARIANT" == "dev" ]]; then
+	# CDXC:DevAppFlavor 2026-04-28-02:01: Local development needs a separate
+	# zmux-dev app identity so iterative builds can run beside the release app;
+	# diagnostics stay in ~/.zmux-dev while workflow state is shared via ~/.zmux.
+	APP_NAME="zmux-dev"
+	BUNDLE_ID="com.madda.zmux-dev.host"
+else
+	APP_NAME="zmux"
+	BUNDLE_ID="com.madda.zmux.host"
+fi
 INSTALL_DIR="${INSTALL_DIR:-/Applications}"
 INSTALLED_APP="$INSTALL_DIR/$APP_NAME.app"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -20,7 +29,7 @@ APP_PATH="$(
 		-configuration "$CONFIGURATION" \
 		-derivedDataPath "$DERIVED_DATA" \
 		-showBuildSettings 2>/dev/null |
-		awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }'
+	awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }'
 )/$APP_NAME.app"
 
 osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true

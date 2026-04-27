@@ -30,8 +30,19 @@ targets:
   zmux:
     type: application
     platform: macOS
-    productName: zmux
+    productName: ${ZMUX_APP_NAME}
+    info:
+      path: AppInfo.plist
+      properties:
+        # CDXC:DevAppFlavor 2026-04-28-03:13: Custom storage keys must be
+        # emitted into Info.plist explicitly. The generated INFOPLIST_KEY_*
+        # build settings do not reliably materialize mixed-case custom keys,
+        # so LaunchServices-installed zmux-dev must read the same storage split
+        # as shell-launched builds from concrete bundle metadata.
+        ZMUXHomeDirectoryName: ${ZMUX_HOME_DIRECTORY_NAME}
+        ZMUXSharedHomeDirectoryName: ${ZMUX_SHARED_HOME_DIRECTORY_NAME}
     sources:
+      - path: Sources/Shared
       - path: Sources/zmuxHost
       - path: ${GHOSTTY_ROOT}/macos/Sources/Ghostty
         excludes:
@@ -76,8 +87,11 @@ targets:
         # CDXC:Branding 2026-04-26-04:18: The native app must be named
         # "zmux" everywhere users see it, including the .app bundle,
         # process/executable, menu title, and window title.
-        EXECUTABLE_NAME: zmux
-        INFOPLIST_KEY_CFBundleDisplayName: zmux
+        # CDXC:DevAppFlavor 2026-04-28-02:01: Dev scripts override these
+        # generated app identifiers to build zmux-dev as a separate app that
+        # keeps diagnostics in ~/.zmux-dev while sharing ~/.zmux workflow state.
+        EXECUTABLE_NAME: ${ZMUX_APP_NAME}
+        INFOPLIST_KEY_CFBundleDisplayName: ${ZMUX_APP_DISPLAY_NAME}
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: zmux uses a local WebSocket bridge between the sidebar and native terminal host.
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
@@ -87,5 +101,5 @@ targets:
         # CDXC:Distribution 2026-04-27-08:37: Public notarized releases are
         # signed under Mohamad Youssef's Apple team, so the bundle identifier
         # uses the com.madda namespace expected by the brew publishing flow.
-        PRODUCT_BUNDLE_IDENTIFIER: com.madda.zmux.host
-        PRODUCT_NAME: zmux
+        PRODUCT_BUNDLE_IDENTIFIER: ${ZMUX_BUNDLE_ID}
+        PRODUCT_NAME: ${ZMUX_APP_NAME}

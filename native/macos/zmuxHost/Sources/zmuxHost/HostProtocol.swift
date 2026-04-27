@@ -18,6 +18,7 @@ enum HostCommand: Decodable {
   case appendRestoreDebugLog(AppendRestoreDebugLog)
   case appendSessionTitleDebugLog(AppendSessionTitleDebugLog)
   case appendWorkspaceDockIndicatorDebugLog(AppendWorkspaceDockIndicatorDebugLog)
+  case persistSharedSidebarStorage(PersistSharedSidebarStorage)
   case runProcess(RunProcess)
   case syncGhosttyTerminalSettings(SyncGhosttyTerminalSettings)
   case openExternalUrl(OpenExternalUrl)
@@ -49,6 +50,7 @@ enum HostCommand: Decodable {
     case appendRestoreDebugLog
     case appendSessionTitleDebugLog
     case appendWorkspaceDockIndicatorDebugLog
+    case persistSharedSidebarStorage
     case runProcess
     case syncGhosttyTerminalSettings
     case openExternalUrl
@@ -97,6 +99,8 @@ enum HostCommand: Decodable {
     case .appendWorkspaceDockIndicatorDebugLog:
       self = .appendWorkspaceDockIndicatorDebugLog(
         try AppendWorkspaceDockIndicatorDebugLog(from: decoder))
+    case .persistSharedSidebarStorage:
+      self = .persistSharedSidebarStorage(try PersistSharedSidebarStorage(from: decoder))
     case .runProcess:
       self = .runProcess(try RunProcess(from: decoder))
     case .syncGhosttyTerminalSettings:
@@ -139,10 +143,16 @@ struct SetActiveTerminalSet: Decodable {
   let attentionSessionIds: [String]?
   let focusedSessionId: String?
   let layout: NativeTerminalLayout?
+  let sessionActivities: [String: NativeTerminalActivity]?
 }
 
 struct SetTerminalLayout: Decodable {
   let layout: NativeTerminalLayout
+}
+
+enum NativeTerminalActivity: String, Decodable {
+  case attention
+  case working
 }
 
 struct SetTerminalVisibility: Decodable {
@@ -182,6 +192,11 @@ struct AppendRestoreDebugLog: Decodable {
 struct AppendWorkspaceDockIndicatorDebugLog: Decodable {
   let details: String?
   let event: String
+}
+
+struct PersistSharedSidebarStorage: Decodable {
+  let key: String
+  let payloadJson: String
 }
 
 enum MessageLevel: String, Decodable {
@@ -277,6 +292,7 @@ enum HostEvent: Encodable {
   case hostReady
   case terminalReady(sessionId: String, ttyName: String?, foregroundPid: Int?)
   case terminalTitleChanged(sessionId: String, title: String)
+  case terminalTitleBarAction(sessionId: String, action: TerminalTitleBarAction)
   case terminalCwdChanged(sessionId: String, cwd: String)
   case terminalExited(sessionId: String, exitCode: Int?)
   case terminalFocused(sessionId: String)
@@ -291,6 +307,7 @@ enum HostEvent: Encodable {
     case foregroundPid
     case message
     case protocolVersion
+    case action
     case sessionId
     case stderr
     case stdout
@@ -317,6 +334,10 @@ enum HostEvent: Encodable {
       try container.encode("terminalTitleChanged", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)
       try container.encode(title, forKey: .title)
+    case .terminalTitleBarAction(let sessionId, let action):
+      try container.encode("terminalTitleBarAction", forKey: .type)
+      try container.encode(sessionId, forKey: .sessionId)
+      try container.encode(action, forKey: .action)
     case .terminalCwdChanged(let sessionId, let cwd):
       try container.encode("terminalCwdChanged", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)
@@ -348,4 +369,12 @@ enum HostEvent: Encodable {
       try container.encode(payloadJson, forKey: .payloadJson)
     }
   }
+}
+
+enum TerminalTitleBarAction: String, Encodable {
+  case close
+  case fork
+  case reload
+  case rename
+  case sleep
 }

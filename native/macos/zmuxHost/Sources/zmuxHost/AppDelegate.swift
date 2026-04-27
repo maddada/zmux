@@ -48,9 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     MainActor.assumeIsolated {
       /**
        CDXC:NativeTerminals 2026-04-28-12:06
-       Persistent terminal mode is intentionally removed. The native host must
-       start only the embedded Ghostty SurfaceView backend and must not create
-       or reconnect to a long-lived helper process.
+       Persistent helper mode was removed by request. Native terminals now
+       always use the in-process embedded Ghostty SurfaceView backend from
+       startup, so no restart-survival helper client is created.
        */
       makeWindow()
       startBridge()
@@ -170,8 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   }
 
   private static func appendGhosttyConfigLog(_ message: String) {
-    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("native-ghostty-config.log")
     appendLogLine(
       message, to: logURL, logsDirectory: logsDirectory, label: "Ghostty config startup")
@@ -181,11 +180,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     /**
      CDXC:SessionTitleDiagnostics 2026-04-26-08:03
      The native packaged app must write session-title diagnostics into the
-     same ~/.zmux/logs location as the Bun controller so missing Codex
+     same app storage logs location as the Bun controller so missing Codex
      auto-renames can be correlated with native Ghostty title events.
      */
-    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("session-title-sync-debug.log")
     let message = details.map { "\(event) \($0)" } ?? event
     appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "session title debug")
@@ -194,12 +192,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   fileprivate static func appendAgentDetectionDebugLog(event: String, details: String?) {
     /**
      CDXC:AgentDetection 2026-04-26-11:14
-     Agent-icon debugging needs a dedicated ~/.zmux/logs file so native
+     Agent-icon debugging needs a dedicated app storage logs file so native
      title events, detector output, and sidebar projection can be correlated
      without mixing them with session rename diagnostics.
      */
-    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("agent-detection-debug.log")
     let message = details.map { "\(event) \($0)" } ?? event
     appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "agent detection debug")
@@ -218,12 +215,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     /**
      CDXC:WorkspaceRestore 2026-04-26-10:00
      The packaged native sidebar owns workspace/session persistence. Write
-     restore diagnostics into a dedicated ~/.zmux/logs file so project load,
+     restore diagnostics into a dedicated app storage logs file so project load,
      localStorage persistence, and native terminal recreation can be traced
      independently from session-title logs.
      */
-    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("workspace-restore-debug.log")
     let message = details.map { "\(event) \($0)" } ?? event
     appendLogLine(
@@ -234,11 +230,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     /**
      CDXC:WorkspaceDock 2026-04-27-04:23
      Native workspace rail indicator repros need a dedicated log file under
-     ~/.zmux/logs because this UI is rendered from the native sidebar webview,
+     app storage logs because this UI is rendered from the native sidebar webview,
      not the older Electrobun mainview dock.
      */
-    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("workspace-dock-indicator-debug.log")
     let message = details.map { "\(event) \($0)" } ?? event
     appendLogLine(
@@ -250,11 +245,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      CDXC:AppModals 2026-04-27-14:25
      Full-window modal failures must be persisted outside React debug mode.
      Every modal host exception writes an area-tagged timestamped line under
-     ~/.zmux/logs so missing bridge, render, and command routing failures can
+     app storage logs so missing bridge, render, and command routing failures can
      be diagnosed after the UI has already failed.
      */
-    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("app-modal-errors.log")
     let stackText = stack.map { " stack=\($0)" } ?? ""
     appendLogLine(
@@ -269,10 +263,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      survive outside WebKit and JS logs so close-button, last-window, and
      termination paths can be separated from renderer crashes.
      */
-    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("native-host-lifecycle.log")
     appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "native host lifecycle")
+  }
+
+  fileprivate static func persistSharedSidebarStorage(_ command: PersistSharedSidebarStorage) {
+    do {
+      try ZmuxAppStorage.persistSharedSidebarStorage(
+        key: command.key, payloadJson: command.payloadJson)
+    } catch {
+      appendRestoreDebugLog(
+        event: "nativeSidebar.sharedStorage.persistFailed",
+        details: jsonObjectString([
+          "error": error.localizedDescription,
+          "key": command.key,
+        ]))
+    }
   }
 
   private static func appendLogLine(
@@ -579,6 +586,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       Self.appendSessionTitleDebugLog(event: command.event, details: command.details)
     case .appendWorkspaceDockIndicatorDebugLog(let command):
       Self.appendWorkspaceDockIndicatorDebugLog(event: command.event, details: command.details)
+    case .persistSharedSidebarStorage(let command):
+      Self.persistSharedSidebarStorage(command)
     case .runProcess(let command):
       runProcess(command) { [weak self] event in
         self?.bridge?.send(event)
@@ -692,7 +701,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     return String(data: data, encoding: .utf8)
   }
 
-  private static func jsonObjectString(_ value: [String: String]) -> String {
+  fileprivate static func jsonObjectString(_ value: [String: String]) -> String {
     guard let data = try? JSONEncoder().encode(value),
       let text = String(data: data, encoding: .utf8)
     else {
@@ -1026,6 +1035,7 @@ private final class NativeSettingsStore {
     }
   }
 
+
   private func readSettingsDictionary() -> [String: Any]? {
     let url = settingsURL()
     guard let data = try? Data(contentsOf: url),
@@ -1069,16 +1079,27 @@ private final class NativeSettingsStore {
     }
     return nil
   }
+
+  private static func readDouble(_ value: Any?) -> Double? {
+    if let number = value as? NSNumber {
+      return Double(truncating: number)
+    }
+    if let string = value as? String, let double = Double(string) {
+      return double
+    }
+    return nil
+  }
 }
 
 final class zmuxRootView: NSView {
   private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "webview")
 
   private static let workspaceBarWidth: CGFloat = 54
-  private static let sidebarMinWidth: CGFloat = 190
+  private static let sidebarMinWidth: CGFloat = 220
   private static let sidebarMaxWidth: CGFloat = 520
   private static let dividerWidth: CGFloat = 6
-  private static let defaultSidebarWidth: CGFloat = 320
+  private static let defaultSidebarWidth: CGFloat = 260
+  private static let sidebarResetWidth: CGFloat = 260
 
   let workspaceView: TerminalWorkspaceView
   var sidebarWebView: WKWebView { sidebarView }
@@ -1104,10 +1125,13 @@ final class zmuxRootView: NSView {
    Native zmux keeps the project/workspace rail and main sidebar in one React
    webview, and uses an AppKit drag handle to resize that combined sidebar
    without disturbing the embedded Ghostty terminal area.
-   CDXC:NativeSidebarChrome 2026-04-26-07:16
-   Users need sidebar restarts to honor their chosen width, with a 190px
-   minimum so the sidebar can become 50px narrower than the earlier 240px
-   limit without adding fallback width behavior.
+   CDXC:NativeSidebarChrome 2026-04-28-01:16
+   Users need sidebar restarts and drag resizing to honor a 200px minimum,
+   increasing the previous 190px lower bound by 10px without adding fallback
+   width behavior.
+   CDXC:NativeSidebarChrome 2026-04-28-02:21
+   New sidebar sessions should start at 260px, and double-clicking the native
+   resize handle should snap the sidebar back to the same 260px width.
    */
   init(
     ghostty: Ghostty.App,
@@ -1117,7 +1141,10 @@ final class zmuxRootView: NSView {
     openBrowserWindow: @escaping (OpenBrowserWindow) -> Void,
     showBrowserWindow: @escaping () -> Void
   ) {
-    self.workspaceView = TerminalWorkspaceView(ghostty: ghostty, sendEvent: sendEvent)
+    self.workspaceView = TerminalWorkspaceView(
+      ghostty: ghostty,
+      sendEvent: sendEvent
+    )
     self.scriptBridge = SidebarScriptBridge(router: sidebarCommandRouter)
     self.configureZedOverlay = configureZedOverlay
     self.syncGhosttyTerminalSettings = syncGhosttyTerminalSettings
@@ -1137,9 +1164,11 @@ final class zmuxRootView: NSView {
     var bootstrap: [String: Any] = [
       "cwd": cwd,
       "homeDir": FileManager.default.homeDirectoryForCurrentUser.path,
+      "zmuxHomeDir": ZmuxAppStorage.sharedRootDirectory.path,
+      "sharedSidebarStorage": ZmuxAppStorage.readSharedSidebarStorage(),
       "workspaceName": workspaceName.isEmpty ? "zmux" : workspaceName,
     ]
-    let storedZedOverlay = NativeSettingsStore().readZedOverlay()
+    let storedZedOverlay = nativeSettingsStore.readZedOverlay()
     if let enabled = storedZedOverlay.enabled {
       bootstrap["zedOverlayEnabled"] = enabled
     }
@@ -1186,6 +1215,9 @@ final class zmuxRootView: NSView {
     }
     divider.onDragEnded = { [weak self] in
       self?.persistSidebarWidth()
+    }
+    divider.onDoubleClick = { [weak self] in
+      self?.resetSidebarWidth()
     }
 
     wantsLayer = true
@@ -1287,6 +1319,8 @@ final class zmuxRootView: NSView {
     case .appendWorkspaceDockIndicatorDebugLog(let command):
       AppDelegate.appendWorkspaceDockIndicatorDebugLog(
         event: command.event, details: command.details)
+    case .persistSharedSidebarStorage(let command):
+      AppDelegate.persistSharedSidebarStorage(command)
     case .runProcess(let command):
       runProcess(command)
     case .syncGhosttyTerminalSettings(let command):
@@ -1381,9 +1415,7 @@ final class zmuxRootView: NSView {
 
   override func layout() {
     super.layout()
-    let maxSidebarWidth = max(
-      Self.sidebarMinWidth,
-      min(Self.sidebarMaxWidth, bounds.width - Self.workspaceBarWidth - Self.dividerWidth - 240))
+    let maxSidebarWidth = currentMaxSidebarWidth()
     let sidebarWidth = min(max(self.sidebarWidth, Self.sidebarMinWidth), maxSidebarWidth)
     self.sidebarWidth = sidebarWidth
     let chromeWidth = Self.workspaceBarWidth + sidebarWidth + Self.dividerWidth
@@ -1413,12 +1445,22 @@ final class zmuxRootView: NSView {
   }
 
   private func resizeSidebar(by deltaX: CGFloat) {
-    let maxSidebarWidth = max(
-      Self.sidebarMinWidth,
-      min(Self.sidebarMaxWidth, bounds.width - Self.workspaceBarWidth - Self.dividerWidth - 240))
+    let maxSidebarWidth = currentMaxSidebarWidth()
     let effectiveDelta = sidebarSide == .left ? deltaX : -deltaX
     sidebarWidth = min(max(sidebarWidth + effectiveDelta, Self.sidebarMinWidth), maxSidebarWidth)
     needsLayout = true
+  }
+
+  private func resetSidebarWidth() {
+    sidebarWidth = min(max(Self.sidebarResetWidth, Self.sidebarMinWidth), currentMaxSidebarWidth())
+    needsLayout = true
+    persistSidebarWidth()
+  }
+
+  private func currentMaxSidebarWidth() -> CGFloat {
+    max(
+      Self.sidebarMinWidth,
+      min(Self.sidebarMaxWidth, bounds.width - Self.workspaceBarWidth - Self.dividerWidth - 240))
   }
 
   private func persistSidebarWidth() {
@@ -1453,6 +1495,12 @@ final class zmuxRootView: NSView {
         self.pendingModalHostOpenMessage = nil
       }
     case "open":
+      /**
+       CDXC:AppModals 2026-04-28-12:06
+       Persistent helper mode was removed, so full-window modal presentation no
+       longer pauses or resurfaces external terminal windows. The modal host
+       only needs to show its overlay above the embedded terminal view.
+       */
       modalHostView.isHidden = false
       pendingModalHostOpenMessage = isModalHostReady ? nil : message
       if let latestModalHostSidebarState {
@@ -2257,6 +2305,7 @@ final class zmuxFocusReportingWindow: NSWindow {
 final class PaneResizeHandleView: NSView {
   var onDrag: ((CGFloat) -> Void)?
   var onDragEnded: (() -> Void)?
+  var onDoubleClick: (() -> Void)?
   private var lastDragX: CGFloat = 0
 
   override init(frame frameRect: NSRect) {
@@ -2291,6 +2340,10 @@ final class PaneResizeHandleView: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
+    if event.clickCount >= 2 {
+      onDoubleClick?()
+      return
+    }
     lastDragX = convert(event.locationInWindow, from: nil).x
   }
 

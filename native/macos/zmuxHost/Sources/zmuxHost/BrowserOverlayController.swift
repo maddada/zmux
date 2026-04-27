@@ -526,8 +526,7 @@ enum BrowserOverlayRestoreReproLog {
    traces in a separate file so a repro can be inspected without general logs.
    */
   static func append(_ event: String, _ details: [String: Any] = [:]) {
-    let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".zmux/logs", isDirectory: true)
+    let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("browser-overlay-restore-repro.log")
     let line = "[\(timestamp())] \(event) \(serialize(details))\n"
 
