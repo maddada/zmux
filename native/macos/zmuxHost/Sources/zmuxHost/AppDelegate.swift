@@ -1341,6 +1341,13 @@ final class zmuxRootView: NSView {
                 return
             }
             sidebarView.evaluateJavaScript("window.__zmux_NATIVE_WORKSPACE_BAR__?.focusProject(\(json));")
+        case "reorderProjects":
+            guard let projectIds = message["projectIds"] as? [String],
+                  let data = try? JSONEncoder().encode(projectIds),
+                  let json = String(data: data, encoding: .utf8) else {
+                return
+            }
+            sidebarView.evaluateJavaScript("window.__zmux_NATIVE_WORKSPACE_BAR__?.reorderProjects(\(json));")
         case "pickProject":
             presentWorkspaceFolderPicker()
         default:
@@ -1763,6 +1770,52 @@ final class zmuxRootView: NSView {
             position: relative;
             width: 40px;
           }
+          button[data-dragging="true"] {
+            opacity: 0.28;
+            transform: scale(0.96);
+          }
+          #drop-line {
+            background: #8fb4ff;
+            border-radius: 999px;
+            box-shadow:
+              0 0 0 1px rgba(143, 180, 255, 0.34),
+              0 0 12px rgba(143, 180, 255, 0.42);
+            height: 3px;
+            left: 8px;
+            opacity: 0;
+            pointer-events: none;
+            position: fixed;
+            top: 0;
+            transform: translateY(-50%);
+            transition: opacity 90ms ease;
+            width: 38px;
+            z-index: 20;
+          }
+          #drop-line[data-visible="true"] {
+            opacity: 1;
+          }
+          #drag-ghost {
+            align-items: center;
+            background: #121a26;
+            border: 1px solid #263346;
+            border-radius: 12px;
+            color: #d8e1f1;
+            display: none;
+            font: 700 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+            height: 40px;
+            justify-content: center;
+            left: 0;
+            opacity: 0.92;
+            pointer-events: none;
+            position: fixed;
+            top: 0;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            z-index: 21;
+          }
+          #drag-ghost[data-visible="true"] {
+            display: flex;
+          }
           button:hover {
             background: #172235;
             border-color: #3b4e69;
@@ -1822,11 +1875,26 @@ final class zmuxRootView: NSView {
       </head>
       <body>
         <div id="projects"></div>
+        <div id="drop-line"></div>
+        <div id="drag-ghost"></div>
         <button id="add" title="New workspace">+</button>
         <script>
           const projectsElement = document.getElementById("projects");
           const addButton = document.getElementById("add");
+          const dropLineElement = document.getElementById("drop-line");
+          const dragGhostElement = document.getElementById("drag-ghost");
           let state = { projects: [], activeProjectId: "" };
+          const pointerDrag = {
+            button: null,
+            didDrag: false,
+            ghostText: "",
+            placeAfterTarget: false,
+            pointerId: undefined,
+            projectId: "",
+            startX: 0,
+            startY: 0,
+            targetProjectId: "",
+          };
           const post = (message) => {
             window.webkit?.messageHandlers?.zmuxWorkspaceBar?.postMessage(message);
           };
@@ -1842,6 +1910,7 @@ final class zmuxRootView: NSView {
             state.projects.forEach((project, index) => {
               const button = document.createElement("button");
               button.type = "button";
+              button.dataset.projectId = project.projectId;
               button.dataset.active = project.isActive ? "true" : "false";
               const running = Number(project.sessionCounts?.running || 0);
               const done = Number(project.sessionCounts?.done || 0);
@@ -1853,7 +1922,77 @@ final class zmuxRootView: NSView {
               ].filter(Boolean).join(", ");
               button.title = summary ? `${project.path || project.title} - ${summary}` : (project.path || project.title);
               button.textContent = initials(project.title, index);
-              button.onclick = () => post({ type: "focusProject", projectId: project.projectId });
+              const focusProject = () => post({ type: "focusProject", projectId: project.projectId });
+              /**
+               * CDXC:WorkspaceDock 2026-04-27-08:30
+               * Project selection used to run on pointerdown to avoid dropped
+               * clicks during rail re-renders. Native HTML drag cannot start
+               * after that preventDefault, so the rail now owns a tiny pointer
+               * drag recognizer: release without movement selects; movement
+               * reorders and persists workareas. Drag feedback is a faded
+               * source button, a plain floating ghost, and an insertion line
+               * only when release would change the order.
+               */
+              button.onpointerdown = (event) => {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                pointerDrag.button = button;
+                pointerDrag.didDrag = false;
+                pointerDrag.ghostText = button.textContent || "";
+                pointerDrag.placeAfterTarget = false;
+                pointerDrag.pointerId = event.pointerId;
+                pointerDrag.projectId = project.projectId;
+                pointerDrag.startX = event.clientX;
+                pointerDrag.startY = event.clientY;
+                pointerDrag.targetProjectId = "";
+                button.setPointerCapture?.(event.pointerId);
+              };
+              button.onpointermove = (event) => {
+                if (pointerDrag.pointerId !== event.pointerId || pointerDrag.projectId !== project.projectId) return;
+                const deltaX = event.clientX - pointerDrag.startX;
+                const deltaY = event.clientY - pointerDrag.startY;
+                if (!pointerDrag.didDrag && Math.hypot(deltaX, deltaY) < 5) return;
+                pointerDrag.didDrag = true;
+                button.dataset.dragging = "true";
+                const dropTarget = getDropTarget(event.clientY, pointerDrag.projectId);
+                const target = dropTarget?.button;
+                clearDragState(button);
+                updateDragGhost(event.clientX, event.clientY);
+                if (target && wouldReorder(pointerDrag.projectId, target.dataset.projectId, dropTarget.placeAfterTarget)) {
+                  const bounds = target.getBoundingClientRect();
+                  pointerDrag.targetProjectId = target.dataset.projectId;
+                  pointerDrag.placeAfterTarget = dropTarget.placeAfterTarget;
+                  updateDropLine(bounds, pointerDrag.placeAfterTarget);
+                } else {
+                  pointerDrag.targetProjectId = "";
+                  hideDropLine();
+                }
+              };
+              button.onpointerup = (event) => {
+                if (pointerDrag.pointerId !== event.pointerId || pointerDrag.projectId !== project.projectId) return;
+                event.preventDefault();
+                button.releasePointerCapture?.(event.pointerId);
+                const sourceProjectId = pointerDrag.projectId;
+                const didDrag = pointerDrag.didDrag;
+                const targetProjectId = pointerDrag.targetProjectId;
+                const placeAfterTarget = pointerDrag.placeAfterTarget;
+                resetPointerDrag();
+                if (!didDrag) {
+                  focusProject();
+                  return;
+                }
+                if (targetProjectId) {
+                  reorderProjects(sourceProjectId, targetProjectId, placeAfterTarget);
+                }
+              };
+              button.onpointercancel = (event) => {
+                if (pointerDrag.pointerId !== event.pointerId) return;
+                resetPointerDrag();
+              };
+              button.onclick = (event) => {
+                if (event.detail > 0) return;
+                focusProject();
+              };
               if (done > 0 || working > 0) {
                 const indicators = document.createElement("span");
                 indicators.className = "indicators";
@@ -1882,6 +2021,79 @@ final class zmuxRootView: NSView {
               }
               projectsElement.appendChild(button);
             });
+          };
+          const clearDragState = (except) => {
+            projectsElement.querySelectorAll("[data-dragging]").forEach((element) => {
+              if (element !== except) delete element.dataset.dragging;
+            });
+          };
+          const resetPointerDrag = () => {
+            pointerDrag.button?.releasePointerCapture?.(pointerDrag.pointerId);
+            pointerDrag.button = null;
+            pointerDrag.didDrag = false;
+            pointerDrag.ghostText = "";
+            pointerDrag.placeAfterTarget = false;
+            pointerDrag.pointerId = undefined;
+            pointerDrag.projectId = "";
+            pointerDrag.startX = 0;
+            pointerDrag.startY = 0;
+            pointerDrag.targetProjectId = "";
+            hideDragGhost();
+            hideDropLine();
+            clearDragState();
+          };
+          const updateDragGhost = (clientX, clientY) => {
+            dragGhostElement.textContent = pointerDrag.ghostText;
+            dragGhostElement.style.left = `${clientX}px`;
+            dragGhostElement.style.top = `${clientY}px`;
+            dragGhostElement.dataset.visible = "true";
+          };
+          const hideDragGhost = () => {
+            delete dragGhostElement.dataset.visible;
+          };
+          const updateDropLine = (targetBounds, placeAfterTarget) => {
+            dropLineElement.style.left = `${targetBounds.left + 1}px`;
+            dropLineElement.style.top = `${placeAfterTarget ? targetBounds.bottom + 4 : targetBounds.top - 4}px`;
+            dropLineElement.style.width = `${Math.max(34, targetBounds.width - 2)}px`;
+            dropLineElement.dataset.visible = "true";
+          };
+          const hideDropLine = () => {
+            delete dropLineElement.dataset.visible;
+          };
+          const getDropTarget = (clientY, sourceProjectId) => {
+            const buttons = Array.from(projectsElement.querySelectorAll("button[data-project-id]"))
+              .filter((button) => button.dataset.projectId !== sourceProjectId);
+            if (buttons.length === 0) return undefined;
+            for (const button of buttons) {
+              const bounds = button.getBoundingClientRect();
+              if (clientY < bounds.top + bounds.height / 2) {
+                return { button, placeAfterTarget: false };
+              }
+            }
+            return { button: buttons[buttons.length - 1], placeAfterTarget: true };
+          };
+          const nextProjectOrder = (sourceProjectId, targetProjectId, placeAfterTarget) => {
+            if (!sourceProjectId || !targetProjectId || sourceProjectId === targetProjectId) return;
+            const ids = state.projects.map((project) => project.projectId);
+            const fromIndex = ids.indexOf(sourceProjectId);
+            const toIndex = ids.indexOf(targetProjectId);
+            if (fromIndex < 0 || toIndex < 0) return;
+            const [movedProjectId] = ids.splice(fromIndex, 1);
+            const adjustedTargetIndex = ids.indexOf(targetProjectId);
+            ids.splice(adjustedTargetIndex + (placeAfterTarget ? 1 : 0), 0, movedProjectId);
+            return ids;
+          };
+          const wouldReorder = (sourceProjectId, targetProjectId, placeAfterTarget) => {
+            const nextIds = nextProjectOrder(sourceProjectId, targetProjectId, placeAfterTarget);
+            if (!nextIds) return false;
+            return nextIds.some((projectId, index) => projectId !== state.projects[index]?.projectId);
+          };
+          const reorderProjects = (sourceProjectId, targetProjectId, placeAfterTarget) => {
+            clearDragState();
+            const ids = nextProjectOrder(sourceProjectId, targetProjectId, placeAfterTarget);
+            if (!ids) return;
+            if (!ids.some((projectId, index) => projectId !== state.projects[index]?.projectId)) return;
+            post({ type: "reorderProjects", projectIds: ids });
           };
           const formatCount = (count) => count > 99 ? "99+" : String(count);
           window.addEventListener("zmux-workspace-bar-state", (event) => {

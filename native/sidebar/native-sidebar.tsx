@@ -13,8 +13,10 @@ import {
   type TitleDerivedSessionActivity,
 } from "../../extension/session-title-activity";
 import {
+  createAgentSessionDefaultTitle,
   createDefaultGroupedSessionWorkspaceSnapshot,
   createSidebarHudState,
+  DEFAULT_TERMINAL_SESSION_TITLE,
   createSidebarSessionItems,
   getVisiblePrimaryTitle,
   getVisibleTerminalTitle,
@@ -222,6 +224,7 @@ declare global {
       addProject: (path: string, name?: string) => void;
       focusProject: (projectId: string) => void;
       getState: () => WorkspaceBarStateMessage;
+      reorderProjects: (projectIds: string[]) => void;
     };
     __zmux_NATIVE_SETTINGS__?: {
       attachZedOverlay: (targetApp: "zed" | "zed-preview" | "vscode" | "vscode-insiders") => void;
@@ -287,6 +290,8 @@ const FIRST_PROMPT_AUTO_RENAME_POLL_MS = 2_000;
  * the later native Enter command handles submission separately from text input.
  */
 const AUTO_SUBMIT_STAGED_RENAME_DELAY_MS = 1_000;
+const NATIVE_INITIAL_ACTIVITY_SUPPRESSION_MS = 7_000;
+const NATIVE_MIN_WORKING_DURATION_BEFORE_ATTENTION_MS = 5_000;
 const zmux_AGENT_NOTIFY_HOOK_PATH = `${nativeHomeDirectory()}/.zmux/hooks/agent-shell-notify.sh`;
 /**
  * CDXC:SessionTitleSync 2026-04-26-09:23
@@ -358,6 +363,8 @@ const terminalStateById = new Map<
   }
 >();
 const titleDerivedActivityBySessionId = new Map<string, TitleDerivedSessionActivity>();
+const nativeActivitySuppressedUntilBySessionId = new Map<string, number>();
+const nativeWorkingStartedAtBySessionId = new Map<string, number>();
 /**
  * CDXC:NativeTerminals 2026-04-26-06:45
  * Sidebar workspace snapshots normalize terminal ids back to canonical display
@@ -1749,10 +1756,13 @@ function restoreNativeTerminalSession(
   const nativeSessionId = `${project.projectId}-session-${nextNativeSessionNumber++}`;
   const sessionStateFilePath = createNativeSessionStateFilePath(project.projectId, session.sessionId);
   const initialInput = buildNativeRestoredTerminalInitialInput(session);
+  if (initialInput.trim()) {
+    suppressNativeSessionActivityIndicators(session.sessionId, "restore-resume-command");
+  }
   nativeSessionIdBySidebarSessionId.set(session.sessionId, nativeSessionId);
   sidebarSessionIdByNativeSessionId.set(nativeSessionId, session.sessionId);
   terminalStateById.set(session.sessionId, {
-    activity: initialInput.trim() ? "working" : "idle",
+    activity: "idle",
     agentName: session.agentName,
     lifecycleState: "running",
     sessionStateFilePath,
@@ -1760,7 +1770,7 @@ function restoreNativeTerminalSession(
   });
   appendAgentDetectionDebugLog("nativeSidebar.restoreTerminalState.created", {
     agentName: session.agentName,
-    initialActivity: initialInput.trim() ? "working" : "idle",
+    initialActivity: "idle",
     initialInputPreview: initialInput.trim().slice(0, 120),
     nativeSessionId,
     reason,
@@ -2163,6 +2173,93 @@ function quoteNativeShellArg(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+function suppressNativeSessionActivityIndicators(
+  sessionId: string,
+  reason: "agent-launch" | "restore-resume-command",
+): void {
+  const suppressedUntil = Date.now() + NATIVE_INITIAL_ACTIVITY_SUPPRESSION_MS;
+  nativeActivitySuppressedUntilBySessionId.set(sessionId, suppressedUntil);
+  nativeWorkingStartedAtBySessionId.delete(sessionId);
+  const terminalState = terminalStateById.get(sessionId);
+  if (terminalState?.activity === "attention" || terminalState?.activity === "working") {
+    terminalState.activity = "idle";
+  }
+  /**
+   * CDXC:SessionRestore 2026-04-27-08:20
+   * Native Ghostty title events can briefly report agent working/done markers
+   * while a new or resumed agent is still booting. Mirror agent-tiler's startup
+   * activity suppression so launch/resume noise does not flash Working or Done
+   * before the agent has had a real chance to work.
+   */
+  appendAgentDetectionDebugLog("nativeSidebar.activitySuppression.started", {
+    reason,
+    sessionId,
+    suppressedUntil: new Date(suppressedUntil).toISOString(),
+  });
+}
+
+function getNativeActivitySuppressedUntil(sessionId: string): number | undefined {
+  const suppressedUntil = nativeActivitySuppressedUntilBySessionId.get(sessionId);
+  if (
+    suppressedUntil !== undefined &&
+    Number.isFinite(suppressedUntil) &&
+    suppressedUntil <= Date.now()
+  ) {
+    nativeActivitySuppressedUntilBySessionId.delete(sessionId);
+    appendAgentDetectionDebugLog("nativeSidebar.activitySuppression.expired", {
+      sessionId,
+      suppressedUntil: new Date(suppressedUntil).toISOString(),
+    });
+    return undefined;
+  }
+
+  return suppressedUntil;
+}
+
+function getNativeEffectiveTitleActivity(
+  sessionId: string,
+  nextDerivedActivity: TitleDerivedSessionActivity,
+): TitleDerivedSessionActivity {
+  const now = Date.now();
+  const suppressedUntil = getNativeActivitySuppressedUntil(sessionId);
+  if (
+    suppressedUntil !== undefined &&
+    Number.isFinite(suppressedUntil) &&
+    now < suppressedUntil
+  ) {
+    nativeWorkingStartedAtBySessionId.delete(sessionId);
+    return { ...nextDerivedActivity, activity: "idle" };
+  }
+
+  if (nextDerivedActivity.activity === "working") {
+    if (!nativeWorkingStartedAtBySessionId.has(sessionId)) {
+      nativeWorkingStartedAtBySessionId.set(sessionId, now);
+    }
+    return nextDerivedActivity;
+  }
+
+  if (nextDerivedActivity.activity === "attention") {
+    const workingStartedAt = nativeWorkingStartedAtBySessionId.get(sessionId);
+    const workingDurationMs =
+      workingStartedAt === undefined ? undefined : Math.max(0, now - workingStartedAt);
+    if (
+      workingStartedAt === undefined ||
+      (workingDurationMs ?? 0) < NATIVE_MIN_WORKING_DURATION_BEFORE_ATTENTION_MS
+    ) {
+      nativeWorkingStartedAtBySessionId.delete(sessionId);
+      appendAgentDetectionDebugLog("nativeSidebar.activitySuppression.attentionSuppressed", {
+        sessionId,
+        workingDurationMs,
+      });
+      return { ...nextDerivedActivity, activity: "idle" };
+    }
+    return nextDerivedActivity;
+  }
+
+  nativeWorkingStartedAtBySessionId.delete(sessionId);
+  return nextDerivedActivity;
+}
+
 function buildNativeRestoredTerminalInitialInput(session: TerminalSessionRecord): string {
   const command = buildNativeResumeAgentCommand(session.agentName, session.title);
   return command ? `${command}\r` : "";
@@ -2309,7 +2406,7 @@ function resolveNativeAgentCommand(agentId: NativeResumeAgentId | undefined): st
 }
 
 function createTerminal(
-  title = "Shell",
+  title = DEFAULT_TERMINAL_SESSION_TITLE,
   initialInput = "",
   groupId?: string,
   agentName?: string,
@@ -2336,9 +2433,12 @@ function createTerminal(
   if (!session) {
     return undefined;
   }
+  if (initialInput.trim() && agentName) {
+    suppressNativeSessionActivityIndicators(session.sessionId, "agent-launch");
+  }
 
   terminalStateById.set(session.sessionId, {
-    activity: initialInput.trim() ? "working" : "idle",
+    activity: initialInput.trim() && !agentName ? "working" : "idle",
     agentName,
     lifecycleState: "running",
     sessionStateFilePath,
@@ -2346,7 +2446,7 @@ function createTerminal(
   });
   appendAgentDetectionDebugLog("nativeSidebar.terminalState.created", {
     agentName,
-    initialActivity: initialInput.trim() ? "working" : "idle",
+    initialActivity: initialInput.trim() && !agentName ? "working" : "idle",
     initialInputPreview: initialInput.trim().slice(0, 120),
     nativeSessionId,
     sessionId: session.sessionId,
@@ -2467,7 +2567,11 @@ function getNativeTerminalTitleSessionSyncDecision(args: {
 }
 
 function isGeneratedSessionTitle(title: string): boolean {
-  return /^Session\s+\d+$/iu.test(title);
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  return (
+    /^Session\s+\d+$/iu.test(normalizedTitle) ||
+    getVisiblePrimaryTitle(normalizedTitle) === undefined
+  );
 }
 
 function isGenericAgentTitle(title: string, agentName: string | undefined): boolean {
@@ -2851,6 +2955,8 @@ function closeTerminal(sessionId: string): void {
   updateActiveProjectWorkspace((workspace) => removeSessionInSimpleWorkspace(workspace, sessionId).snapshot);
   terminalStateById.delete(sessionId);
   titleDerivedActivityBySessionId.delete(sessionId);
+  nativeActivitySuppressedUntilBySessionId.delete(sessionId);
+  nativeWorkingStartedAtBySessionId.delete(sessionId);
   postNative({ sessionId: nativeSessionId, type: "closeTerminal" });
   publish();
 }
@@ -2930,7 +3036,7 @@ function restartNativeSession(sessionId: string): void {
    * agent-specific resume command instead of opening a fresh shell.
    */
   closeTerminal(sessionId);
-  createTerminal(session.title || "Shell", initialInput, groupId, session.agentName);
+  createTerminal(session.title || DEFAULT_TERMINAL_SESSION_TITLE, initialInput, groupId, session.agentName);
 }
 
 function forkNativeSession(sessionId: string): void {
@@ -2939,7 +3045,7 @@ function forkNativeSession(sessionId: string): void {
   if (!session) {
     return;
   }
-  createTerminal(`${session.title || "Shell"} Fork`, "", groupId);
+  createTerminal(`${session.title || DEFAULT_TERMINAL_SESSION_TITLE} Fork`, "", groupId);
 }
 
 function findSidebarSessionForCli(
@@ -3076,7 +3182,7 @@ function runCliAgent(agentId: string, groupId?: string): TerminalSessionRecord |
   if (!agent?.command) {
     throw new Error(`Unknown or unconfigured agent: ${agentId}`);
   }
-  return createTerminal(agent.name, `${agent.command}\r`, groupId, agent.agentId);
+  return createTerminal(createAgentSessionDefaultTitle(agent.name), `${agent.command}\r`, groupId, agent.agentId);
 }
 
 function runCliCommandButton(commandId: string): TerminalSessionRecord | undefined {
@@ -3108,7 +3214,7 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         return { ok: true, state: summarizeCliState() };
       case "createSession": {
         const session = createTerminal(
-          typeof payload.title === "string" ? payload.title : "Shell",
+          typeof payload.title === "string" ? payload.title : DEFAULT_TERMINAL_SESSION_TITLE,
           typeof payload.input === "string" ? payload.input : "",
           typeof payload.groupId === "string" ? payload.groupId : undefined,
         );
@@ -3394,7 +3500,7 @@ function addProject(path: string, name = projectNameFromPath(path)): void {
   }
   focusProject(projectId);
   if (activeSnapshot().sessions.length === 0) {
-    createTerminal("Native Ghostty");
+    createTerminal(DEFAULT_TERMINAL_SESSION_TITLE);
     return;
   }
   publish();
@@ -3408,6 +3514,38 @@ function focusProject(projectId: string): void {
   writeStoredProjects("focusProject");
   postZedOverlaySettings();
   void refreshGitState();
+  publish();
+}
+
+function reorderProjects(projectIds: string[]): void {
+  const requestedIds = projectIds.filter((projectId) =>
+    projects.some((project) => project.projectId === projectId),
+  );
+  if (requestedIds.length === 0) {
+    return;
+  }
+
+  /**
+   * CDXC:WorkspaceDock 2026-04-27-08:22
+   * Workspace rail drag/drop reorders workareas persistently. Preserve any
+   * projects missing from the drag payload at the end so stale rail messages
+   * cannot drop workspaces from localStorage.
+   */
+  const requestedIdSet = new Set(requestedIds);
+  const orderedProjects = requestedIds
+    .map((projectId) => projects.find((project) => project.projectId === projectId))
+    .filter((project): project is NativeProject => Boolean(project));
+  const remainingProjects = projects.filter((project) => !requestedIdSet.has(project.projectId));
+  const nextProjects = [...orderedProjects, ...remainingProjects];
+  if (
+    nextProjects.length === projects.length &&
+    nextProjects.every((project, index) => project.projectId === projects[index]?.projectId)
+  ) {
+    return;
+  }
+
+  projects = nextProjects;
+  writeStoredProjects("reorderProjects");
   publish();
 }
 
@@ -3630,7 +3768,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       createTerminal();
       return;
     case "createSessionInGroup":
-      createTerminal("Shell", "", message.groupId);
+      createTerminal(DEFAULT_TERMINAL_SESSION_TITLE, "", message.groupId);
       return;
     case "openBrowser":
       openNativeBrowserWindow(DEFAULT_BROWSER_LAUNCH_URL);
@@ -3699,7 +3837,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "promptRenameSession": {
       const session = findTerminalSession(message.sessionId);
       if (session) {
-        const title = window.prompt("Rename session", session.title || "Shell");
+        const title = window.prompt("Rename session", session.title || DEFAULT_TERMINAL_SESSION_TITLE);
         if (title?.trim()) {
           updateActiveProjectWorkspace((workspace) =>
             setSessionTitleInSimpleWorkspace(workspace, message.sessionId, title.trim()).snapshot,
@@ -3772,6 +3910,8 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       for (const session of group?.snapshot.sessions ?? []) {
         terminalStateById.delete(session.sessionId);
         titleDerivedActivityBySessionId.delete(session.sessionId);
+        nativeActivitySuppressedUntilBySessionId.delete(session.sessionId);
+        nativeWorkingStartedAtBySessionId.delete(session.sessionId);
         const nativeSessionId = forgetNativeSessionMapping(session.sessionId);
         postNative({ sessionId: nativeSessionId, type: "closeTerminal" });
       }
@@ -3878,7 +4018,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "runSidebarAgent": {
       const agent = agents.find((candidate) => candidate.agentId === message.agentId);
       if (agent?.command) {
-        createTerminal(agent.name, `${agent.command}\r`, undefined, agent.agentId);
+        createTerminal(createAgentSessionDefaultTitle(agent.name), `${agent.command}\r`, undefined, agent.agentId);
       }
       return;
     }
@@ -4029,6 +4169,9 @@ window.addEventListener("zmux-native-host-event", (event) => {
       previousDerivedActivity,
       knownAgentNameBeforeDetection,
     );
+    const effectiveDerivedActivity = nextDerivedActivity
+      ? getNativeEffectiveTitleActivity(sidebarSessionId, nextDerivedActivity)
+      : undefined;
     terminalState.terminalTitle = hostEvent.title;
     /**
      * CDXC:AgentDetection 2026-04-26-10:50
@@ -4037,11 +4180,11 @@ window.addEventListener("zmux-native-host-event", (event) => {
      * detector so Codex, Claude, Gemini, and Copilot titles update the sidebar
      * icon/status without requiring launch through an agent button.
      */
-    if (nextDerivedActivity) {
-      titleDerivedActivityBySessionId.set(sidebarSessionId, nextDerivedActivity);
-      terminalState.agentName = nextDerivedActivity.agentName;
-      terminalState.activity = nextDerivedActivity.activity;
-      setTerminalSessionAgentName(sidebarSessionId, nextDerivedActivity.agentName);
+    if (effectiveDerivedActivity) {
+      titleDerivedActivityBySessionId.set(sidebarSessionId, effectiveDerivedActivity);
+      terminalState.agentName = effectiveDerivedActivity.agentName;
+      terminalState.activity = effectiveDerivedActivity.activity;
+      setTerminalSessionAgentName(sidebarSessionId, effectiveDerivedActivity.agentName);
     } else {
       titleDerivedActivityBySessionId.delete(sidebarSessionId);
     }
@@ -4049,6 +4192,7 @@ window.addEventListener("zmux-native-host-event", (event) => {
       knownAgentNameAfterDetection: terminalState.agentName,
       knownAgentNameBeforeDetection,
       nativeSessionId: hostEvent.sessionId,
+      effectiveDerivedActivity,
       nextDerivedActivity,
       previousDerivedActivity,
       previousTerminalTitle,
@@ -4057,8 +4201,8 @@ window.addEventListener("zmux-native-host-event", (event) => {
       titleDerivedActivityStored: titleDerivedActivityBySessionId.has(sidebarSessionId),
     });
     appendSessionTitleDebugLog("terminalRenameCommand.notSent", {
-      detectedAgentName: nextDerivedActivity?.agentName,
-      detectedAgentStatus: nextDerivedActivity?.activity,
+      detectedAgentName: effectiveDerivedActivity?.agentName,
+      detectedAgentStatus: effectiveDerivedActivity?.activity,
       nativeSessionId: hostEvent.sessionId,
       previousTerminalTitle,
       reason: "native-title-event-is-source-of-truth",
@@ -4069,11 +4213,25 @@ window.addEventListener("zmux-native-host-event", (event) => {
   } else if (hostEvent.type === "terminalExited") {
     terminalState.lifecycleState = "done";
     terminalState.activity = "idle";
+    nativeWorkingStartedAtBySessionId.delete(sidebarSessionId);
   } else if (hostEvent.type === "terminalError") {
     terminalState.lifecycleState = "error";
     terminalState.activity = "attention";
     terminalState.terminalTitle = hostEvent.message;
+    nativeWorkingStartedAtBySessionId.delete(sidebarSessionId);
   } else if (hostEvent.type === "terminalBell") {
+    const suppressedUntil = getNativeActivitySuppressedUntil(sidebarSessionId);
+    if (
+      suppressedUntil !== undefined &&
+      Number.isFinite(suppressedUntil) &&
+      Date.now() < suppressedUntil
+    ) {
+      appendAgentDetectionDebugLog("nativeSidebar.activitySuppression.bellSuppressed", {
+        sessionId: sidebarSessionId,
+        suppressedUntil: new Date(suppressedUntil).toISOString(),
+      });
+      return;
+    }
     terminalState.activity = "attention";
   } else if (hostEvent.type === "terminalReady") {
     terminalState.lifecycleState = "running";
@@ -4125,6 +4283,7 @@ window.__zmux_NATIVE_WORKSPACE_BAR__ = {
   addProject,
   focusProject,
   getState: createWorkspaceBarState,
+  reorderProjects,
 };
 
 window.__zmux_NATIVE_SETTINGS__ = {
@@ -4164,7 +4323,7 @@ queueMicrotask(() => {
   startFirstPromptAutoRenameMonitor();
   void refreshGitState();
   if (activeSnapshot().sessions.length === 0) {
-    createTerminal("Native Ghostty");
+    createTerminal(DEFAULT_TERMINAL_SESSION_TITLE);
   } else {
     publish();
   }

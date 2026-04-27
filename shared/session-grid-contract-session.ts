@@ -32,6 +32,7 @@ import { normalizeT3SessionMetadata } from "./t3-session-metadata";
  */
 const LEADING_TERMINAL_TITLE_STATUS_MARKER_PATTERN = /^[\s\u2800-\u28ff·•⋅◦✳*✶✻✽✸✹✺✷✴✦◇🤖🔔]+/u;
 const LEADING_TERMINAL_TITLE_PREFIX_PATTERN = /^(?:OC\s*\|\s*)+/iu;
+export const DEFAULT_TERMINAL_SESSION_TITLE = "Terminal Session";
 const DEFAULT_TERMINAL_ENGINE: TerminalEngine = "ghostty-native";
 const IGNORED_GENERIC_TERMINAL_TITLES = new Set([
   "claude",
@@ -41,9 +42,22 @@ const IGNORED_GENERIC_TERMINAL_TITLES = new Set([
   "openai codex",
   "zmux",
 ]);
+const IGNORED_PLACEHOLDER_SESSION_TITLES = new Set([
+  DEFAULT_TERMINAL_SESSION_TITLE.toLowerCase(),
+  "claude session",
+  "claude code session",
+  "codex session",
+  "codex cli session",
+  "copilot session",
+  "gemini session",
+  "opencode session",
+  "open code session",
+  "openai codex session",
+  "t3 code session",
+]);
+const ELLIPSIZED_PATH_TITLE_PATTERN = /^(?:…|\.\.\.)[\\/]/u;
 const WINDOWS_DEFAULT_POWERSHELL_TITLE_PATTERN =
   /^[a-z]:\\windows\\system32\\windowspowershell\\v1\.0\\powershell\.exe(?:\s+\.)?$/iu;
-export const DEFAULT_TERMINAL_SESSION_TITLE = "Terminal Session";
 
 export function clampVisibleSessionCount(value: number): VisibleSessionCount {
   if (value <= 1) {
@@ -402,7 +416,7 @@ export function getVisibleSessionNumber(
 
 export function getVisiblePrimaryTitle(title: string): string | undefined {
   const normalizedTitle = title.trim();
-  if (!normalizedTitle || /^Session \d+$/.test(normalizedTitle)) {
+  if (!normalizedTitle || isIgnoredPlaceholderSessionTitle(normalizedTitle)) {
     return undefined;
   }
 
@@ -428,7 +442,11 @@ export function getVisibleTerminalTitle(title: string | undefined): string | und
     return undefined;
   }
 
-  if (/^(~|\/)/.test(normalizedTitle)) {
+  if (isPathLikeTerminalTitle(normalizedTitle)) {
+    return undefined;
+  }
+
+  if (isIgnoredPlaceholderSessionTitle(normalizedTitle)) {
     return undefined;
   }
 
@@ -441,6 +459,26 @@ export function getVisibleTerminalTitle(title: string | undefined): string | und
   }
 
   return normalizedTitle;
+}
+
+function isIgnoredPlaceholderSessionTitle(title: string): boolean {
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  /**
+   * CDXC:Session-title-defaults 2026-04-27-08:20
+   * Neutral titles such as `Terminal Session` and agent-aware creation titles
+   * such as `Codex Session` are placeholders from session creation. Path-like
+   * Ghostty titles such as `…/dev/_active/agent-tiler` are also shell context,
+   * not user-persisted names, so none of them should drive resume titles.
+   */
+  return (
+    /^Session \d+$/iu.test(normalizedTitle) ||
+    IGNORED_PLACEHOLDER_SESSION_TITLES.has(normalizedTitle.toLowerCase()) ||
+    isPathLikeTerminalTitle(normalizedTitle)
+  );
+}
+
+function isPathLikeTerminalTitle(title: string): boolean {
+  return /^(~|\/)/u.test(title) || ELLIPSIZED_PATH_TITLE_PATTERN.test(title);
 }
 
 export function getPreferredSessionTitle(

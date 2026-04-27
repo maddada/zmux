@@ -431,6 +431,9 @@ describe("visible primary titles", () => {
   test("should hide generated Session N placeholder titles in sidebar items", () => {
     expect(getVisiblePrimaryTitle("Session 1")).toBeUndefined();
     expect(getVisiblePrimaryTitle(" Session 12 ")).toBeUndefined();
+    expect(getVisiblePrimaryTitle(DEFAULT_TERMINAL_SESSION_TITLE)).toBeUndefined();
+    expect(getVisiblePrimaryTitle("Codex Session")).toBeUndefined();
+    expect(getVisiblePrimaryTitle("…/dev/_active/agent-tiler")).toBeUndefined();
     expect(getVisiblePrimaryTitle("Claude Code")).toBe("Claude Code");
   });
 
@@ -452,6 +455,12 @@ describe("visible primary titles", () => {
 
   test("should ignore generic zmux terminal titles when choosing a visible session title", () => {
     expect(getPreferredSessionTitle("Session 1", "zmux")).toBeUndefined();
+  });
+
+  test("should ignore placeholder and path-like terminal titles when choosing persisted titles", () => {
+    expect(getPreferredSessionTitle(DEFAULT_TERMINAL_SESSION_TITLE, undefined)).toBeUndefined();
+    expect(getPreferredSessionTitle("Codex Session", "…/dev/_active/agent-tiler")).toBeUndefined();
+    expect(getPreferredSessionTitle("Bug Fix", "…/dev/_active/agent-tiler")).toBe("Bug Fix");
   });
 
   test("should ignore bare agent names when choosing a visible session title", () => {
