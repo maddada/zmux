@@ -133,6 +133,7 @@ type NativeHostCommand =
     }
   | { sessionId: string; type: "closeTerminal" }
   | { sessionId: string; type: "focusTerminal" }
+  | { type: "activateApp" }
   | { sessionId: string; text: string; type: "writeTerminalText" }
   | { sessionId: string; type: "sendTerminalEnter" }
   | {
@@ -409,6 +410,124 @@ type NativeCliSessionSelector = {
   sessionNumber?: number;
 };
 
+type AgentManagerXMuxSource = "zmux";
+
+type AgentManagerXWorkspaceSession = {
+  agent: string;
+  alias: string;
+  displayName: string;
+  isFocused: boolean;
+  isRunning: boolean;
+  isVisible: boolean;
+  kind: "t3" | "terminal";
+  lastActiveAt: string;
+  projectName?: string;
+  projectPath?: string;
+  sessionId: string;
+  status: "attention" | "idle" | "working";
+  terminalTitle?: string;
+  threadId?: string;
+};
+
+type AgentManagerXWorkspaceSnapshotMessage = {
+  sessions: AgentManagerXWorkspaceSession[];
+  source: AgentManagerXMuxSource;
+  type: "workspaceSnapshot";
+  updatedAt: string;
+  workspaceFaviconDataUrl?: string;
+  workspaceId: string;
+  workspaceName: string;
+  workspacePath: string;
+};
+
+type AgentManagerXSessionCommandMessage = {
+  sessionId: string;
+  type: "closeSession" | "focusSession";
+  workspaceId: string;
+};
+
+const AGENT_MANAGER_X_BRIDGE_URL = "ws://127.0.0.1:47652/zmux";
+const AGENT_MANAGER_X_RECONNECT_INITIAL_DELAY_MS = 1000;
+const AGENT_MANAGER_X_RECONNECT_MAX_DELAY_MS = 5000;
+
+class AgentManagerXNativeBridgeClient {
+  private latestSnapshotJsonByWorkspaceId = new Map<string, string>();
+  private reconnectDelayMs = AGENT_MANAGER_X_RECONNECT_INITIAL_DELAY_MS;
+  private reconnectTimer: number | undefined;
+  private socket: WebSocket | undefined;
+
+  publish(snapshots: readonly AgentManagerXWorkspaceSnapshotMessage[]): void {
+    const nextWorkspaceIds = new Set<string>();
+    for (const snapshot of snapshots) {
+      nextWorkspaceIds.add(snapshot.workspaceId);
+      this.latestSnapshotJsonByWorkspaceId.set(snapshot.workspaceId, JSON.stringify(snapshot));
+    }
+    for (const workspaceId of Array.from(this.latestSnapshotJsonByWorkspaceId.keys())) {
+      if (!nextWorkspaceIds.has(workspaceId)) {
+        this.latestSnapshotJsonByWorkspaceId.delete(workspaceId);
+      }
+    }
+    this.ensureConnected();
+    this.flush();
+  }
+
+  private ensureConnected(): void {
+    if (this.socket && this.socket.readyState !== WebSocket.CLOSED) {
+      return;
+    }
+    if (this.reconnectTimer !== undefined) {
+      return;
+    }
+
+    try {
+      const socket = new WebSocket(AGENT_MANAGER_X_BRIDGE_URL);
+      this.socket = socket;
+      socket.addEventListener("open", () => {
+        this.reconnectDelayMs = AGENT_MANAGER_X_RECONNECT_INITIAL_DELAY_MS;
+        this.flush();
+      });
+      socket.addEventListener("message", (event) => {
+        handleAgentManagerXSessionCommand(event.data);
+      });
+      socket.addEventListener("close", () => {
+        if (this.socket === socket) {
+          this.socket = undefined;
+        }
+        this.scheduleReconnect();
+      });
+      socket.addEventListener("error", () => {
+        socket.close();
+      });
+    } catch {
+      this.scheduleReconnect();
+    }
+  }
+
+  private flush(): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    for (const snapshotJson of this.latestSnapshotJsonByWorkspaceId.values()) {
+      this.socket.send(snapshotJson);
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer !== undefined) {
+      return;
+    }
+    const delayMs = this.reconnectDelayMs;
+    this.reconnectDelayMs = Math.min(
+      AGENT_MANAGER_X_RECONNECT_MAX_DELAY_MS,
+      this.reconnectDelayMs * 2,
+    );
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.ensureConnected();
+    }, delayMs);
+  }
+}
+
 const restoredProjectState = readStoredProjects();
 let projects: NativeProject[] = restoredProjectState.projects;
 let activeProjectId = restoredProjectState.activeProjectId;
@@ -440,6 +559,13 @@ const nativeWorkingStartedAtBySessionId = new Map<string, number>();
  */
 const nativeSessionIdBySidebarSessionId = new Map<string, string>();
 const sidebarSessionIdByNativeSessionId = new Map<string, string>();
+/**
+ * CDXC:AgentManagerXBridge 2026-04-27-20:34
+ * Agent Manager X reads live mux sessions from a localhost WebSocket. The
+ * packaged zmux app owns native sidebar state, so it must publish snapshots
+ * directly instead of relying on the VS Code extension bridge path.
+ */
+const agentManagerXBridgeClient = new AgentManagerXNativeBridgeClient();
 
 /**
  * CDXC:NativeSidebar 2026-04-26-00:47
@@ -1668,9 +1794,104 @@ function buildChromeCanaryBrowserGroup(): SidebarSessionGroup {
   };
 }
 
+function createProjectedSidebarGroupsForProject(project: NativeProject): SidebarSessionGroup[] {
+  const workspace = project.workspace;
+  return workspace.groups.map((group) => ({
+    groupId: group.groupId,
+    isActive: group.groupId === workspace.activeGroupId,
+    isFocusModeActive: group.snapshot.visibleCount === 1,
+    kind: "workspace",
+    layoutVisibleCount: group.snapshot.visibleCount,
+    sessions: createSidebarSessionItems(group.snapshot, "mac").map((session) => {
+      const sessionRecord = group.snapshot.sessions.find(
+        (candidate) => candidate.sessionId === session.sessionId,
+      );
+      const persistedAgentName =
+        sessionRecord?.kind === "terminal" ? sessionRecord.agentName : undefined;
+      const terminalState = terminalStateById.get(session.sessionId);
+      if (session.sessionKind !== "terminal") {
+        return session;
+      }
+      const visibleTerminalTitle = getVisibleTerminalTitle(terminalState?.terminalTitle);
+      const displayPrimaryTitle =
+        sessionRecord && sessionRecord.kind === "terminal"
+          ? getSessionCardPrimaryTitle(sessionRecord)
+          : session.primaryTitle;
+      const visiblePrimaryTitle = getVisiblePrimaryTitle(displayPrimaryTitle ?? "");
+      /**
+       * CDXC:AgentDetection 2026-04-27-02:36
+       * Session cards must show the detected agent from the canonical session
+       * record even when the native terminal state is not currently mounted.
+       * Live terminal state can still refine the value as title detection runs.
+       */
+      const projectedAgentName = terminalState?.agentName ?? persistedAgentName;
+      const agentIcon = getSidebarAgentIconById(projectedAgentName);
+      const shouldPreferTerminalTitle =
+        Boolean(visibleTerminalTitle) && shouldPreferTerminalTitleForAgentIcon(agentIcon);
+      const primaryTitle = shouldPreferTerminalTitle
+        ? visibleTerminalTitle
+        : visiblePrimaryTitle
+          ? displayPrimaryTitle
+          : (visibleTerminalTitle ?? displayPrimaryTitle);
+      const secondaryTerminalTitle = shouldPreferTerminalTitle
+        ? undefined
+        : displayPrimaryTitle
+          ? visibleTerminalTitle
+          : undefined;
+      appendSessionTitleDebugLog("nativeSidebar.sidebarTitleProjection", {
+        agentIcon,
+        primaryTitle,
+        rawTerminalTitle: terminalState?.terminalTitle,
+        reason: getNativeSidebarTitleProjectionReason({
+          hasTerminalState: Boolean(terminalState),
+          shouldPreferTerminalTitle,
+          visiblePrimaryTitle,
+          visibleTerminalTitle,
+        }),
+        sessionId: session.sessionId,
+        terminalTitle: secondaryTerminalTitle,
+        visiblePrimaryTitle,
+        visibleTerminalTitle,
+      });
+      appendAgentDetectionDebugLog("nativeSidebar.sidebarCardProjection", {
+        agentIcon,
+        agentName: projectedAgentName,
+        hasTerminalState: Boolean(terminalState),
+        lifecycleState: terminalState?.lifecycleState,
+        persistedAgentName,
+        rawTerminalTitle: terminalState?.terminalTitle,
+        sessionActivity: session.activity,
+        sessionId: session.sessionId,
+        terminalActivity: terminalState?.activity,
+        titleProjectionReason: getNativeSidebarTitleProjectionReason({
+          hasTerminalState: Boolean(terminalState),
+          shouldPreferTerminalTitle,
+          visiblePrimaryTitle,
+          visibleTerminalTitle,
+        }),
+        visibleTerminalTitle,
+      });
+      return {
+        ...session,
+        activity: terminalState?.activity ?? session.activity,
+        agentIcon,
+        lifecycleState: terminalState?.lifecycleState ?? session.lifecycleState,
+        isGeneratingFirstPromptTitle: terminalState?.firstPromptAutoRenameInProgress === true,
+        isRunning: terminalState?.lifecycleState === "running",
+        isPrimaryTitleTerminalTitle:
+          Boolean(visibleTerminalTitle) && (!visiblePrimaryTitle || shouldPreferTerminalTitle),
+        primaryTitle,
+        terminalTitle: secondaryTerminalTitle,
+      };
+    }),
+    title: group.title,
+    viewMode: group.snapshot.viewMode,
+    visibleCount: group.snapshot.visibleCount,
+  }));
+}
+
 function buildSidebarMessage(): SidebarHydrateMessage {
   const project = activeProject();
-  const workspace = project.workspace;
   const snapshot = activeSnapshot();
   const browserGroups = isChromeCanaryRunning ? [buildChromeCanaryBrowserGroup()] : [];
   /**
@@ -1680,100 +1901,7 @@ function buildSidebarMessage(): SidebarHydrateMessage {
    * passing them to shared sidebar HUD creation.
    */
   return {
-    groups: browserGroups.concat(
-      workspace.groups.map((group) => ({
-        groupId: group.groupId,
-        isActive: group.groupId === workspace.activeGroupId,
-        isFocusModeActive: group.snapshot.visibleCount === 1,
-        kind: "workspace",
-        layoutVisibleCount: group.snapshot.visibleCount,
-        sessions: createSidebarSessionItems(group.snapshot, "mac").map((session) => {
-          const sessionRecord = group.snapshot.sessions.find(
-            (candidate) => candidate.sessionId === session.sessionId,
-          );
-          const persistedAgentName =
-            sessionRecord?.kind === "terminal" ? sessionRecord.agentName : undefined;
-          const terminalState = terminalStateById.get(session.sessionId);
-          if (session.sessionKind !== "terminal") {
-            return session;
-          }
-          const visibleTerminalTitle = getVisibleTerminalTitle(terminalState?.terminalTitle);
-          const displayPrimaryTitle =
-            sessionRecord && sessionRecord.kind === "terminal"
-              ? getSessionCardPrimaryTitle(sessionRecord)
-              : session.primaryTitle;
-          const visiblePrimaryTitle = getVisiblePrimaryTitle(displayPrimaryTitle ?? "");
-          /**
-           * CDXC:AgentDetection 2026-04-27-02:36
-           * Session cards must show the detected agent from the canonical session
-           * record even when the native terminal state is not currently mounted.
-           * Live terminal state can still refine the value as title detection runs.
-           */
-          const projectedAgentName = terminalState?.agentName ?? persistedAgentName;
-          const agentIcon = getSidebarAgentIconById(projectedAgentName);
-          const shouldPreferTerminalTitle =
-            Boolean(visibleTerminalTitle) && shouldPreferTerminalTitleForAgentIcon(agentIcon);
-          const primaryTitle = shouldPreferTerminalTitle
-            ? visibleTerminalTitle
-            : visiblePrimaryTitle
-              ? displayPrimaryTitle
-              : (visibleTerminalTitle ?? displayPrimaryTitle);
-          const secondaryTerminalTitle = shouldPreferTerminalTitle
-            ? undefined
-            : displayPrimaryTitle
-              ? visibleTerminalTitle
-              : undefined;
-          appendSessionTitleDebugLog("nativeSidebar.sidebarTitleProjection", {
-            agentIcon,
-            primaryTitle,
-            rawTerminalTitle: terminalState?.terminalTitle,
-            reason: getNativeSidebarTitleProjectionReason({
-              hasTerminalState: Boolean(terminalState),
-              shouldPreferTerminalTitle,
-              visiblePrimaryTitle,
-              visibleTerminalTitle,
-            }),
-            sessionId: session.sessionId,
-            terminalTitle: secondaryTerminalTitle,
-            visiblePrimaryTitle,
-            visibleTerminalTitle,
-          });
-          appendAgentDetectionDebugLog("nativeSidebar.sidebarCardProjection", {
-            agentIcon,
-            agentName: projectedAgentName,
-            hasTerminalState: Boolean(terminalState),
-            lifecycleState: terminalState?.lifecycleState,
-            persistedAgentName,
-            rawTerminalTitle: terminalState?.terminalTitle,
-            sessionActivity: session.activity,
-            sessionId: session.sessionId,
-            terminalActivity: terminalState?.activity,
-            titleProjectionReason: getNativeSidebarTitleProjectionReason({
-              hasTerminalState: Boolean(terminalState),
-              shouldPreferTerminalTitle,
-              visiblePrimaryTitle,
-              visibleTerminalTitle,
-            }),
-            visibleTerminalTitle,
-          });
-          return {
-            ...session,
-            activity: terminalState?.activity ?? session.activity,
-            agentIcon,
-            lifecycleState: terminalState?.lifecycleState ?? session.lifecycleState,
-            isGeneratingFirstPromptTitle: terminalState?.firstPromptAutoRenameInProgress === true,
-            isRunning: terminalState?.lifecycleState === "running",
-            isPrimaryTitleTerminalTitle:
-              Boolean(visibleTerminalTitle) && (!visiblePrimaryTitle || shouldPreferTerminalTitle),
-            primaryTitle,
-            terminalTitle: secondaryTerminalTitle,
-          };
-        }),
-        title: group.title,
-        viewMode: group.snapshot.viewMode,
-        visibleCount: group.snapshot.visibleCount,
-      })),
-    ),
+    groups: browserGroups.concat(createProjectedSidebarGroupsForProject(project)),
     hud: {
       ...createSidebarHudState(
         snapshot,
@@ -1839,10 +1967,99 @@ function getNativeSidebarTitleProjectionReason(args: {
   return "terminal-title-used-because-primary-title-missing";
 }
 
+function createAgentManagerXWorkspaceSnapshots(): AgentManagerXWorkspaceSnapshotMessage[] {
+  const updatedAt = new Date().toISOString();
+  return projects.map((project) => {
+    const sessions = createProjectedSidebarGroupsForProject(project).flatMap((group) =>
+      group.sessions.flatMap((session): AgentManagerXWorkspaceSession[] => {
+        if (session.sessionKind === "browser") {
+          return [];
+        }
+        const primaryTitle = session.primaryTitle?.trim();
+        const terminalTitle = session.terminalTitle?.trim();
+        const alias = session.alias.trim();
+        return [
+          {
+            agent: session.agentIcon ?? "unknown",
+            alias: session.alias,
+            displayName: primaryTitle || terminalTitle || alias || "Session",
+            isFocused: project.projectId === activeProjectId && session.isFocused,
+            isRunning: session.isRunning,
+            isVisible: project.projectId === activeProjectId && session.isVisible,
+            kind: session.sessionKind === "t3" ? "t3" : "terminal",
+            lastActiveAt: session.lastInteractionAt ?? updatedAt,
+            projectName: project.name,
+            projectPath: project.path,
+            sessionId: session.sessionId,
+            status: session.activity,
+            terminalTitle: session.terminalTitle,
+          },
+        ];
+      }),
+    );
+
+    return {
+      sessions,
+      source: "zmux",
+      type: "workspaceSnapshot",
+      updatedAt,
+      workspaceFaviconDataUrl: project.iconDataUrl,
+      workspaceId: project.projectId,
+      workspaceName: project.name,
+      workspacePath: project.path,
+    };
+  });
+}
+
+function handleAgentManagerXSessionCommand(rawData: unknown): void {
+  const rawText = typeof rawData === "string" ? rawData : undefined;
+  if (!rawText) {
+    return;
+  }
+
+  let message: AgentManagerXSessionCommandMessage;
+  try {
+    message = JSON.parse(rawText) as AgentManagerXSessionCommandMessage;
+  } catch {
+    return;
+  }
+
+  if (message.type !== "focusSession" && message.type !== "closeSession") {
+    return;
+  }
+  const project = projects.find((candidate) => candidate.projectId === message.workspaceId);
+  if (!project) {
+    return;
+  }
+  const hasSession = project.workspace.groups.some((group) =>
+    group.snapshot.sessions.some((session) => session.sessionId === message.sessionId),
+  );
+  if (!hasSession) {
+    return;
+  }
+
+  if (activeProjectId !== project.projectId) {
+    focusProject(project.projectId);
+  }
+  if (message.type === "focusSession") {
+    /**
+     * CDXC:AgentManagerXBridge 2026-04-27-20:34
+     * Clicking a zmux session in Agent Manager must raise the native zmux
+     * workarea before focusing the terminal, because Agent Manager no longer
+     * opens an editor window for zmux-owned sessions.
+     */
+    postNative({ type: "activateApp" });
+    focusSidebarSession(message.sessionId);
+  } else {
+    closeTerminal(message.sessionId);
+  }
+}
+
 function publish(): void {
   ensureVisibleNativeTerminals("publish");
   const sidebarMessage = buildSidebarMessage();
   sidebarBus.post(sidebarMessage);
+  agentManagerXBridgeClient.publish(createAgentManagerXWorkspaceSnapshots());
   /**
    * CDXC:AppModals 2026-04-26-15:10
    * App-level modals need the same sidebar store data as the sidebar webview.
