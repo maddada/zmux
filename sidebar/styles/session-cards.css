@@ -557,11 +557,24 @@
   font-weight: 650;
   gap: calc(6px * var(--sidebar-density-scale));
   inset: calc(4px * var(--sidebar-density-scale));
-  justify-content: center;
+  /* CDXC:SessionTitleLoading 2026-04-27-09:44
+   * The first-prompt title generation state must read like the normal session
+   * title row: loading label and spinner stay left-aligned instead of centered.
+   */
+  justify-content: flex-start;
   line-height: 1;
+  min-width: 0;
+  padding-inline: calc(10px * var(--sidebar-density-scale));
   pointer-events: none;
   position: absolute;
   z-index: 6;
+}
+
+.session-title-generation-overlay span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-title-generation-overlay-icon {

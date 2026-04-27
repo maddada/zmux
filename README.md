@@ -2,6 +2,15 @@
 
 Native ghostty terminals multiplexer and agent clis manager that in
 
+## Install
+
+<!-- CDXC:Distribution 2026-04-27-09:49: The public 1.0.0 release is
+distributed through the maddada Homebrew tap so users can install the
+notarized macOS app with one cask command. -->
+
+```bash
+brew install --cask maddada/tap/zmux
+```
 
 ## Shows a button on the attached IDE to show zmux. 
 
