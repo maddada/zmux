@@ -31,16 +31,20 @@ brew install --cask maddada/tap/zmux
 ## Best features:
 
 - Use the Ghostty (native) in a very organized way with splits/groups/workspaces
+- Native terminal title bars with rename, fork, reload, sleep, and close controls.
+- Native Ghostty scrollbars inside embedded terminals.
 - Uses your own ghostty configuration out of the box
 - Stay close to the code and edit it easily with the IDE attachment integration (Zed, VS Code, more soon!)
 - Integrates with Chrome Canary as the "Agent Browser" (instructions below)
 - Automatic agent session naming (Claude / Codex / Others)
 - Automatic session resuming on restart
+- Workspace dock configuration for names, themes, Tabler icons, and uploaded images.
 - Search all previous sessions
 - Supports all agent clis (Codex/Claude/Pi/OpenCode/Copilot/Gemini/More) <- Please ask if missing any features
-- 1 click actions (run commands, tests, etc.)
+- 1 click actions (run commands, tests, etc.) with run indicators and close-on-exit action sessions.
 - Notification sounds for agent status or command completion
 - Floating status indicators for all agents using companion app: (github.com/maddada/agent-manager-x)
+- `zmux-dev` app flavor for local development diagnostics while sharing normal zmux workspace state.
 - Rich text mode pop up (ctrl+g) <- in testing
 - T3code sessions support <- in testing
 - Much more!
