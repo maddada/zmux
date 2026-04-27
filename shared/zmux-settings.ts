@@ -125,7 +125,12 @@ export const ZED_OVERLAY_TARGET_APP_OPTIONS: ReadonlyArray<{
   value: ZedOverlayTargetApp;
 }> = [
   { label: "Zed", value: "zed" },
-  { label: "Zed", value: "zed-preview" },
+  /**
+   * CDXC:IDEAttachment 2026-04-28-00:05
+   * Settings must distinguish regular Zed from Zed Preview because the
+   * attach target is persisted separately from the shortened title-bar labels.
+   */
+  { label: "Zed Preview", value: "zed-preview" },
   { label: "VS Code", value: "vscode" },
   { label: "VS Code Insiders", value: "vscode-insiders" },
 ];

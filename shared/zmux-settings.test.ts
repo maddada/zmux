@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { DEFAULT_zmux_SETTINGS, normalizezmuxSettings } from "./zmux-settings";
+import {
+  DEFAULT_zmux_SETTINGS,
+  normalizezmuxSettings,
+  ZED_OVERLAY_TARGET_APP_OPTIONS,
+} from "./zmux-settings";
 
 describe("normalizezmuxSettings", () => {
   test("defaults the Zed overlay settings", () => {
@@ -42,5 +46,18 @@ describe("normalizezmuxSettings", () => {
         zedOverlayTargetApp: "vscode-insiders",
       }).zedOverlayTargetApp,
     ).toBe("vscode-insiders");
+  });
+
+  test("keeps IDE attachment dropdown labels distinguishable", () => {
+    /**
+     * CDXC:IDEAttachment 2026-04-28-00:05
+     * The settings dropdown must show Zed Preview explicitly, even though
+     * native title-bar buttons use the shorter "Attach Zed" text.
+     */
+    expect(ZED_OVERLAY_TARGET_APP_OPTIONS).toContainEqual({ label: "Zed", value: "zed" });
+    expect(ZED_OVERLAY_TARGET_APP_OPTIONS).toContainEqual({
+      label: "Zed Preview",
+      value: "zed-preview",
+    });
   });
 });
