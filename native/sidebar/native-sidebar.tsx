@@ -858,13 +858,14 @@ function readStoredProjects(): { activeProjectId: string; projects: NativeProjec
       projects.some((project) => project.projectId === candidate.activeProjectId)
         ? candidate.activeProjectId
         : projects[0]!.projectId;
+    const startupProjects = normalizeStartupTerminalSleepState(projects, activeProjectId);
     appendRestoreDebugLog("nativeSidebar.projects.read", {
       activeProjectId,
-      projectCount: projects.length,
-      projects: projects.map(summarizeNativeProject),
+      projectCount: startupProjects.length,
+      projects: startupProjects.map(summarizeNativeProject),
       source: candidateProjects.length > 0 ? "localStorage" : "fallback",
     });
-    return { activeProjectId, projects };
+    return { activeProjectId, projects: startupProjects };
   } catch (error) {
     appendRestoreDebugLog("nativeSidebar.projects.readFailed", {
       error: error instanceof Error ? error.message : String(error),
@@ -872,6 +873,45 @@ function readStoredProjects(): { activeProjectId: string; projects: NativeProjec
     });
     return { activeProjectId: fallbackProject.projectId, projects: [fallbackProject] };
   }
+}
+
+function normalizeStartupTerminalSleepState(
+  storedProjects: readonly NativeProject[],
+  storedActiveProjectId: string,
+): NativeProject[] {
+  /**
+   * CDXC:SessionSleep 2026-04-27-09:12
+   * Native startup restores layout state, not every terminal process. Background
+   * workspaces, inactive groups, and off-screen terminal cards start sleeping;
+   * only the last active workspace group's visible terminal cards are eligible
+   * to wake immediately.
+   */
+  return storedProjects.map((project) => ({
+    ...project,
+    workspace: {
+      ...project.workspace,
+      groups: project.workspace.groups.map((group) => {
+        const visibleIds = new Set(group.snapshot.visibleSessionIds);
+        const isActiveVisibleGroup =
+          project.projectId === storedActiveProjectId &&
+          group.groupId === project.workspace.activeGroupId;
+        return {
+          ...group,
+          snapshot: {
+            ...group.snapshot,
+            sessions: group.snapshot.sessions.map((session) =>
+              session.kind === "terminal"
+                ? {
+                    ...session,
+                    isSleeping: !(isActiveVisibleGroup && visibleIds.has(session.sessionId)),
+                  }
+                : session,
+            ),
+          },
+        };
+      }),
+    },
+  }));
 }
 
 function writeStoredProjects(reason: string): void {
@@ -1772,21 +1812,24 @@ function publish(): void {
 function ensureVisibleNativeTerminals(reason: string): void {
   const decisions: unknown[] = [];
   /**
-   * CDXC:SessionRestore 2026-04-27-07:38
-   * Native zmux startup restore must recreate every non-sleeping terminal
-   * persisted in every workspace group, including sessions hidden behind
-   * inactive tabs. Restored agent terminals must launch with the stored agent
-   * identity and immediately send that agent's title-based resume command.
+   * CDXC:SessionRestore 2026-04-27-09:12
+   * Native zmux only recreates terminal processes for sessions that are actually
+   * on screen: the active workspace, active group, and current visible card set.
+   * Hidden terminals remain sleeping until focus/wake asks for their resume.
    */
   for (const project of projects) {
     for (const group of project.workspace.groups) {
       const visibleIds = new Set(group.snapshot.visibleSessionIds);
       for (const session of group.snapshot.sessions) {
+        const isVisibleOnScreen =
+          project.projectId === activeProjectId &&
+          group.groupId === project.workspace.activeGroupId &&
+          visibleIds.has(session.sessionId);
         if (session.kind !== "terminal" || session.isSleeping === true) {
           decisions.push({
             groupId: group.groupId,
             isSleeping: session.isSleeping === true,
-            isVisible: visibleIds.has(session.sessionId),
+            isVisible: isVisibleOnScreen,
             kind: session.kind,
             persistedAgentName: session.kind === "terminal" ? session.agentName : undefined,
             projectId: project.projectId,
@@ -1796,10 +1839,23 @@ function ensureVisibleNativeTerminals(reason: string): void {
           });
           continue;
         }
+        if (!isVisibleOnScreen) {
+          decisions.push({
+            groupId: group.groupId,
+            isSleeping: false,
+            isVisible: false,
+            persistedAgentName: session.agentName,
+            projectId: project.projectId,
+            reason: "hidden-session-left-sleeping",
+            sessionId: session.sessionId,
+            title: session.title,
+          });
+          continue;
+        }
         if (terminalStateById.has(session.sessionId)) {
           decisions.push({
             groupId: group.groupId,
-            isVisible: visibleIds.has(session.sessionId),
+            isVisible: true,
             persistedAgentName: session.agentName,
             projectId: project.projectId,
             reason: "already-has-terminal-state",
@@ -1811,7 +1867,7 @@ function ensureVisibleNativeTerminals(reason: string): void {
         restoreNativeTerminalSession(project, session, reason);
         decisions.push({
           groupId: group.groupId,
-          isVisible: visibleIds.has(session.sessionId),
+          isVisible: true,
           persistedAgentName: session.agentName,
           projectId: project.projectId,
           reason: "restored-native-terminal",
@@ -3057,9 +3113,34 @@ function closeTerminal(sessionId: string): void {
 
 function focusTerminal(sessionId: string): void {
   updateActiveProjectWorkspace((workspace) => focusSessionInSimpleWorkspace(workspace, sessionId).snapshot);
+  const session = findTerminalSession(sessionId);
+  /**
+   * CDXC:SessionSleep 2026-04-27-09:09
+   * Sleeping a native Ghostty session destroys its terminal surface. Activating
+   * that card must first recreate the terminal and run the agent resume command
+   * before sending native focus, matching agent-tiler's detached-session wake.
+   */
+  if (session && !terminalStateById.has(sessionId)) {
+    restoreNativeTerminalSession(activeProject(), session, "focus-sleeping-session");
+  }
   acknowledgeNativeTerminalAttention(sessionId, "sidebar-focus");
   postNative({ sessionId: nativeSessionIdForSidebarSession(sessionId), type: "focusTerminal" });
   publish();
+}
+
+function focusSidebarSession(sessionId: string): void {
+  /**
+   * CDXC:BrowserOverlay 2026-04-27-10:23
+   * The sidebar Chrome Canary card is a browser-window control, not a terminal
+   * session. Any sidebar focus path, including debug CLI replay, must route it
+   * to Swift's Canary show command so clicking it reveals the existing Canary
+   * window the same way the browser new-tab button reveals a Canary window.
+   */
+  if (sessionId === CHROME_CANARY_BROWSER_SESSION_ID) {
+    showNativeBrowserWindow();
+    return;
+  }
+  focusTerminal(sessionId);
 }
 
 function acknowledgeNativeTerminalAttention(
@@ -3107,6 +3188,117 @@ function findTerminalSession(sessionId: string): TerminalSessionRecord | undefin
     }
   }
   return undefined;
+}
+
+function disposeNativeSleepingSessionSurface(sessionId: string): void {
+  const nativeSessionId = forgetNativeSessionMapping(sessionId);
+  terminalStateById.delete(sessionId);
+  titleDerivedActivityBySessionId.delete(sessionId);
+  nativeActivitySuppressedUntilBySessionId.delete(sessionId);
+  nativeWorkingStartedAtBySessionId.delete(sessionId);
+  postNative({ sessionId: nativeSessionId, type: "closeTerminal" });
+}
+
+function setNativeSessionSleeping(sessionId: string, sleeping: boolean): void {
+  const session = findTerminalSession(sessionId);
+  if (!session) {
+    return;
+  }
+  updateActiveProjectWorkspace((workspace) =>
+    setSessionSleepingInSimpleWorkspace(workspace, sessionId, sleeping).snapshot,
+  );
+  if (sleeping) {
+    disposeNativeSleepingSessionSurface(sessionId);
+  } else if (!terminalStateById.has(sessionId)) {
+    const nextSession = findTerminalSession(sessionId);
+    if (nextSession) {
+      restoreNativeTerminalSession(activeProject(), nextSession, "wake-session");
+    }
+  }
+  publish();
+}
+
+function setNativeGroupSleeping(groupId: string, sleeping: boolean): void {
+  const group = activeProject().workspace.groups.find((candidate) => candidate.groupId === groupId);
+  if (!group) {
+    return;
+  }
+  const sessionsToSleep = sleeping
+    ? group.snapshot.sessions.filter(
+        (session): session is TerminalSessionRecord =>
+          session.kind === "terminal" && session.isSleeping !== true,
+      )
+    : [];
+  updateActiveProjectWorkspace((workspace) =>
+    setGroupSleepingInSimpleWorkspace(
+      workspace,
+      groupId,
+      sleeping,
+      sleeping ? sessionsToSleep.map((session) => session.sessionId) : undefined,
+    ).snapshot,
+  );
+  if (sleeping) {
+    for (const session of sessionsToSleep) {
+      disposeNativeSleepingSessionSurface(session.sessionId);
+    }
+  } else {
+    const nextGroup = activeProject().workspace.groups.find((candidate) => candidate.groupId === groupId);
+    for (const session of nextGroup?.snapshot.sessions ?? []) {
+      if (session.kind === "terminal" && !terminalStateById.has(session.sessionId)) {
+        restoreNativeTerminalSession(activeProject(), session, "wake-group");
+      }
+    }
+  }
+  publish();
+}
+
+function syncNativeTerminalSleepForVisibleLayout(reason: string): void {
+  let changed = false;
+  const closeSessionIds: string[] = [];
+  projects = projects.map((project) => ({
+    ...project,
+    workspace: {
+      ...project.workspace,
+      groups: project.workspace.groups.map((group) => {
+        const visibleIds = new Set(group.snapshot.visibleSessionIds);
+        const isActiveVisibleGroup =
+          project.projectId === activeProjectId &&
+          group.groupId === project.workspace.activeGroupId;
+        return {
+          ...group,
+          snapshot: {
+            ...group.snapshot,
+            sessions: group.snapshot.sessions.map((session) => {
+              if (session.kind !== "terminal") {
+                return session;
+              }
+              const shouldSleep = !(isActiveVisibleGroup && visibleIds.has(session.sessionId));
+              if (session.isSleeping === shouldSleep) {
+                return session;
+              }
+              changed = true;
+              if (shouldSleep) {
+                closeSessionIds.push(session.sessionId);
+              }
+              return { ...session, isSleeping: shouldSleep };
+            }),
+          },
+        };
+      }),
+    },
+  }));
+  for (const sessionId of closeSessionIds) {
+    disposeNativeSleepingSessionSurface(sessionId);
+  }
+  if (changed) {
+    appendRestoreDebugLog("nativeSidebar.visibleLayoutSleepSynced", {
+      activeProjectId,
+      closedSessionIds: closeSessionIds,
+      projects: projects.map(summarizeNativeProject),
+      reason,
+    });
+    writeStoredProjects(`syncNativeTerminalSleepForVisibleLayout:${reason}`);
+  }
 }
 
 function restartNativeSession(sessionId: string): void {
@@ -3342,13 +3534,14 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       }
       case "focusSession": {
         const session = requireCliSession(payload);
-        focusTerminal(session.sessionId);
+        focusSidebarSession(session.sessionId);
         return { ok: true, session, state: summarizeCliState() };
       }
       case "focusGroup":
         updateActiveProjectWorkspace((workspace) =>
           focusGroupInSimpleWorkspace(workspace, String(payload.groupId)).snapshot,
         );
+        syncNativeTerminalSleepForVisibleLayout("cli-focus-group");
         publish();
         return { ok: true, state: summarizeCliState() };
       case "switchProject": {
@@ -3397,10 +3590,7 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       }
       case "sleepSession": {
         const session = requireCliSession(payload);
-        updateActiveProjectWorkspace((workspace) =>
-          setSessionSleepingInSimpleWorkspace(workspace, session.sessionId, payload.sleeping !== false).snapshot,
-        );
-        publish();
+        setNativeSessionSleeping(session.sessionId, payload.sleeping !== false);
         return { ok: true, state: summarizeCliState() };
       }
       case "favoriteSession": {
@@ -3674,7 +3864,12 @@ function focusProject(projectId: string): void {
   if (!projects.some((project) => project.projectId === projectId)) {
     return;
   }
+  if (activeProjectId === projectId) {
+    publish();
+    return;
+  }
   activeProjectId = projectId;
+  syncNativeTerminalSleepForVisibleLayout("focus-project");
   writeStoredProjects("focusProject");
   postZedOverlaySettings();
   void refreshGitState();
@@ -3989,14 +4184,11 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       updateActiveProjectWorkspace((workspace) =>
         focusGroupInSimpleWorkspace(workspace, message.groupId).snapshot,
       );
+      syncNativeTerminalSleepForVisibleLayout("sidebar-focus-group");
       publish();
       return;
     case "focusSession":
-      if (message.sessionId === CHROME_CANARY_BROWSER_SESSION_ID) {
-        showNativeBrowserWindow();
-        return;
-      }
-      focusTerminal(message.sessionId);
+      focusSidebarSession(message.sessionId);
       return;
     case "promptRenameSession": {
       const session = findTerminalSession(message.sessionId);
@@ -4086,10 +4278,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     }
     case "setSessionSleeping":
-      updateActiveProjectWorkspace((workspace) =>
-        setSessionSleepingInSimpleWorkspace(workspace, message.sessionId, message.sleeping).snapshot,
-      );
-      publish();
+      setNativeSessionSleeping(message.sessionId, message.sleeping);
       return;
     case "setSessionFavorite":
       updateActiveProjectWorkspace((workspace) =>
@@ -4098,10 +4287,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       publish();
       return;
     case "setGroupSleeping":
-      updateActiveProjectWorkspace((workspace) =>
-        setGroupSleepingInSimpleWorkspace(workspace, message.groupId, message.sleeping).snapshot,
-      );
-      publish();
+      setNativeGroupSleeping(message.groupId, message.sleeping);
       return;
     case "moveSessionToGroup":
       updateActiveProjectWorkspace((workspace) =>
