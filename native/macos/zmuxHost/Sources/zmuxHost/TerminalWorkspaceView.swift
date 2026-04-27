@@ -7,18 +7,20 @@ import QuartzCore
 final class TerminalWorkspaceView: NSView {
   private struct TerminalSession {
     let sessionId: String
-    let view: Ghostty.SurfaceView
-    let borderView: TerminalPaneBorderView
+    let view: Ghostty.SurfaceView?
+    let borderView: TerminalPaneBorderView?
     var cancellables: Set<AnyCancellable> = []
   }
 
   private let ghostty: Ghostty.App
+  private let terminalHostClient: GhosttySessionHostClient?
   private let sendEvent: (HostEvent) -> Void
   private var sessions: [String: TerminalSession] = [:]
   private var activeSessionIds = Set<String>()
   private var attentionSessionIds = Set<String>()
   private var focusedSessionId: String?
   private var lastEmittedFocusedSessionId: String?
+  private var lastHostedFocusSentSessionId: String?
   private var programmaticFocusDepth = 0
   private var terminalLayout: NativeTerminalLayout?
   private var exitPollTimer: Timer?
@@ -29,8 +31,13 @@ final class TerminalWorkspaceView: NSView {
    Inactive terminal surfaces are moved offscreen, and sidebar/native id
    translation decides which native Ghostty session is active.
    */
-  init(ghostty: Ghostty.App, sendEvent: @escaping (HostEvent) -> Void) {
+  init(
+    ghostty: Ghostty.App,
+    terminalHostClient: GhosttySessionHostClient?,
+    sendEvent: @escaping (HostEvent) -> Void
+  ) {
     self.ghostty = ghostty
+    self.terminalHostClient = terminalHostClient
     self.sendEvent = sendEvent
     super.init(frame: .zero)
     wantsLayer = true
@@ -50,6 +57,33 @@ final class TerminalWorkspaceView: NSView {
       return
     }
 
+    if let terminalHostClient {
+      /**
+       CDXC:NativeTerminalSurvival 2026-04-27-16:28
+       The zmux UI process records layout state locally and asks the long-lived
+       helper to create the real Ghostty.SurfaceView/PTY. This lets app
+       restarts reconnect before the user-defined timeout closes the shell,
+       without tmux, replay, or terminal streaming.
+       */
+      sessions[command.sessionId] = TerminalSession(
+        sessionId: command.sessionId,
+        view: nil,
+        borderView: nil
+      )
+      activeSessionIds.insert(command.sessionId)
+      focusedSessionId = command.sessionId
+      terminalLayout = terminalLayout ?? .leaf(sessionId: command.sessionId)
+      needsLayout = true
+      terminalHostClient.createTerminal(
+        command,
+        frame: hostFrame(for: bounds),
+        visible: true
+      )
+      focusTerminal(sessionId: command.sessionId, reason: "createTerminalNewHosted")
+      sendEvent(.terminalCwdChanged(sessionId: command.sessionId, cwd: command.cwd))
+      return
+    }
+
     guard let app = ghostty.app else {
       sendEvent(
         .terminalError(sessionId: command.sessionId, message: "Ghostty runtime is not ready"))
@@ -58,7 +92,8 @@ final class TerminalWorkspaceView: NSView {
 
     var config = Ghostty.SurfaceConfiguration()
     config.workingDirectory = command.cwd
-    config.environmentVariables = command.env ?? [:]
+    config.environmentVariables = NativeGhosttyTerminalEnvironment.surfaceEnvironment(
+      from: command.env)
     config.initialInput = command.initialInput
     let surfaceView = Ghostty.SurfaceView(app, baseConfig: config)
     surfaceView.translatesAutoresizingMaskIntoConstraints = false
@@ -106,15 +141,19 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     activeSessionIds.remove(sessionId)
-    if let surface = session.view.surface {
+    terminalHostClient?.closeTerminal(sessionId: sessionId)
+    if let surface = session.view?.surface {
       ghostty.requestClose(surface: surface)
     }
-    session.view.removeFromSuperview()
-    session.borderView.removeFromSuperview()
+    session.view?.removeFromSuperview()
+    session.borderView?.removeFromSuperview()
     terminalLayout = prunedLayout(removing: sessionId, from: terminalLayout)
     attentionSessionIds.remove(sessionId)
     if focusedSessionId == sessionId {
       focusedSessionId = nil
+    }
+    if lastHostedFocusSentSessionId == sessionId {
+      lastHostedFocusSentSessionId = nil
     }
     needsLayout = true
     sendEvent(.terminalExited(sessionId: sessionId, exitCode: nil))
@@ -122,7 +161,13 @@ final class TerminalWorkspaceView: NSView {
   }
 
   func focusTerminal(sessionId: String, reason: String = "explicitFocusTerminalCommand") {
+    if let terminalHostClient {
+      terminalHostClient.focusTerminal(sessionId: sessionId)
+      lastHostedFocusSentSessionId = sessionId
+    }
     guard let view = sessions[sessionId]?.view else {
+      focusedSessionId = sessionId
+      updateAllTerminalBorders()
       TerminalFocusDebugLog.append(
         event: "nativeWorkspace.focusTerminal.missingSession",
         details: [
@@ -131,7 +176,13 @@ final class TerminalWorkspaceView: NSView {
           "reason": reason,
           "requestedSessionId": sessionId,
           "responderBefore": responderSnapshot(),
-        ])
+      ])
+      /**
+       CDXC:NativeTerminalSurvival 2026-04-28-00:03
+       Helper-owned terminals intentionally have no in-process SurfaceView.
+       Their programmatic focus path must not emit terminalFocused back into
+       the sidebar, or focus state loops between visible durable terminals.
+       */
       return
     }
     focusedSessionId = sessionId
@@ -192,7 +243,11 @@ final class TerminalWorkspaceView: NSView {
         "textPreview": summarizeTerminalText(text),
         "visibleSessionIds": orderedVisibleSessionIds(),
       ])
-    sessions[sessionId]?.view.surfaceModel?.sendText(text)
+    if let terminalHostClient {
+      terminalHostClient.writeTerminalText(sessionId: sessionId, text: text)
+      return
+    }
+    sessions[sessionId]?.view?.surfaceModel?.sendText(text)
   }
 
   /**
@@ -200,8 +255,12 @@ final class TerminalWorkspaceView: NSView {
    The sidebar stages `/rename <title>` as terminal text, then submits it with
    a real Return key event. Ghostty treats text carriage returns differently
    in Codex, so Enter must travel through the same key path as a user press.
-   */
+  */
   func sendTerminalEnter(sessionId: String) {
+    if let terminalHostClient {
+      terminalHostClient.sendTerminalEnter(sessionId: sessionId)
+      return
+    }
     guard let view = sessions[sessionId]?.view else {
       TerminalFocusDebugLog.append(
         event: "nativeWorkspace.sendTerminalEnter.missingSession",
@@ -275,6 +334,19 @@ final class TerminalWorkspaceView: NSView {
           "responderBefore": responderSnapshot(),
           "visible": visible,
         ])
+      if visible {
+        activeSessionIds.insert(sessionId)
+      } else {
+        activeSessionIds.remove(sessionId)
+      }
+      if let frame = hostFrame(for: bounds) {
+        terminalHostClient?.setTerminalFrame(
+          sessionId: sessionId,
+          frame: frame,
+          visible: visible && activeSessionIds.contains(sessionId)
+        )
+      }
+      needsLayout = true
       return
     }
     TerminalFocusDebugLog.append(
@@ -289,29 +361,39 @@ final class TerminalWorkspaceView: NSView {
       activeSessionIds.insert(sessionId)
     } else {
       activeSessionIds.remove(sessionId)
-      moveOffscreen(session.view)
-      moveOffscreen(session.borderView)
+      if let view = session.view {
+        moveOffscreen(view)
+      }
+      if let borderView = session.borderView {
+        moveOffscreen(borderView)
+      }
     }
-    session.view.isHidden = false
-    session.borderView.isHidden = !visible
+    session.view?.isHidden = false
+    session.borderView?.isHidden = !visible
     needsLayout = true
     updateTerminalBorder(for: sessionId)
   }
 
   func setActiveTerminalSet(_ command: SetActiveTerminalSet) {
     let responderBefore = responderSnapshot()
+    let previousFocusedSessionId = focusedSessionId
     activeSessionIds = Set(command.activeSessionIds)
     attentionSessionIds = Set(command.attentionSessionIds ?? [])
     focusedSessionId = command.focusedSessionId
     terminalLayout = command.layout
     for session in sessions.values {
-      session.view.isHidden = false
-      session.borderView.isHidden = false
+      session.view?.isHidden = false
+      session.borderView?.isHidden = false
       if !activeSessionIds.contains(session.sessionId) {
-        moveOffscreen(session.view)
-        moveOffscreen(session.borderView)
+        if let view = session.view {
+          moveOffscreen(view)
+        }
+        if let borderView = session.borderView {
+          moveOffscreen(borderView)
+        }
       }
     }
+    terminalHostClient?.setActiveTerminalSet(command)
     needsLayout = true
     layoutSubtreeIfNeeded()
     updateAllTerminalBorders()
@@ -328,12 +410,28 @@ final class TerminalWorkspaceView: NSView {
     if let focusedSessionId = command.focusedSessionId,
       activeSessionIds.contains(focusedSessionId)
     {
-      focusTerminal(sessionId: focusedSessionId, reason: "setActiveTerminalSet")
+      /**
+       CDXC:NativeTerminalSurvival 2026-04-27-23:52
+       Layout sync keeps helper-owned Ghostty windows sized/visible, but it
+       must not continuously resend focus for the same terminal. Repeated
+       programmatic focus can steal key status while the user is trying to
+       type, especially with multiple durable terminal windows alive.
+       */
+      let shouldForwardFocus =
+        previousFocusedSessionId != focusedSessionId
+          || lastHostedFocusSentSessionId != focusedSessionId
+      if shouldForwardFocus {
+        focusTerminal(sessionId: focusedSessionId, reason: "setActiveTerminalSet")
+      }
     }
   }
 
   override func layout() {
     super.layout()
+    syncHostedTerminalFrames()
+  }
+
+  func syncHostedTerminalFrames() {
     let visibleSessionIds = orderedVisibleSessionIds()
     guard !visibleSessionIds.isEmpty else {
       return
@@ -343,6 +441,14 @@ final class TerminalWorkspaceView: NSView {
     } else {
       layoutGrid(visibleSessionIds, in: bounds)
     }
+  }
+
+  func requestHostedTerminalResurface(reason: String) {
+    terminalHostClient?.requestResurfaceVisibleTerminals(reason: reason)
+  }
+
+  func setModalPresentationActive(_ active: Bool) {
+    terminalHostClient?.setModalPresentationActive(active)
   }
 
   private func orderedVisibleSessionIds() -> [String] {
@@ -406,11 +512,30 @@ final class TerminalWorkspaceView: NSView {
     guard let session = sessions[sessionId] else {
       return
     }
-    let view = session.view
-    view.frame = rect
-    view.sizeDidChange(rect.size)
-    session.borderView.frame = rect
+    if let view = session.view {
+      view.frame = rect
+      view.sizeDidChange(rect.size)
+    } else if let frame = hostFrame(for: rect) {
+      terminalHostClient?.setTerminalFrame(
+        sessionId: sessionId,
+        frame: frame,
+        visible: activeSessionIds.contains(sessionId)
+      )
+    }
+    session.borderView?.frame = rect
     updateTerminalBorder(for: sessionId)
+  }
+
+  private func hostFrame(for rect: CGRect) -> GhosttyHostFrame? {
+    guard let window else { return nil }
+    let windowRect = convert(rect, to: nil)
+    let screenRect = window.convertToScreen(windowRect)
+    return GhosttyHostFrame(
+      x: Double(screenRect.minX),
+      y: Double(screenRect.minY),
+      width: Double(screenRect.width),
+      height: Double(screenRect.height)
+    )
   }
 
   private func moveOffscreen(_ view: Ghostty.SurfaceView) {
@@ -441,8 +566,8 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     let isActive = activeSessionIds.contains(sessionId)
-    session.borderView.isHidden = !isActive
-    session.borderView.setState(
+    session.borderView?.isHidden = !isActive
+    session.borderView?.setState(
       isFocused: focusedSessionId == sessionId,
       isAttention: attentionSessionIds.contains(sessionId)
     )
@@ -463,10 +588,15 @@ final class TerminalWorkspaceView: NSView {
 
   private func sessionId(containing responder: NSResponder) -> String? {
     guard let responderView = responder as? NSView else {
-      return sessions.first { _, session in responder === session.view }?.key
+      return sessions.first { _, session in
+        guard let view = session.view else { return false }
+        return responder === view
+      }?.key
     }
     for (sessionId, session) in sessions {
-      if responderView === session.view || responderView.isDescendant(of: session.view) {
+      if let view = session.view,
+        (responderView === view || responderView.isDescendant(of: view))
+      {
         return sessionId
       }
     }
@@ -561,7 +691,7 @@ final class TerminalWorkspaceView: NSView {
 
   private func pollExitedSurfaces() {
     let exitedSessionIds = sessions.compactMap { sessionId, session in
-      session.view.processExited ? sessionId : nil
+      session.view?.processExited == true ? sessionId : nil
     }
     for sessionId in exitedSessionIds {
       closeTerminal(sessionId: sessionId)

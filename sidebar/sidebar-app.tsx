@@ -13,6 +13,7 @@ import {
   IconLayoutSidebar,
   IconPencil,
   IconPlusFilled,
+  IconRefresh,
   IconSearch,
   IconSettings,
   IconDeviceMobile,
@@ -35,6 +36,7 @@ import {
   type ExtensionToSidebarMessage,
   type SidebarCollapsibleSection,
 } from "../shared/session-grid-contract";
+import type { zmuxSettings } from "../shared/zmux-settings";
 import type { SidebarActionType } from "../shared/sidebar-commands";
 import { playCompletionSound, prepareCompletionSoundPlayback } from "./completion-sound-player";
 import { AgentsPanel } from "./agents-panel";
@@ -1506,6 +1508,28 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     vscode.postMessage({ type: "moveSidebarToOtherSide" });
   };
 
+  const toggleTerminalPersistenceMode = () => {
+    setIsOverflowMenuOpen(false);
+    if (!settings) {
+      return;
+    }
+    /**
+     * CDXC:NativeTerminalSurvival 2026-04-28-11:06
+     * Terminal persistence mode is a debug-only overflow toggle while the
+     * helper backend is being tested. Keep it out of normal Settings, but
+     * persist through the same settings update path so native startup reads
+     * the next owner choice reliably after restart.
+     */
+    vscode.postMessage({
+      settings: {
+        ...settings,
+        terminalSessionPersistenceMode:
+          settings.terminalSessionPersistenceMode === "persistent" ? "embedded" : "persistent",
+      },
+      type: "updateSettings",
+    });
+  };
+
   const openWorkspaceWelcome = () => {
     setIsOverflowMenuOpen(false);
     vscode.postMessage({ type: "openWorkspaceWelcome" });
@@ -1566,8 +1590,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     onToggleShowLastInteractionTimeOnSessionCards: toggleShowLastInteractionTimeOnSessionCards,
     onToggleMenu: toggleOverflowMenu,
     onToggleScratchPad: openScratchPad,
+    onToggleTerminalPersistenceMode: toggleTerminalPersistenceMode,
     overflowMenuPosition,
     overflowMenuRef,
+    settings,
     showLastInteractionTimeOnSessionCards,
   } satisfies RenderSidebarTopControlsOptions;
 
@@ -2000,8 +2026,10 @@ type RenderSidebarTopControlsOptions = {
   onToggleShowLastInteractionTimeOnSessionCards: () => void;
   onToggleMenu: (trigger: HTMLElement) => void;
   onToggleScratchPad: () => void;
+  onToggleTerminalPersistenceMode: () => void;
   overflowMenuPosition?: FloatingMenuPosition;
   overflowMenuRef: RefObject<HTMLDivElement | null>;
+  settings?: zmuxSettings;
   showLastInteractionTimeOnSessionCards: boolean;
   showMenu?: boolean;
   showSearch?: boolean;
@@ -2182,10 +2210,16 @@ function renderFloatingOverflowMenu({
   onToggleShowLastInteractionTimeOnSessionCards,
   onToggleMenu,
   onToggleScratchPad,
+  onToggleTerminalPersistenceMode,
   overflowMenuPosition,
   overflowMenuRef,
+  settings,
   showLastInteractionTimeOnSessionCards,
 }: RenderSidebarTopControlsOptions) {
+  const isDebugPersistenceToggleVisible = settings?.debuggingMode === true;
+  const persistenceMode = settings?.terminalSessionPersistenceMode ?? "persistent";
+  const nextPersistenceMode = persistenceMode === "persistent" ? "Embedded" : "Persistent";
+
   return (
     <>
       {/*
@@ -2283,6 +2317,35 @@ function renderFloatingOverflowMenu({
                 </button>
               </div>
               <div className="session-context-menu-divider" role="separator" />
+              {isDebugPersistenceToggleVisible ? (
+                <>
+                  <div className="session-context-menu-group">
+                    {/*
+                     * CDXC:NativeTerminalSurvival 2026-04-28-11:08
+                     * Persistence mode is intentionally a debug-only overflow
+                     * action. A single click toggles the restart-scoped backend
+                     * between helper-owned Persistent terminals and original
+                     * Embedded terminals without exposing the experiment in
+                     * the normal Settings modal.
+                     */}
+                    <button
+                      className="session-context-menu-item"
+                      onClick={onToggleTerminalPersistenceMode}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconRefresh
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                        stroke={1.8}
+                      />
+                      Use {nextPersistenceMode} Terminals
+                    </button>
+                  </div>
+                  <div className="session-context-menu-divider" role="separator" />
+                </>
+              ) : null}
               <div className="session-context-menu-group">
                 <button
                   className="session-context-menu-item"
