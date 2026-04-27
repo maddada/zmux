@@ -545,6 +545,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       workspaceView?.closeTerminal(sessionId: command.sessionId)
     case .focusTerminal(let command):
       workspaceView?.focusTerminal(sessionId: command.sessionId)
+    case .activateApp:
+      activateAppWindow()
     case .writeTerminalText(let command):
       workspaceView?.writeTerminalText(sessionId: command.sessionId, text: command.text)
     case .sendTerminalEnter(let command):
@@ -605,6 +607,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     case .sidebarCliCommand(let command):
       runSidebarCliCommand(command)
     }
+  }
+
+  @MainActor private func activateAppWindow() {
+    /**
+     CDXC:AgentManagerXBridge 2026-04-27-20:34
+     Agent Manager focus commands for zmux sessions should bring the native
+     workarea forward before selecting the requested Ghostty surface.
+     */
+    NSApp.activate(ignoringOtherApps: true)
+    window?.makeKeyAndOrderFront(nil)
   }
 
   @MainActor private func runSidebarCliCommand(_ command: SidebarCliCommand) {
@@ -1240,6 +1252,8 @@ final class zmuxRootView: NSView {
       workspaceView.closeTerminal(sessionId: command.sessionId)
     case .focusTerminal(let command):
       workspaceView.focusTerminal(sessionId: command.sessionId)
+    case .activateApp:
+      activateAppWindow()
     case .writeTerminalText(let command):
       workspaceView.writeTerminalText(sessionId: command.sessionId, text: command.text)
     case .sendTerminalEnter(let command):
@@ -1309,6 +1323,11 @@ final class zmuxRootView: NSView {
        */
       break
     }
+  }
+
+  private func activateAppWindow() {
+    NSApp.activate(ignoringOtherApps: true)
+    window?.makeKeyAndOrderFront(nil)
   }
 
   private func showMessage(_ command: ShowMessage) {

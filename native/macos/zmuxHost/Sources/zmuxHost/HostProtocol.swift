@@ -4,6 +4,7 @@ enum HostCommand: Decodable {
   case createTerminal(CreateTerminal)
   case closeTerminal(SessionCommand)
   case focusTerminal(SessionCommand)
+  case activateApp
   case writeTerminalText(WriteTerminalText)
   case sendTerminalEnter(SessionCommand)
   case setActiveTerminalSet(SetActiveTerminalSet)
@@ -34,6 +35,7 @@ enum HostCommand: Decodable {
     case createTerminal
     case closeTerminal
     case focusTerminal
+    case activateApp
     case writeTerminalText
     case sendTerminalEnter
     case setActiveTerminalSet
@@ -66,6 +68,8 @@ enum HostCommand: Decodable {
       self = .closeTerminal(try SessionCommand(from: decoder))
     case .focusTerminal:
       self = .focusTerminal(try SessionCommand(from: decoder))
+    case .activateApp:
+      self = .activateApp
     case .writeTerminalText:
       self = .writeTerminalText(try WriteTerminalText(from: decoder))
     case .sendTerminalEnter:
