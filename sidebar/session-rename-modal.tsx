@@ -1,6 +1,13 @@
 import { IconX } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 
 export type SessionRenameModalProps = {
   initialTitle: string;
@@ -63,13 +70,35 @@ export function SessionRenameModal({
   }
 
   const trimmedTitle = title.trim();
-  const submitRename = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!trimmedTitle) {
+  const confirmTitle = (nextTitle: string) => {
+    const normalizedTitle = nextTitle.trim();
+    if (!normalizedTitle) {
       return;
     }
 
-    onConfirm(trimmedTitle);
+    onConfirm(normalizedTitle);
+  };
+
+  const submitRename = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    confirmTitle(title);
+  };
+
+  const handleInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) {
+      return;
+    }
+
+    /**
+     * CDXC:SidebarRename 2026-04-28-15:34
+     * The native full-window modal host must preserve the reference rename
+     * behavior where typing a session name and pressing Enter immediately
+     * submits the existing renameSession command path. Bind Enter at the input
+     * so WKWebView form-submission differences cannot leave the modal inert.
+     */
+    event.preventDefault();
+    event.stopPropagation();
+    confirmTitle(event.currentTarget.value);
   };
 
   return createPortal(
@@ -105,6 +134,7 @@ export function SessionRenameModal({
             autoFocus
             className="group-title-input command-config-input"
             onChange={(event) => setTitle(event.currentTarget.value)}
+            onKeyDown={handleInputKeyDown}
             ref={inputRef}
             value={title}
           />
