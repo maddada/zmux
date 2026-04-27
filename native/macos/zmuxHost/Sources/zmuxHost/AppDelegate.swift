@@ -543,7 +543,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate, GhosttyAppDelegate {
                 return
             }
             zedOverlayController.configure(command)
+        case let .sidebarCliCommand(command):
+            runSidebarCliCommand(command)
         }
+    }
+
+    @MainActor private func runSidebarCliCommand(_ command: SidebarCliCommand) {
+        /**
+         CDXC:DebugCli 2026-04-27-07:18
+         The CLI must exercise the same sidebar/runtime code paths as a user
+         click. Forward debug commands into the sidebar webview and return the
+         JSON result through the existing bridge instead of creating orphan
+         native terminals behind the sidebar's state.
+         */
+        guard let sidebarView = (window?.contentView as? zmuxRootView)?.sidebarWebView else {
+            bridge?.send(.sidebarCliResult(
+                requestId: command.requestId,
+                ok: false,
+                payloadJson: #"{"error":"sidebar-webview-missing"}"#
+            ))
+            return
+        }
+        guard
+            let actionJson = Self.javascriptStringLiteral(command.action),
+            let payloadJson = Self.javascriptStringLiteral(command.payloadJson ?? "{}")
+        else {
+            bridge?.send(.sidebarCliResult(
+                requestId: command.requestId,
+                ok: false,
+                payloadJson: #"{"error":"sidebar-cli-command-encoding-failed"}"#
+            ))
+            return
+        }
+        let script = """
+        (async () => {
+          const handler = window.__zmux_NATIVE_CLI__;
+          if (!handler || typeof handler.handleCommand !== 'function') {
+            return JSON.stringify({ ok: false, error: 'sidebar-cli-handler-missing' });
+          }
+          return JSON.stringify(await handler.handleCommand(\(actionJson), JSON.parse(\(payloadJson))));
+        })()
+        """
+        sidebarView.evaluateJavaScript(script) { [weak self] result, error in
+            let payloadJson: String
+            let ok: Bool
+            if let error {
+                ok = false
+                payloadJson = Self.jsonObjectString(["error": error.localizedDescription])
+            } else if let result = result as? String {
+                ok = !result.contains(#""ok":false"#)
+                payloadJson = result
+            } else {
+                ok = false
+                payloadJson = #"{"error":"sidebar-cli-result-missing"}"#
+            }
+            self?.bridge?.send(.sidebarCliResult(
+                requestId: command.requestId,
+                ok: ok,
+                payloadJson: payloadJson
+            ))
+        }
+    }
+
+    private static func javascriptStringLiteral(_ value: String) -> String? {
+        guard let data = try? JSONEncoder().encode(value) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func jsonObjectString(_ value: [String: String]) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let text = String(data: data, encoding: .utf8) else {
+            return #"{"error":"json-encoding-failed"}"#
+        }
+        return text
     }
 
     @MainActor private func detachZedOverlayFromNativeButton(targetApp: ZedOverlayTargetApp) {
@@ -901,6 +975,7 @@ final class zmuxRootView: NSView {
     private static let defaultSidebarWidth: CGFloat = 320
 
     let workspaceView: TerminalWorkspaceView
+    var sidebarWebView: WKWebView { sidebarView }
     private let workspaceBarView: WKWebView
     private let sidebarView: WKWebView
     private let modalHostView: WKWebView
@@ -1139,6 +1214,14 @@ final class zmuxRootView: NSView {
              router so the native button can be positioned over Zed Preview.
              */
             configureZedOverlay(command)
+        case .sidebarCliCommand:
+            /**
+             CDXC:DebugCli 2026-04-27-07:18
+             Sidebar CLI commands are handled by AppDelegate before this
+             view-level router. Keep this case explicit so adding the command to
+             HostCommand does not make the sidebar command switch non-exhaustive.
+             */
+            break
         }
     }
 
@@ -1690,9 +1773,10 @@ final class zmuxRootView: NSView {
             box-shadow: 0 0 0 2px rgba(91, 141, 246, 0.18);
           }
           .indicators {
-            /* CDXC:WorkspaceDock 2026-04-27-06:19: Done and active badges sit
+            /* CDXC:WorkspaceDock 2026-04-27-06:58: Done and working badges sit
                together at the top-right of the workspace button, ordered green
-               then orange from left to right. */
+               then orange from left to right. The orange badge uses "working"
+               to match session-card activity and avoid overloading "active". */
             align-items: center;
             display: flex;
             gap: 1px;
@@ -1716,7 +1800,7 @@ final class zmuxRootView: NSView {
             padding: 0 4px;
             white-space: nowrap;
           }
-          .indicator[data-status="active"] {
+          .indicator[data-status="working"] {
             background: #d08a2d;
           }
           .indicator[data-status="done"] {
@@ -1725,7 +1809,7 @@ final class zmuxRootView: NSView {
           .indicator[data-status="running"] {
             /* CDXC:WorkspaceDock 2026-04-27-06:27: The gray total-running
                terminal count belongs at the bottom-left of each workspace
-               button, distinct from top-right done/active session badges. */
+               button, distinct from top-right done/working session badges. */
             background: #6f7785;
             bottom: -7px;
             left: -1px;
@@ -1759,18 +1843,18 @@ final class zmuxRootView: NSView {
               const button = document.createElement("button");
               button.type = "button";
               button.dataset.active = project.isActive ? "true" : "false";
-              const active = Number(project.sessionCounts?.active || 0);
               const running = Number(project.sessionCounts?.running || 0);
               const done = Number(project.sessionCounts?.done || 0);
+              const working = Number(project.sessionCounts?.working || 0);
               const summary = [
                 running > 0 ? `${running} running` : "",
-                active > 0 ? `${active} active` : "",
+                working > 0 ? `${working} working` : "",
                 done > 0 ? `${done} done` : "",
               ].filter(Boolean).join(", ");
               button.title = summary ? `${project.path || project.title} - ${summary}` : (project.path || project.title);
               button.textContent = initials(project.title, index);
               button.onclick = () => post({ type: "focusProject", projectId: project.projectId });
-              if (done > 0 || active > 0) {
+              if (done > 0 || working > 0) {
                 const indicators = document.createElement("span");
                 indicators.className = "indicators";
                 if (done > 0) {
@@ -1780,12 +1864,12 @@ final class zmuxRootView: NSView {
                   doneIndicator.textContent = formatCount(done);
                   indicators.appendChild(doneIndicator);
                 }
-                if (active > 0) {
-                  const activeIndicator = document.createElement("span");
-                  activeIndicator.className = "indicator";
-                  activeIndicator.dataset.status = "active";
-                  activeIndicator.textContent = formatCount(active);
-                  indicators.appendChild(activeIndicator);
+                if (working > 0) {
+                  const workingIndicator = document.createElement("span");
+                  workingIndicator.className = "indicator";
+                  workingIndicator.dataset.status = "working";
+                  workingIndicator.textContent = formatCount(working);
+                  indicators.appendChild(workingIndicator);
                 }
                 button.appendChild(indicators);
               }

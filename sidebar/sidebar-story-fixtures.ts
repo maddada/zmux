@@ -23,6 +23,7 @@ import {
 } from "./sidebar-story-fixture-helpers";
 
 export type SidebarStoryFixture =
+  | "agent-icon-render"
   | "browser-groups"
   | "command-indicator-active"
   | "default"

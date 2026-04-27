@@ -48,6 +48,7 @@ type SidebarSessionDecoration = Pick<
   SidebarSessionItem,
   | "activity"
   | "activityLabel"
+  | "agentIcon"
   | "detail"
   | "lifecycleState"
   | "isRunning"
@@ -89,6 +90,12 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
           {
             activity: session.activity,
             activityLabel: session.activityLabel,
+            /*
+             * CDXC:AgentDetection 2026-04-27-06:55
+             * Storybook must preserve agent identity across its session-grid
+             * round trip so sidebar card icon rendering can be verified there.
+             */
+            agentIcon: session.agentIcon,
             detail: session.detail,
             lifecycleState: session.lifecycleState,
             isRunning: session.isRunning,
@@ -124,6 +131,7 @@ export function createSidebarStoryMessage(
       ...item,
       ...workspace.sessionDecorationsById[item.sessionId],
       activity: workspace.sessionDecorationsById[item.sessionId]?.activity ?? "idle",
+      agentIcon: workspace.sessionDecorationsById[item.sessionId]?.agentIcon,
       lifecycleState:
         workspace.sessionDecorationsById[item.sessionId]?.lifecycleState ?? item.lifecycleState,
       isRunning: workspace.sessionDecorationsById[item.sessionId]?.isRunning ?? item.isRunning,

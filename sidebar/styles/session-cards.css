@@ -298,19 +298,6 @@
   display: none;
 }
 
-/*
- * CDXC:AgentDetection 2026-04-27-03:37
- * Agent identity is now present in the projected sidebar card data. Mirror that
- * state onto the outer session frame so normal cards render the floating agent
- * icon without depending on a parent `:has()` selector.
- */
-.session-frame:not(.session-history-frame)[data-has-agent-icon="true"] .session-floating-agent-icon,
-.session-frame:not(.session-history-frame)[data-has-agent-icon="true"]
-  .session-floating-agent-tabler-icon {
-  display: block;
-  opacity: 0.74;
-}
-
 .session-history-frame .session-floating-agent-icon,
 .session-history-frame .session-floating-agent-tabler-icon {
   left: calc(10px * var(--sidebar-density-scale));

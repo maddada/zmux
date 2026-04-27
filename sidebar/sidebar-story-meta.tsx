@@ -28,6 +28,7 @@ export const SIDEBAR_STORY_ARG_TYPES: NonNullable<Meta<SidebarStoryArgs>["argTyp
   fixture: {
     control: "select",
     options: [
+      "agent-icon-render",
       "browser-groups",
       "command-indicator-active",
       "default",

@@ -60,7 +60,7 @@ describe("shouldAutoSleepSidebarSession", () => {
     ).toBe(false);
   });
 
-  test("should skip sessions with an active working indicator", () => {
+  test("should skip sessions with a working indicator", () => {
     expect(
       shouldAutoSleepSidebarSession({
         activity: "working",

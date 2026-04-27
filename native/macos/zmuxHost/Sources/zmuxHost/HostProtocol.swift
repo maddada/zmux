@@ -23,6 +23,7 @@ enum HostCommand: Decodable {
     case showBrowserWindow
     case setSidebarSide(SetSidebarSide)
     case configureZedOverlay(ConfigureZedOverlay)
+    case sidebarCliCommand(SidebarCliCommand)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -51,6 +52,7 @@ enum HostCommand: Decodable {
         case showBrowserWindow
         case setSidebarSide
         case configureZedOverlay
+        case sidebarCliCommand
     }
 
     init(from decoder: Decoder) throws {
@@ -100,6 +102,8 @@ enum HostCommand: Decodable {
             self = .setSidebarSide(try SetSidebarSide(from: decoder))
         case .configureZedOverlay:
             self = .configureZedOverlay(try ConfigureZedOverlay(from: decoder))
+        case .sidebarCliCommand:
+            self = .sidebarCliCommand(try SidebarCliCommand(from: decoder))
         }
     }
 }
@@ -212,6 +216,12 @@ struct ConfigureZedOverlay: Decodable {
     let workspacePath: String?
 }
 
+struct SidebarCliCommand: Decodable {
+    let action: String
+    let payloadJson: String?
+    let requestId: String
+}
+
 enum NativeTerminalLayout: Decodable {
     case leaf(sessionId: String)
     case split(direction: SplitDirection, ratio: Double?, children: [NativeTerminalLayout])
@@ -259,6 +269,7 @@ enum HostEvent: Encodable {
     case terminalBell(sessionId: String)
     case terminalError(sessionId: String, message: String)
     case processResult(requestId: String, exitCode: Int32, stdout: String, stderr: String)
+    case sidebarCliResult(requestId: String, ok: Bool, payloadJson: String)
 
     private enum CodingKeys: String, CodingKey {
         case exitCode
@@ -273,6 +284,8 @@ enum HostEvent: Encodable {
         case ttyName
         case type
         case requestId
+        case ok
+        case payloadJson
     }
 
     func encode(to encoder: Encoder) throws {
@@ -314,6 +327,11 @@ enum HostEvent: Encodable {
             try container.encode(exitCode, forKey: .exitCode)
             try container.encode(stdout, forKey: .stdout)
             try container.encode(stderr, forKey: .stderr)
+        case let .sidebarCliResult(requestId, ok, payloadJson):
+            try container.encode("sidebarCliResult", forKey: .type)
+            try container.encode(requestId, forKey: .requestId)
+            try container.encode(ok, forKey: .ok)
+            try container.encode(payloadJson, forKey: .payloadJson)
         }
     }
 }

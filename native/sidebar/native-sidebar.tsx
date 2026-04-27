@@ -152,13 +152,14 @@ type WorkspaceBarProject = {
   /**
    * CDXC:WorkspaceDock 2026-04-27-06:19
    * The native workspace rail must split session-card state into three badges:
-   * idle running sessions are gray, active working sessions are orange, and
-   * completed sessions are green.
+   * idle running sessions are gray, working sessions are orange, and completed
+   * sessions are green. Use "working" instead of "active" because "active"
+   * already means selected/current workspace, group, session, or modal.
    */
   sessionCounts: {
-    active: number;
     done: number;
     running: number;
+    working: number;
   };
   title: string;
 };
@@ -223,6 +224,9 @@ declare global {
     __zmux_NATIVE_SETTINGS__?: {
       attachZedOverlay: (targetApp: "zed" | "zed-preview" | "vscode" | "vscode-insiders") => void;
       detachZedOverlay: (targetApp: "zed" | "zed-preview" | "vscode" | "vscode-insiders") => void;
+    };
+    __zmux_NATIVE_CLI__?: {
+      handleCommand: (action: string, payload: Record<string, unknown>) => Promise<unknown>;
     };
     __zmux_NATIVE_MODAL_BRIDGE__?: {
       handleSidebarMessage: (message: SidebarToExtensionMessage) => void;
@@ -323,6 +327,12 @@ type NativeProject = {
   path: string;
   projectId: string;
   workspace: GroupedSessionWorkspaceSnapshot;
+};
+
+type NativeCliSessionSelector = {
+  index?: number;
+  sessionId?: string;
+  sessionNumber?: number;
 };
 
 const restoredProjectState = readStoredProjects();
@@ -1794,9 +1804,9 @@ function countWorkspaceBarSessions(project: NativeProject): WorkspaceBarProject[
    * sessions remain gray at the bottom-right of the workspace button.
    */
   const counts: WorkspaceBarProject["sessionCounts"] = {
-    active: 0,
     done: 0,
     running: 0,
+    working: 0,
   };
   for (const group of project.workspace.groups) {
     for (const session of group.snapshot.sessions) {
@@ -1814,7 +1824,7 @@ function countWorkspaceBarSessions(project: NativeProject): WorkspaceBarProject[
       const terminalState = terminalStateById.get(session.sessionId);
       const lifecycleState = terminalState?.lifecycleState ?? "done";
       if (lifecycleState === "running" && terminalState?.activity === "working") {
-        counts.active += 1;
+        counts.working += 1;
       } else if (lifecycleState === "running") {
         counts.running += 1;
       } else if (lifecycleState === "done") {
@@ -1855,7 +1865,7 @@ function getWorkspaceBarIndicatorDecision(
   kind: string,
   activity: string | undefined,
   lifecycleState: string | undefined,
-): "active" | "done" | "running" | "ignored-error" | "ignored-sleeping" {
+): "done" | "ignored-error" | "ignored-sleeping" | "running" | "working" {
   if (isSleeping) {
     return "ignored-sleeping";
   }
@@ -1866,7 +1876,7 @@ function getWorkspaceBarIndicatorDecision(
     return "done";
   }
   if (lifecycleState === "running" && activity === "working") {
-    return "active";
+    return "working";
   }
   if (lifecycleState === "running") {
     return "running";
@@ -2726,6 +2736,357 @@ function forkNativeSession(sessionId: string): void {
   createTerminal(`${session.title || "Shell"} Fork`, "", groupId);
 }
 
+function findSidebarSessionForCli(
+  selector: NativeCliSessionSelector,
+): SidebarSessionItem | undefined {
+  const sidebarMessage = buildSidebarMessage();
+  const sessions = sidebarMessage.groups.flatMap((group) => group.sessions);
+  if (selector.sessionId) {
+    return sessions.find((session) => session.sessionId === selector.sessionId);
+  }
+  if (typeof selector.sessionNumber === "number") {
+    return sessions.find((session) => session.sessionNumber === selector.sessionNumber);
+  }
+  if (typeof selector.index === "number") {
+    return sessions[selector.index];
+  }
+  const focusedSessionId = activeSnapshot().focusedSessionId;
+  return focusedSessionId
+    ? sessions.find((session) => session.sessionId === focusedSessionId)
+    : sessions[0];
+}
+
+function requireCliSession(payload: Record<string, unknown>): SidebarSessionItem {
+  const session = findSidebarSessionForCli({
+    index: typeof payload.index === "number" ? payload.index : undefined,
+    sessionId: typeof payload.sessionId === "string" ? payload.sessionId : undefined,
+    sessionNumber: typeof payload.sessionNumber === "number" ? payload.sessionNumber : undefined,
+  });
+  if (!session) {
+    throw new Error("No matching session was found.");
+  }
+  return session;
+}
+
+function terminalTextForCliKey(key: unknown): string | undefined {
+  switch (String(key)) {
+    case "ctrl-c":
+    case "Control+C":
+      return "\u0003";
+    case "escape":
+    case "Escape":
+      return "\u001b";
+    case "tab":
+    case "Tab":
+      return "\t";
+    case "arrow-up":
+    case "ArrowUp":
+      return "\u001b[A";
+    case "arrow-down":
+    case "ArrowDown":
+      return "\u001b[B";
+    case "arrow-right":
+    case "ArrowRight":
+      return "\u001b[C";
+    case "arrow-left":
+    case "ArrowLeft":
+      return "\u001b[D";
+    default:
+      return undefined;
+  }
+}
+
+function summarizeCliState() {
+  const sidebarMessage = buildSidebarMessage();
+  return {
+    activeProjectId,
+    projects: projects.map((project) => ({
+      activeGroupId: project.workspace.activeGroupId,
+      groupCount: project.workspace.groups.length,
+      isActive: project.projectId === activeProjectId,
+      name: project.name,
+      path: project.path,
+      projectId: project.projectId,
+    })),
+    revision,
+    sidebar: {
+      groups: sidebarMessage.groups,
+      hud: sidebarMessage.hud,
+      previousSessions,
+    },
+    terminalStates: Object.fromEntries(
+      [...terminalStateById.entries()].map(([sessionId, state]) => [
+        sessionId,
+        {
+          ...state,
+          nativeSessionId: nativeSessionIdForSidebarSession(sessionId),
+        },
+      ]),
+    ),
+  };
+}
+
+function assertCliSidebarCard(payload: Record<string, unknown>) {
+  const session = requireCliSession(payload);
+  const terminalState = terminalStateById.get(session.sessionId);
+  const failures: string[] = [];
+  const expectedAgentIcon = typeof payload.agentIcon === "string" ? payload.agentIcon : undefined;
+  const expectedAgentName = typeof payload.agentName === "string" ? payload.agentName : undefined;
+  const expectedVisible = typeof payload.visible === "boolean" ? payload.visible : undefined;
+  if (expectedAgentIcon !== undefined && session.agentIcon !== expectedAgentIcon) {
+    failures.push(`agentIcon expected ${expectedAgentIcon}, received ${session.agentIcon ?? "<empty>"}`);
+  }
+  if (expectedAgentName !== undefined && terminalState?.agentName !== expectedAgentName) {
+    failures.push(`agentName expected ${expectedAgentName}, received ${terminalState?.agentName ?? "<empty>"}`);
+  }
+  if (expectedVisible !== undefined && session.isVisible !== expectedVisible) {
+    failures.push(`visible expected ${expectedVisible}, received ${session.isVisible}`);
+  }
+  return {
+    failures,
+    ok: failures.length === 0,
+    session,
+    terminalState,
+  };
+}
+
+async function waitForCliSidebarCard(payload: Record<string, unknown>) {
+  const timeoutMs = typeof payload.timeoutMs === "number" ? payload.timeoutMs : 5_000;
+  const intervalMs = typeof payload.intervalMs === "number" ? payload.intervalMs : 200;
+  const startedAt = Date.now();
+  let result = assertCliSidebarCard(payload);
+  while (!result.ok && Date.now() - startedAt < timeoutMs) {
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+    result = assertCliSidebarCard(payload);
+  }
+  return {
+    ...result,
+    elapsedMs: Date.now() - startedAt,
+  };
+}
+
+function runCliAgent(agentId: string, groupId?: string): TerminalSessionRecord | undefined {
+  const agent = agents.find((candidate) => candidate.agentId === agentId);
+  if (!agent?.command) {
+    throw new Error(`Unknown or unconfigured agent: ${agentId}`);
+  }
+  return createTerminal(agent.name, `${agent.command}\r`, groupId, agent.agentId);
+}
+
+function runCliCommandButton(commandId: string): TerminalSessionRecord | undefined {
+  const command = commands.find((candidate) => candidate.commandId === commandId);
+  if (!command) {
+    throw new Error(`Unknown command button: ${commandId}`);
+  }
+  if (command.actionType === "browser" && command.url) {
+    openNativeBrowserWindow(command.url);
+    return undefined;
+  }
+  if (!command.command) {
+    throw new Error(`Command button is not configured: ${commandId}`);
+  }
+  return createTerminal(command.name, `${command.command}\r`);
+}
+
+async function handleNativeCliCommand(action: string, payload: Record<string, unknown>) {
+  /**
+   * CDXC:DebugCli 2026-04-27-07:18
+   * CLI actions are intentionally routed through the native sidebar runtime so
+   * automated repros can create sessions, press sidebar buttons, send terminal
+   * input, and inspect projected card state without bypassing app behavior.
+   */
+  try {
+    switch (action) {
+      case "state":
+      case "dumpState":
+        return { ok: true, state: summarizeCliState() };
+      case "createSession": {
+        const session = createTerminal(
+          typeof payload.title === "string" ? payload.title : "Shell",
+          typeof payload.input === "string" ? payload.input : "",
+          typeof payload.groupId === "string" ? payload.groupId : undefined,
+        );
+        return { ok: true, session, state: summarizeCliState() };
+      }
+      case "createAgentSession":
+      case "runAgent": {
+        const agentId = typeof payload.agentId === "string" ? payload.agentId : "";
+        const session = runCliAgent(agentId, typeof payload.groupId === "string" ? payload.groupId : undefined);
+        return { ok: true, session, state: summarizeCliState() };
+      }
+      case "runCommand": {
+        const session = runCliCommandButton(String(payload.commandId ?? ""));
+        return { ok: true, session, state: summarizeCliState() };
+      }
+      case "clickButton": {
+        const kind = String(payload.kind ?? "");
+        const id = String(payload.id ?? "");
+        if (kind === "agent") {
+          return { ok: true, session: runCliAgent(id), state: summarizeCliState() };
+        }
+        if (kind === "command") {
+          return { ok: true, session: runCliCommandButton(id), state: summarizeCliState() };
+        }
+        if (kind === "section") {
+          const section = id as SidebarCollapsibleSection;
+          setSidebarSectionCollapsed(section, !collapsedSections[section]);
+          return { ok: true, state: summarizeCliState() };
+        }
+        throw new Error(`Unsupported button kind: ${kind}`);
+      }
+      case "focusSession": {
+        const session = requireCliSession(payload);
+        focusTerminal(session.sessionId);
+        return { ok: true, session, state: summarizeCliState() };
+      }
+      case "focusGroup":
+        updateActiveProjectWorkspace((workspace) =>
+          focusGroupInSimpleWorkspace(workspace, String(payload.groupId)).snapshot,
+        );
+        publish();
+        return { ok: true, state: summarizeCliState() };
+      case "switchProject": {
+        const project = projects.find(
+          (candidate) =>
+            candidate.projectId === payload.projectId ||
+            candidate.path === payload.path ||
+            candidate.name === payload.name,
+        );
+        if (!project) {
+          throw new Error("No matching project was found.");
+        }
+        focusProject(project.projectId);
+        return { ok: true, state: summarizeCliState() };
+      }
+      case "addProject":
+        addProject(String(payload.path), typeof payload.name === "string" ? payload.name : undefined);
+        return { ok: true, state: summarizeCliState() };
+      case "closeSession": {
+        const session = requireCliSession(payload);
+        closeTerminal(session.sessionId);
+        return { ok: true, state: summarizeCliState() };
+      }
+      case "restartSession": {
+        const session = requireCliSession(payload);
+        restartNativeSession(session.sessionId);
+        return { ok: true, state: summarizeCliState() };
+      }
+      case "forkSession": {
+        const session = requireCliSession(payload);
+        forkNativeSession(session.sessionId);
+        return { ok: true, state: summarizeCliState() };
+      }
+      case "fullReloadSession": {
+        const session = requireCliSession(payload);
+        restartNativeSession(session.sessionId);
+        return { ok: true, state: summarizeCliState() };
+      }
+      case "renameSession": {
+        const session = requireCliSession(payload);
+        updateActiveProjectWorkspace((workspace) =>
+          setSessionTitleInSimpleWorkspace(workspace, session.sessionId, String(payload.title ?? "")).snapshot,
+        );
+        publish();
+        return { ok: true, state: summarizeCliState() };
+      }
+      case "sleepSession": {
+        const session = requireCliSession(payload);
+        updateActiveProjectWorkspace((workspace) =>
+          setSessionSleepingInSimpleWorkspace(workspace, session.sessionId, payload.sleeping !== false).snapshot,
+        );
+        publish();
+        return { ok: true, state: summarizeCliState() };
+      }
+      case "favoriteSession": {
+        const session = requireCliSession(payload);
+        updateActiveProjectWorkspace((workspace) =>
+          setSessionFavoriteInSimpleWorkspace(workspace, session.sessionId, payload.favorite !== false).snapshot,
+        );
+        publish();
+        return { ok: true, state: summarizeCliState() };
+      }
+      case "sendText": {
+        const session = requireCliSession(payload);
+        postNative({
+          sessionId: nativeSessionIdForSidebarSession(session.sessionId),
+          text: String(payload.text ?? ""),
+          type: "writeTerminalText",
+        });
+        return { ok: true, session };
+      }
+      case "sendEnter": {
+        const session = requireCliSession(payload);
+        postNative({ sessionId: nativeSessionIdForSidebarSession(session.sessionId), type: "sendTerminalEnter" });
+        return { ok: true, session };
+      }
+      case "sendKey": {
+        const session = requireCliSession(payload);
+        const text = terminalTextForCliKey(payload.key);
+        if (!text) {
+          throw new Error(`Unsupported key: ${String(payload.key)}`);
+        }
+        postNative({
+          sessionId: nativeSessionIdForSidebarSession(session.sessionId),
+          text,
+          type: "writeTerminalText",
+        });
+        return { ok: true, session };
+      }
+      case "renameCommand": {
+        const session = requireCliSession(payload);
+        postNative({
+          sessionId: nativeSessionIdForSidebarSession(session.sessionId),
+          text: `/rename ${String(payload.title ?? "")}`,
+          type: "writeTerminalText",
+        });
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+        postNative({ sessionId: nativeSessionIdForSidebarSession(session.sessionId), type: "sendTerminalEnter" });
+        return { ok: true, session };
+      }
+      case "toggleSection":
+        setSidebarSectionCollapsed(
+          String(payload.section) as SidebarCollapsibleSection,
+          typeof payload.collapsed === "boolean"
+            ? payload.collapsed
+            : !collapsedSections[String(payload.section) as SidebarCollapsibleSection],
+        );
+        return { ok: true, state: summarizeCliState() };
+      case "setVisibleCount":
+        updateActiveProjectWorkspace((workspace) =>
+          setVisibleCountInSimpleWorkspace(workspace, Number(payload.count)),
+        );
+        publish();
+        return { ok: true, state: summarizeCliState() };
+      case "setViewMode":
+        updateActiveProjectWorkspace((workspace) =>
+          setViewModeInSimpleWorkspace(workspace, String(payload.mode) as "grid" | "horizontal" | "vertical"),
+        );
+        publish();
+        return { ok: true, state: summarizeCliState() };
+      case "openBrowser":
+        openNativeBrowserWindow(typeof payload.url === "string" ? payload.url : DEFAULT_BROWSER_LAUNCH_URL);
+        return { ok: true };
+      case "showBrowser":
+        showNativeBrowserWindow();
+        return { ok: true };
+      case "moveSidebar":
+        moveSidebarToOtherSide();
+        return { ok: true, state: summarizeCliState() };
+      case "assertSidebarCard":
+        return assertCliSidebarCard(payload);
+      case "waitFor":
+        return waitForCliSidebarCard(payload);
+      default:
+        throw new Error(`Unsupported CLI action: ${action}`);
+    }
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+      ok: false,
+    };
+  }
+}
+
 function copyResumeCommand(sessionId: string): void {
   const session = findTerminalSession(sessionId);
   if (!session) {
@@ -3298,6 +3659,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       openNativeExternalUrl(message.url);
       return;
     case "sidebarDebugLog":
+      if (message.event.startsWith("sidebar.agentIcon.")) {
+        appendAgentDetectionDebugLog(message.event, message.details);
+      }
       console.debug("[zmux-native-sidebar]", message.event, message.details);
       return;
     case "runSidebarAgent": {
@@ -3547,6 +3911,12 @@ window.__zmux_NATIVE_SETTINGS__ = {
       zedOverlayEnabled: false,
       zedOverlayTargetApp: targetApp,
     });
+  },
+};
+
+window.__zmux_NATIVE_CLI__ = {
+  handleCommand(action, payload) {
+    return handleNativeCliCommand(action, payload);
   },
 };
 

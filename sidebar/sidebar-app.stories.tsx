@@ -35,6 +35,19 @@ export const CommandIndicatorActive: Story = {
 
 export const Default: Story = {};
 
+export const AgentIconRender: Story = {
+  args: {
+    fixture: "agent-icon-render",
+    highlightedVisibleCount: 2,
+    showCloseButtonOnSessionCards: true,
+    showHotkeysOnSessionCards: true,
+    showLastInteractionTimeOnSessionCards: true,
+    theme: "dark-blue",
+    viewMode: "grid",
+    visibleCount: 2,
+  },
+};
+
 export const ActiveSortToggle: Story = {
   args: {
     fixture: "sort-toggle-demo",

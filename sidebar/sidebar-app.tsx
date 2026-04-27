@@ -484,6 +484,17 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
         sessionCount: countSidebarSessions(event.data.groups),
       });
     }
+    /*
+     * CDXC:AgentDetection 2026-04-27-07:29
+     * Agent-icon debugging must verify the message boundary, not the CSS layer:
+     * log whether native-projected agentIcon values reach the sidebar webview
+     * and survive the Zustand store apply step.
+     */
+    postSidebarAgentIconBoundaryLog(vscode, "sidebar.agentIcon.messageReceived", {
+      messageType: event.data.type,
+      revision: event.data.revision,
+      summary: summarizeSidebarAgentIconsFromGroups(event.data.groups),
+    });
 
     if (pendingCreateGroupRef.current) {
       const nextGroupId = findCreatedGroupId(
@@ -497,6 +508,11 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     }
 
     applySidebarMessage(event.data);
+    postSidebarAgentIconBoundaryLog(vscode, "sidebar.agentIcon.messageApplied", {
+      messageType: event.data.type,
+      revision: event.data.revision,
+      summary: summarizeSidebarAgentIconsFromStore(useSidebarStore.getState().sessionsById),
+    });
     if (event.data.type === "hydrate" && !hasAppliedHydrateRef.current) {
       hasAppliedHydrateRef.current = true;
       firstHydrateRevisionRef.current = event.data.revision;
@@ -2490,6 +2506,68 @@ function getSidebarStartupElapsedMs(startedAt: number): number {
 
 function countSidebarSessions(groups: readonly { sessions: readonly unknown[] }[]): number {
   return groups.reduce((total, group) => total + group.sessions.length, 0);
+}
+
+function postSidebarAgentIconBoundaryLog(
+  vscode: WebviewApi,
+  event: string,
+  details: Record<string, unknown>,
+): void {
+  vscode.postMessage({
+    details,
+    event,
+    type: "sidebarDebugLog",
+  });
+}
+
+function summarizeSidebarAgentIconsFromGroups(
+  groups: readonly {
+    groupId: string;
+    sessions: readonly {
+      agentIcon?: string;
+      sessionId: string;
+      sessionKind?: string;
+    }[];
+  }[],
+) {
+  const sessions = groups.flatMap((group) =>
+    group.sessions.map((session) => ({
+      agentIcon: session.agentIcon,
+      groupId: group.groupId,
+      sessionId: session.sessionId,
+      sessionKind: session.sessionKind,
+    })),
+  );
+
+  return summarizeSidebarAgentIconSessions(sessions);
+}
+
+function summarizeSidebarAgentIconsFromStore(
+  sessionsById: ReturnType<typeof useSidebarStore.getState>["sessionsById"],
+) {
+  return summarizeSidebarAgentIconSessions(
+    Object.values(sessionsById).map((session) => ({
+      agentIcon: session.agentIcon,
+      sessionId: session.sessionId,
+      sessionKind: session.sessionKind,
+    })),
+  );
+}
+
+function summarizeSidebarAgentIconSessions(
+  sessions: readonly {
+    agentIcon?: string;
+    groupId?: string;
+    sessionId: string;
+    sessionKind?: string;
+  }[],
+) {
+  const agentSessions = sessions.filter((session) => Boolean(session.agentIcon));
+  return {
+    agentIconSessionCount: agentSessions.length,
+    agentSessions: agentSessions.slice(0, 10),
+    sessionCount: sessions.length,
+  };
 }
 
 function createDisplayedSessionIdsByGroup({

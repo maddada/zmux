@@ -1049,7 +1049,7 @@ function getCollapsedSummaryLabel(
   }
 
   if (indicatorActivity === "working") {
-    return "Group has active sessions";
+    return "Group has working sessions";
   }
 
   return undefined;

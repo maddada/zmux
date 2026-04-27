@@ -8,6 +8,7 @@
     "start": "native/macos/zmuxHost/run-zmux-host.sh",
     "build": "native/macos/zmuxHost/build-zmux-host.sh",
     "build:sidebar-css": "tailwindcss -i sidebar/styles/shadcn.css -o sidebar/styles/shadcn.generated.css --minify",
+    "cli": "node scripts/zmux-cli.mjs",
     "storybook": "bun run build:sidebar-css && storybook dev -p 6006 --no-open",
     "build:storybook": "bun run build:sidebar-css && storybook build",
     "typecheck": "tsc --noEmit --pretty false",

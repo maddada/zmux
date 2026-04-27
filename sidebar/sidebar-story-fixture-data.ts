@@ -108,6 +108,42 @@ const COMMAND_INDICATOR_ACTIVE_GROUPS: SidebarStoryGroup[] = [
   },
 ];
 
+/*
+ * CDXC:AgentDetection 2026-04-27-06:47
+ * Keep a narrow Storybook fixture for verifying that sidebar cards render the
+ * agent identity already present in session data before changing production CSS.
+ */
+const AGENT_ICON_RENDER_GROUPS: SidebarStoryGroup[] = [
+  {
+    groupId: "agent-icon-main",
+    isActive: true,
+    sessions: [
+      createStorySession({
+        alias: "Codex assigned",
+        agentIcon: "codex",
+        detail: "OpenAI Codex",
+        isFocused: true,
+        isVisible: true,
+        lastInteractionAt: secondsAgo(15),
+        sessionId: "agent-icon-codex",
+        shortcutLabel: "⌘⌥1",
+        terminalTitle: "codex",
+      }),
+      createStorySession({
+        alias: "Claude assigned",
+        agentIcon: "claude",
+        detail: "Claude Code",
+        isVisible: true,
+        lastInteractionAt: secondsAgo(35),
+        sessionId: "agent-icon-claude",
+        shortcutLabel: "⌘⌥2",
+        terminalTitle: "✳ Claude Code",
+      }),
+    ],
+    title: "Main",
+  },
+];
+
 const BROWSER_GROUPS: SidebarStoryGroup[] = [
   {
     groupId: "browser-main",
@@ -523,6 +559,7 @@ const THREE_GROUPS_STRESS: SidebarStoryGroup[] = [
 ];
 
 export const GROUPS_BY_FIXTURE: Record<SidebarStoryFixture, SidebarStoryGroup[]> = {
+  "agent-icon-render": AGENT_ICON_RENDER_GROUPS,
   "browser-groups": BROWSER_GROUPS,
   "command-indicator-active": COMMAND_INDICATOR_ACTIVE_GROUPS,
   default: DEFAULT_GROUPS,

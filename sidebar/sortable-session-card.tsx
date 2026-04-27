@@ -161,6 +161,7 @@ export function SortableSessionCard({
   const menuRef = useRef<HTMLDivElement>(null);
   const aliasHeadingRef = useRef<HTMLDivElement>(null);
   const debugInstanceIdRef = useRef(createSidebarDebugInstanceId());
+  const lastAgentIconRenderDebugKeyRef = useRef<string | undefined>(undefined);
   const isBrowserSession = session?.sessionKind === "browser" || session?.kind === "browser";
   const isT3Session = session?.sessionKind === "t3";
   const canFavoriteSession = !isBrowserSession;
@@ -305,6 +306,118 @@ export function SortableSessionCard({
       isDropTarget: sortable.isDropTarget,
     });
   }, [dropPosition, postSessionDragDebugLog, sortable.isDragging, sortable.isDropTarget]);
+
+  useEffect(() => {
+    if (!session.agentIcon && session.isReloading !== true) {
+      return;
+    }
+
+    const hasLastInteractionLabel = Boolean(session.lastInteractionAt);
+    const showHeaderLoadingSpinner =
+      session.isReloading === true || session.isGeneratingFirstPromptTitle === true;
+    const hasHeaderAgentIcon = Boolean(session.agentIcon) || showHeaderLoadingSpinner;
+    const defaultTrailingDisplay =
+      !showLastInteractionTime && hasHeaderAgentIcon
+        ? "icon"
+        : hasLastInteractionLabel
+          ? "time"
+          : "icon";
+    const shouldKeepLoadingIconVisible = showHeaderLoadingSpinner && hasHeaderAgentIcon;
+    const hoverTrailingDisplay = shouldKeepLoadingIconVisible
+      ? "icon"
+      : defaultTrailingDisplay === "icon"
+        ? hasLastInteractionLabel
+          ? "time"
+          : "icon"
+        : hasHeaderAgentIcon
+          ? "icon"
+          : "time";
+    const debugKey = JSON.stringify({
+      agentIcon: session.agentIcon,
+      defaultTrailingDisplay,
+      hasHeaderAgentIcon,
+      hasLastInteractionLabel,
+      hoverTrailingDisplay,
+      isGeneratingFirstPromptTitle: session.isGeneratingFirstPromptTitle === true,
+      isReloading: session.isReloading === true,
+      primaryTitle: session.primaryTitle,
+      sessionId: session.sessionId,
+      showLastInteractionTime,
+      terminalTitle: session.terminalTitle,
+    });
+    if (lastAgentIconRenderDebugKeyRef.current === debugKey) {
+      return;
+    }
+    lastAgentIconRenderDebugKeyRef.current = debugKey;
+
+    /*
+     * CDXC:AgentDetection 2026-04-27-07:43
+     * Agent identity is confirmed at the native/webview/store boundary. Log
+     * the card render decision and actual DOM state so missing sidebar icons
+     * can be traced without guessing at CSS or projection state.
+     */
+    postSidebarAgentIconRenderDebugLog(vscode, "sidebar.agentIcon.cardRenderState", {
+      agentIcon: session.agentIcon,
+      defaultTrailingDisplay,
+      groupId,
+      hasHeaderAgentIcon,
+      hasLastInteractionLabel,
+      hoverTrailingDisplay,
+      isGeneratingFirstPromptTitle: session.isGeneratingFirstPromptTitle === true,
+      isReloading: session.isReloading === true,
+      primaryTitle: session.primaryTitle,
+      sessionActivity: session.activity,
+      sessionId: session.sessionId,
+      sessionKind: session.sessionKind,
+      showLastInteractionTime,
+      terminalTitle: session.terminalTitle,
+    });
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      const card = findSessionCardElement(session.sessionId);
+      const frame = card?.closest<HTMLElement>(".session-frame");
+      const trailing = card?.querySelector<HTMLElement>(".session-head-trailing");
+      const headerIcon = card?.querySelector<HTMLElement>(
+        ".session-header-agent-icon, .session-header-agent-tabler-icon, .session-header-reloading-icon",
+      );
+      const floatingIcon = frame?.querySelector<HTMLElement>(
+        ".session-floating-agent-icon, .session-floating-agent-tabler-icon, .session-floating-reloading-icon",
+      );
+
+      postSidebarAgentIconRenderDebugLog(vscode, "sidebar.agentIcon.cardDomState", {
+        agentIcon: session.agentIcon,
+        card: summarizeAgentIconElement(card),
+        defaultTrailingDisplay,
+        floatingIcon: summarizeAgentIconElement(floatingIcon),
+        frame: summarizeAgentIconElement(frame),
+        groupId,
+        hasCardElement: Boolean(card),
+        hasFloatingIconElement: Boolean(floatingIcon),
+        hasHeaderIconElement: Boolean(headerIcon),
+        headerIcon: summarizeAgentIconElement(headerIcon),
+        hoverTrailingDisplay,
+        sessionId: session.sessionId,
+        trailing: summarizeAgentIconElement(trailing),
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [
+    groupId,
+    session.activity,
+    session.agentIcon,
+    session.isGeneratingFirstPromptTitle,
+    session.isReloading,
+    session.lastInteractionAt,
+    session.primaryTitle,
+    session.sessionId,
+    session.sessionKind,
+    session.terminalTitle,
+    showLastInteractionTime,
+    vscode,
+  ]);
 
   useEffect(() => {
     if (!contextMenuPosition) {
@@ -835,6 +948,47 @@ function supportsFullReload(session: SidebarSessionItem): boolean {
     session.agentIcon === "claude" ||
     session.agentIcon === "opencode"
   );
+}
+
+function postSidebarAgentIconRenderDebugLog(
+  vscode: WebviewApi,
+  event: string,
+  details: Record<string, unknown>,
+): void {
+  vscode.postMessage({
+    details,
+    event,
+    type: "sidebarDebugLog",
+  });
+}
+
+function findSessionCardElement(sessionId: string): HTMLElement | undefined {
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-session-id]")).find(
+    (element) => element.dataset.sidebarSessionId === sessionId,
+  );
+}
+
+function summarizeAgentIconElement(element: HTMLElement | null | undefined) {
+  if (!element) {
+    return undefined;
+  }
+
+  const styles = window.getComputedStyle(element);
+  const bounds = element.getBoundingClientRect();
+  return {
+    className:
+      typeof element.className === "string"
+        ? element.className
+        : String(element.getAttribute("class") ?? ""),
+    dataDefaultTrailingDisplay: element.dataset.defaultTrailingDisplay,
+    dataHasAgentIcon: element.dataset.hasAgentIcon,
+    dataHoverTrailingDisplay: element.dataset.hoverTrailingDisplay,
+    display: styles.display,
+    height: Math.round(bounds.height * 100) / 100,
+    opacity: styles.opacity,
+    visibility: styles.visibility,
+    width: Math.round(bounds.width * 100) / 100,
+  };
 }
 
 let sidebarDebugInstanceCounter = 0;
