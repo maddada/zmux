@@ -127,6 +127,7 @@ struct WriteTerminalText: Decodable {
 
 struct SetActiveTerminalSet: Decodable {
     let activeSessionIds: [String]
+    let attentionSessionIds: [String]?
     let focusedSessionId: String?
     let layout: NativeTerminalLayout?
 }

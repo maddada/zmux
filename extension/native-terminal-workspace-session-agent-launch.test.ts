@@ -44,7 +44,7 @@ describe("buildResumeAgentCommand", () => {
         "claude",
         "Fix sidebar card title",
       ),
-    ).toBe("cw -r 'Fix sidebar card title'");
+    ).toBe("cw --resume 'Fix sidebar card title'");
 
     configurationValues.clear();
   });
@@ -72,7 +72,7 @@ describe("buildResumeAgentCommand", () => {
         "claude",
         "Design pass",
       ),
-    ).toBe("claude -r 'Design pass'");
+    ).toBe("claude --resume 'Design pass'");
   });
 
   test("should escape apostrophes in titled resume commands", () => {
@@ -126,7 +126,7 @@ describe("buildResumeAgentCommand", () => {
         "claude",
         "✳ Fix sidebar card title",
       ),
-    ).toBe("claude -r 'Fix sidebar card title'");
+    ).toBe("claude --resume 'Fix sidebar card title'");
   });
 
   test("should build an opencode resume command for titled sessions", () => {
@@ -335,7 +335,7 @@ describe("buildCopyResumeCommandText", () => {
         "claude",
         "Design pass",
       ),
-    ).toBe("claude -r 'Design pass'");
+    ).toBe("claude --resume 'Design pass'");
   });
 
   test("should preserve custom command prefixes for codex copy text", () => {
@@ -490,7 +490,7 @@ describe("buildDetachedResumeAction", () => {
       ),
     ).toEqual({
       shouldExecute: true,
-      text: "claude -r 'Bug Fixing'",
+      text: "claude --resume 'Bug Fixing'",
     });
   });
 

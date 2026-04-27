@@ -929,6 +929,11 @@ function getSessionRenameInitialTitle(session: SidebarSessionItem): string {
 }
 
 function supportsResumeCommandCopy(session: SidebarSessionItem): boolean {
+  /**
+   * CDXC:SessionRestore 2026-04-27-08:04
+   * Match agent-tiler context-menu visibility: Copy resume is only shown for
+   * built-in agents with known resume or resume-selection CLI behavior.
+   */
   return (
     session.agentIcon === "codex" ||
     session.agentIcon === "claude" ||
@@ -943,6 +948,11 @@ function supportsFork(session: SidebarSessionItem): boolean {
 }
 
 function supportsFullReload(session: SidebarSessionItem): boolean {
+  /**
+   * CDXC:SessionRestore 2026-04-27-08:04
+   * Match agent-tiler context-menu visibility: Full reload is only shown for
+   * agent sessions that can be recreated and resumed programmatically.
+   */
   return (
     session.agentIcon === "codex" ||
     session.agentIcon === "claude" ||

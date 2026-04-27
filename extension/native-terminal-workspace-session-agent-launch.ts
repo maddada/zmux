@@ -54,7 +54,12 @@ export function buildResumeAgentCommand(
     case "codex":
       return appendResumeTarget(`${agentCommand} resume`, sessionTitle, terminalTitle);
     case "claude":
-      return appendResumeTarget(`${agentCommand} -r`, sessionTitle, terminalTitle);
+      /**
+       * CDXC:SessionRestore 2026-04-27-07:38
+       * Claude session resume must use the long-form CLI flag that matches
+       * native zmux reopen behavior: `claude --resume <session title>`.
+       */
+      return appendResumeTarget(`${agentCommand} --resume`, sessionTitle, terminalTitle);
     case "opencode":
       return buildOpenCodeResumeCommand(agentCommand, sessionTitle, terminalTitle, false);
     default:
@@ -106,7 +111,7 @@ export function buildProgrammaticResumeAction(
       };
     }
     case "claude": {
-      const text = appendResumeTarget(`${agentCommand} -r`, sessionTitle, terminalTitle);
+      const text = appendResumeTarget(`${agentCommand} --resume`, sessionTitle, terminalTitle);
       return {
         steps: [{ data: text, shouldExecute: true }],
       };
@@ -148,7 +153,7 @@ export function buildCopyResumeCommandText(
     case "codex":
       return appendResumeTarget(`${agentCommand} resume`, sessionTitle, terminalTitle);
     case "claude":
-      return appendResumeTarget(`${agentCommand} -r`, sessionTitle, terminalTitle);
+      return appendResumeTarget(`${agentCommand} --resume`, sessionTitle, terminalTitle);
     case "gemini":
       return `${agentCommand} --list-sessions && echo 'Enter ${agentCommand} -r id' to resume a session`;
     case "opencode":
@@ -188,7 +193,7 @@ export function buildDetachedResumeAction(
     case "claude":
       return {
         shouldExecute: true,
-        text: appendResumeTarget(`${agentCommand} -r`, sessionTitle, terminalTitle),
+        text: appendResumeTarget(`${agentCommand} --resume`, sessionTitle, terminalTitle),
       };
     case "gemini":
       return {

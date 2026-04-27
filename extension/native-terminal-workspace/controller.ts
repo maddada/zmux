@@ -948,6 +948,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     this.restartAutoSleepTimer();
     await this.syncT3ActivityMonitor();
     await this.syncKnownSessionActivities(false);
+    await this.resumeStartupTerminalSessions();
     this.hasCompletedInitialActivityHydration = true;
     this.syncSurfaceManagers();
     await this.reconcileProjectedSessions("initialize");
@@ -5389,6 +5390,57 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       surfaceEnsureResult === "created-terminal" &&
       this.canResumeDetachedTerminalSession(sessionRecord)
     );
+  }
+
+  private async resumeStartupTerminalSessions(): Promise<void> {
+    const terminalSessions = this.getAllSessionRecords().filter(
+      (sessionRecord): sessionRecord is TerminalSessionRecord =>
+        sessionRecord.kind === "terminal" && !this.isSessionClosing(sessionRecord.sessionId),
+    );
+    /**
+     * CDXC:SessionRestore 2026-04-27-07:12
+     * Startup restore must cover every terminal in every workspace group, not
+     * just panes visible in the active group. Stored title, agent launch, and
+     * stable session ID metadata are used to recreate each terminal and send the
+     * agent-specific resume command once for newly created terminal surfaces.
+     */
+    logzmuxDebug("controller.startupTerminalRestore.start", {
+      sessionIds: terminalSessions.map((sessionRecord) => sessionRecord.sessionId),
+      terminalSessionCount: terminalSessions.length,
+    });
+
+    for (const sessionRecord of terminalSessions) {
+      const persistedTitle = getVisibleTerminalTitle(
+        this.backend.getSessionSnapshot(sessionRecord.sessionId)?.title,
+      );
+      if (persistedTitle) {
+        this.terminalTitleBySessionId.set(sessionRecord.sessionId, persistedTitle);
+      }
+    }
+
+    let resumedCount = 0;
+    let skippedCount = 0;
+    for (const sessionRecord of terminalSessions) {
+      if (this.isFrozenNonPersistentTerminalSession(sessionRecord)) {
+        skippedCount += 1;
+        continue;
+      }
+
+      const surfaceEnsureResult = await this.createSurfaceIfNeeded(sessionRecord);
+      if (!this.shouldAutoResumeVisibleTerminalSession(sessionRecord, surfaceEnsureResult)) {
+        skippedCount += 1;
+        continue;
+      }
+
+      await this.resumeDetachedTerminalSession(sessionRecord);
+      resumedCount += 1;
+    }
+
+    logzmuxDebug("controller.startupTerminalRestore.complete", {
+      resumedCount,
+      skippedCount,
+      terminalSessionCount: terminalSessions.length,
+    });
   }
 
   private canResumeDetachedTerminalSession(sessionRecord: SessionRecord): boolean {

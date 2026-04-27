@@ -8,6 +8,7 @@ import {
   type FirstPromptAutoRenameStrategy,
 } from "../../extension/first-prompt-session-title";
 import {
+  acknowledgeTitleDerivedSessionActivity,
   getTitleDerivedSessionActivityFromTransition,
   type TitleDerivedSessionActivity,
 } from "../../extension/session-title-activity";
@@ -111,6 +112,7 @@ type NativeHostCommand =
   | { sessionId: string; type: "sendTerminalEnter" }
   | {
       activeSessionIds: string[];
+      attentionSessionIds?: string[];
       focusedSessionId?: string;
       layout?: NativeTerminalLayout;
       type: "setActiveTerminalSet";
@@ -1680,53 +1682,62 @@ function publish(): void {
 }
 
 function ensureVisibleNativeTerminals(reason: string): void {
-  const project = activeProject();
-  const snapshot = activeSnapshot();
-  const visibleIds = new Set(snapshot.visibleSessionIds);
   const decisions: unknown[] = [];
-  for (const session of snapshot.sessions) {
-    if (session.kind !== "terminal" || session.isSleeping === true || !visibleIds.has(session.sessionId)) {
-      decisions.push({
-        isSleeping: session.isSleeping === true,
-        isVisible: visibleIds.has(session.sessionId),
-        kind: session.kind,
-        persistedAgentName: session.kind === "terminal" ? session.agentName : undefined,
-        reason:
-          session.kind !== "terminal"
-            ? "non-terminal"
-            : session.isSleeping === true
-              ? "sleeping"
-              : "not-visible",
-        sessionId: session.sessionId,
-        title: session.title,
-      });
-      continue;
+  /**
+   * CDXC:SessionRestore 2026-04-27-07:38
+   * Native zmux startup restore must recreate every non-sleeping terminal
+   * persisted in every workspace group, including sessions hidden behind
+   * inactive tabs. Restored agent terminals must launch with the stored agent
+   * identity and immediately send that agent's title-based resume command.
+   */
+  for (const project of projects) {
+    for (const group of project.workspace.groups) {
+      const visibleIds = new Set(group.snapshot.visibleSessionIds);
+      for (const session of group.snapshot.sessions) {
+        if (session.kind !== "terminal" || session.isSleeping === true) {
+          decisions.push({
+            groupId: group.groupId,
+            isSleeping: session.isSleeping === true,
+            isVisible: visibleIds.has(session.sessionId),
+            kind: session.kind,
+            persistedAgentName: session.kind === "terminal" ? session.agentName : undefined,
+            projectId: project.projectId,
+            reason: session.kind !== "terminal" ? "non-terminal" : "sleeping",
+            sessionId: session.sessionId,
+            title: session.title,
+          });
+          continue;
+        }
+        if (terminalStateById.has(session.sessionId)) {
+          decisions.push({
+            groupId: group.groupId,
+            isVisible: visibleIds.has(session.sessionId),
+            persistedAgentName: session.agentName,
+            projectId: project.projectId,
+            reason: "already-has-terminal-state",
+            sessionId: session.sessionId,
+            title: session.title,
+          });
+          continue;
+        }
+        restoreNativeTerminalSession(project, session, reason);
+        decisions.push({
+          groupId: group.groupId,
+          isVisible: visibleIds.has(session.sessionId),
+          persistedAgentName: session.agentName,
+          projectId: project.projectId,
+          reason: "restored-native-terminal",
+          sessionId: session.sessionId,
+          title: session.title,
+        });
+      }
     }
-    if (terminalStateById.has(session.sessionId)) {
-      decisions.push({
-        persistedAgentName: session.agentName,
-        isVisible: true,
-        reason: "already-has-terminal-state",
-        sessionId: session.sessionId,
-        title: session.title,
-      });
-      continue;
-    }
-    restoreNativeTerminalSession(project, session, reason);
-    decisions.push({
-      persistedAgentName: session.agentName,
-      isVisible: true,
-      reason: "restored-native-terminal",
-      sessionId: session.sessionId,
-      title: session.title,
-    });
   }
   appendRestoreDebugLog("nativeSidebar.ensureVisibleNativeTerminals", {
     activeProjectId,
     decisions,
-    project: summarizeNativeProject(project),
+    projects: projects.map(summarizeNativeProject),
     reason,
-    visibleIds: [...visibleIds],
   });
 }
 
@@ -1737,10 +1748,11 @@ function restoreNativeTerminalSession(
 ): void {
   const nativeSessionId = `${project.projectId}-session-${nextNativeSessionNumber++}`;
   const sessionStateFilePath = createNativeSessionStateFilePath(project.projectId, session.sessionId);
+  const initialInput = buildNativeRestoredTerminalInitialInput(session);
   nativeSessionIdBySidebarSessionId.set(session.sessionId, nativeSessionId);
   sidebarSessionIdByNativeSessionId.set(nativeSessionId, session.sessionId);
   terminalStateById.set(session.sessionId, {
-    activity: "idle",
+    activity: initialInput.trim() ? "working" : "idle",
     agentName: session.agentName,
     lifecycleState: "running",
     sessionStateFilePath,
@@ -1748,7 +1760,8 @@ function restoreNativeTerminalSession(
   });
   appendAgentDetectionDebugLog("nativeSidebar.restoreTerminalState.created", {
     agentName: session.agentName,
-    initialActivity: "idle",
+    initialActivity: initialInput.trim() ? "working" : "idle",
+    initialInputPreview: initialInput.trim().slice(0, 120),
     nativeSessionId,
     reason,
     sessionId: session.sessionId,
@@ -1758,11 +1771,12 @@ function restoreNativeTerminalSession(
   postNative({
     cwd: project.path,
     env: createNativeAgentSessionEnvironment({
+      agentName: session.agentName,
       project,
       sessionId: session.sessionId,
       sessionStateFilePath,
     }),
-    initialInput: "",
+    initialInput,
     sessionId: nativeSessionId,
     title: session.title,
     type: "createTerminal",
@@ -1771,6 +1785,7 @@ function restoreNativeTerminalSession(
     nativeSessionId,
     projectId: project.projectId,
     reason,
+    restoredWithResumeInput: Boolean(initialInput.trim()),
     sessionId: session.sessionId,
     title: session.title,
   });
@@ -1827,7 +1842,7 @@ function countWorkspaceBarSessions(project: NativeProject): WorkspaceBarProject[
         counts.working += 1;
       } else if (lifecycleState === "running") {
         counts.running += 1;
-      } else if (lifecycleState === "done") {
+      } else if (lifecycleState === "done" && terminalState?.activity === "attention") {
         counts.done += 1;
       }
     }
@@ -2146,6 +2161,151 @@ function dirnameNativePath(path: string): string {
 
 function quoteNativeShellArg(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function buildNativeRestoredTerminalInitialInput(session: TerminalSessionRecord): string {
+  const command = buildNativeResumeAgentCommand(session.agentName, session.title);
+  return command ? `${command}\r` : "";
+}
+
+type NativeResumeAgentId = "claude" | "codex" | "copilot" | "gemini" | "opencode";
+
+function buildNativeResumeAgentCommand(
+  agentName: string | undefined,
+  sessionTitle: string | undefined,
+): string | undefined {
+  const agentId = resolveNativeResumeAgentId(agentName);
+  if (agentId !== "claude" && agentId !== "codex" && agentId !== "opencode") {
+    return undefined;
+  }
+  const agentCommand = resolveNativeAgentCommand(agentId);
+  const resumeTitle = getVisibleTerminalTitle(sessionTitle)?.trim();
+  if (!agentId || !agentCommand || !resumeTitle) {
+    return undefined;
+  }
+
+  /**
+   * CDXC:SessionRestore 2026-04-27-07:38
+   * Automatic reopen uses the agent-specific resume syntax that users expect:
+   * Claude receives `claude --resume <title>`, Codex receives
+   * `codex resume <title>`, and OpenCode resolves the stored title to its
+   * session ID before launching so restored terminals attach to saved sessions.
+   */
+  switch (agentId) {
+    case "codex":
+      return `${agentCommand} resume ${quoteNativeShellArg(resumeTitle)}`;
+    case "claude":
+      return `${agentCommand} --resume ${quoteNativeShellArg(resumeTitle)}`;
+    case "opencode":
+      return buildNativeOpenCodeResumeCommand(agentCommand, resumeTitle);
+    default:
+      return undefined;
+  }
+}
+
+function buildNativeCopyResumeCommand(
+  agentName: string | undefined,
+  sessionTitle: string | undefined,
+): string | undefined {
+  const agentId = resolveNativeResumeAgentId(agentName);
+  const agentCommand = resolveNativeAgentCommand(agentId);
+  if (!agentId || !agentCommand) {
+    return undefined;
+  }
+  const resumeTitle = getVisibleTerminalTitle(sessionTitle)?.trim();
+
+  switch (agentId) {
+    case "codex":
+      return resumeTitle
+        ? `${agentCommand} resume ${quoteNativeShellArg(resumeTitle)}`
+        : `${agentCommand} resume`;
+    case "claude":
+      return resumeTitle
+        ? `${agentCommand} --resume ${quoteNativeShellArg(resumeTitle)}`
+        : `${agentCommand} --resume`;
+    case "opencode":
+      return buildNativeOpenCodeCopyResumeCommand(agentCommand, sessionTitle);
+    case "gemini":
+      return `${agentCommand} --list-sessions && echo 'Enter ${agentCommand} -r id' to resume a session`;
+    case "copilot":
+      return `${agentCommand} --continue && echo 'Or use ${agentCommand} --resume to pick a session, or ${agentCommand} --resume SESSION-ID if you know it'`;
+    default:
+      return undefined;
+  }
+}
+
+function buildNativeOpenCodeResumeCommand(agentCommand: string, resumeTitle: string): string {
+  return `${agentCommand} -s "$(${agentCommand} session list --format json | /usr/bin/python3 -c ${quoteNativeShellArg(getNativeOpenCodeSessionLookupScript())} ${quoteNativeShellArg(resumeTitle)})"`;
+}
+
+function buildNativeOpenCodeCopyResumeCommand(
+  agentCommand: string,
+  sessionTitle: string | undefined,
+): string {
+  const resumeTitle = getVisibleTerminalTitle(sessionTitle)?.trim();
+  return resumeTitle
+    ? buildNativeOpenCodeResumeCommand(agentCommand, resumeTitle)
+    : `${agentCommand} session list && echo 'Enter ${agentCommand} -s id' to resume a session`;
+}
+
+function getNativeOpenCodeSessionLookupScript(): string {
+  return `import json, os, sys
+title = sys.argv[1].strip()
+sessions = json.load(sys.stdin)
+cwd = os.getcwd()
+match = next((session for session in sessions if session.get("title") == title and session.get("directory") == cwd), None)
+if match is None:
+    match = next((session for session in sessions if session.get("title") == title), None)
+if not match or not match.get("id"):
+    sys.exit(1)
+sys.stdout.write(str(match["id"]))
+`;
+}
+
+function resolveNativeResumeAgentId(agentName: string | undefined): NativeResumeAgentId | undefined {
+  const normalizedAgentName = agentName?.trim().toLowerCase();
+  if (!normalizedAgentName) {
+    return undefined;
+  }
+
+  if (isNativeResumeAgentId(normalizedAgentName)) {
+    return normalizedAgentName;
+  }
+
+  const defaultAgent = getDefaultSidebarAgentById(normalizedAgentName);
+  if (isNativeResumeAgentId(defaultAgent?.agentId)) {
+    return defaultAgent.agentId;
+  }
+
+  const matchingAgent = agents.find(
+    (agent) =>
+      agent.agentId.trim().toLowerCase() === normalizedAgentName ||
+      agent.name.trim().toLowerCase() === normalizedAgentName,
+  );
+  return isNativeResumeAgentId(matchingAgent?.agentId)
+    ? matchingAgent.agentId
+    : undefined;
+}
+
+function isNativeResumeAgentId(agentId: string | undefined): agentId is NativeResumeAgentId {
+  return (
+    agentId === "claude" ||
+    agentId === "codex" ||
+    agentId === "copilot" ||
+    agentId === "gemini" ||
+    agentId === "opencode"
+  );
+}
+
+function resolveNativeAgentCommand(agentId: NativeResumeAgentId | undefined): string | undefined {
+  if (!agentId) {
+    return undefined;
+  }
+
+  return (
+    agents.find((agent) => agent.agentId === agentId)?.command?.trim() ??
+    getDefaultSidebarAgentById(agentId)?.command
+  );
 }
 
 function createTerminal(
@@ -2697,8 +2857,40 @@ function closeTerminal(sessionId: string): void {
 
 function focusTerminal(sessionId: string): void {
   updateActiveProjectWorkspace((workspace) => focusSessionInSimpleWorkspace(workspace, sessionId).snapshot);
+  acknowledgeNativeTerminalAttention(sessionId, "sidebar-focus");
   postNative({ sessionId: nativeSessionIdForSidebarSession(sessionId), type: "focusTerminal" });
   publish();
+}
+
+function acknowledgeNativeTerminalAttention(
+  sessionId: string,
+  reason: "native-focus" | "sidebar-focus",
+): boolean {
+  const terminalState = terminalStateById.get(sessionId);
+  if (terminalState?.activity !== "attention") {
+    return false;
+  }
+
+  /**
+   * CDXC:NativeSessionStatus 2026-04-27-07:39
+   * Done/green is an attention state, not just an exited lifecycle. Clicking a
+   * green session card acknowledges that completion and clears both the card
+   * dot and workspace-bar done count until the next working-to-done transition.
+   */
+  const previousDerivedActivity = titleDerivedActivityBySessionId.get(sessionId);
+  const acknowledgedDerivedActivity =
+    acknowledgeTitleDerivedSessionActivity(previousDerivedActivity);
+  if (acknowledgedDerivedActivity) {
+    titleDerivedActivityBySessionId.set(sessionId, acknowledgedDerivedActivity);
+  }
+  terminalState.activity = "idle";
+  appendAgentDetectionDebugLog("nativeSidebar.sessionAttentionAcknowledged", {
+    acknowledgedDerivedActivity,
+    previousDerivedActivity,
+    reason,
+    sessionId,
+  });
+  return true;
 }
 
 function findSessionGroupId(sessionId: string): string | undefined {
@@ -2723,8 +2915,22 @@ function restartNativeSession(sessionId: string): void {
   if (!session) {
     return;
   }
+  const initialInput = buildNativeRestoredTerminalInitialInput(session);
+  if (!initialInput.trim()) {
+    showNativeMessage(
+      "info",
+      "Full reload is only available for Codex, Claude, and OpenCode sessions with a visible title.",
+    );
+    return;
+  }
+  /**
+   * CDXC:SessionRestore 2026-04-27-08:04
+   * Right-click Full reload follows agent-tiler semantics in native zmux:
+   * recreate the terminal as the same agent type, then immediately send the
+   * agent-specific resume command instead of opening a fresh shell.
+   */
   closeTerminal(sessionId);
-  createTerminal(session.title || "Shell", "", groupId);
+  createTerminal(session.title || "Shell", initialInput, groupId, session.agentName);
 }
 
 function forkNativeSession(sessionId: string): void {
@@ -3092,7 +3298,12 @@ function copyResumeCommand(sessionId: string): void {
   if (!session) {
     return;
   }
-  const text = `cd ${JSON.stringify(activeProject().path)} && ${session.title || "echo No resume command available"}`;
+  const resumeCommand = buildNativeCopyResumeCommand(session.agentName, session.title);
+  if (!resumeCommand) {
+    showNativeMessage("info", "No resume command is available for this session.");
+    return;
+  }
+  const text = `cd ${quoteNativeShellArg(activeProject().path)} && ${resumeCommand}`;
   void navigator.clipboard?.writeText(text).catch(() => undefined);
 }
 
@@ -3543,7 +3754,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "fullReloadGroup": {
       const group = activeProject().workspace.groups.find((candidate) => candidate.groupId === message.groupId);
       for (const session of group?.snapshot.sessions ?? []) {
-        if (session.kind === "terminal") {
+        if (session.kind === "terminal" && buildNativeRestoredTerminalInitialInput(session).trim()) {
           restartNativeSession(session.sessionId);
         }
       }
@@ -3737,9 +3948,19 @@ function syncNativeLayout(): void {
   const visibleSessionIds = snapshot.sessions
     .filter((session) => session.kind === "terminal" && visibleIds.has(session.sessionId))
     .map((session) => nativeSessionIdForSidebarSession(session.sessionId));
+  const attentionSessionIds = snapshot.sessions
+    .filter((session) => {
+      if (session.kind !== "terminal" || !visibleIds.has(session.sessionId)) {
+        return false;
+      }
+      const terminalState = terminalStateById.get(session.sessionId);
+      return terminalState?.activity === "attention";
+    })
+    .map((session) => nativeSessionIdForSidebarSession(session.sessionId));
   const layout = buildLayout(visibleSessionIds, snapshot.visibleCount);
   postNative({
     activeSessionIds: visibleSessionIds,
+    attentionSessionIds,
     focusedSessionId: snapshot.focusedSessionId
       ? nativeSessionIdForSidebarSession(snapshot.focusedSessionId)
       : undefined,
@@ -3866,10 +4087,18 @@ window.addEventListener("zmux-native-host-event", (event) => {
      */
     const previousFocusedSessionId = activeSnapshot().focusedSessionId;
     if (previousFocusedSessionId === sidebarSessionId) {
+      const acknowledgedAttention = acknowledgeNativeTerminalAttention(
+        sidebarSessionId,
+        "native-focus",
+      );
       appendTerminalFocusDebugLog("nativeSidebar.terminalFocused.duplicateSkipped", {
+        acknowledgedAttention,
         nativeSessionId: hostEvent.sessionId,
         sessionId: sidebarSessionId,
       });
+      if (acknowledgedAttention) {
+        publish();
+      }
       return;
     }
     let focusChanged = false;
@@ -3884,6 +4113,7 @@ window.addEventListener("zmux-native-host-event", (event) => {
       previousFocusedSessionId,
       sessionId: sidebarSessionId,
     });
+    acknowledgeNativeTerminalAttention(sidebarSessionId, "native-focus");
     if (!focusChanged) {
       return;
     }

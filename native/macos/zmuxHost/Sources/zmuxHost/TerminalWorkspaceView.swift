@@ -1,12 +1,14 @@
 import AppKit
 import Combine
 import GhosttyKit
+import QuartzCore
 
 @MainActor
 final class TerminalWorkspaceView: NSView {
     private struct TerminalSession {
         let sessionId: String
         let view: Ghostty.SurfaceView
+        let borderView: TerminalPaneBorderView
         var cancellables: Set<AnyCancellable> = []
     }
 
@@ -14,6 +16,8 @@ final class TerminalWorkspaceView: NSView {
     private let sendEvent: (HostEvent) -> Void
     private var sessions: [String: TerminalSession] = [:]
     private var activeSessionIds = Set<String>()
+    private var attentionSessionIds = Set<String>()
+    private var focusedSessionId: String?
     private var lastEmittedFocusedSessionId: String?
     private var programmaticFocusDepth = 0
     private var terminalLayout: NativeTerminalLayout?
@@ -57,8 +61,10 @@ final class TerminalWorkspaceView: NSView {
         config.initialInput = command.initialInput
         let surfaceView = Ghostty.SurfaceView(app, baseConfig: config)
         surfaceView.translatesAutoresizingMaskIntoConstraints = false
+        let borderView = TerminalPaneBorderView()
+        borderView.translatesAutoresizingMaskIntoConstraints = false
 
-        var session = TerminalSession(sessionId: command.sessionId, view: surfaceView)
+        var session = TerminalSession(sessionId: command.sessionId, view: surfaceView, borderView: borderView)
         surfaceView.$title
             .removeDuplicates()
             .sink { [weak self] title in
@@ -78,6 +84,7 @@ final class TerminalWorkspaceView: NSView {
         sessions[command.sessionId] = session
         activeSessionIds.insert(command.sessionId)
         addSubview(surfaceView)
+        addSubview(borderView)
         terminalLayout = terminalLayout ?? .leaf(sessionId: command.sessionId)
         needsLayout = true
         focusTerminal(sessionId: command.sessionId, reason: "createTerminalNew")
@@ -100,7 +107,12 @@ final class TerminalWorkspaceView: NSView {
             ghostty.requestClose(surface: surface)
         }
         session.view.removeFromSuperview()
+        session.borderView.removeFromSuperview()
         terminalLayout = prunedLayout(removing: sessionId, from: terminalLayout)
+        attentionSessionIds.remove(sessionId)
+        if focusedSessionId == sessionId {
+            focusedSessionId = nil
+        }
         needsLayout = true
         sendEvent(.terminalExited(sessionId: sessionId, exitCode: nil))
         stopExitPollingIfIdle()
@@ -117,6 +129,8 @@ final class TerminalWorkspaceView: NSView {
             ])
             return
         }
+        focusedSessionId = sessionId
+        updateAllTerminalBorders()
         let didChangeFocus = window?.firstResponder !== view
         let responderBefore = responderSnapshot()
         programmaticFocusDepth += 1
@@ -227,7 +241,7 @@ final class TerminalWorkspaceView: NSView {
     }
 
     func setTerminalVisibility(sessionId: String, visible: Bool) {
-        guard let view = sessions[sessionId]?.view else {
+        guard let session = sessions[sessionId] else {
             TerminalFocusDebugLog.append(event: "nativeWorkspace.setTerminalVisibility.missingSession", details: [
                 "activeSessionIds": Array(activeSessionIds).sorted(),
                 "requestedSessionId": sessionId,
@@ -246,26 +260,35 @@ final class TerminalWorkspaceView: NSView {
             activeSessionIds.insert(sessionId)
         } else {
             activeSessionIds.remove(sessionId)
-            moveOffscreen(view)
+            moveOffscreen(session.view)
+            moveOffscreen(session.borderView)
         }
-        view.isHidden = false
+        session.view.isHidden = false
+        session.borderView.isHidden = !visible
         needsLayout = true
+        updateTerminalBorder(for: sessionId)
     }
 
     func setActiveTerminalSet(_ command: SetActiveTerminalSet) {
         let responderBefore = responderSnapshot()
         activeSessionIds = Set(command.activeSessionIds)
+        attentionSessionIds = Set(command.attentionSessionIds ?? [])
+        focusedSessionId = command.focusedSessionId
         terminalLayout = command.layout
         for session in sessions.values {
             session.view.isHidden = false
+            session.borderView.isHidden = false
             if !activeSessionIds.contains(session.sessionId) {
                 moveOffscreen(session.view)
+                moveOffscreen(session.borderView)
             }
         }
         needsLayout = true
         layoutSubtreeIfNeeded()
+        updateAllTerminalBorders()
         TerminalFocusDebugLog.append(event: "nativeWorkspace.setActiveTerminalSet.applied", details: [
             "activeSessionIds": Array(activeSessionIds).sorted(),
+            "attentionSessionIds": Array(attentionSessionIds).sorted(),
             "focusedSessionId": nullableString(command.focusedSessionId),
             "responderAfterLayout": responderSnapshot(),
             "responderBefore": responderBefore,
@@ -344,14 +367,21 @@ final class TerminalWorkspaceView: NSView {
     }
 
     private func setFrame(_ rect: CGRect, for sessionId: String) {
-        guard let view = sessions[sessionId]?.view else {
+        guard let session = sessions[sessionId] else {
             return
         }
+        let view = session.view
         view.frame = rect
         view.sizeDidChange(rect.size)
+        session.borderView.frame = rect
+        updateTerminalBorder(for: sessionId)
     }
 
     private func moveOffscreen(_ view: Ghostty.SurfaceView) {
+        moveOffscreen(view as NSView)
+    }
+
+    private func moveOffscreen(_ view: NSView) {
         let size = view.frame.size.width > 1 && view.frame.size.height > 1
             ? view.frame.size
             : bounds.size
@@ -360,6 +390,24 @@ final class TerminalWorkspaceView: NSView {
             y: bounds.maxY + 10_000,
             width: max(size.width, 1),
             height: max(size.height, 1)
+        )
+    }
+
+    private func updateAllTerminalBorders() {
+        for sessionId in sessions.keys {
+            updateTerminalBorder(for: sessionId)
+        }
+    }
+
+    private func updateTerminalBorder(for sessionId: String) {
+        guard let session = sessions[sessionId] else {
+            return
+        }
+        let isActive = activeSessionIds.contains(sessionId)
+        session.borderView.isHidden = !isActive
+        session.borderView.setState(
+            isFocused: focusedSessionId == sessionId,
+            isAttention: attentionSessionIds.contains(sessionId)
         )
     }
 
@@ -419,6 +467,8 @@ final class TerminalWorkspaceView: NSView {
             return
         }
         lastEmittedFocusedSessionId = focusedSessionId
+        self.focusedSessionId = focusedSessionId
+        updateAllTerminalBorders()
         TerminalFocusDebugLog.append(event: "nativeWorkspace.terminalFocused.emitted", details: [
             "reason": reason,
             "sessionId": focusedSessionId,
@@ -493,5 +543,106 @@ final class TerminalWorkspaceView: NSView {
             }
             return nextChildren.isEmpty ? nil : .split(direction: direction, ratio: ratio, children: nextChildren)
         }
+    }
+}
+
+final class TerminalPaneBorderView: NSView {
+    private enum BorderState: Equatable {
+        case attention
+        case focused
+        case none
+    }
+
+    private static let pulseAnimationKey = "zmux-terminal-attention-border-pulse"
+    private static let focusedBorderColor = NSColor(
+        calibratedRed: 0x5A / 255,
+        green: 0x86 / 255,
+        blue: 0xFF / 255,
+        alpha: 0.95
+    ).cgColor
+    private static let attentionBorderColor = NSColor(
+        calibratedRed: 0x65 / 255,
+        green: 0xE5 / 255,
+        blue: 0x8A / 255,
+        alpha: 1
+    ).cgColor
+    private static let attentionDimBorderColor = NSColor(
+        calibratedRed: 0x65 / 255,
+        green: 0xE5 / 255,
+        blue: 0x8A / 255,
+        alpha: 0.34
+    ).cgColor
+
+    private var state: BorderState = .none
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.borderWidth = 0
+        layer?.cornerRadius = 0
+        layer?.masksToBounds = false
+        layer?.shadowRadius = 16
+        layer?.shadowOffset = .zero
+        layer?.shadowOpacity = 0
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    func setState(isFocused: Bool, isAttention: Bool) {
+        /**
+         CDXC:NativeSessionStatus 2026-04-27-08:02
+         Native Ghostty panes are outside the React workspace DOM. Mirror the
+         existing workspace UX with a blue selected border and a pulsing green
+         border for done/attention sessions, without stealing terminal input.
+         */
+        let nextState: BorderState = isAttention ? .attention : isFocused ? .focused : .none
+        guard nextState != state else {
+            return
+        }
+        state = nextState
+        switch nextState {
+        case .attention:
+            layer?.borderWidth = 2
+            layer?.borderColor = Self.attentionBorderColor
+            layer?.shadowColor = Self.attentionBorderColor
+            layer?.shadowOpacity = 0.28
+            startAttentionPulse()
+        case .focused:
+            stopAttentionPulse()
+            layer?.borderWidth = 2
+            layer?.borderColor = Self.focusedBorderColor
+            layer?.shadowColor = Self.focusedBorderColor
+            layer?.shadowOpacity = 0.18
+        case .none:
+            stopAttentionPulse()
+            layer?.borderWidth = 0
+            layer?.borderColor = NSColor.clear.cgColor
+            layer?.shadowOpacity = 0
+        }
+    }
+
+    private func startAttentionPulse() {
+        guard layer?.animation(forKey: Self.pulseAnimationKey) == nil else {
+            return
+        }
+        let animation = CABasicAnimation(keyPath: "borderColor")
+        animation.fromValue = Self.attentionDimBorderColor
+        animation.toValue = Self.attentionBorderColor
+        animation.duration = 0.72
+        animation.autoreverses = true
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer?.add(animation, forKey: Self.pulseAnimationKey)
+    }
+
+    private func stopAttentionPulse() {
+        layer?.removeAnimation(forKey: Self.pulseAnimationKey)
     }
 }
