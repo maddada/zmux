@@ -298,6 +298,7 @@ import {
   getShowHotkeysOnSessionCards,
   getSidebarThemeVariant,
   getWorkspaceActivePaneBorderColor,
+  getWorkspaceBackgroundColor,
   getWorkspacePaneGap,
   getTerminalCursorBlink,
   getTerminalScrollToBottomWhenTyping,
@@ -2581,12 +2582,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await vscode.commands.executeCommand("workbench.action.openSettings", "@ext:maddada.zmux");
   }
 
-  public async promptFindPreviousSession(): Promise<void> {
-    const query = await vscode.window.showInputBox({
-      ignoreFocusOut: true,
-      placeHolder: "e.g. full reload should not update last active",
-      prompt: "What do you remember talking about in that session?",
-    });
+  public async promptFindPreviousSession(queryInput?: string): Promise<void> {
+    const query =
+      queryInput?.trim() ||
+      (await vscode.window.showInputBox({
+        ignoreFocusOut: true,
+        placeHolder: "e.g. full reload should not update last active",
+        prompt: "What do you remember talking about in that session?",
+      }));
     const normalizedQuery = query?.trim();
     if (!normalizedQuery) {
       return;
@@ -7579,6 +7582,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   private getWorkspaceLayoutAppearance() {
     return {
       activePaneBorderColor: getWorkspaceActivePaneBorderColor(),
+      backgroundColor: getWorkspaceBackgroundColor(),
       paneGap: getWorkspacePaneGap(),
     };
   }

@@ -31,16 +31,15 @@ final class ZedOverlayController: NSObject {
   private static let buttonPanelSize = toggleButtonSize
   private static let attachedWindowInset: CGFloat = 40
   private static let measuredHiddenTopRight = CGPoint(x: -1437, y: 1022)
+  private static let programmaticWorkspaceOpenActivationSuppressionSeconds: TimeInterval = 3
 
   private weak var window: NSWindow?
-  private let workspacePathProvider: () -> String?
   private let didActivateAttachment: () -> Void
   private let didHideAttachment: () -> Void
   private let didShowAttachment: () -> Void
   private let didRequestDetach: (ZedOverlayTargetApp) -> Void
   private var enabled = false
   private var targetApp: ZedOverlayTargetApp = .zedPreview
-  private var workspacePath: String?
   private var buttonPanel: NSPanel?
   private weak var toggleButton: NSButton?
   private var followTimer: Timer?
@@ -52,6 +51,7 @@ final class ZedOverlayController: NSObject {
   private var activationObserver: NSObjectProtocol?
   private var companionApplicationBundleIdentifiers: Set<String> = []
   private var hasRequestedAccessibilityPermission = false
+  private var suppressTargetActivationHideUntil: Date?
 
   /**
    CDXC:IDEAttachment 2026-04-26-22:38
@@ -59,22 +59,29 @@ final class ZedOverlayController: NSObject {
    The overlay button follows the configured IDE process; VS Code resolves by
    its Code/Code - Insiders app names and reopens workspaces with
    code/code-insiders instead of the Zed command.
-   */
+  */
   init(
     window: NSWindow,
-    workspacePathProvider: @escaping () -> String?,
+    initialWindowSize: CGSize,
     didActivateAttachment: @escaping () -> Void,
     didHideAttachment: @escaping () -> Void,
     didShowAttachment: @escaping () -> Void,
     didRequestDetach: @escaping (ZedOverlayTargetApp) -> Void
   ) {
     self.window = window
-    self.workspacePathProvider = workspacePathProvider
     self.didActivateAttachment = didActivateAttachment
     self.didHideAttachment = didHideAttachment
     self.didShowAttachment = didShowAttachment
     self.didRequestDetach = didRequestDetach
     self.visibleWindowFrame = window.frame
+    /**
+     CDXC:NativeWindowChrome 2026-04-28-05:44
+     IDE-attached startup must begin from the same saved main-window size as
+     standalone startup, then let the existing attachment constraints clamp it
+     to the maximum size that still leaves the IDE border visible.
+     */
+    self.attachedWindowWidth = initialWindowSize.width
+    self.attachedWindowHeight = initialWindowSize.height
     super.init()
     self.buttonPanel = makeButtonPanel()
     self.activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -104,7 +111,6 @@ final class ZedOverlayController: NSObject {
   func configure(_ command: ConfigureZedOverlay) {
     enabled = command.enabled
     targetApp = command.targetApp
-    workspacePath = command.workspacePath
     Self.logger.info(
       "Configured Zed overlay enabled=\(command.enabled) target=\(command.targetApp.rawValue, privacy: .public)"
     )
@@ -184,17 +190,33 @@ final class ZedOverlayController: NSObject {
     if let application, isTargetApplication(application) {
       window?.level = .floating
       startFollowingTargetWindow()
-      if userInitiatedActivation, isWindowVisibleInAttachment {
+      let shouldSuppressProgrammaticActivationHide =
+        suppressTargetActivationHideUntil.map { Date() <= $0 } ?? false
+      if userInitiatedActivation, isWindowVisibleInAttachment,
+        !shouldSuppressProgrammaticActivationHide
+      {
         /**
          CDXC:ZedOverlay 2026-04-26-07:19
          Clicking the attached Zed window is an intentional request to
          tuck zmux and any companion browser window away while leaving
          the native button available for restoring the prior view.
         */
-        moveWindowOffscreen(openWorkspaceInZed: false)
+        moveWindowOffscreen()
         updateButtonPosition()
       } else {
+        /**
+         CDXC:ZedOverlayWorkspace 2026-04-28-05:34
+         Sync Open Project with Zed may activate Zed as a side effect of
+         opening the project. That programmatic activation must not hide zmux;
+         only explicit user activation of the IDE should tuck the overlay away.
+         */
+        if shouldSuppressProgrammaticActivationHide {
+          suppressTargetActivationHideUntil = nil
+        }
         showButtonAndRestoreWindowIfNeeded()
+        if shouldSuppressProgrammaticActivationHide {
+          refocusWindowAfterProgrammaticWorkspaceOpen()
+        }
       }
       return
     }
@@ -242,7 +264,13 @@ final class ZedOverlayController: NSObject {
     }
 
     if isWindowVisibleInAttachment {
-      moveWindowOffscreen(openWorkspaceInZed: true)
+      /**
+       CDXC:ZedOverlayWorkspace 2026-04-28-05:18
+       The Show Zed button only switches visibility. Opening the active zmux
+       project in Zed is controlled by the sidebar's Sync Open Project with
+       Zed setting and its 2s project-switch debounce.
+       */
+      moveWindowOffscreen()
     } else {
       showWindow()
     }
@@ -295,7 +323,21 @@ final class ZedOverlayController: NSObject {
     updateButtonPosition()
   }
 
-  private func moveWindowOffscreen(openWorkspaceInZed shouldOpenWorkspaceInZed: Bool) {
+  private func refocusWindowAfterProgrammaticWorkspaceOpen() {
+    /**
+     CDXC:ZedOverlayWorkspace 2026-04-28-05:37
+     After Sync Open Project with Zed triggers the IDE project switch, focus
+     must return to zmux so the workspace stays keyboard-ready instead of
+     leaving the newly opened Zed project as the active macOS window.
+     */
+    guard let window, isWindowVisibleInAttachment else {
+      return
+    }
+    NSApp.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
+  }
+
+  private func moveWindowOffscreen() {
     guard let window else {
       return
     }
@@ -303,7 +345,7 @@ final class ZedOverlayController: NSObject {
       "zedOverlay.moveWindowOffscreen.request",
       [
         "isWindowVisibleInAttachment": isWindowVisibleInAttachment,
-        "shouldOpenWorkspaceInZed": shouldOpenWorkspaceInZed,
+        "shouldOpenWorkspaceInZed": false,
         "visibleWindowFrame": visibleWindowFrame.map {
           "x=\($0.minX),y=\($0.minY),w=\($0.width),h=\($0.height)"
         } as Any,
@@ -329,10 +371,6 @@ final class ZedOverlayController: NSObject {
         "windowFrame":
           "x=\(window.frame.minX),y=\(window.frame.minY),w=\(window.frame.width),h=\(window.frame.height)",
       ])
-
-    if shouldOpenWorkspaceInZed {
-      openWorkspaceInZed()
-    }
   }
 
   private func restoreWindowIfOffscreen() -> Bool {
@@ -725,6 +763,10 @@ final class ZedOverlayController: NSObject {
   }
 
   private func targetAppConfiguration() -> TargetApp {
+    targetAppConfiguration(for: targetApp)
+  }
+
+  private func targetAppConfiguration(for targetApp: ZedOverlayTargetApp) -> TargetApp {
     switch targetApp {
     case .zed:
       TargetApp(
@@ -746,21 +788,21 @@ final class ZedOverlayController: NSObject {
     }
   }
 
-  private func openWorkspaceInZed() {
-    /**
-     CDXC:ZedOverlayWorkspace 2026-04-26-00:47
-     When the user hides zmux from a different workspace, reopen the active
-     project in the existing Zed window using a background process so macOS
-     Terminal never appears.
-     */
-    let path = workspacePath ?? workspacePathProvider()
-    guard let path, !path.isEmpty else {
+  func openWorkspace(targetApp: ZedOverlayTargetApp, workspacePath: String) {
+    let path = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !path.isEmpty else {
       return
     }
 
+    suppressTargetActivationHideUntil = Date().addingTimeInterval(
+      Self.programmaticWorkspaceOpenActivationSuppressionSeconds)
+    runOpenWorkspaceProcess(targetApp: targetApp, workspacePath: path)
+  }
+
+  private func runOpenWorkspaceProcess(targetApp: ZedOverlayTargetApp, workspacePath path: String) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    let target = targetAppConfiguration()
+    let target = targetAppConfiguration(for: targetApp)
     process.arguments = [target.commandName, path, target.commandReuseWindowArgument]
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle.nullDevice

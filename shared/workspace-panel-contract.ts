@@ -30,6 +30,7 @@ export type WorkspacePanelTerminalAppearance = {
 
 export type WorkspacePanelLayoutAppearance = {
   activePaneBorderColor: string;
+  backgroundColor: string;
   paneGap: number;
 };
 

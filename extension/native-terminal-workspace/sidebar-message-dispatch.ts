@@ -44,7 +44,7 @@ export type SidebarMessageHandlers = {
   openBrowser: () => Promise<void>;
   openWorkspaceWelcome: () => Promise<void>;
   openSettings: () => Promise<void>;
-  promptFindPreviousSession: () => Promise<void>;
+  promptFindPreviousSession: (query?: string) => Promise<void>;
   promptRenameSession: (sessionId: string) => Promise<void>;
   renameGroup: (groupId: string, title: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
@@ -125,7 +125,7 @@ export async function dispatchSidebarMessage(
       await handlers.openSettings();
       return;
     case "promptFindPreviousSession":
-      await handlers.promptFindPreviousSession();
+      await handlers.promptFindPreviousSession(message.query);
       return;
     case "toggleCompletionBell":
       await handlers.toggleCompletionBell();

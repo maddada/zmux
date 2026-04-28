@@ -9,12 +9,17 @@ final class TerminalWorkspaceView: NSView {
     let sessionId: String
     let view: Ghostty.SurfaceView
     let scrollView: SurfaceScrollView
+    let searchBarView: TerminalSearchBarView
     let titleBarView: TerminalSessionTitleBarView
     let borderView: TerminalPaneBorderView
     var cancellables: Set<AnyCancellable> = []
   }
 
   private static let terminalTitleBarHeight: CGFloat = 33
+  private static let defaultPaneGap: CGFloat = 12
+  private static let singlePaneInset: CGFloat = 1
+  private static let defaultWorkspaceBackgroundColor = NSColor(
+    calibratedRed: 0.071, green: 0.071, blue: 0.071, alpha: 1)
   private let ghostty: Ghostty.App
   private let sendEvent: (HostEvent) -> Void
   private var sessions: [String: TerminalSession] = [:]
@@ -23,6 +28,7 @@ final class TerminalWorkspaceView: NSView {
   private var sessionActivities = [String: NativeTerminalActivity]()
   private var focusedSessionId: String?
   private var lastEmittedFocusedSessionId: String?
+  private var paneGap = TerminalWorkspaceView.defaultPaneGap
   private var programmaticFocusDepth = 0
   private var terminalLayout: NativeTerminalLayout?
   private var exitPollTimer: Timer?
@@ -38,7 +44,7 @@ final class TerminalWorkspaceView: NSView {
     self.sendEvent = sendEvent
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.backgroundColor = NSColor.black.cgColor
+    layer?.backgroundColor = Self.defaultWorkspaceBackgroundColor.cgColor
   }
 
   required init?(coder: NSCoder) {
@@ -72,9 +78,11 @@ final class TerminalWorkspaceView: NSView {
      scrollbar as Ghostty windows. Mount the surface through Ghostty's native
      scroll wrapper so scrollbar state, dragging, and scrollback positioning
      are driven by the terminal core instead of a separate overlay.
-     */
+    */
     let scrollView = SurfaceScrollView(contentSize: .zero, surfaceView: surfaceView)
     scrollView.translatesAutoresizingMaskIntoConstraints = false
+    let searchBarView = TerminalSearchBarView(surfaceView: surfaceView)
+    searchBarView.translatesAutoresizingMaskIntoConstraints = false
     let titleBarView = TerminalSessionTitleBarView(
       title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId)
     )
@@ -93,6 +101,7 @@ final class TerminalWorkspaceView: NSView {
       sessionId: command.sessionId,
       view: surfaceView,
       scrollView: scrollView,
+      searchBarView: searchBarView,
       titleBarView: titleBarView,
       borderView: borderView)
     surfaceView.$title
@@ -113,10 +122,17 @@ final class TerminalWorkspaceView: NSView {
         }
       }
       .store(in: &session.cancellables)
+    surfaceView.$searchState
+      .receive(on: DispatchQueue.main)
+      .sink { [weak searchBarView] searchState in
+        searchBarView?.setSearchState(searchState)
+      }
+      .store(in: &session.cancellables)
 
     sessions[command.sessionId] = session
     activeSessionIds.insert(command.sessionId)
     addSubview(scrollView)
+    addSubview(searchBarView)
     addSubview(titleBarView)
     addSubview(borderView)
     terminalLayout = terminalLayout ?? .leaf(sessionId: command.sessionId)
@@ -143,6 +159,7 @@ final class TerminalWorkspaceView: NSView {
       ghostty.requestClose(surface: surface)
     }
     session.scrollView.removeFromSuperview()
+    session.searchBarView.removeFromSuperview()
     session.titleBarView.removeFromSuperview()
     session.borderView.removeFromSuperview()
     terminalLayout = prunedLayout(removing: sessionId, from: terminalLayout)
@@ -324,10 +341,12 @@ final class TerminalWorkspaceView: NSView {
     } else {
       activeSessionIds.remove(sessionId)
       moveOffscreen(session.scrollView)
+      moveOffscreen(session.searchBarView)
       moveOffscreen(session.titleBarView)
       moveOffscreen(session.borderView)
     }
     session.scrollView.isHidden = false
+    session.searchBarView.isHidden = !visible || session.view.searchState == nil
     session.titleBarView.isHidden = !visible
     session.borderView.isHidden = !visible
     needsLayout = true
@@ -341,12 +360,23 @@ final class TerminalWorkspaceView: NSView {
     sessionActivities = command.sessionActivities ?? [:]
     focusedSessionId = command.focusedSessionId
     terminalLayout = command.layout
+    paneGap = Self.clampedPaneGap(command.paneGap)
+    /**
+     CDXC:WorkspaceLayout 2026-04-28-06:08
+     The terminal workspace background is user-configurable from Settings.
+     Apply the chosen color directly to the AppKit backing layer so the
+     visible space created by Pane Gap uses the user's color.
+     */
+    layer?.backgroundColor = Self.workspaceBackgroundColor(command.backgroundColor).cgColor
     for session in sessions.values {
       session.scrollView.isHidden = false
+      session.searchBarView.isHidden =
+        !activeSessionIds.contains(session.sessionId) || session.view.searchState == nil
       session.titleBarView.isHidden = false
       session.borderView.isHidden = false
       if !activeSessionIds.contains(session.sessionId) {
         moveOffscreen(session.scrollView)
+        moveOffscreen(session.searchBarView)
         moveOffscreen(session.titleBarView)
         moveOffscreen(session.borderView)
       }
@@ -359,7 +389,9 @@ final class TerminalWorkspaceView: NSView {
       details: [
         "activeSessionIds": Array(activeSessionIds).sorted(),
         "attentionSessionIds": Array(attentionSessionIds).sorted(),
+        "backgroundColor": command.backgroundColor ?? "default",
         "focusedSessionId": nullableString(command.focusedSessionId),
+        "paneGap": Double(paneGap),
         "responderAfterLayout": responderSnapshot(),
         "responderBefore": responderBefore,
         "visibleSessionIds": orderedVisibleSessionIds(),
@@ -367,6 +399,22 @@ final class TerminalWorkspaceView: NSView {
     if let focusedSessionId = command.focusedSessionId,
       activeSessionIds.contains(focusedSessionId)
     {
+      if shouldPreserveNonTerminalFirstResponder() {
+        /**
+         CDXC:ScratchPadFocus 2026-04-28-05:35
+         Passive sidebar state sync must not steal typing focus from the
+         full-window modal host or other WKWebView controls. Explicit terminal
+         focus commands still call focusTerminal directly; only
+         setActiveTerminalSet preserves a non-terminal first responder.
+         */
+        TerminalFocusDebugLog.append(
+          event: "nativeWorkspace.setActiveTerminalSet.focusPreserved",
+          details: [
+            "focusedSessionId": focusedSessionId,
+            "responder": responderSnapshot(),
+          ])
+        return
+      }
       focusTerminal(sessionId: focusedSessionId, reason: "setActiveTerminalSet")
     }
   }
@@ -378,10 +426,15 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     if let terminalLayout {
-      layoutTree(terminalLayout, in: bounds)
+      layoutTree(terminalLayout, in: layoutBounds(forVisibleCount: visibleSessionIds.count))
     } else {
-      layoutGrid(visibleSessionIds, in: bounds)
+      layoutGrid(visibleSessionIds, in: layoutBounds(forVisibleCount: visibleSessionIds.count))
     }
+  }
+
+  private func layoutBounds(forVisibleCount visibleCount: Int) -> CGRect {
+    let inset = visibleCount <= 1 ? Self.singlePaneInset : paneGap
+    return bounds.insetBy(dx: inset, dy: inset)
   }
 
   private func orderedVisibleSessionIds() -> [String] {
@@ -402,23 +455,42 @@ final class TerminalWorkspaceView: NSView {
         layoutTree(visibleChildren[0], in: rect)
         return
       }
+      /**
+       CDXC:WorkspaceLayout 2026-04-28-06:01
+       Native split panes must use the same Pane Gap setting as the sidebar
+       control. Apply the gap as real AppKit layout space between split
+       siblings instead of hardcoded 1px child insets.
+       */
+      let gap = splitGap(forChildCount: visibleChildren.count)
       let firstRatio = CGFloat(ratio ?? (1.0 / Double(visibleChildren.count)))
-      var remaining = rect
+      var nextOrigin = direction == .horizontal ? rect.minX : rect.maxY
+      let availableLength = max(
+        (direction == .horizontal ? rect.width : rect.height)
+          - gap * CGFloat(max(visibleChildren.count - 1, 0)),
+        CGFloat(visibleChildren.count)
+      )
       for (index, child) in visibleChildren.enumerated() {
         let isLast = index == visibleChildren.count - 1
+        let childLength: CGFloat
+        if isLast {
+          childLength =
+            direction == .horizontal
+            ? max(rect.maxX - nextOrigin, 1)
+            : max(nextOrigin - rect.minY, 1)
+        } else {
+          childLength = max(floor(availableLength * firstRatio), 1)
+        }
         let childRect: CGRect
         if direction == .horizontal {
-          let width = isLast ? remaining.width : floor(rect.width * firstRatio)
           childRect = CGRect(
-            x: remaining.minX, y: remaining.minY, width: width, height: remaining.height)
-          remaining = remaining.divided(atDistance: width, from: .minXEdge).remainder
+            x: nextOrigin, y: rect.minY, width: childLength, height: rect.height)
+          nextOrigin += childLength + gap
         } else {
-          let height = isLast ? remaining.height : floor(rect.height * firstRatio)
           childRect = CGRect(
-            x: remaining.minX, y: remaining.maxY - height, width: remaining.width, height: height)
-          remaining.size.height -= height
+            x: rect.minX, y: nextOrigin - childLength, width: rect.width, height: childLength)
+          nextOrigin -= childLength + gap
         }
-        layoutTree(child, in: childRect.insetBy(dx: 1, dy: 1))
+        layoutTree(child, in: childRect)
       }
     }
   }
@@ -426,19 +498,24 @@ final class TerminalWorkspaceView: NSView {
   private func layoutGrid(_ sessionIds: [String], in rect: CGRect) {
     let columns = Int(ceil(sqrt(Double(sessionIds.count))))
     let rows = Int(ceil(Double(sessionIds.count) / Double(columns)))
-    let cellWidth = rect.width / CGFloat(columns)
-    let cellHeight = rect.height / CGFloat(rows)
+    let gap = splitGap(forChildCount: sessionIds.count)
+    let cellWidth = max((rect.width - gap * CGFloat(max(columns - 1, 0))) / CGFloat(columns), 1)
+    let cellHeight = max((rect.height - gap * CGFloat(max(rows - 1, 0))) / CGFloat(rows), 1)
     for (index, sessionId) in sessionIds.enumerated() {
       let column = index % columns
       let row = index / columns
       let cell = CGRect(
-        x: rect.minX + CGFloat(column) * cellWidth,
-        y: rect.maxY - CGFloat(row + 1) * cellHeight,
+        x: rect.minX + CGFloat(column) * (cellWidth + gap),
+        y: rect.maxY - CGFloat(row + 1) * cellHeight - CGFloat(row) * gap,
         width: cellWidth,
         height: cellHeight
       )
-      setFrame(cell.insetBy(dx: 1, dy: 1), for: sessionId)
+      setFrame(cell, for: sessionId)
     }
+  }
+
+  private func splitGap(forChildCount childCount: Int) -> CGFloat {
+    childCount <= 1 ? 0 : paneGap
   }
 
   private func setFrame(_ rect: CGRect, for sessionId: String) {
@@ -471,8 +548,20 @@ final class TerminalWorkspaceView: NSView {
     session.view.sizeDidChange(terminalRect.size)
     session.scrollView.needsLayout = true
     session.scrollView.layoutSubtreeIfNeeded()
+    session.searchBarView.frame = searchBarFrame(in: terminalRect)
     session.borderView.frame = rect
     updateTerminalBorder(for: sessionId)
+  }
+
+  private func searchBarFrame(in terminalRect: CGRect) -> CGRect {
+    let width = min(CGFloat(320), max(terminalRect.width - 16, 180))
+    let height = CGFloat(40)
+    return CGRect(
+      x: terminalRect.maxX - width - 8,
+      y: terminalRect.maxY - height - 8,
+      width: width,
+      height: height
+    )
   }
 
   private func moveOffscreen(_ view: NSView) {
@@ -500,6 +589,7 @@ final class TerminalWorkspaceView: NSView {
     }
     let isActive = activeSessionIds.contains(sessionId)
     session.titleBarView.isHidden = !isActive
+    session.searchBarView.isHidden = !isActive || session.view.searchState == nil
     session.borderView.isHidden = !isActive
     session.titleBarView.setState(
       activity: sessionActivities[sessionId]
@@ -521,6 +611,13 @@ final class TerminalWorkspaceView: NSView {
       "className": String(describing: type(of: responder)),
       "sessionId": nullableString(sessionId(containing: responder)),
     ]
+  }
+
+  private func shouldPreserveNonTerminalFirstResponder() -> Bool {
+    guard let responder = window?.firstResponder else {
+      return false
+    }
+    return sessionId(containing: responder) == nil
   }
 
   private func sessionId(containing responder: NSResponder) -> String? {
@@ -605,6 +702,43 @@ final class TerminalWorkspaceView: NSView {
     value ?? NSNull()
   }
 
+  private static func clampedPaneGap(_ value: Double?) -> CGFloat {
+    guard let value, value.isFinite else {
+      return defaultPaneGap
+    }
+    return CGFloat(min(48, max(0, value)))
+  }
+
+  private static func workspaceBackgroundColor(_ value: String?) -> NSColor {
+    guard let color = parseHexColor(value?.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+      return defaultWorkspaceBackgroundColor
+    }
+    return color
+  }
+
+  private static func parseHexColor(_ value: String?) -> NSColor? {
+    guard let value else {
+      return nil
+    }
+    let pattern = #"^#?([0-9a-fA-F]{6})$"#
+    guard
+      let match = value.range(of: pattern, options: .regularExpression),
+      match == value.startIndex..<value.endIndex
+    else {
+      return nil
+    }
+    let hex = value.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+    guard let rawValue = Int(hex, radix: 16) else {
+      return nil
+    }
+    return NSColor(
+      calibratedRed: CGFloat((rawValue >> 16) & 0xff) / 255,
+      green: CGFloat((rawValue >> 8) & 0xff) / 255,
+      blue: CGFloat(rawValue & 0xff) / 255,
+      alpha: 1
+    )
+  }
+
   private func startExitPollingIfNeeded() {
     guard exitPollTimer == nil else { return }
     exitPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -663,6 +797,13 @@ private func normalizedTerminalSessionTitle(_ title: String?, sessionId: String)
 }
 
 private final class ZmuxGhosttySurfaceView: Ghostty.SurfaceView {
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if handleZmuxSearchKeyEquivalent(event) {
+      return true
+    }
+    return super.performKeyEquivalent(with: event)
+  }
+
   /**
    CDXC:NativeTerminals 2026-04-28-03:17
    Embedded Ghostty terminals must not paste text on middle click. Ghostty's
@@ -688,6 +829,230 @@ private final class ZmuxGhosttySurfaceView: Ghostty.SurfaceView {
       return
     }
     super.otherMouseDragged(with: event)
+  }
+
+  /**
+   CDXC:NativeTerminals 2026-04-28-05:13
+   Embedded Ghostty surfaces do not use Ghostty's SwiftUI terminal wrapper or
+   app main menu, so search shortcuts must be handled at the surface level and
+   routed to Ghostty's native search actions.
+   */
+  private func handleZmuxSearchKeyEquivalent(_ event: NSEvent) -> Bool {
+    guard event.type == .keyDown, focused else {
+      return false
+    }
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    guard flags.contains(.command), flags.isDisjoint(with: [.control, .option]) else {
+      return false
+    }
+    switch event.charactersIgnoringModifiers?.lowercased() {
+    case "f":
+      find(nil)
+      return true
+    case "g":
+      if flags.contains(.shift) {
+        _ = navigateSearchToPrevious()
+      } else {
+        _ = navigateSearchToNext()
+      }
+      return true
+    default:
+      return false
+    }
+  }
+}
+
+private final class TerminalSearchTextField: NSTextField {
+  var onClose: (() -> Void)?
+  var onFindNext: (() -> Void)?
+  var onFindPrevious: (() -> Void)?
+
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    guard event.type == .keyDown else {
+      return super.performKeyEquivalent(with: event)
+    }
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    if flags.contains(.command),
+      flags.isDisjoint(with: [.control, .option]),
+      event.charactersIgnoringModifiers?.lowercased() == "g"
+    {
+      if flags.contains(.shift) {
+        onFindPrevious?()
+      } else {
+        onFindNext?()
+      }
+      return true
+    }
+    return super.performKeyEquivalent(with: event)
+  }
+
+  override func keyDown(with event: NSEvent) {
+    if event.keyCode == 53 {
+      onClose?()
+      return
+    }
+    super.keyDown(with: event)
+  }
+}
+
+private final class TerminalSearchBarView: NSView, NSTextFieldDelegate {
+  private static let backgroundColor = NSColor(
+    calibratedRed: 0x12 / 255,
+    green: 0x16 / 255,
+    blue: 0x20 / 255,
+    alpha: 0.96
+  ).cgColor
+  private static let borderColor = NSColor(
+    calibratedRed: 0x7C / 255,
+    green: 0x8D / 255,
+    blue: 0xAA / 255,
+    alpha: 0.38
+  ).cgColor
+
+  private weak var surfaceView: Ghostty.SurfaceView?
+  private var searchState: Ghostty.SurfaceView.SearchState?
+  private var cancellables = Set<AnyCancellable>()
+  private let textField = TerminalSearchTextField()
+  private let countLabel = NSTextField(labelWithString: "")
+  private let previousButton = NSButton()
+  private let nextButton = NSButton()
+  private let closeButton = NSButton()
+
+  init(surfaceView: Ghostty.SurfaceView) {
+    self.surfaceView = surfaceView
+    super.init(frame: .zero)
+    isHidden = true
+    wantsLayer = true
+    layer?.backgroundColor = Self.backgroundColor
+    layer?.borderColor = Self.borderColor
+    layer?.borderWidth = 1
+    layer?.cornerRadius = 8
+    layer?.masksToBounds = true
+
+    configureTextField()
+    configureCountLabel()
+    configureButton(previousButton, symbolName: "chevron.up", action: #selector(findPrevious))
+    configureButton(nextButton, symbolName: "chevron.down", action: #selector(findNext))
+    configureButton(closeButton, symbolName: "xmark", action: #selector(closeSearch))
+
+    let stackView = NSStackView(views: [textField, countLabel, previousButton, nextButton, closeButton])
+    stackView.alignment = .centerY
+    stackView.distribution = .fill
+    stackView.spacing = 4
+    stackView.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(stackView)
+
+    NSLayoutConstraint.activate([
+      stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+      stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+      stackView.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+      stackView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+      textField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+      countLabel.widthAnchor.constraint(equalToConstant: 54),
+      previousButton.widthAnchor.constraint(equalToConstant: 26),
+      nextButton.widthAnchor.constraint(equalToConstant: 26),
+      closeButton.widthAnchor.constraint(equalToConstant: 26),
+    ])
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
+  func setSearchState(_ nextSearchState: Ghostty.SurfaceView.SearchState?) {
+    searchState = nextSearchState
+    cancellables.removeAll()
+    guard let nextSearchState else {
+      isHidden = true
+      return
+    }
+
+    isHidden = false
+    updateNeedle(nextSearchState.needle)
+    updateCount(selected: nextSearchState.selected, total: nextSearchState.total)
+    nextSearchState.$needle
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] needle in
+        self?.updateNeedle(needle)
+      }
+      .store(in: &cancellables)
+    nextSearchState.$selected
+      .combineLatest(nextSearchState.$total)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] selected, total in
+        self?.updateCount(selected: selected, total: total)
+      }
+      .store(in: &cancellables)
+    DispatchQueue.main.async { [weak self] in
+      guard let self, !self.isHidden else { return }
+      self.window?.makeFirstResponder(self.textField)
+    }
+  }
+
+  func controlTextDidChange(_ notification: Notification) {
+    guard notification.object as? NSTextField === textField else {
+      return
+    }
+    searchState?.needle = textField.stringValue
+  }
+
+  private func configureTextField() {
+    textField.delegate = self
+    textField.placeholderString = "Search"
+    textField.focusRingType = .none
+    textField.isBezeled = false
+    textField.drawsBackground = false
+    textField.font = NSFont.systemFont(ofSize: 13)
+    textField.textColor = NSColor(calibratedWhite: 0.94, alpha: 1)
+    textField.onClose = { [weak self] in self?.closeSearch() }
+    textField.onFindNext = { [weak self] in self?.findNext() }
+    textField.onFindPrevious = { [weak self] in self?.findPrevious() }
+  }
+
+  private func configureCountLabel() {
+    countLabel.alignment = .right
+    countLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+    countLabel.textColor = NSColor(calibratedWhite: 0.72, alpha: 1)
+  }
+
+  private func configureButton(_ button: NSButton, symbolName: String, action: Selector) {
+    button.bezelStyle = .texturedRounded
+    button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+    button.imagePosition = .imageOnly
+    button.isBordered = false
+    button.target = self
+    button.action = action
+  }
+
+  private func updateNeedle(_ needle: String) {
+    if textField.stringValue != needle {
+      textField.stringValue = needle
+    }
+  }
+
+  private func updateCount(selected: UInt?, total: UInt?) {
+    if let selected {
+      countLabel.stringValue = "\(selected + 1)/\(total.map(String.init) ?? "?")"
+    } else if let total {
+      countLabel.stringValue = "-/\(total)"
+    } else {
+      countLabel.stringValue = ""
+    }
+  }
+
+  @objc private func findNext() {
+    _ = surfaceView?.navigateSearchToNext()
+  }
+
+  @objc private func findPrevious() {
+    _ = surfaceView?.navigateSearchToPrevious()
+  }
+
+  @objc private func closeSearch() {
+    surfaceView?.searchState = nil
+    if let surfaceView {
+      window?.makeFirstResponder(surfaceView)
+    }
   }
 }
 
@@ -783,14 +1148,20 @@ private final class TerminalSessionTitleBarView: NSView {
 
   override func layout() {
     super.layout()
-    let insetX: CGFloat = 10
-    let buttonSize: CGFloat = 20
-    let buttonGap: CGFloat = 6
+    let insetX: CGFloat = 8
+    let buttonSize: CGFloat = 18
+    let buttonGap: CGFloat = 3
     let indicatorSize: CGFloat = 8
     let indicatorGap: CGFloat = 6
     let centerY = floor((bounds.height - buttonSize) / 2)
     var trailingX = bounds.width - insetX
 
+    /**
+     CDXC:NativeTerminals 2026-04-28-05:18
+     Terminal titles should not truncate before reaching the right-side action
+     cluster. Keep title-bar actions compact so pane names use the available
+     chrome width while still leaving a non-overlapping hit target per action.
+     */
     for item in actionButtons.reversed() {
       trailingX -= buttonSize
       item.button.frame = CGRect(x: trailingX, y: centerY, width: buttonSize, height: buttonSize)

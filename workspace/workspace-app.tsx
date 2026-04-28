@@ -64,6 +64,7 @@ type WorkspaceStateMessage = WorkspacePanelHydrateMessage | WorkspacePanelSessio
 
 type WorkspaceShellStyle = CSSProperties & {
   "--workspace-active-pane-border-color"?: string;
+  "--workspace-background-color"?: string;
   "--workspace-pane-gap": string;
   paddingTop?: string;
 };
@@ -992,6 +993,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     const nextStyle: WorkspaceShellStyle = {
       "--workspace-active-pane-border-color":
         workspaceState?.layoutAppearance.activePaneBorderColor,
+      "--workspace-background-color": workspaceState?.layoutAppearance.backgroundColor,
       "--workspace-pane-gap": `${String(workspaceShellPaneGapPx)}px`,
     };
 
@@ -1009,6 +1011,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     return nextStyle;
   }, [
     workspaceState?.layoutAppearance.activePaneBorderColor,
+    workspaceState?.layoutAppearance.backgroundColor,
     workspaceState?.viewMode,
     workspaceShellPaneGapPx,
     workspaceShellPaddingTopPx,

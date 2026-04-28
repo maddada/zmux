@@ -307,6 +307,7 @@ function createWorkspaceMessage(
     focusedSessionId: activeGroup?.snapshot.focusedSessionId,
     layoutAppearance: {
       activePaneBorderColor: "rgba(90, 134, 255, 0.95)",
+      backgroundColor: "#121212",
       paneGap: 12,
     },
     panes,

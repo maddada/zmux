@@ -75,6 +75,7 @@ export const DEFAULT_T3_ZOOM_PERCENT = 100;
 export const DEFAULT_TERMINAL_FONT_WEIGHT = 300;
 export const WORKSPACE_PANE_GAP_SETTING = "workspacePaneGap";
 export const WORKSPACE_ACTIVE_PANE_BORDER_COLOR_SETTING = "workspaceActivePaneBorderColor";
+export const WORKSPACE_BACKGROUND_COLOR_SETTING = "workspaceBackgroundColor";
 export const COMPLETION_BELL_ENABLED_KEY = "zmux.completionBellEnabled";
 export const SCRATCH_PAD_CONTENT_KEY = "zmux.sidebarScratchPadContent";
 export const NATIVE_TERMINAL_DEBUG_STATE_KEY = "zmux.nativeTerminalDebugState";
@@ -570,6 +571,15 @@ export function getWorkspaceActivePaneBorderColor(): string {
     vscode.workspace
       .getConfiguration(SETTINGS_SECTION)
       .get<string>(WORKSPACE_ACTIVE_PANE_BORDER_COLOR_SETTING, defaultColor) ?? defaultColor;
+  return value.trim() || defaultColor;
+}
+
+export function getWorkspaceBackgroundColor(): string {
+  const defaultColor = "#121212";
+  const value =
+    vscode.workspace
+      .getConfiguration(SETTINGS_SECTION)
+      .get<string>(WORKSPACE_BACKGROUND_COLOR_SETTING, defaultColor) ?? defaultColor;
   return value.trim() || defaultColor;
 }
 

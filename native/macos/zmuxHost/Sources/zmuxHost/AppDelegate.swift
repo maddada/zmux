@@ -323,9 +323,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   }
 
   func windowWillClose(_ notification: Notification) {
+    persistMainWindowSize()
     Self.appendNativeHostLifecycleLog(
       "windowWillClose title=\(window?.title ?? "<missing>") visibleBeforeClose=\(window?.isVisible ?? false)"
     )
+  }
+
+  func windowDidResize(_ notification: Notification) {
+    persistMainWindowSize()
   }
 
   func findSurface(forUUID uuid: UUID) -> Ghostty.SurfaceView? {
@@ -367,20 +372,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       openBrowserWindow: { [weak self] command in
         self?.handle(.openBrowserWindow(command))
       },
+      openZedWorkspace: { [weak self] command in
+        self?.handle(.openZedWorkspace(command))
+      },
       showBrowserWindow: { [weak self] in
         self?.handle(.showBrowserWindow)
       }
     )
     workspaceView = root.workspaceView
 
+    let initialWindowFrame = restoredInitialWindowFrame()
     let window = zmuxFocusReportingWindow(
-      contentRect: NSRect(x: 100, y: 80, width: 1440, height: 900),
+      contentRect: initialWindowFrame,
       styleMask: [.closable, .miniaturizable, .resizable, .titled],
       backing: .buffered,
       defer: false
     )
     window.onFirstResponderChanged = { [weak root] responder in
       root?.workspaceView.windowFirstResponderChanged(responder, reason: "windowMakeFirstResponder")
+    }
+    window.onKeyEquivalent = { [weak root] event in
+      root?.handleHotkeyEquivalent(event) ?? false
     }
     window.title = "zmux"
     window.titleVisibility = .hidden
@@ -391,9 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     self.window = window
     let zedOverlayController = ZedOverlayController(
       window: window,
-      workspacePathProvider: { [weak self] in
-        self?.workspacePath
-      },
+      initialWindowSize: initialWindowFrame.size,
       didActivateAttachment: { [weak self] in
         self?.browserOverlayController?.markBrowserNoLongerShownInAttachment(
           reason: "zmuxActivated"
@@ -444,6 +454,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       )
     }
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  private func restoredInitialWindowFrame() -> NSRect {
+    /**
+     CDXC:NativeWindowChrome 2026-04-28-05:44
+     Startup should use the previous close/resize size as the source of truth.
+     Position remains a stable default, while standalone size is bounded only
+     by native window minimums. IDE-attached startup applies its own existing
+     maximum-size constraint after this saved size is loaded.
+     */
+    let stored = nativeSettingsStore.readMainWindowChrome()
+    let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+    let width = max(stored.width ?? 1440, 320)
+    let height = max(stored.height ?? 900, 240)
+    let x = screenFrame.minX + min(100, max(0, screenFrame.width - width))
+    let y = screenFrame.minY + min(80, max(0, screenFrame.height - height))
+    return NSRect(x: x, y: y, width: width, height: height)
+  }
+
+  private func persistMainWindowSize() {
+    guard let window else {
+      return
+    }
+    nativeSettingsStore.persistMainWindowSize(window.frame.size)
   }
 
   @MainActor private func installAttachToIdeTitlebarButton(on window: NSWindow) {
@@ -619,6 +653,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
         return
       }
       zedOverlayController.configure(command)
+    case .openZedWorkspace(let command):
+      self.workspacePath = command.workspacePath
+      zedOverlayController?.openWorkspace(
+        targetApp: command.targetApp, workspacePath: command.workspacePath)
     case .sidebarCliCommand(let command):
       runSidebarCliCommand(command)
     }
@@ -967,8 +1005,44 @@ private struct NativeSidebarChromeSettings {
   let width: CGFloat?
 }
 
+private struct NativeMainWindowChromeSettings {
+  let width: CGFloat?
+  let height: CGFloat?
+}
+
 private final class NativeSettingsStore {
   private static let logger = Logger(subsystem: "com.madda.zmux.host", category: "settings")
+  private static let defaultHotkeys: [String: String] = [
+    "createSession": "cmd+alt+n",
+    "focusDown": "cmd+alt+shift+down",
+    "focusGroup1": "cmd+alt+shift+1",
+    "focusGroup2": "cmd+alt+shift+2",
+    "focusGroup3": "cmd+alt+shift+3",
+    "focusGroup4": "cmd+alt+shift+4",
+    "focusLeft": "cmd+alt+shift+left",
+    "focusNextSession": "cmd+alt+]",
+    "focusPreviousSession": "cmd+alt+[",
+    "focusRight": "cmd+alt+shift+right",
+    "focusSessionSlot1": "cmd+alt+1",
+    "focusSessionSlot2": "cmd+alt+2",
+    "focusSessionSlot3": "cmd+alt+3",
+    "focusSessionSlot4": "cmd+alt+4",
+    "focusSessionSlot5": "cmd+alt+5",
+    "focusSessionSlot6": "cmd+alt+6",
+    "focusSessionSlot7": "cmd+alt+7",
+    "focusSessionSlot8": "cmd+alt+8",
+    "focusSessionSlot9": "cmd+alt+9",
+    "focusUp": "cmd+alt+shift+up",
+    "moveSidebar": "cmd+alt+b",
+    "openSettings": "cmd+alt+,",
+    "renameActiveSession": "cmd+alt+r",
+    "showFour": "cmd+alt+s 4",
+    "showNine": "cmd+alt+s 9",
+    "showOne": "cmd+alt+s 1",
+    "showSix": "cmd+alt+s 6",
+    "showThree": "cmd+alt+s 3",
+    "showTwo": "cmd+alt+s 2",
+  ]
 
   /**
    CDXC:ZedOverlay 2026-04-26-04:14
@@ -1018,6 +1092,22 @@ private final class NativeSettingsStore {
     return NativeSidebarChromeSettings(width: Self.readCGFloat(settings["sidebarWidth"]))
   }
 
+  func readHotkeys() -> [String: String] {
+    guard let settings = readSharedSidebarSettingsDictionary() else {
+      return Self.defaultHotkeys
+    }
+    var hotkeys = Self.defaultHotkeys
+    if let customHotkeys = settings["hotkeys"] as? [String: Any] {
+      for (key, value) in customHotkeys {
+        if let text = value as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+          hotkeys[key] = Self.normalizeHotkeyText(text)
+        }
+      }
+    }
+    return hotkeys
+  }
+
   func persistSidebarWidth(_ width: CGFloat) {
     do {
       let url = settingsURL()
@@ -1035,6 +1125,40 @@ private final class NativeSettingsStore {
     }
   }
 
+  /**
+   CDXC:NativeWindowChrome 2026-04-28-05:44
+   The native host must reopen at the same main-window size the user last
+   closed or resized. Store only width and height in the shared native settings
+   file so startup can preserve the user's size without reviving stale screen
+   positions or offscreen IDE attachment coordinates.
+   */
+  func readMainWindowChrome() -> NativeMainWindowChromeSettings {
+    guard let settings = readSettingsDictionary() else {
+      return NativeMainWindowChromeSettings(width: nil, height: nil)
+    }
+    return NativeMainWindowChromeSettings(
+      width: Self.readCGFloat(settings["mainWindowWidth"]),
+      height: Self.readCGFloat(settings["mainWindowHeight"])
+    )
+  }
+
+  func persistMainWindowSize(_ size: CGSize) {
+    do {
+      let url = settingsURL()
+      var settings = readSettingsDictionary() ?? [:]
+      settings["mainWindowWidth"] = size.width
+      settings["mainWindowHeight"] = size.height
+      let data = try JSONSerialization.data(
+        withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+      try FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+      )
+      try data.write(to: url, options: [.atomic])
+    } catch {
+      Self.logger.error("Failed to persist main window size: \(error.localizedDescription)")
+    }
+  }
 
   private func readSettingsDictionary() -> [String: Any]? {
     let url = settingsURL()
@@ -1045,6 +1169,27 @@ private final class NativeSettingsStore {
       return nil
     }
     return settings
+  }
+
+  private func readSharedSidebarSettingsDictionary() -> [String: Any]? {
+    let url = ZmuxAppStorage.sharedStateDirectory.appendingPathComponent(
+      "native-sidebar-settings.json")
+    guard let data = try? Data(contentsOf: url),
+      let object = try? JSONSerialization.jsonObject(with: data),
+      let settings = object as? [String: Any]
+    else {
+      return nil
+    }
+    return settings
+  }
+
+  private static func normalizeHotkeyText(_ text: String) -> String {
+    text.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+      .replacingOccurrences(of: "command", with: "cmd")
+      .replacingOccurrences(of: "option", with: "alt")
+      .replacingOccurrences(of: "control", with: "ctrl")
+      .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
   }
 
   private func settingsURL() -> URL {
@@ -1112,11 +1257,15 @@ final class zmuxRootView: NSView {
   private let configureZedOverlay: (ConfigureZedOverlay) -> Void
   private let syncGhosttyTerminalSettings: (SyncGhosttyTerminalSettings) -> Void
   private let openBrowserWindow: (OpenBrowserWindow) -> Void
+  private let openZedWorkspace: (OpenZedWorkspace) -> Void
   private let showBrowserWindow: () -> Void
+  private let sendHostEvent: (HostEvent) -> Void
   private let nativeSettingsStore = NativeSettingsStore()
   private var isModalHostReady = false
   private var pendingModalHostOpenMessage: [String: Any]?
   private var latestModalHostSidebarState: [String: Any]?
+  private var pendingHotkeyPrefix: String?
+  private var pendingHotkeyPrefixExpiresAt: Date?
   private var sidebarWidth: CGFloat
   private var sidebarSide: SidebarSide = .left
 
@@ -1139,6 +1288,7 @@ final class zmuxRootView: NSView {
     configureZedOverlay: @escaping (ConfigureZedOverlay) -> Void,
     syncGhosttyTerminalSettings: @escaping (SyncGhosttyTerminalSettings) -> Void,
     openBrowserWindow: @escaping (OpenBrowserWindow) -> Void,
+    openZedWorkspace: @escaping (OpenZedWorkspace) -> Void,
     showBrowserWindow: @escaping () -> Void
   ) {
     self.workspaceView = TerminalWorkspaceView(
@@ -1149,7 +1299,9 @@ final class zmuxRootView: NSView {
     self.configureZedOverlay = configureZedOverlay
     self.syncGhosttyTerminalSettings = syncGhosttyTerminalSettings
     self.openBrowserWindow = openBrowserWindow
+    self.openZedWorkspace = openZedWorkspace
     self.showBrowserWindow = showBrowserWindow
+    self.sendHostEvent = sendEvent
     self.sidebarWidth = nativeSettingsStore.readSidebarChrome().width ?? Self.defaultSidebarWidth
     let configuration = WKWebViewConfiguration()
     configuration.userContentController.add(scriptBridge, name: "zmuxNativeHost")
@@ -1354,6 +1506,14 @@ final class zmuxRootView: NSView {
        router so the native button can be positioned over Zed Preview.
        */
       configureZedOverlay(command)
+    case .openZedWorkspace(let command):
+      /**
+       CDXC:ZedOverlay 2026-04-28-05:29
+       Sidebar workspace-open commands must use the same native overlay
+       path as bridge commands so the selected Zed-family target receives
+       the workspace request instead of leaving HostCommand non-exhaustive.
+       */
+      openZedWorkspace(command)
     case .sidebarCliCommand:
       /**
        CDXC:DebugCli 2026-04-27-07:18
@@ -1368,6 +1528,165 @@ final class zmuxRootView: NSView {
   private func activateAppWindow() {
     NSApp.activate(ignoringOtherApps: true)
     window?.makeKeyAndOrderFront(nil)
+  }
+
+  func handleHotkeyEquivalent(_ event: NSEvent) -> Bool {
+    guard event.type == .keyDown else {
+      return false
+    }
+    let hotkeyText = Self.hotkeyText(for: event)
+    if Self.isHotkeyCandidate(event) {
+      logNativeHotkeyDebug(
+        "nativeHotkeys.appKitKeyEquivalent",
+        [
+          "characters": event.charactersIgnoringModifiers ?? "",
+          "hotkeyText": hotkeyText ?? "<none>",
+          "keyCode": String(event.keyCode),
+        ])
+    }
+    guard let hotkeyText,
+      let actionId = matchedHotkeyActionId(for: hotkeyText)
+    else {
+      if Self.isHotkeyCandidate(event) {
+        logNativeHotkeyDebug(
+          "nativeHotkeys.appKitNoAction",
+          [
+            "hotkeyText": hotkeyText ?? "<none>",
+            "keyCode": String(event.keyCode),
+          ])
+      }
+      return false
+    }
+    logNativeHotkeyDebug(
+      "nativeHotkeys.appKitMatched",
+      [
+        "actionId": actionId,
+        "hotkeyText": hotkeyText,
+      ])
+    dispatchNativeHotkey(actionId)
+    return true
+  }
+
+  private func matchedHotkeyActionId(for hotkeyText: String) -> String? {
+    /**
+     CDXC:Hotkeys 2026-04-28-05:20
+     Terminal surfaces receive key equivalents before the sidebar webview can
+     observe DOM keyboard events, so AppKit matches only configured zmux app
+     hotkeys and dispatches their action id into the existing sidebar executor.
+     */
+    let hotkeys = nativeSettingsStore.readHotkeys()
+    let now = Date()
+    if let expiresAt = pendingHotkeyPrefixExpiresAt, expiresAt <= now {
+      pendingHotkeyPrefix = nil
+      pendingHotkeyPrefixExpiresAt = nil
+    }
+    let sequence =
+      pendingHotkeyPrefix.map { "\($0) \(hotkeyText)" } ?? hotkeyText
+    if let match = hotkeys.first(where: { $0.value == sequence }) {
+      logNativeHotkeyDebug(
+        "nativeHotkeys.appKitSequenceMatch",
+        [
+          "actionId": match.key,
+          "configuredCount": String(hotkeys.count),
+          "hotkeyText": hotkeyText,
+          "sequence": sequence,
+        ])
+      pendingHotkeyPrefix = nil
+      pendingHotkeyPrefixExpiresAt = nil
+      return match.key
+    }
+    if hotkeys.values.contains(where: { $0.hasPrefix("\(hotkeyText) ") }) {
+      logNativeHotkeyDebug(
+        "nativeHotkeys.appKitPrefixStarted",
+        [
+          "configuredCount": String(hotkeys.count),
+          "hotkeyText": hotkeyText,
+        ])
+      pendingHotkeyPrefix = hotkeyText
+      pendingHotkeyPrefixExpiresAt = now.addingTimeInterval(1)
+      return nil
+    }
+    logNativeHotkeyDebug(
+      "nativeHotkeys.appKitNoMatch",
+      [
+        "configuredCount": String(hotkeys.count),
+        "hotkeyText": hotkeyText,
+        "pendingPrefix": pendingHotkeyPrefix ?? "",
+        "sequence": sequence,
+      ])
+    pendingHotkeyPrefix = nil
+    pendingHotkeyPrefixExpiresAt = nil
+    return nil
+  }
+
+  private func dispatchNativeHotkey(_ actionId: String) {
+    /**
+     CDXC:Hotkeys 2026-04-28-06:15
+     06:12 diagnostics showed AppKit matched shortcuts but the optional
+     window.__zmux_NATIVE_HOTKEYS__ call never reached the sidebar executor.
+     Emit a typed host event through the same native event bus as terminal
+     focus/title updates so hotkeys cannot disappear at an optional JS bridge.
+     */
+    logNativeHotkeyDebug("nativeHotkeys.dispatchHostEvent", ["actionId": actionId])
+    sendHostEvent(.nativeHotkey(actionId: actionId))
+  }
+
+  private func logNativeHotkeyDebug(_ event: String, _ details: [String: String]) {
+    /**
+     CDXC:Hotkeys 2026-04-28-05:36
+     AppKit owns shortcuts while Ghostty has first responder, so hotkey
+     diagnostics must be written before dispatching into the sidebar webview.
+     */
+    AppDelegate.appendTerminalFocusDebugLog(
+      event: event,
+      details: AppDelegate.jsonObjectString(details))
+  }
+
+  private static func hotkeyText(for event: NSEvent) -> String? {
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    guard let key = normalizedHotkeyKey(event) else {
+      return nil
+    }
+    var parts: [String] = []
+    if flags.contains(.command) {
+      parts.append("cmd")
+    }
+    if flags.contains(.control) {
+      parts.append("ctrl")
+    }
+    if flags.contains(.option) {
+      parts.append("alt")
+    }
+    if flags.contains(.shift) {
+      parts.append("shift")
+    }
+    parts.append(key)
+    return parts.joined(separator: "+")
+  }
+
+  private static func isHotkeyCandidate(_ event: NSEvent) -> Bool {
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    return !flags.isDisjoint(with: [.command, .control, .option, .shift])
+  }
+
+  private static func normalizedHotkeyKey(_ event: NSEvent) -> String? {
+    switch event.keyCode {
+    case 126:
+      return "up"
+    case 124:
+      return "right"
+    case 125:
+      return "down"
+    case 123:
+      return "left"
+    default:
+      break
+    }
+    let characters = event.charactersIgnoringModifiers
+    guard let characters, !characters.isEmpty else {
+      return nil
+    }
+    return characters.lowercased()
   }
 
   private func showMessage(_ command: ShowMessage) {
@@ -2284,6 +2603,7 @@ final class zmuxRootView: NSView {
 
 final class zmuxFocusReportingWindow: NSWindow {
   var onFirstResponderChanged: ((NSResponder?) -> Void)?
+  var onKeyEquivalent: ((NSEvent) -> Bool)?
 
   /**
    CDXC:NativeTerminalFocus 2026-04-26-21:32
@@ -2299,6 +2619,13 @@ final class zmuxFocusReportingWindow: NSWindow {
       onFirstResponderChanged?(firstResponder)
     }
     return didBecomeFirstResponder
+  }
+
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if onKeyEquivalent?(event) == true {
+      return true
+    }
+    return super.performKeyEquivalent(with: event)
   }
 }
 

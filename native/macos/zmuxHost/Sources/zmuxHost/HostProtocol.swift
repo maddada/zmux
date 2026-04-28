@@ -26,6 +26,7 @@ enum HostCommand: Decodable {
   case showBrowserWindow
   case setSidebarSide(SetSidebarSide)
   case configureZedOverlay(ConfigureZedOverlay)
+  case openZedWorkspace(OpenZedWorkspace)
   case sidebarCliCommand(SidebarCliCommand)
 
   private enum CodingKeys: String, CodingKey {
@@ -58,6 +59,7 @@ enum HostCommand: Decodable {
     case showBrowserWindow
     case setSidebarSide
     case configureZedOverlay
+    case openZedWorkspace
     case sidebarCliCommand
   }
 
@@ -115,6 +117,8 @@ enum HostCommand: Decodable {
       self = .setSidebarSide(try SetSidebarSide(from: decoder))
     case .configureZedOverlay:
       self = .configureZedOverlay(try ConfigureZedOverlay(from: decoder))
+    case .openZedWorkspace:
+      self = .openZedWorkspace(try OpenZedWorkspace(from: decoder))
     case .sidebarCliCommand:
       self = .sidebarCliCommand(try SidebarCliCommand(from: decoder))
     }
@@ -141,8 +145,10 @@ struct WriteTerminalText: Decodable {
 struct SetActiveTerminalSet: Decodable {
   let activeSessionIds: [String]
   let attentionSessionIds: [String]?
+  let backgroundColor: String?
   let focusedSessionId: String?
   let layout: NativeTerminalLayout?
+  let paneGap: Double?
   let sessionActivities: [String: NativeTerminalActivity]?
 }
 
@@ -245,6 +251,11 @@ struct ConfigureZedOverlay: Decodable {
   let workspacePath: String?
 }
 
+struct OpenZedWorkspace: Decodable {
+  let targetApp: ZedOverlayTargetApp
+  let workspacePath: String
+}
+
 struct SidebarCliCommand: Decodable {
   let action: String
   let payloadJson: String?
@@ -290,6 +301,7 @@ enum NativeTerminalLayout: Decodable {
 
 enum HostEvent: Encodable {
   case hostReady
+  case nativeHotkey(actionId: String)
   case terminalReady(sessionId: String, ttyName: String?, foregroundPid: Int?)
   case terminalTitleChanged(sessionId: String, title: String)
   case terminalTitleBarAction(sessionId: String, action: TerminalTitleBarAction)
@@ -308,6 +320,7 @@ enum HostEvent: Encodable {
     case message
     case protocolVersion
     case action
+    case actionId
     case sessionId
     case stderr
     case stdout
@@ -325,6 +338,16 @@ enum HostEvent: Encodable {
     case .hostReady:
       try container.encode("hostReady", forKey: .type)
       try container.encode(1, forKey: .protocolVersion)
+    case .nativeHotkey(let actionId):
+      /**
+       CDXC:Hotkeys 2026-04-28-06:15
+       AppKit-matched hotkeys must travel over the typed native host event bus
+       instead of an optional JavaScript global. This makes the native-to-sidebar
+       boundary observable and avoids silently dropping shortcuts before the
+       sidebar action executor can run.
+       */
+      try container.encode("nativeHotkey", forKey: .type)
+      try container.encode(actionId, forKey: .actionId)
     case .terminalReady(let sessionId, let ttyName, let foregroundPid):
       try container.encode("terminalReady", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)

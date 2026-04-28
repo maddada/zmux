@@ -769,6 +769,7 @@ describe("WorkspacePanelManager", () => {
       focusedSessionId: "session-1",
       layoutAppearance: {
         activePaneBorderColor: "#fff",
+        backgroundColor: "#121212",
         paneGap: 12,
       },
       panes: [],
@@ -1125,6 +1126,7 @@ function createWorkspaceStateMessage() {
     focusedSessionId: "session-1",
     layoutAppearance: {
       activePaneBorderColor: "#fff",
+      backgroundColor: "#121212",
       paneGap: 12,
     },
     panes: [
