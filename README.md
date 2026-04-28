@@ -1,6 +1,4 @@
-# ZMUX - The IDE Integrated Agents Manager (CLIs & T3code)
-
-Native ghostty terminals multiplexer and agent clis manager that integates with your IDE! (see screenshots)
+# ZMUX - The IDE Integrated Agents Manager
 
 <img width="1295" height="953" alt="image" src="https://github.com/user-attachments/assets/7ed8791d-eae2-4951-a417-27f4b217eb9e" />
 
@@ -10,7 +8,7 @@ Native ghostty terminals multiplexer and agent clis manager that integates with 
 brew install --cask maddada/tap/zmux
 ```
 
-## Native Ghostty terminals that integrate that integrate with the sidebar
+## Screenshots:
 
 - Auto naming Codex/Claude/Gemini/Copilot terminal sessions (more soon).
 - Auto sync of the terminal title and status with UI.
