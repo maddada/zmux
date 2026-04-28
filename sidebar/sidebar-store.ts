@@ -78,7 +78,12 @@ export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
     groupOrder: [],
     groupsById: {},
     hud: {
-      activeSessionsSortMode: "manual",
+      /**
+       * CDXC:SidebarSessions 2026-04-28-05:18
+       * The client store must match the shared/native default so sidebar
+       * sessions start sorted by last activity before the first hydrate message.
+       */
+      activeSessionsSortMode: "lastActivity",
       agentManagerZoomPercent: 100,
       agents: createDefaultSidebarAgentButtons(),
       collapsedSections: createDefaultSidebarSectionCollapseState(),

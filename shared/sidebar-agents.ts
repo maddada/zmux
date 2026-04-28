@@ -1,4 +1,4 @@
-export const DEFAULT_SIDEBAR_AGENTS = [
+const BUILT_IN_SIDEBAR_AGENTS = [
   {
     agentId: "t3",
     command: "npx --yes t3",
@@ -37,9 +37,19 @@ export const DEFAULT_SIDEBAR_AGENTS = [
   },
 ] as const;
 
+/**
+ * CDXC:SidebarAgents 2026-04-28-05:48
+ * T3 Code remains a recognized internal session kind and icon so existing
+ * sessions render correctly, but it is not a default sidebar agent option.
+ */
+export const DEFAULT_SIDEBAR_AGENTS = BUILT_IN_SIDEBAR_AGENTS.filter(
+  (agent) => agent.agentId !== "t3",
+);
+
+export type BuiltInSidebarAgent = (typeof BUILT_IN_SIDEBAR_AGENTS)[number];
 export type DefaultSidebarAgent = (typeof DEFAULT_SIDEBAR_AGENTS)[number];
-export type DefaultSidebarAgentId = DefaultSidebarAgent["agentId"];
-export type SidebarAgentIcon = "browser" | DefaultSidebarAgent["icon"];
+export type DefaultSidebarAgentId = BuiltInSidebarAgent["agentId"];
+export type SidebarAgentIcon = "browser" | BuiltInSidebarAgent["icon"];
 export type DefaultSidebarAgentCommandOverrides = Partial<
   Record<DefaultSidebarAgentId, string | null>
 >;
@@ -122,14 +132,14 @@ export function createSidebarAgentButtons(
 }
 
 export function isDefaultSidebarAgentId(agentId: string): boolean {
-  return DEFAULT_SIDEBAR_AGENTS.some((agent) => agent.agentId === agentId);
+  return BUILT_IN_SIDEBAR_AGENTS.some((agent) => agent.agentId === agentId);
 }
 
 export function getDefaultSidebarAgentById(
   agentId: string | undefined,
-): DefaultSidebarAgent | undefined {
+): BuiltInSidebarAgent | undefined {
   const normalizedAgentId = agentId?.trim().toLowerCase();
-  return DEFAULT_SIDEBAR_AGENTS.find((agent) => agent.agentId === normalizedAgentId);
+  return BUILT_IN_SIDEBAR_AGENTS.find((agent) => agent.agentId === normalizedAgentId);
 }
 
 export function getDefaultSidebarAgentByIcon(
@@ -151,7 +161,7 @@ export function getSidebarAgentNameByIcon(icon: SidebarAgentIcon | undefined): s
     return "Browser";
   }
 
-  return DEFAULT_SIDEBAR_AGENTS.find((agent) => agent.icon === icon)?.name;
+  return BUILT_IN_SIDEBAR_AGENTS.find((agent) => agent.icon === icon)?.name;
 }
 
 export function shouldPreferTerminalTitleForAgentIcon(icon: SidebarAgentIcon | undefined): boolean {
@@ -230,12 +240,12 @@ function isSidebarAgentIcon(candidate: unknown): candidate is SidebarAgentIcon {
 
   return (
     typeof candidate === "string" &&
-    DEFAULT_SIDEBAR_AGENTS.some((agent) => agent.icon === candidate)
+    BUILT_IN_SIDEBAR_AGENTS.some((agent) => agent.icon === candidate)
   );
 }
 
 function getDefaultSidebarAgentName(agentId: string, storedName: string): string {
-  const defaultName = DEFAULT_SIDEBAR_AGENTS.find((agent) => agent.agentId === agentId)?.name;
+  const defaultName = BUILT_IN_SIDEBAR_AGENTS.find((agent) => agent.agentId === agentId)?.name;
   if (!defaultName) {
     return storedName;
   }

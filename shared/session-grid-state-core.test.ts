@@ -328,6 +328,7 @@ describe("sidebar HUD state", () => {
     expect(hud.showCloseButtonOnSessionCards).toBe(false);
     expect(hud.showHotkeysOnSessionCards).toBe(false);
     expect(hud.showLastInteractionTimeOnSessionCards).toBe(true);
+    expect(hud.activeSessionsSortMode).toBe("lastActivity");
     expect(hud.isFocusModeActive).toBe(false);
   });
 

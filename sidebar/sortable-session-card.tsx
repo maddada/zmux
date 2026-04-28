@@ -1,12 +1,12 @@
 import {
   IconCopy,
   IconGitFork,
+  IconMessageCircle,
   IconMoon,
   IconPencil,
   IconPlayerPlay,
   IconRefresh,
   IconStar,
-  IconDeviceMobile,
   IconX,
 } from "@tabler/icons-react";
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
@@ -544,11 +544,18 @@ export function SortableSessionCard({
     });
   };
 
-  const requestT3BrowserAccess = () => {
+  const requestViewFirstUserMessage = () => {
+    const message = session.firstUserMessage?.trim();
+    if (!message) {
+      return;
+    }
+
     setContextMenuPosition(undefined);
-    vscode.postMessage({
-      sessionId: session.sessionId,
-      type: "requestT3SessionBrowserAccess",
+    openAppModal({
+      message,
+      modal: "firstUserMessage",
+      title: getSessionRenameInitialTitle(session),
+      type: "open",
     });
   };
 
@@ -615,21 +622,26 @@ export function SortableSessionCard({
   }
 
   const sessionActions: SessionContextMenuAction[] = [];
-  if (isT3Session) {
+  if (session.firstUserMessage?.trim()) {
     sessionActions.push({
       icon: (
-        <IconDeviceMobile
+        <IconMessageCircle
           aria-hidden="true"
           className="session-context-menu-icon"
           size={16}
           stroke={1.8}
         />
       ),
-      key: "browser-access",
-      label: "Remote Access",
-      onClick: requestT3BrowserAccess,
+      key: "view-first-message",
+      label: "View 1st message",
+      onClick: requestViewFirstUserMessage,
     });
   }
+  /**
+   * CDXC:SidebarSessions 2026-04-28-05:48
+   * Remote Access is intentionally hidden from T3 session overflow menus while
+   * the underlying browser-access handler remains available to non-UI callers.
+   */
   if (canCopyResumeCommand) {
     sessionActions.push({
       icon: (

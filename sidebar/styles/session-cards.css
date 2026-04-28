@@ -330,6 +330,31 @@
   z-index: 2;
 }
 
+.previous-session-first-message-button {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-button-background) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-button-background) 18%, transparent);
+  border-radius: 7px;
+  color: var(--app-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 11px;
+  gap: 5px;
+  line-height: 1;
+  padding: 5px 7px;
+  position: absolute;
+  right: 8px;
+  top: 34px;
+  z-index: 4;
+}
+
+.previous-session-first-message-button:hover,
+.previous-session-first-message-button:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 24%, transparent);
+  color: var(--app-foreground);
+  outline: none;
+}
+
 .session-history-card:hover .previous-session-delete-button,
 .session-history-card:focus-visible .previous-session-delete-button,
 .session-history-card:focus-within .previous-session-delete-button {
@@ -668,11 +693,15 @@
   top: calc(1px * var(--sidebar-density-scale));
 }
 
+.session-frame:hover .session-last-interaction-time,
 .session:hover .session-last-interaction-time,
 .session:focus-visible .session-last-interaction-time {
   opacity: 1;
 }
 
+.session-frame:not(.session-history-frame):hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-last-interaction-time,
 .session-frame:not(.session-history-frame)
   .session:hover
   .session-head-trailing[data-hover-trailing-display="icon"]
@@ -688,6 +717,15 @@
   opacity: 0;
 }
 
+.session-frame:not(.session-history-frame):hover
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-agent-icon,
+.session-frame:not(.session-history-frame):hover
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-agent-tabler-icon,
+.session-frame:not(.session-history-frame):hover
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-header-reloading-icon,
 .session-frame:not(.session-history-frame)
   .session:hover
   .session-head-trailing[data-hover-trailing-display="time"]
@@ -727,6 +765,15 @@
   opacity: 0;
 }
 
+.session-frame:not(.session-history-frame):hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-icon,
+.session-frame:not(.session-history-frame):hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-tabler-icon,
+.session-frame:not(.session-history-frame):hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-reloading-icon,
 .session-frame:not(.session-history-frame)
   .session:hover
   .session-head-trailing[data-hover-trailing-display="icon"]
@@ -766,6 +813,13 @@
   opacity: 0.74;
 }
 
+/*
+ * CDXC:SidebarSessions 2026-04-28-05:18
+ * The overflow menu has two card trailing modes: Agent Icon and Last Active.
+ * Hovering anywhere on a session card frame must reveal the other mode, not
+ * only when the pointer is exactly over the inner button element.
+ */
+
 @keyframes session-agent-icon-spin {
   from {
     transform: rotate(0deg);
@@ -780,8 +834,14 @@
   .session:hover
   .session-head-trailing[data-hover-trailing-display="icon"]
   .session-header-agent-icon[data-favorite="true"],
+.session-frame:not(.session-history-frame):hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-icon[data-favorite="true"],
 .session-frame:not(.session-history-frame)
   .session:hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-header-agent-tabler-icon[data-favorite="true"],
+.session-frame:not(.session-history-frame):hover
   .session-head-trailing[data-hover-trailing-display="icon"]
   .session-header-agent-tabler-icon[data-favorite="true"],
 .session-frame:not(.session-history-frame)

@@ -68,12 +68,17 @@ export function SessionCardContent({
     hasLastInteractionTime && session.lastInteractionAt
       ? { color: getRelativeTimeColor(session.lastInteractionAt) }
       : undefined;
-  const defaultTrailingDisplay =
-    !showLastInteractionTime && hasHeaderAgentIcon
-      ? "icon"
-      : lastInteractionLabel
-        ? "time"
-        : "icon";
+  /**
+   * CDXC:SidebarSessions 2026-04-28-05:18
+   * The overflow menu selects the default trailing mode. Agent Icon mode must
+   * not fall back to showing Last Active for iconless sessions; keep the default
+   * slot blank and reveal the timestamp only on hover.
+   */
+  const defaultTrailingDisplay = !showLastInteractionTime
+    ? "icon"
+    : lastInteractionLabel
+      ? "time"
+      : "icon";
   const shouldKeepLoadingIconVisible = showHeaderLoadingSpinner && hasHeaderAgentIcon;
   const hoverTrailingDisplay = shouldKeepLoadingIconVisible
     ? "icon"

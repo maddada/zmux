@@ -134,12 +134,7 @@ export function CommandIconPicker({
             />
           </button>
           {isOpen ? (
-            <div
-              aria-labelledby={labelId}
-              className="command-icon-picker-menu scroll-mask-y"
-              id={listboxId}
-              role="listbox"
-            >
+            <div className="command-icon-picker-menu">
               <input
                 aria-label="Filter icons"
                 className="group-title-input command-config-input command-icon-picker-search"
@@ -154,50 +149,57 @@ export function CommandIconPicker({
                 spellCheck={false}
                 value={query}
               />
-              <button
-                aria-selected={icon === undefined}
-                className="command-icon-picker-option"
-                data-selected={String(icon === undefined)}
-                onClick={() => {
-                  onIconChange(undefined);
-                  setIsOpen(false);
-                }}
-                role="option"
-                type="button"
+              <div
+                aria-labelledby={labelId}
+                className="command-icon-picker-options scroll-mask-y"
+                id={listboxId}
+                role="listbox"
               >
-                <span className="command-icon-picker-option-copy">No icon</span>
-              </button>
-              {filteredOptions.map((option) => (
                 <button
-                  aria-selected={icon === option.icon}
+                  aria-selected={icon === undefined}
                   className="command-icon-picker-option"
-                  data-selected={String(icon === option.icon)}
-                  key={option.icon}
+                  data-selected={String(icon === undefined)}
                   onClick={() => {
-                    onIconChange(option.icon);
-                    if (!normalizeSidebarCommandIconColor(colorText)) {
-                      onIconColorChange(DEFAULT_SIDEBAR_COMMAND_ICON_COLOR);
-                      setColorText(DEFAULT_SIDEBAR_COMMAND_ICON_COLOR);
-                    }
+                    onIconChange(undefined);
                     setIsOpen(false);
                   }}
                   role="option"
                   type="button"
                 >
-                  <span aria-hidden="true" className="command-button-icon-shell">
-                    <SidebarCommandIconGlyph
-                      className="command-button-leading-icon"
-                      color={icon === option.icon ? iconColor : DEFAULT_SIDEBAR_COMMAND_ICON_COLOR}
-                      icon={option.icon}
-                      size={16}
-                    />
-                  </span>
-                  <span className="command-icon-picker-option-copy">{option.label}</span>
+                  <span className="command-icon-picker-option-copy">No icon</span>
                 </button>
-              ))}
-              {filteredOptions.length === 0 ? (
-                <div className="command-icon-picker-empty-state">No matching icons</div>
-              ) : null}
+                {filteredOptions.map((option) => (
+                  <button
+                    aria-selected={icon === option.icon}
+                    className="command-icon-picker-option"
+                    data-selected={String(icon === option.icon)}
+                    key={option.icon}
+                    onClick={() => {
+                      onIconChange(option.icon);
+                      if (!normalizeSidebarCommandIconColor(colorText)) {
+                        onIconColorChange(DEFAULT_SIDEBAR_COMMAND_ICON_COLOR);
+                        setColorText(DEFAULT_SIDEBAR_COMMAND_ICON_COLOR);
+                      }
+                      setIsOpen(false);
+                    }}
+                    role="option"
+                    type="button"
+                  >
+                    <span aria-hidden="true" className="command-button-icon-shell">
+                      <SidebarCommandIconGlyph
+                        className="command-button-leading-icon"
+                        color={icon === option.icon ? iconColor : DEFAULT_SIDEBAR_COMMAND_ICON_COLOR}
+                        icon={option.icon}
+                        size={16}
+                      />
+                    </span>
+                    <span className="command-icon-picker-option-copy">{option.label}</span>
+                  </button>
+                ))}
+                {filteredOptions.length === 0 ? (
+                  <div className="command-icon-picker-empty-state">No matching icons</div>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </div>

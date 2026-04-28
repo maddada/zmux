@@ -48,7 +48,13 @@ export function createSidebarHudState(
   git: SidebarGitState = createDefaultSidebarGitState(),
   sectionVisibility: SidebarSectionVisibility = createDefaultSidebarSectionVisibility(),
   collapsedSections: SidebarSectionCollapseState = createDefaultSidebarSectionCollapseState(),
-  activeSessionsSortMode: SidebarActiveSessionsSortMode = "manual",
+  /**
+   * CDXC:SidebarSessions 2026-04-28-05:18
+   * New sidebar HUD state must default to the reference behavior: active
+   * sessions are ordered by last activity unless a caller explicitly requests
+   * manual ordering.
+   */
+  activeSessionsSortMode: SidebarActiveSessionsSortMode = "lastActivity",
   createSessionOnSidebarDoubleClick = false,
   renameSessionOnDoubleClick = false,
   commandSessionIndicators: SidebarCommandSessionIndicator[] = [],
@@ -106,6 +112,7 @@ export function createSidebarSessionItems(
     detail: undefined,
     lifecycleState:
       session.kind === "browser" ? "running" : session.isSleeping === true ? "sleeping" : "done",
+    firstUserMessage: session.firstUserMessage,
     isFocused: snapshot.focusedSessionId === session.sessionId,
     isSleeping: session.isSleeping === true,
     isRunning: session.kind === "browser",
