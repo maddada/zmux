@@ -1,4 +1,4 @@
-# zmux - The IDE Integrated Agents Manager (CLIs & T3code)
+# ZMUX - The IDE Integrated Agents Manager (CLIs & T3code)
 
 Native ghostty terminals multiplexer and agent clis manager that integates with your IDE! (see screenshots)
 
