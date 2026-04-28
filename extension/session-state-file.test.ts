@@ -9,6 +9,7 @@ import {
   getPersistedSessionHookDedupMarkerPath,
   readPersistedSessionStateFromFile,
   readPersistedSessionStateSnapshotFromFile,
+  parsePersistedSessionState,
   serializePersistedSessionState,
   writePersistedSessionStateToFile,
 } from "./session-state-file";
@@ -22,6 +23,7 @@ describe("deletePersistedSessionStateFile", () => {
       agentName: "claude",
       agentStatus: "attention",
       agentSessionId: "session-123",
+      firstUserMessage: "first\nmessage",
       hasAutoTitleFromFirstPrompt: true,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
       pendingFirstPromptAutoRenamePrompt: "rename this session from the first prompt",
@@ -118,7 +120,7 @@ describe("persisted session title normalization", () => {
 
     await writeFile(
       filePath,
-      "status=working\nagent=codex\nagentSessionId=session-xyz\nautoTitleFromFirstPrompt=1\nlastActivityAt=2026-04-08T10:00:00.000Z\npendingFirstPromptAutoRenamePrompt=  explain the project and suggest improvements  \ntitle=  🤖 Copilot fix  \n",
+      `status=working\nagent=codex\nagentSessionId=session-xyz\nfirstUserMessageBase64=${Buffer.from("first\nmessage", "utf8").toString("base64")}\nautoTitleFromFirstPrompt=1\nlastActivityAt=2026-04-08T10:00:00.000Z\npendingFirstPromptAutoRenamePrompt=  explain the project and suggest improvements  \ntitle=  🤖 Copilot fix  \n`,
       "utf8",
     );
 
@@ -126,6 +128,7 @@ describe("persisted session title normalization", () => {
       agentName: "codex",
       agentStatus: "working",
       agentSessionId: "session-xyz",
+      firstUserMessage: "first\nmessage",
       frozenAt: undefined,
       hasAutoTitleFromFirstPrompt: true,
       historyBase64: undefined,
@@ -159,6 +162,7 @@ describe("persisted session title normalization", () => {
       agentName: "claude",
       agentStatus: "idle",
       agentSessionId: undefined,
+      firstUserMessage: undefined,
       frozenAt: undefined,
       historyBase64: undefined,
       lastActivityAt: "2026-04-08T10:00:00.000Z",
@@ -173,7 +177,7 @@ describe("persisted session title normalization", () => {
 
     await writeFile(
       filePath,
-      "status=attention\nagent=claude\nagentSessionId=session-snapshot\nautoTitleFromFirstPrompt=\nlastActivityAt=2026-04-08T10:00:00.000Z\npendingFirstPromptAutoRenamePrompt=rename this session\ntitle=Claude Code\n",
+      "status=attention\nagent=claude\nagentSessionId=session-snapshot\nfirstUserMessageBase64=\nautoTitleFromFirstPrompt=\nlastActivityAt=2026-04-08T10:00:00.000Z\npendingFirstPromptAutoRenamePrompt=rename this session\ntitle=Claude Code\n",
       "utf8",
     );
 
@@ -182,6 +186,7 @@ describe("persisted session title normalization", () => {
       agentName: "claude",
       agentStatus: "attention",
       agentSessionId: "session-snapshot",
+      firstUserMessage: undefined,
       frozenAt: undefined,
       hasAutoTitleFromFirstPrompt: undefined,
       historyBase64: undefined,
@@ -205,5 +210,29 @@ describe("persisted session title normalization", () => {
     expect(serialized).toContain(
       `historyBase64=${Buffer.from("prompt\r\noutput\r\n", "utf8").toString("base64")}`,
     );
+  });
+
+  test("should round-trip first user message text with line breaks", async () => {
+    const serialized = serializePersistedSessionState({
+      agentName: "codex",
+      agentStatus: "idle",
+      firstUserMessage: "please fix this\n\nand keep the repro",
+      title: "Bug hunt",
+    });
+
+    expect(serialized).toContain(
+      `firstUserMessageBase64=${Buffer.from("please fix this\n\nand keep the repro", "utf8").toString("base64")}`,
+    );
+    expect(parsePersistedSessionState(serialized).firstUserMessage).toBe(
+      "please fix this\n\nand keep the repro",
+    );
+  });
+
+  test("should expose legacy pending first prompt as the first user message", () => {
+    expect(
+      parsePersistedSessionState(
+        "status=idle\nagent=codex\npendingFirstPromptAutoRenamePrompt=rename from this prompt\n",
+      ).firstUserMessage,
+    ).toBe("rename from this prompt");
   });
 });

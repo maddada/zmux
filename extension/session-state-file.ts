@@ -7,6 +7,7 @@ export type PersistedSessionState = {
   agentName?: string;
   agentStatus: TerminalAgentStatus;
   agentSessionId?: string;
+  firstUserMessage?: string;
   frozenAt?: string;
   hasAutoTitleFromFirstPrompt?: boolean;
   historyBase64?: string;
@@ -24,6 +25,7 @@ const DEFAULT_PERSISTED_SESSION_STATE: PersistedSessionState = {
   agentName: undefined,
   agentStatus: "idle",
   agentSessionId: undefined,
+  firstUserMessage: undefined,
   frozenAt: undefined,
   hasAutoTitleFromFirstPrompt: undefined,
   historyBase64: undefined,
@@ -48,6 +50,7 @@ export function parsePersistedSessionState(rawState: string): PersistedSessionSt
   let agentName: string | undefined;
   let agentStatus: TerminalAgentStatus = "idle";
   let agentSessionId: string | undefined;
+  let firstUserMessage: string | undefined;
   let frozenAt: string | undefined;
   let hasAutoTitleFromFirstPrompt: boolean | undefined;
   let historyBase64: string | undefined;
@@ -63,6 +66,9 @@ export function parsePersistedSessionState(rawState: string): PersistedSessionSt
     }
     if (key === "agentSessionId") {
       agentSessionId = normalizePersistedSessionValue(value);
+    }
+    if (key === "firstUserMessageBase64") {
+      firstUserMessage = normalizePersistedTextBase64(value);
     }
     if (key === "title") {
       title = getVisibleTerminalTitle(value);
@@ -91,6 +97,13 @@ export function parsePersistedSessionState(rawState: string): PersistedSessionSt
     agentName,
     agentStatus,
     agentSessionId,
+    /**
+     * CDXC:FirstMessage 2026-04-28-05:48
+     * Existing sessions may only have the hook-captured first prompt in the
+     * pending auto-title field. Expose that saved prompt as first-message
+     * metadata until a newer hook writes the dedicated base64 field.
+     */
+    firstUserMessage: firstUserMessage ?? pendingFirstPromptAutoRenamePrompt,
     frozenAt,
     hasAutoTitleFromFirstPrompt,
     historyBase64,
@@ -105,6 +118,7 @@ export function serializePersistedSessionState(state: PersistedSessionState): st
     `status=${state.agentStatus}`,
     `agent=${normalizePersistedSessionValue(state.agentName) ?? ""}`,
     `agentSessionId=${normalizePersistedSessionValue(state.agentSessionId) ?? ""}`,
+    `firstUserMessageBase64=${serializePersistedTextBase64(state.firstUserMessage) ?? ""}`,
     `frozenAt=${normalizePersistedTimestamp(state.frozenAt) ?? ""}`,
     `autoTitleFromFirstPrompt=${state.hasAutoTitleFromFirstPrompt ? "1" : ""}`,
     `historyBase64=${normalizePersistedHistoryBase64(state.historyBase64) ?? ""}`,
@@ -123,6 +137,7 @@ export function haveSamePersistedSessionState(
     left.agentName === right.agentName &&
     left.agentStatus === right.agentStatus &&
     left.agentSessionId === right.agentSessionId &&
+    left.firstUserMessage === right.firstUserMessage &&
     left.frozenAt === right.frozenAt &&
     left.hasAutoTitleFromFirstPrompt === right.hasAutoTitleFromFirstPrompt &&
     left.historyBase64 === right.historyBase64 &&
@@ -225,6 +240,32 @@ export async function deletePersistedSessionStateFile(filePath: string): Promise
 function normalizePersistedSessionValue(value: string | undefined): string | undefined {
   const normalizedValue = value?.replace(/\s+/g, " ").trim();
   return normalizedValue && normalizedValue.length > 0 ? normalizedValue : undefined;
+}
+
+/**
+ * CDXC:FirstMessage 2026-04-28-05:48
+ * Agent UserPromptSubmit hooks must persist the user's first message with line
+ * breaks intact so the session viewer can show copyable original prompt text.
+ * The state file is line-oriented, so first-message text is stored as base64
+ * instead of using the space-collapsing scalar value normalizer.
+ */
+function normalizePersistedTextBase64(value: string | undefined): string | undefined {
+  const normalizedValue = value?.trim();
+  if (!normalizedValue) {
+    return undefined;
+  }
+
+  try {
+    const decodedValue = Buffer.from(normalizedValue, "base64").toString("utf8").trim();
+    return decodedValue || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function serializePersistedTextBase64(value: string | undefined): string | undefined {
+  const normalizedValue = value?.trim();
+  return normalizedValue ? Buffer.from(normalizedValue, "utf8").toString("base64") : undefined;
 }
 
 function normalizePersistedHistoryBase64(value: string | undefined): string | undefined {

@@ -213,6 +213,18 @@ export function resolvePersistedSessionStateForHook(
   }
 
   if (hookInfo.rawEventName === USER_PROMPT_SUBMIT_EVENT_NAME && hookInfo.prompt?.trim()) {
+    /**
+     * CDXC:FirstMessage 2026-04-28-05:48
+     * The first submitted user prompt is session metadata, not just rename
+     * input. Capture it once so active and previous session cards can offer a
+     * "View 1st message" action whenever the hook saved that text.
+     */
+    if (
+      !nextState.firstUserMessage?.trim() ||
+      nextState.firstUserMessage === currentState.pendingFirstPromptAutoRenamePrompt
+    ) {
+      nextState.firstUserMessage = hookInfo.prompt.trim();
+    }
     nextState.lastActivityAt = new Date().toISOString();
   }
 
@@ -333,6 +345,7 @@ function summarizePersistedSessionState(state: PersistedSessionState): Record<st
   return {
     agentName: state.agentName,
     agentStatus: state.agentStatus,
+    firstUserMessageLength: state.firstUserMessage?.length,
     hasAutoTitleFromFirstPrompt: state.hasAutoTitleFromFirstPrompt,
     lastActivityAt: state.lastActivityAt,
     pendingFirstPromptAutoRenamePrompt: state.pendingFirstPromptAutoRenamePrompt,

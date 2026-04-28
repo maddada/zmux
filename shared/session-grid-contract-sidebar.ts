@@ -56,6 +56,7 @@ export type SidebarSessionItem = {
   activity: "idle" | "working" | "attention";
   activityLabel?: string;
   agentIcon?: SidebarAgentIcon;
+  firstUserMessage?: string;
   isGeneratingFirstPromptTitle?: boolean;
   isReloading?: boolean;
   lifecycleState?: SessionLifecycleState;
@@ -460,6 +461,13 @@ export type SidebarToExtensionMessage =
       type: "deletePreviousSession";
     }
   | {
+      /**
+       * CDXC:PreviousSessions 2026-04-28-05:36
+       * Native full-window modals cannot rely on WKWebView JavaScript prompt
+       * dialogs. Carry the user's typed search text with the command so the
+       * native launcher can create the agent session immediately.
+       */
+      query?: string;
       type: "promptFindPreviousSession";
     }
   | {

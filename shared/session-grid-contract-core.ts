@@ -71,6 +71,7 @@ export type BaseSessionRecord = {
   kind: SessionKind;
   sessionId: string;
   displayId: string;
+  firstUserMessage?: string;
   title: string;
   titleSource?: SessionTitleSource;
   alias: string;

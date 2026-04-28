@@ -64,6 +64,8 @@ export class PreviousSessionHistory {
           activity: "idle",
           activityLabel: undefined,
           closedAt: entry.closedAt,
+          firstUserMessage:
+            entry.sidebarItem.firstUserMessage ?? entry.sessionRecord.firstUserMessage,
           historyId: entry.historyId,
           lifecycleState: normalizeHistoryLifecycleState(sidebarItem),
           isGeneratedName: isGeneratedSessionAlias(entry.sessionRecord),

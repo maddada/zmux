@@ -18,6 +18,7 @@ export type TerminalSessionSnapshot = {
   cwd: string;
   exitCode?: number;
   frontendAttachmentGeneration?: number;
+  firstUserMessage?: string;
   history?: string;
   isAttached: boolean;
   restoreState: TerminalSessionRestoreState;

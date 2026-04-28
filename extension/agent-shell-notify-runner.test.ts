@@ -118,6 +118,9 @@ describe("resolvePersistedSessionStateForHook", () => {
     expect(nextState.pendingFirstPromptAutoRenamePrompt).toBe(
       "how does terminal title syncing work in this project?",
     );
+    expect(nextState.firstUserMessage).toBe(
+      "how does terminal title syncing work in this project?",
+    );
     expect(nextState.title).toBe("Codex");
     expect(nextState.lastActivityAt).toEqual(expect.any(String));
   });
@@ -142,6 +145,7 @@ describe("resolvePersistedSessionStateForHook", () => {
     expect(nextState.pendingFirstPromptAutoRenamePrompt).toBe(
       "can you explain how this repo is structured?",
     );
+    expect(nextState.firstUserMessage).toBe("can you explain how this repo is structured?");
     expect(nextState.title).toBe("Claude Code");
     expect(nextState.lastActivityAt).toEqual(expect.any(String));
   });
@@ -165,7 +169,28 @@ describe("resolvePersistedSessionStateForHook", () => {
     );
 
     expect(nextState.pendingFirstPromptAutoRenamePrompt).toBe("rename the controller session");
+    expect(nextState.firstUserMessage).toBe("fix the workspace group ordering too");
     expect(nextState.title).toBe("Codex");
+  });
+
+  test("preserves raw newlines when upgrading a legacy pending prompt into first message metadata", () => {
+    const nextState = resolvePersistedSessionStateForHook(
+      {
+        agentName: "codex",
+        agentStatus: "working",
+        firstUserMessage: "fix the markdown rendering",
+        pendingFirstPromptAutoRenamePrompt: "fix the markdown rendering",
+        title: "Codex",
+      },
+      {
+        agentName: "codex",
+        prompt: "fix the markdown\n\nrendering",
+        rawEventName: "UserPromptSubmit",
+      },
+    );
+
+    expect(nextState.firstUserMessage).toBe("fix the markdown\n\nrendering");
+    expect(nextState.pendingFirstPromptAutoRenamePrompt).toBe("fix the markdown rendering");
   });
 
   test("does not queue auto rename requests for slash commands", () => {
@@ -187,6 +212,7 @@ describe("resolvePersistedSessionStateForHook", () => {
     );
 
     expect(nextState.pendingFirstPromptAutoRenamePrompt).toBeUndefined();
+    expect(nextState.firstUserMessage).toBe("/rename Better title");
     expect(nextState.title).toBe("Codex");
   });
 
@@ -210,6 +236,9 @@ describe("resolvePersistedSessionStateForHook", () => {
     );
 
     expect(nextState.pendingFirstPromptAutoRenamePrompt).toBeUndefined();
+    expect(nextState.firstUserMessage).toBe(
+      "add 1 more toggle here [Image #1] that makes it open as /rename Memory Consolidation Agent",
+    );
     expect(nextState.title).toBe("Codex");
   });
 

@@ -328,6 +328,7 @@ function buildSidebarItem(
       lifecycleState: "running",
       isFocused,
       isFavorite: false,
+      firstUserMessage: sessionRecord.firstUserMessage,
       isReloading: false,
       isSleeping: false,
       isRunning: true,
@@ -370,6 +371,7 @@ function buildSidebarItem(
             ? `Thread ${boundThreadId.slice(0, 8)}`
             : undefined)),
       lifecycleState,
+      firstUserMessage: sessionRecord.firstUserMessage,
       isFocused,
       isFavorite: sessionRecord.isFavorite === true,
       isReloading: options.getIsSessionReloading(sessionRecord.sessionId),
@@ -425,6 +427,7 @@ function buildSidebarItem(
     column: sessionRecord.column,
     detail: isSleeping ? "Sleeping" : sessionSnapshot.errorMessage,
     isGeneratingFirstPromptTitle,
+    firstUserMessage: sessionRecord.firstUserMessage ?? sessionSnapshot.firstUserMessage,
     lifecycleState,
     isFocused,
     isFavorite: sessionRecord.isFavorite === true,
