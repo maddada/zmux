@@ -8,8 +8,32 @@ import {
 describe("normalizezmuxSettings", () => {
   test("defaults the Zed overlay settings", () => {
     expect(normalizezmuxSettings({})).toMatchObject({
+      syncOpenProjectWithZed: DEFAULT_zmux_SETTINGS.syncOpenProjectWithZed,
       zedOverlayEnabled: DEFAULT_zmux_SETTINGS.zedOverlayEnabled,
       zedOverlayTargetApp: DEFAULT_zmux_SETTINGS.zedOverlayTargetApp,
+    });
+  });
+
+  test("keeps Sync Open Project with Zed enabled by default", () => {
+    /**
+     * CDXC:ZedOverlayWorkspace 2026-04-28-05:18
+     * The sync setting must default on so existing users get project-to-Zed
+     * syncing after switching zmux workspaces, with the debounce owned by the
+     * sidebar instead of by the native Show Zed button.
+     */
+    expect(DEFAULT_zmux_SETTINGS.syncOpenProjectWithZed).toBe(true);
+    expect(normalizezmuxSettings({ syncOpenProjectWithZed: false })).toMatchObject({
+      syncOpenProjectWithZed: false,
+    });
+  });
+
+  test("keeps the workspace background color setting", () => {
+    expect(DEFAULT_zmux_SETTINGS.workspaceBackgroundColor).toBe("#121212");
+    expect(normalizezmuxSettings({ workspaceBackgroundColor: "#202020" })).toMatchObject({
+      workspaceBackgroundColor: "#202020",
+    });
+    expect(normalizezmuxSettings({ workspaceBackgroundColor: "   " })).toMatchObject({
+      workspaceBackgroundColor: DEFAULT_zmux_SETTINGS.workspaceBackgroundColor,
     });
   });
 

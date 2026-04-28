@@ -19,6 +19,11 @@ import {
   normalizeTerminalFontPreset,
   type TerminalFontPreset,
 } from "./terminal-font-preset";
+import {
+  DEFAULT_zmux_HOTKEYS,
+  normalizezmuxHotkeySettings,
+  type zmuxHotkeySettings,
+} from "./zmux-hotkeys";
 
 export type TerminalCursorStyle = "bar" | "block" | "underline";
 export type ZedOverlayTargetApp = "zed" | "zed-preview" | "vscode" | "vscode-insiders";
@@ -52,8 +57,11 @@ export type zmuxSettings = {
   terminalLetterSpacing: number;
   terminalLineHeight: number;
   terminalScrollToBottomWhenTyping: boolean;
+  hotkeys: zmuxHotkeySettings;
   workspaceActivePaneBorderColor: string;
+  workspaceBackgroundColor: string;
   workspacePaneGap: number;
+  syncOpenProjectWithZed: boolean;
   zedOverlayEnabled: boolean;
   zedOverlayTargetApp: ZedOverlayTargetApp;
 };
@@ -87,8 +95,11 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   terminalLetterSpacing: 0,
   terminalLineHeight: 1.2,
   terminalScrollToBottomWhenTyping: true,
+  hotkeys: DEFAULT_zmux_HOTKEYS,
   workspaceActivePaneBorderColor: "#3b82f6",
+  workspaceBackgroundColor: "#121212",
   workspacePaneGap: 12,
+  syncOpenProjectWithZed: true,
   zedOverlayEnabled: false,
   zedOverlayTargetApp: "zed-preview",
 };
@@ -234,17 +245,44 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
       "terminalScrollToBottomWhenTyping",
       DEFAULT_zmux_SETTINGS.terminalScrollToBottomWhenTyping,
     ),
+    /**
+     * CDXC:Hotkeys 2026-04-28-05:20
+     * User-defined app shortcuts are normalized with defaults on every settings
+     * read so older settings files gain configurable native hotkeys without a
+     * migration or fallback execution path.
+     */
+    hotkeys: normalizezmuxHotkeySettings(source.hotkeys),
     workspaceActivePaneBorderColor:
       readString(
         source,
         "workspaceActivePaneBorderColor",
         DEFAULT_zmux_SETTINGS.workspaceActivePaneBorderColor,
       ).trim() || DEFAULT_zmux_SETTINGS.workspaceActivePaneBorderColor,
+    /**
+     * CDXC:WorkspaceLayout 2026-04-28-06:08
+     * Users can choose the background visible behind terminal panes. Persist a
+     * normalized CSS color string so the React workspace and native AppKit
+     * workspace render the same color instead of hardcoding dark gray.
+     */
+    workspaceBackgroundColor:
+      readString(source, "workspaceBackgroundColor", DEFAULT_zmux_SETTINGS.workspaceBackgroundColor)
+        .trim() || DEFAULT_zmux_SETTINGS.workspaceBackgroundColor,
     workspacePaneGap: clampNumber(
       readNumber(source, "workspacePaneGap", DEFAULT_zmux_SETTINGS.workspacePaneGap),
       0,
       48,
       DEFAULT_zmux_SETTINGS.workspacePaneGap,
+    ),
+    /**
+     * CDXC:ZedOverlayWorkspace 2026-04-28-05:18
+     * Project-to-Zed syncing is a user-facing behavior setting and defaults
+     * on, so switching zmux workspaces can drive the editor project after the
+     * sidebar's debounce instead of doing that work from the Show Zed button.
+     */
+    syncOpenProjectWithZed: readBoolean(
+      source,
+      "syncOpenProjectWithZed",
+      DEFAULT_zmux_SETTINGS.syncOpenProjectWithZed,
     ),
     zedOverlayEnabled: readBoolean(
       source,

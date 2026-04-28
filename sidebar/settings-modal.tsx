@@ -335,6 +335,12 @@ export function SettingsModal({
                 onChange={(value) => updateDraft("workspaceActivePaneBorderColor", value)}
                 value={draft.workspaceActivePaneBorderColor}
               />
+              <ColorField
+                description="Color shown behind terminal panes."
+                label="Terminal Background"
+                onChange={(value) => updateDraft("workspaceBackgroundColor", value)}
+                value={draft.workspaceBackgroundColor}
+              />
               <ToggleField
                 checked={draft.debuggingMode}
                 description="Expose debugging-only sidebar controls."
@@ -362,6 +368,16 @@ export function SettingsModal({
                 }
                 options={ZED_OVERLAY_TARGET_APP_OPTIONS}
                 value={draft.zedOverlayTargetApp}
+              />
+              {/* CDXC:ZedOverlayWorkspace 2026-04-28-05:18: Project sync is a
+                  separate setting from attachment. When enabled, zmux opens
+                  the active project in Zed after workspace switches instead of
+                  waiting for the native Show Zed button click. */}
+              <ToggleField
+                checked={draft.syncOpenProjectWithZed}
+                description="Open the active zmux project in Zed after switching workspaces."
+                label="Sync open project with Zed"
+                onChange={(checked) => updateDraft("syncOpenProjectWithZed", checked)}
               />
             </SettingsSection>
 
@@ -620,6 +636,44 @@ function TextField({
       />
     </SettingRow>
   );
+}
+
+function ColorField({
+  description,
+  label,
+  onChange,
+  value,
+}: {
+  description?: string;
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  const id = useId();
+  const colorValue = normalizeColorInputValue(value);
+  return (
+    <SettingRow description={description} htmlFor={id} label={label}>
+      <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-3">
+        <Input
+          aria-label={`${label} picker`}
+          className="h-10 cursor-pointer rounded-xl p-1"
+          onChange={(event) => onChange(event.currentTarget.value)}
+          type="color"
+          value={colorValue}
+        />
+        <Input
+          id={id}
+          className="h-10 px-3 text-sm"
+          onChange={(event) => onChange(event.currentTarget.value)}
+          value={value}
+        />
+      </div>
+    </SettingRow>
+  );
+}
+
+function normalizeColorInputValue(value: string): string {
+  return /^#[0-9a-f]{6}$/iu.test(value.trim()) ? value.trim() : "#121212";
 }
 
 function ToggleField({

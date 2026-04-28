@@ -10,12 +10,12 @@ import {
   IconEye,
   IconHelpCircle,
   IconHistory,
+  IconKeyboard,
   IconLayoutSidebar,
   IconPencil,
   IconPlusFilled,
   IconSearch,
   IconSettings,
-  IconDeviceMobile,
 } from "@tabler/icons-react";
 import {
   useEffect,
@@ -1261,6 +1261,18 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     openAppModal({ modal: "settings", type: "open" });
   };
 
+  const openHotkeys = () => {
+    setIsOverflowMenuOpen(false);
+    setIsPinnedPromptsOpen(false);
+    setIsPreviousSessionsOpen(false);
+    setIsDaemonSessionsOpen(false);
+    setIsScratchPadOpen(false);
+    setIsSessionSearchSelectionVisible(false);
+    setIsSessionSearchOpen(false);
+    setSessionSearchQuery("");
+    openAppModal({ modal: "hotkeys", type: "open" });
+  };
+
   const closeSessionSearch = () => {
     setIsSessionSearchSelectionVisible(false);
     setIsSessionSearchOpen(false);
@@ -1511,16 +1523,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     vscode.postMessage({ type: "openWorkspaceWelcome" });
   };
 
-  const browserAccessSessionId = useMemo(() => {
-    const orderedSessionIds = groupOrder.flatMap(
-      (groupId) => authoritativeSessionIdsByGroup[groupId] ?? [],
-    );
-    const focusedSessionId = orderedSessionIds.find(
-      (sessionId) => sessionsById[sessionId]?.isFocused,
-    );
-    return focusedSessionId ?? orderedSessionIds[0];
-  }, [authoritativeSessionIdsByGroup, groupOrder, sessionsById]);
-
   const togglePinnedPrompts = () => {
     setIsOverflowMenuOpen(false);
     setIsDaemonSessionsOpen(false);
@@ -1534,21 +1536,14 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
 
   const topControlOptions = {
     completionBellEnabled,
-    browserAccessSessionId,
     isManualActiveSessionsSort,
     isOverflowMenuOpen,
     isPreviousSessionsOpen,
     isScratchPadOpen,
     isSessionSearchOpen,
-    onAccessT3FromBrowser: (sessionId: string) => {
-      setIsOverflowMenuOpen(false);
-      vscode.postMessage({
-        sessionId,
-        type: "requestT3SessionBrowserAccess",
-      });
-    },
     onMoveSidebar: moveSidebar,
     onOpenHelp: openWorkspaceWelcome,
+    onOpenHotkeys: openHotkeys,
     onOpenSettings: openSidebarSettings,
     onShowRunning: openRunningSessions,
     onTogglePreviousSessions: () => {
@@ -1982,15 +1977,14 @@ function getSessionCardTimeToggleLabel(showLastInteractionTimeOnSessionCards: bo
 
 type RenderSidebarTopControlsOptions = {
   completionBellEnabled: boolean;
-  browserAccessSessionId?: string;
   isManualActiveSessionsSort: boolean;
   isOverflowMenuOpen: boolean;
   isPreviousSessionsOpen: boolean;
   isScratchPadOpen: boolean;
   isSessionSearchOpen: boolean;
-  onAccessT3FromBrowser: (sessionId: string) => void;
   onMoveSidebar: () => void;
   onOpenHelp: () => void;
+  onOpenHotkeys: () => void;
   onOpenSettings: () => void;
   onShowRunning: () => void;
   onTogglePreviousSessions: () => void;
@@ -2169,13 +2163,12 @@ function renderPreviousSessionsToolbarButton({
 }
 
 function renderFloatingOverflowMenu({
-  browserAccessSessionId,
   isManualActiveSessionsSort,
   isOverflowMenuOpen,
   isScratchPadOpen,
-  onAccessT3FromBrowser,
   onMoveSidebar: _onMoveSidebar,
   onOpenHelp,
+  onOpenHotkeys,
   onOpenSettings,
   onShowRunning,
   onToggleActiveSessionsSortMode,
@@ -2237,22 +2230,11 @@ function renderFloatingOverflowMenu({
               </div>
               <div className="session-context-menu-divider" role="separator" />
               <div className="session-context-menu-group">
-                {browserAccessSessionId ? (
-                  <button
-                    className="session-context-menu-item"
-                    onClick={() => onAccessT3FromBrowser(browserAccessSessionId)}
-                    role="menuitem"
-                    type="button"
-                  >
-                    <IconDeviceMobile
-                      aria-hidden="true"
-                      className="session-context-menu-icon"
-                      size={14}
-                      stroke={1.8}
-                    />
-                    Remote Access
-                  </button>
-                ) : null}
+                {/*
+                 * CDXC:SidebarOverflow 2026-04-28-05:48
+                 * Remote Access is hidden from the sidebar overflow menu while
+                 * the underlying modal/message path remains available.
+                 */}
                 <button
                   className="session-context-menu-item"
                   onClick={onToggleActiveSessionsSortMode}
@@ -2306,6 +2288,20 @@ function renderFloatingOverflowMenu({
                     stroke={1.8}
                   />
                   Tips &amp; Tricks
+                </button>
+                <button
+                  className="session-context-menu-item"
+                  onClick={onOpenHotkeys}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconKeyboard
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={14}
+                    stroke={1.8}
+                  />
+                  Hotkeys
                 </button>
                 <button
                   className="session-context-menu-item"
