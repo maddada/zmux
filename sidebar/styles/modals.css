@@ -138,12 +138,21 @@
   gap: 14px;
   grid-template-rows: auto auto minmax(0, 1fr);
   max-height: 80vh;
-  max-width: min(280px, 100%);
+  max-width: min(300px, 100%);
   overflow: hidden;
-  width: min(280px, 100%);
+  width: min(300px, 100%);
 }
 
-.app-modal-host-body .previous-sessions-modal,
+.app-modal-host-body .previous-sessions-modal {
+  /**
+   * CDXC:PreviousSessions 2026-04-28-05:36
+   * Previous Sessions is a scanning picker, not a management workspace. Keep
+   * the full-window native modal slim enough to read like the sidebar version.
+   */
+  max-width: min(300px, calc(100vw - 32px));
+  width: min(300px, calc(100vw - 32px));
+}
+
 .app-modal-host-body .pinned-prompts-modal,
 .app-modal-host-body .pinned-prompt-editor-modal {
   max-width: min(720px, calc(100vw - 32px));
@@ -842,6 +851,20 @@
   width: min(420px, 100%);
 }
 
+.first-user-message-modal {
+  gap: 14px;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: min(76vh, 620px);
+  max-height: calc(100vh - 24px);
+  max-width: min(560px, 100%);
+  width: min(560px, 100%);
+}
+
+.first-user-message-textarea {
+  min-height: 220px;
+  resize: none;
+}
+
 .scratch-pad-modal-body {
   display: grid;
   min-height: 0;
@@ -871,6 +894,66 @@
 
 .scratch-pad-textarea::placeholder {
   color: color-mix(in srgb, var(--app-muted) 88%, transparent);
+}
+
+.hotkeys-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: min(86vh, 720px);
+  max-height: calc(100vh - 32px);
+  width: min(680px, calc(100vw - 24px));
+}
+
+.hotkeys-modal-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.hotkeys-modal-body {
+  display: grid;
+  gap: 8px;
+}
+
+/* CDXC:Hotkeys 2026-04-28-05:20: The hotkey editor lists many app-level
+   bindings, so rows use compact fixed controls and wrapping descriptions to
+   keep every action scannable inside the full-window modal host. */
+.hotkeys-modal-row {
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--app-border) 76%, transparent);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, 180px);
+  padding: 10px 12px;
+}
+
+.hotkeys-modal-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.hotkeys-modal-title {
+  color: var(--app-foreground);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.hotkeys-modal-description {
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.hotkeys-modal-input {
+  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
+  letter-spacing: 0;
+}
+
+.hotkeys-modal-input[aria-invalid="true"] {
+  border-color: color-mix(in srgb, var(--vscode-errorForeground, #f87171) 76%, var(--app-border));
 }
 
 .command-config-fields {
@@ -1050,12 +1133,21 @@
   left: 0;
   margin-top: 6px;
   max-height: 220px;
-  overflow: auto;
+  overflow: hidden;
   padding: 6px;
   position: absolute;
   right: 0;
   top: 100%;
   z-index: 2;
+}
+
+/* CDXC:CommandIcons 2026-04-28-05:23: Icon dropdown search must remain
+   visible while browsing the expanded Tabler set; only the option list scrolls. */
+.command-icon-picker-options {
+  display: grid;
+  gap: 2px;
+  max-height: 166px;
+  overflow: auto;
 }
 
 .command-icon-picker-search {

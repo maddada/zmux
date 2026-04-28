@@ -24,6 +24,10 @@ import {
   type FirstPromptAutoRenameStrategy,
 } from "../../extension/first-prompt-session-title";
 import {
+  DEFAULT_FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE,
+  renderFindPreviousSessionPrompt,
+} from "../../extension/find-previous-session-prompt";
+import {
   acknowledgeTitleDerivedSessionActivity,
   getTitleDerivedSessionActivityFromTransition,
   type TitleDerivedSessionActivity,
@@ -35,7 +39,9 @@ import {
   createSidebarHudState,
   DEFAULT_TERMINAL_SESSION_TITLE,
   createSidebarSessionItems,
+  getOrderedSessions,
   getSessionCardPrimaryTitle,
+  normalizeTerminalTitle,
   getVisiblePrimaryTitle,
   getVisibleTerminalTitle,
   resolveSidebarTheme,
@@ -57,7 +63,9 @@ import {
   type TerminalSessionRecord,
   type VisibleSessionCount,
   type SidebarCommandSessionIndicator,
+  type SessionGridDirection,
 } from "../../shared/session-grid-contract";
+import { focusDirectionInSnapshot } from "../../shared/session-grid-state-create-focus";
 import {
   createDefaultSidebarGitState,
   type SidebarGitAction,
@@ -67,6 +75,7 @@ import {
   createGroupFromSessionInSimpleWorkspace,
   createGroupInSimpleWorkspace,
   createSessionInSimpleWorkspace,
+  focusGroupByIndexInSimpleWorkspace,
   focusGroupInSimpleWorkspace,
   focusSessionInSimpleWorkspace,
   moveSessionToGroupInSimpleWorkspace,
@@ -126,8 +135,10 @@ import {
 import {
   DEFAULT_zmux_SETTINGS,
   normalizezmuxSettings,
+  type ZedOverlayTargetApp,
   type zmuxSettings,
 } from "../../shared/zmux-settings";
+import { getzmuxHotkeyActionById, type zmuxHotkeyActionId } from "../../shared/zmux-hotkeys";
 import { getGhosttyTerminalConfigValues } from "../../shared/ghostty-terminal-settings";
 import "../../sidebar/styles.css";
 
@@ -148,8 +159,10 @@ type NativeHostCommand =
   | {
       activeSessionIds: string[];
       attentionSessionIds?: string[];
+      backgroundColor?: string;
       focusedSessionId?: string;
       layout?: NativeTerminalLayout;
+      paneGap?: number;
       sessionActivities?: Record<string, "attention" | "working">;
       type: "setActiveTerminalSet";
     }
@@ -191,8 +204,13 @@ type NativeHostCommand =
   | { side: "left" | "right"; type: "setSidebarSide" }
   | {
       enabled: boolean;
-      targetApp: "zed" | "zed-preview" | "vscode" | "vscode-insiders";
+      targetApp: ZedOverlayTargetApp;
       type: "configureZedOverlay";
+      workspacePath: string;
+    }
+  | {
+      targetApp: ZedOverlayTargetApp;
+      type: "openZedWorkspace";
       workspacePath: string;
     };
 
@@ -247,6 +265,7 @@ type NativeHostEvent =
   | { sessionId: string; type: "terminalBell" }
   | { message: string; sessionId: string; type: "terminalError" }
   | { exitCode: number; requestId: string; stderr: string; stdout: string; type: "processResult" }
+  | { actionId: zmuxHotkeyActionId; type: "nativeHotkey" }
   | { protocolVersion: 1; type: "hostReady" };
 
 type NativeProcessResult = Extract<NativeHostEvent, { type: "processResult" }>;
@@ -262,7 +281,7 @@ type NativeBootstrap = {
   zmuxHomeDir?: string;
   workspaceName?: string;
   zedOverlayEnabled?: boolean;
-  zedOverlayTargetApp?: "zed" | "zed-preview" | "vscode" | "vscode-insiders";
+  zedOverlayTargetApp?: ZedOverlayTargetApp;
 };
 
 declare global {
@@ -295,14 +314,17 @@ declare global {
       setProjectTheme: (projectId: string, theme: SidebarTheme) => void;
     };
     __zmux_NATIVE_SETTINGS__?: {
-      attachZedOverlay: (targetApp: "zed" | "zed-preview" | "vscode" | "vscode-insiders") => void;
-      detachZedOverlay: (targetApp: "zed" | "zed-preview" | "vscode" | "vscode-insiders") => void;
+      attachZedOverlay: (targetApp: ZedOverlayTargetApp) => void;
+      detachZedOverlay: (targetApp: ZedOverlayTargetApp) => void;
     };
     __zmux_NATIVE_CLI__?: {
       handleCommand: (action: string, payload: Record<string, unknown>) => Promise<unknown>;
     };
     __zmux_NATIVE_MODAL_BRIDGE__?: {
       handleSidebarMessage: (message: SidebarToExtensionMessage) => void;
+    };
+    __zmux_NATIVE_HOTKEYS__?: {
+      handleNativeHotkey: (actionId: zmuxHotkeyActionId) => void;
     };
   }
 }
@@ -352,6 +374,7 @@ const CHROME_CANARY_RUNNING_POLL_MS = 2_000;
 const CHROME_CANARY_BROWSER_GROUP_ID = "browser-chrome-canary";
 const CHROME_CANARY_BROWSER_SESSION_ID = "browser-chrome-canary-window";
 const FIRST_PROMPT_AUTO_RENAME_POLL_MS = 2_000;
+const SYNC_OPEN_PROJECT_WITH_ZED_DEBOUNCE_MS = 2_000;
 /**
  * CDXC:SessionTitleSync 2026-04-26-09:52
  * Codex needs the staged `/rename <title>` text to settle in the prompt before
@@ -362,6 +385,8 @@ const AUTO_SUBMIT_STAGED_RENAME_DELAY_MS = 1_000;
 const NATIVE_INITIAL_ACTIVITY_SUPPRESSION_MS = 7_000;
 const NATIVE_MIN_WORKING_DURATION_BEFORE_ATTENTION_MS = 5_000;
 const zmux_AGENT_NOTIFY_HOOK_PATH = `${nativeZmuxHomeDirectory()}/hooks/agent-shell-notify.sh`;
+const FIND_PREVIOUS_SESSION_AGENT_ID = "codex";
+const FIND_PREVIOUS_SESSION_AGENT_STAGING_DELAY_MS = 1_500;
 /**
  * CDXC:WorkspaceDock 2026-04-27-08:48
  * Workspace context-menu themes use the same concrete theme palette names as
@@ -562,6 +587,7 @@ let projects: NativeProject[] = restoredProjectState.projects;
 let activeProjectId = restoredProjectState.activeProjectId;
 let settings = readStoredSettings();
 let revision = 0;
+let pendingZedProjectSyncTimeout: number | undefined;
 const sidebarBus = new SurfaceMessageBus<ExtensionToSidebarMessage>();
 const terminalStateById = new Map<
   string,
@@ -571,6 +597,8 @@ const terminalStateById = new Map<
     firstPromptAutoRenameInProgress?: boolean;
     firstPromptAutoRenameLastLogKey?: string;
     firstPromptAutoRenameProcessedPrompt?: string;
+    firstUserMessage?: string;
+    lastActivityAt?: string;
     lifecycleState: "done" | "error" | "running" | "sleeping";
     sessionStateFilePath?: string;
     terminalTitle?: string;
@@ -645,6 +673,52 @@ window.__zmux_NATIVE_MODAL_BRIDGE__ = {
     handleSidebarMessage(message);
   },
 };
+
+window.__zmux_NATIVE_HOTKEYS__ = {
+  handleNativeHotkey(actionId) {
+    logNativeHotkeyDebug("nativeHotkeys.bridgeActionReceived", { actionId });
+    runNativeHotkeyAction(actionId);
+  },
+};
+
+let pendingHotkeyPrefix: string | undefined;
+
+document.addEventListener(
+  "keydown",
+  (event) => {
+    const hotkeyText = keyboardEventToNativeHotkeyText(event);
+    const isCandidate = isNativeHotkeyCandidate(event, hotkeyText);
+    if (event.defaultPrevented || isNativeHotkeyEditableTarget(event.target)) {
+      if (isCandidate) {
+        logNativeHotkeyDebug("nativeHotkeys.domKeyIgnored", {
+          defaultPrevented: event.defaultPrevented,
+          hotkeyText,
+          target: describeNativeHotkeyTarget(event.target),
+        });
+      }
+      return;
+    }
+    const actionId = getMatchingNativeHotkeyActionId(hotkeyText, Date.now(), "dom");
+    if (!actionId) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    runNativeHotkeyAction(actionId);
+  },
+  true,
+);
+
+/**
+ * CDXC:Hotkeys 2026-04-28-05:36
+ * Hotkey failures need boundary diagnostics because shortcuts can be swallowed
+ * by AppKit, Ghostty, editable DOM targets, or the action resolver. Log only
+ * modifier/prefix candidates so normal typing does not flood native logs.
+ */
+function logNativeHotkeyDebug(event: string, details: Record<string, unknown>): void {
+  console.debug("[zmux-native-hotkeys]", event, details);
+  appendTerminalFocusDebugLog(event, details);
+}
 
 function postNative(command: NativeHostCommand): void {
   if (isTerminalFocusDebugCommand(command)) {
@@ -734,10 +808,12 @@ function isTerminalFocusDebugCommand(command: NativeHostCommand): boolean {
 function summarizeNativeFocusCommand(command: NativeHostCommand): Record<string, unknown> {
   return {
     activeSessionIds: "activeSessionIds" in command ? command.activeSessionIds : undefined,
+    backgroundColor: "backgroundColor" in command ? command.backgroundColor : undefined,
     focusedSessionId: "focusedSessionId" in command ? command.focusedSessionId : undefined,
     hasInitialInput: "initialInput" in command ? Boolean(command.initialInput) : undefined,
     layoutLeafSessionIds:
       "layout" in command ? summarizeNativeLayoutLeafSessionIds(command.layout) : undefined,
+    paneGap: "paneGap" in command ? command.paneGap : undefined,
     sessionId: "sessionId" in command ? command.sessionId : undefined,
     textLength: "text" in command ? command.text.length : undefined,
     textPreview: "text" in command ? summarizeTerminalText(command.text) : undefined,
@@ -941,6 +1017,9 @@ function readStoredSettings(): zmuxSettings {
 
 function saveSettings(nextSettings: zmuxSettings): void {
   settings = normalizezmuxSettings(nextSettings);
+  if (!settings.zedOverlayEnabled || !settings.syncOpenProjectWithZed) {
+    clearPendingZedProjectSync();
+  }
   persistSharedSettingsSnapshot(settings);
   syncGhosttyTerminalSettings(settings);
   postZedOverlaySettings();
@@ -968,6 +1047,9 @@ function saveSettingsFromNative(nextSettings: zmuxSettings): void {
    * posting a duplicate configure command back to the native host.
   */
   settings = normalizezmuxSettings(nextSettings);
+  if (!settings.zedOverlayEnabled || !settings.syncOpenProjectWithZed) {
+    clearPendingZedProjectSync();
+  }
   persistSharedSettingsSnapshot(settings);
   publish();
 }
@@ -1254,6 +1336,16 @@ function readScratchPadContent(): string {
 }
 
 function saveScratchPadContent(content: string): void {
+  /**
+   * CDXC:ScratchPadFocus 2026-04-28-05:21
+   * Scratch Pad saves must be visible in the same terminal-focus repro trace
+   * as textarea focus changes. Record only lengths so debugging can confirm
+   * whether typing reached storage without persisting note text in logs.
+   */
+  appendTerminalFocusDebugLog("scratchPadFocus.nativeSave", {
+    nextLength: content.length,
+    previousLength: scratchPadContent.length,
+  });
   scratchPadContent = content;
   localStorage.setItem(SCRATCH_PAD_STORAGE_KEY, scratchPadContent);
   publish();
@@ -1316,9 +1408,15 @@ function setSidebarSectionCollapsed(section: SidebarCollapsibleSection, collapse
 }
 
 function readActiveSessionsSortMode(): SidebarActiveSessionsSortMode {
-  return localStorage.getItem(ACTIVE_SESSIONS_SORT_MODE_STORAGE_KEY) === "lastActivity"
-    ? "lastActivity"
-    : "manual";
+  /**
+   * CDXC:NativeSidebar 2026-04-28-05:14
+   * Last-active ordering must match the reference repo: missing or legacy sort
+   * preferences default to last-activity ordering, and only an explicit manual
+   * preference preserves manual card order.
+   */
+  return localStorage.getItem(ACTIVE_SESSIONS_SORT_MODE_STORAGE_KEY) === "manual"
+    ? "manual"
+    : "lastActivity";
 }
 
 function toggleActiveSessionsSortMode(): void {
@@ -1770,6 +1868,49 @@ function postZedOverlaySettings(): void {
   });
 }
 
+function clearPendingZedProjectSync(): void {
+  if (!pendingZedProjectSyncTimeout) {
+    return;
+  }
+  window.clearTimeout(pendingZedProjectSyncTimeout);
+  pendingZedProjectSyncTimeout = undefined;
+}
+
+function scheduleSyncOpenProjectWithZed(reason: string): void {
+  clearPendingZedProjectSync();
+  if (!settings.zedOverlayEnabled || !settings.syncOpenProjectWithZed) {
+    return;
+  }
+
+  const scheduledProject = activeProject();
+  /**
+   * CDXC:ZedOverlayWorkspace 2026-04-28-05:18
+   * Switching zmux workspaces syncs the selected project into the configured
+   * Zed target after a 2s trailing debounce. The native Show Zed button only
+   * toggles zmux visibility, so rapid workspace clicks coalesce into one
+   * editor-open request for the final active project.
+   */
+  pendingZedProjectSyncTimeout = window.setTimeout(() => {
+    pendingZedProjectSyncTimeout = undefined;
+    if (
+      !settings.zedOverlayEnabled ||
+      !settings.syncOpenProjectWithZed ||
+      activeProjectId !== scheduledProject.projectId
+    ) {
+      return;
+    }
+    postNative({
+      targetApp: settings.zedOverlayTargetApp,
+      type: "openZedWorkspace",
+      workspacePath: scheduledProject.path,
+    });
+  }, SYNC_OPEN_PROJECT_WITH_ZED_DEBOUNCE_MS);
+  appendRestoreDebugLog("nativeSidebar.zedProjectSync.scheduled", {
+    projectId: scheduledProject.projectId,
+    reason,
+  });
+}
+
 function createProjectId(path: string): string {
   return `project-${hashString(path)}`;
 }
@@ -1928,7 +2069,7 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
        * Live terminal state can still refine the value as title detection runs.
        */
       const projectedAgentName = terminalState?.agentName ?? persistedAgentName;
-      const agentIcon = getSidebarAgentIconById(projectedAgentName);
+      const agentIcon = resolveNativeSidebarAgentIcon(projectedAgentName);
       const shouldPreferTerminalTitle =
         Boolean(visibleTerminalTitle) && shouldPreferTerminalTitleForAgentIcon(agentIcon);
       const hasTrustedStoredResumeTitle =
@@ -1981,6 +2122,7 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
         ...session,
         activity: terminalState?.activity ?? session.activity,
         agentIcon,
+        firstUserMessage: sessionRecord?.firstUserMessage ?? terminalState?.firstUserMessage,
         lifecycleState: terminalState?.lifecycleState ?? session.lifecycleState,
         isGeneratingFirstPromptTitle: terminalState?.firstPromptAutoRenameInProgress === true,
         isRunning: terminalState?.lifecycleState === "running",
@@ -1988,6 +2130,14 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
           (Boolean(visibleTerminalTitle) && (!visiblePrimaryTitle || shouldPreferTerminalTitle)) ||
           (!visibleTerminalTitle && hasTrustedStoredResumeTitle),
         primaryTitle,
+        /**
+         * CDXC:NativeSidebar 2026-04-28-05:14
+         * Session-card hover timestamps follow agent-tiler's projection rule:
+         * terminal sessions always expose a last-interaction value, using the
+         * live activity timestamp when known and the session creation time as
+         * the canonical baseline.
+         */
+        lastInteractionAt: terminalState?.lastActivityAt ?? sessionRecord?.createdAt,
         terminalTitle: secondaryTerminalTitle,
       };
     }),
@@ -1995,6 +2145,30 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
     viewMode: group.snapshot.viewMode,
     visibleCount: group.snapshot.visibleCount,
   }));
+}
+
+function resolveNativeSidebarAgentIcon(agentName: string | undefined): SidebarAgentButton["icon"] {
+  const directIcon = getSidebarAgentIconById(agentName);
+  if (directIcon) {
+    return directIcon;
+  }
+
+  const normalizedAgentName = agentName?.trim().toLowerCase();
+  if (!normalizedAgentName) {
+    return undefined;
+  }
+
+  /**
+   * CDXC:SidebarSessions 2026-04-28-05:18
+   * The card trailing-mode toggle can only reveal the agent icon on hover when
+   * native session projection resolves one. Native state may hold display names
+   * like "Codex" instead of canonical ids like "codex", so resolve both forms.
+   */
+  return DEFAULT_SIDEBAR_AGENTS.find(
+    (agent) =>
+      agent.agentId === normalizedAgentName ||
+      agent.name.trim().toLowerCase() === normalizedAgentName,
+  )?.icon;
 }
 
 function getNativeSidebarCommandSessionIndicators(
@@ -2607,6 +2781,7 @@ fi
 
 /usr/bin/python3 - "$SESSION_STATE_FILE" "$INPUT" <<'PY'
 import datetime
+import base64
 import json
 import os
 import pathlib
@@ -2633,17 +2808,35 @@ try:
         for line in handle:
             key, separator, value = line.partition("=")
             if separator:
-                state[key] = " ".join(value.strip().split())
+                state[key] = value.strip() if key == "firstUserMessageBase64" else " ".join(value.strip().split())
 except FileNotFoundError:
     pass
 
 if state.get("autoTitleFromFirstPrompt") in {"1", "true", "TRUE", "True"}:
     sys.exit(0)
-if state.get("pendingFirstPromptAutoRenamePrompt", "").strip():
-    sys.exit(0)
 
 state["status"] = state.get("status") or "idle"
 state["agent"] = state.get("agent") or os.environ.get("VSMUX_AGENT") or os.environ.get("ZMUX_AGENT") or os.environ.get("zmux_AGENT") or "codex"
+state["firstUserMessageBase64"] = state.get("firstUserMessageBase64") or base64.b64encode(prompt.encode("utf-8")).decode("ascii")
+if state.get("pendingFirstPromptAutoRenamePrompt", "").strip():
+    path = pathlib.Path(state_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text("".join(f"{key}={state.get(key, '')}\\n" for key in [
+        "status",
+        "agent",
+        "agentSessionId",
+        "firstUserMessageBase64",
+        "frozenAt",
+        "autoTitleFromFirstPrompt",
+        "historyBase64",
+        "lastActivityAt",
+        "pendingFirstPromptAutoRenamePrompt",
+        "title",
+    ]), encoding="utf-8")
+    temp_path.replace(path)
+    sys.exit(0)
+
 state["lastActivityAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 state["pendingFirstPromptAutoRenamePrompt"] = " ".join(prompt.split())
 
@@ -2651,6 +2844,7 @@ keys = [
     "status",
     "agent",
     "agentSessionId",
+    "firstUserMessageBase64",
     "frozenAt",
     "autoTitleFromFirstPrompt",
     "historyBase64",
@@ -2910,11 +3104,13 @@ function buildNativeOpenCodeCopyResumeCommand(
 function getNativeTrustedResumeTitle(session: TerminalSessionRecord): string | undefined {
   const result = getNativeStoredTrustedResumeTitle(session);
   /**
-   * CDXC:SessionRestore 2026-04-28-03:37
+   * CDXC:SessionRestore 2026-04-28-06:06
    * Restore trust is based on persisted title provenance plus title filtering,
-   * not the sidebar `∗` marker. Generated first-prompt titles and terminal-auto
-   * titles are resumable; placeholders, manual sidebar-only names, paths, bare
-   * agent names, and command noise remain rejected.
+   * not the sidebar `∗` marker. Generated, terminal-auto, and native user
+   * titles are resumable because native user renames are submitted to the agent
+   * with `/rename <title>`. Legacy records without a title source can also
+   * resume when the title itself passes filtering. Explicit placeholders,
+   * paths, bare agent names, and command noise remain rejected.
    */
   appendRestoreDebugLog("nativeSidebar.resumeTitleTrust", {
     reason: result.reason,
@@ -2945,7 +3141,7 @@ function getNativeStoredTrustedResumeTitle(
 function isNativeTrustedResumeTitleSource(
   titleSource: TerminalSessionRecord["titleSource"],
 ): boolean {
-  return titleSource === "terminal-auto" || titleSource === "generated";
+  return titleSource !== "placeholder";
 }
 
 function isRejectedNativeResumeTitle(title: string): boolean {
@@ -3225,7 +3421,9 @@ function isValidNativeAgentTerminalTitle(title: string, agentName: string | unde
 
 type NativePersistedSessionState = {
   agentName?: string;
+  firstUserMessage?: string;
   hasAutoTitleFromFirstPrompt?: boolean;
+  lastActivityAt?: string;
   pendingFirstPromptAutoRenamePrompt?: string;
   title?: string;
 };
@@ -3261,6 +3459,26 @@ async function processNativeFirstPromptAutoRename(
   }
 
   const persistedState = await readNativePersistedSessionState(terminalState.sessionStateFilePath);
+  const didUpdateFirstUserMessage =
+    persistedState.firstUserMessage !== undefined &&
+    terminalState.firstUserMessage !== persistedState.firstUserMessage;
+  if (didUpdateFirstUserMessage) {
+    terminalState.firstUserMessage = persistedState.firstUserMessage;
+    publish();
+  }
+  const didUpdateLastActivity =
+    persistedState.lastActivityAt !== undefined &&
+    terminalState.lastActivityAt !== persistedState.lastActivityAt;
+  if (didUpdateLastActivity && persistedState.lastActivityAt) {
+    /**
+     * CDXC:NativeSidebar 2026-04-28-05:14
+     * Native terminal hooks write the same lastActivityAt state used by the
+     * reference extension. Promote it into live sidebar state so hover
+     * timestamps and last-active ordering advance after user prompts.
+     */
+    terminalState.lastActivityAt = persistedState.lastActivityAt;
+    publish();
+  }
   const pendingPrompt = persistedState.pendingFirstPromptAutoRenamePrompt?.trim();
   const agentName = persistedState.agentName || terminalState.agentName;
   const currentTitle = persistedState.title || session.title || terminalState.terminalTitle;
@@ -3423,6 +3641,7 @@ keys = [
     "status",
     "agent",
     "agentSessionId",
+    "firstUserMessageBase64",
     "frozenAt",
     "autoTitleFromFirstPrompt",
     "historyBase64",
@@ -3441,21 +3660,51 @@ function parseNativePersistedSessionState(rawState: string): NativePersistedSess
   const state: NativePersistedSessionState = {};
   for (const line of rawState.split(/\r?\n/g)) {
     const [key, ...valueParts] = line.split("=");
-    const value = valueParts.join("=").replace(/\s+/g, " ").trim();
+    const rawValue = valueParts.join("=").trim();
+    const value = key === "firstUserMessageBase64" ? rawValue : rawValue.replace(/\s+/g, " ");
     if (!value) {
       continue;
     }
     if (key === "agent") {
       state.agentName = value;
+    } else if (key === "firstUserMessageBase64") {
+      state.firstUserMessage = normalizeNativePersistedTextBase64(value);
     } else if (key === "autoTitleFromFirstPrompt") {
       state.hasAutoTitleFromFirstPrompt = value === "1" || /^true$/iu.test(value);
+    } else if (key === "lastActivityAt") {
+      state.lastActivityAt = normalizeNativeIsoTimestamp(value);
     } else if (key === "pendingFirstPromptAutoRenamePrompt") {
       state.pendingFirstPromptAutoRenamePrompt = value;
     } else if (key === "title") {
       state.title = getVisibleTerminalTitle(value);
     }
   }
+  /**
+   * CDXC:FirstMessage 2026-04-28-05:48
+   * Existing agent sessions may only have the first prompt in the legacy
+   * pending auto-title field. Treat that saved prompt as the first message
+   * until a newer hook writes the dedicated base64 field.
+   */
+  state.firstUserMessage = state.firstUserMessage ?? state.pendingFirstPromptAutoRenamePrompt;
   return state;
+}
+
+function normalizeNativePersistedTextBase64(value: string): string | undefined {
+  try {
+    const decodedBytes = Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+    const decodedValue = new TextDecoder().decode(decodedBytes).trim();
+    return decodedValue || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeNativeIsoTimestamp(value: string): string | undefined {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return undefined;
+  }
+  return new Date(timestamp).toISOString();
 }
 
 async function generateNativeSessionTitleFromPrompt(cwd: string, prompt: string): Promise<string> {
@@ -3649,6 +3898,255 @@ function focusSidebarSession(sessionId: string): void {
   focusTerminal(sessionId);
 }
 
+function runNativeHotkeyAction(actionId: zmuxHotkeyActionId): void {
+  const action = getzmuxHotkeyActionById(actionId);
+  if (!action) {
+    logNativeHotkeyDebug("nativeHotkeys.actionMissing", { actionId });
+    return;
+  }
+  logNativeHotkeyDebug("nativeHotkeys.actionStart", {
+    actionId,
+    kind: action.kind,
+  });
+
+  /**
+   * CDXC:Hotkeys 2026-04-28-05:20
+   * App-level hotkeys execute against the same native sidebar state mutations
+   * as clicks and CLI commands. Do the real command directly here so terminal
+   * focus shortcuts do not depend on a hidden fallback UI path.
+   */
+  switch (action.kind) {
+    case "createSession":
+      createTerminal();
+      return;
+    case "focusDirection":
+      focusNativeHotkeyDirection(action.direction);
+      return;
+    case "focusGroup":
+      updateActiveProjectWorkspace(
+        (workspace) => focusGroupByIndexInSimpleWorkspace(workspace, action.groupIndex).snapshot,
+      );
+      publish();
+      return;
+    case "focusSessionSlot":
+      if (action.slotNumber === -1) {
+        focusAdjacentNativeHotkeySession(-1);
+        return;
+      }
+      if (action.slotNumber === 0) {
+        focusAdjacentNativeHotkeySession(1);
+        return;
+      }
+      focusNativeHotkeySessionSlot(action.slotNumber);
+      return;
+    case "moveSidebar":
+      moveSidebarToOtherSide();
+      return;
+    case "openSettings":
+      openAppModal({ modal: "settings", type: "open" });
+      return;
+    case "renameActiveSession":
+      promptRenameFocusedNativeHotkeySession();
+      return;
+    case "setVisibleCount":
+      updateActiveProjectWorkspace((workspace) =>
+        setVisibleCountInSimpleWorkspace(workspace, action.visibleCount),
+      );
+      publish();
+      return;
+    case "setViewMode":
+      updateActiveProjectWorkspace((workspace) =>
+        setViewModeInSimpleWorkspace(workspace, action.viewMode),
+      );
+      publish();
+      return;
+  }
+}
+
+function getMatchingNativeHotkeyActionId(
+  hotkeyText: string | undefined,
+  now: number,
+  source: "dom" | "native",
+): zmuxHotkeyActionId | undefined {
+  if (!hotkeyText) {
+    pendingHotkeyPrefix = undefined;
+    return undefined;
+  }
+  const normalizedHotkeys = settings.hotkeys;
+  const sequence = pendingHotkeyPrefix ? `${pendingHotkeyPrefix} ${hotkeyText}` : hotkeyText;
+  const matchedDefinition = Object.entries(normalizedHotkeys).find(
+    ([, value]) => value === sequence,
+  );
+  if (matchedDefinition) {
+    logNativeHotkeyDebug("nativeHotkeys.match", {
+      actionId: matchedDefinition[0],
+      hotkeyText,
+      sequence,
+      source,
+    });
+    pendingHotkeyPrefix = undefined;
+    return matchedDefinition[0] as zmuxHotkeyActionId;
+  }
+
+  const hasPrefix = Object.values(normalizedHotkeys).some((value) =>
+    value?.startsWith(`${hotkeyText} `),
+  );
+  if (hasPrefix) {
+    logNativeHotkeyDebug("nativeHotkeys.prefixStarted", {
+      hotkeyText,
+      source,
+    });
+  } else if (hotkeyText.includes("+")) {
+    logNativeHotkeyDebug("nativeHotkeys.noMatch", {
+      configuredCount: Object.keys(normalizedHotkeys).length,
+      hotkeyText,
+      pendingHotkeyPrefix,
+      sequence,
+      source,
+    });
+  }
+  pendingHotkeyPrefix = hasPrefix ? hotkeyText : undefined;
+  window.setTimeout(() => {
+    if (pendingHotkeyPrefix === hotkeyText && Date.now() - now >= 1_000) {
+      logNativeHotkeyDebug("nativeHotkeys.prefixExpired", {
+        hotkeyText,
+        source,
+      });
+      pendingHotkeyPrefix = undefined;
+    }
+  }, 1_000);
+  return undefined;
+}
+
+function keyboardEventToNativeHotkeyText(event: KeyboardEvent): string | undefined {
+  const key = normalizeNativeHotkeyKey(event.key);
+  if (!key) {
+    return undefined;
+  }
+  const parts = [
+    event.metaKey ? "cmd" : "",
+    event.ctrlKey ? "ctrl" : "",
+    event.altKey ? "alt" : "",
+    event.shiftKey ? "shift" : "",
+    key,
+  ].filter(Boolean);
+  return parts.length > 1 ? parts.join("+") : key;
+}
+
+function normalizeNativeHotkeyKey(key: string): string | undefined {
+  if (key.length === 1) {
+    return key.toLowerCase();
+  }
+  switch (key) {
+    case "ArrowUp":
+      return "up";
+    case "ArrowRight":
+      return "right";
+    case "ArrowDown":
+      return "down";
+    case "ArrowLeft":
+      return "left";
+    case "Escape":
+    case "Meta":
+    case "Control":
+    case "Alt":
+    case "Shift":
+      return undefined;
+    default:
+      return key.toLowerCase();
+  }
+}
+
+function isNativeHotkeyEditableTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
+
+function isNativeHotkeyCandidate(event: KeyboardEvent, hotkeyText: string | undefined): boolean {
+  return Boolean(hotkeyText && (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey));
+}
+
+function describeNativeHotkeyTarget(target: EventTarget | null): string {
+  if (!(target instanceof Element)) {
+    return target === null ? "null" : typeof target;
+  }
+  const tagName = target.tagName.toLowerCase();
+  const role = target.getAttribute("role");
+  const dataSlot = target.getAttribute("data-slot");
+  return [tagName, role ? `role=${role}` : "", dataSlot ? `slot=${dataSlot}` : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function focusNativeHotkeyDirection(direction: SessionGridDirection): void {
+  const result = focusDirectionInSnapshot(activeSnapshot(), direction);
+  if (!result.changed) {
+    logNativeHotkeyDebug("nativeHotkeys.focusDirectionUnchanged", {
+      direction,
+      focusedSessionId: activeSnapshot().focusedSessionId,
+    });
+    return;
+  }
+  replaceActiveSnapshot(result.snapshot);
+  publish();
+  const focusedSessionId = result.snapshot.focusedSessionId;
+  if (focusedSessionId) {
+    focusSidebarSession(focusedSessionId);
+  }
+}
+
+function focusNativeHotkeySessionSlot(slotNumber: number): void {
+  const session = getOrderedSessions(activeSnapshot())[slotNumber - 1];
+  if (session) {
+    focusSidebarSession(session.sessionId);
+    return;
+  }
+  logNativeHotkeyDebug("nativeHotkeys.sessionSlotMissing", {
+    sessionCount: getOrderedSessions(activeSnapshot()).length,
+    slotNumber,
+  });
+}
+
+function focusAdjacentNativeHotkeySession(direction: -1 | 1): void {
+  const snapshot = activeSnapshot();
+  const sessions = getOrderedSessions(snapshot);
+  if (sessions.length === 0) {
+    logNativeHotkeyDebug("nativeHotkeys.adjacentSessionMissing", { direction });
+    return;
+  }
+  const focusedIndex = Math.max(
+    0,
+    sessions.findIndex((session) => session.sessionId === snapshot.focusedSessionId),
+  );
+  const nextIndex = (focusedIndex + direction + sessions.length) % sessions.length;
+  focusSidebarSession(sessions[nextIndex]!.sessionId);
+}
+
+function promptRenameFocusedNativeHotkeySession(): void {
+  const focusedSessionId = activeSnapshot().focusedSessionId;
+  if (!focusedSessionId) {
+    logNativeHotkeyDebug("nativeHotkeys.renameNoFocusedSession", {});
+    return;
+  }
+  const session = findTerminalSession(focusedSessionId);
+  if (!session) {
+    logNativeHotkeyDebug("nativeHotkeys.renameFocusedSessionNotTerminal", { focusedSessionId });
+    return;
+  }
+  const title = window.prompt("Rename session", session.title || DEFAULT_TERMINAL_SESSION_TITLE);
+  if (title?.trim()) {
+    renameNativeSidebarTerminalSession(
+      focusedSessionId,
+      title,
+      "native-sidebar-hotkey-rename-session",
+    );
+  }
+}
+
 function acknowledgeNativeTerminalAttention(
   sessionId: string,
   reason: "native-focus" | "sidebar-focus",
@@ -3694,6 +4192,47 @@ function findTerminalSession(sessionId: string): TerminalSessionRecord | undefin
     }
   }
   return undefined;
+}
+
+function renameNativeSidebarTerminalSession(
+  sessionId: string,
+  title: string,
+  source: string,
+): void {
+  if (!findTerminalSession(sessionId)) {
+    return;
+  }
+
+  const requestedTitle = title.trim();
+  if (!requestedTitle) {
+    return;
+  }
+
+  updateActiveProjectWorkspace(
+    (workspace) => setSessionTitleInSimpleWorkspace(workspace, sessionId, requestedTitle).snapshot,
+  );
+  const nativeSessionId = nativeSessionIdForSidebarSession(sessionId);
+  const normalizedRenameTitle = normalizeTerminalTitle(requestedTitle) ?? requestedTitle;
+  const commandText = `/rename ${normalizedRenameTitle}`;
+  /**
+   * CDXC:SidebarRename 2026-04-28-15:49
+   * Manual sidebar renames in the native app must match the reference
+   * controller flow: persist the card title, stage `/rename <title>` in the
+   * targeted terminal, then submit through the native Enter path so the Agent
+   * CLI thread name changes instead of only the sidebar label changing.
+   */
+  postNative({ sessionId: nativeSessionId, text: commandText, type: "writeTerminalText" });
+  window.setTimeout(() => {
+    postNative({ sessionId: nativeSessionId, type: "sendTerminalEnter" });
+    appendSessionTitleDebugLog("terminalRenameCommand.sent", {
+      commandText,
+      nativeSessionId,
+      requestedTitle,
+      sessionId,
+      source,
+    });
+  }, AUTO_SUBMIT_STAGED_RENAME_DELAY_MS);
+  publish();
 }
 
 function disposeNativeSleepingSessionSurface(sessionId: string): void {
@@ -3943,6 +4482,66 @@ function runCliAgent(agentId: string, groupId?: string): TerminalSessionRecord |
     `${agent.command}\r`,
     groupId,
     agent.agentId,
+  );
+}
+
+/**
+ * CDXC:PreviousSessions 2026-04-28-05:12
+ * Native zmux must mirror the reference Prompt to Find Session workflow:
+ * receive the modal's remembered-topic query, launch a terminal Codex session,
+ * rename that helper session, then stage the local-session search prompt.
+ */
+function promptFindPreviousSession(queryInput?: string): void {
+  const query = queryInput?.trim();
+  if (!query) {
+    showNativeMessage("info", "Type what you remember in the Previous Sessions search field.");
+    return;
+  }
+
+  const agent = resolveFindPreviousSessionAgent();
+  if (!agent) {
+    showNativeMessage(
+      "info",
+      "zmux could not find Codex for Find a session. Restore the Codex agent button.",
+    );
+    return;
+  }
+
+  const session = createTerminal(
+    createAgentSessionDefaultTitle(agent.name),
+    `${agent.command}\r`,
+    undefined,
+    agent.agentId,
+  );
+  if (!session) {
+    return;
+  }
+
+  const prompt = renderFindPreviousSessionPrompt(
+    DEFAULT_FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE,
+    query,
+  );
+  window.setTimeout(() => {
+    const nativeSessionId = nativeSessionIdForSidebarSession(session.sessionId);
+    postNative({
+      sessionId: nativeSessionId,
+      text: `/rename Search: ${query}`,
+      type: "writeTerminalText",
+    });
+    postNative({ sessionId: nativeSessionId, type: "sendTerminalEnter" });
+    postNative({ sessionId: nativeSessionId, text: prompt, type: "writeTerminalText" });
+  }, FIND_PREVIOUS_SESSION_AGENT_STAGING_DELAY_MS);
+}
+
+function resolveFindPreviousSessionAgent(): SidebarAgentButton | undefined {
+  return (
+    agents.find((candidate) => candidate.agentId === FIND_PREVIOUS_SESSION_AGENT_ID) ??
+    createSidebarAgentButtons(storedAgents, storedAgentOrder).find(
+      (candidate) => candidate.agentId === FIND_PREVIOUS_SESSION_AGENT_ID,
+    ) ??
+    createSidebarAgentButtons([], []).find(
+      (candidate) => candidate.agentId === FIND_PREVIOUS_SESSION_AGENT_ID,
+    )
   );
 }
 
@@ -4544,6 +5143,7 @@ function removeProject(projectId: string): void {
       nextProjects[Math.min(projectIndex, nextProjects.length - 1)]?.projectId ??
       nextProjects[0]!.projectId;
     postZedOverlaySettings();
+    scheduleSyncOpenProjectWithZed("removeProject");
     void refreshGitState();
   }
   writeStoredProjects("removeProject");
@@ -4615,9 +5215,13 @@ function focusProject(projectId: string): void {
   if (!projects.some((project) => project.projectId === projectId)) {
     return;
   }
+  const didSwitchProject = activeProjectId !== projectId;
   activeProjectId = projectId;
   writeStoredProjects("focusProject");
   postZedOverlaySettings();
+  if (didSwitchProject) {
+    scheduleSyncOpenProjectWithZed("focusProject");
+  }
   void refreshGitState();
   publish();
 }
@@ -4960,33 +5564,21 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
           session.title || DEFAULT_TERMINAL_SESSION_TITLE,
         );
         if (title?.trim()) {
-          updateActiveProjectWorkspace(
-            (workspace) =>
-              setSessionTitleInSimpleWorkspace(workspace, message.sessionId, title.trim()).snapshot,
+          renameNativeSidebarTerminalSession(
+            message.sessionId,
+            title,
+            "native-sidebar-prompt-rename-session",
           );
-          appendSessionTitleDebugLog("terminalRenameCommand.notSent", {
-            reason: "sidebar-rename-updates-zmux-session-record-only",
-            requestedTitle: title.trim(),
-            sessionId: message.sessionId,
-            source: "native-sidebar-prompt-rename-session",
-          });
-          publish();
         }
       }
       return;
     }
     case "renameSession":
-      updateActiveProjectWorkspace(
-        (workspace) =>
-          setSessionTitleInSimpleWorkspace(workspace, message.sessionId, message.title).snapshot,
+      renameNativeSidebarTerminalSession(
+        message.sessionId,
+        message.title,
+        "native-sidebar-rename-session",
       );
-      appendSessionTitleDebugLog("terminalRenameCommand.notSent", {
-        reason: "sidebar-rename-updates-zmux-session-record-only",
-        requestedTitle: message.title,
-        sessionId: message.sessionId,
-        source: "native-sidebar-rename-session",
-      });
-      publish();
       return;
     case "renameGroup":
       updateActiveProjectWorkspace(
@@ -5112,7 +5704,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       clearGeneratedPreviousSessions();
       return;
     case "promptFindPreviousSession":
-      publish();
+      promptFindPreviousSession(message.query);
       return;
     case "runSidebarGitAction":
       void runSidebarGitAction(message.action);
@@ -5145,6 +5737,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "sidebarDebugLog":
       if (message.event.startsWith("sidebar.agentIcon.")) {
         appendAgentDetectionDebugLog(message.event, message.details);
+      }
+      if (message.event.startsWith("scratchPadFocus.")) {
+        appendTerminalFocusDebugLog(message.event, message.details);
       }
       console.debug("[zmux-native-sidebar]", message.event, message.details);
       return;
@@ -5268,10 +5863,18 @@ function syncNativeLayout(): void {
   postNative({
     activeSessionIds: visibleSessionIds,
     attentionSessionIds,
+    backgroundColor: settings.workspaceBackgroundColor,
     focusedSessionId: snapshot.focusedSessionId
       ? nativeSessionIdForSidebarSession(snapshot.focusedSessionId)
       : undefined,
     layout,
+    /**
+     * CDXC:WorkspaceLayout 2026-04-28-06:01
+     * The Pane Gap settings control must affect native Ghostty pane layout,
+     * not only the React workspace panel. Send the normalized persisted value
+     * with every native layout sync so slider drags repaint AppKit spacing.
+     */
+    paneGap: settings.workspacePaneGap,
     sessionActivities,
     type: "setActiveTerminalSet",
   });
@@ -5316,6 +5919,19 @@ window.addEventListener("zmux-native-host-event", (event) => {
     window.clearTimeout(pending.timeout);
     pendingProcessResults.delete(hostEvent.requestId);
     pending.resolve(hostEvent);
+    return;
+  }
+  if (hostEvent.type === "nativeHotkey") {
+    /**
+     * CDXC:Hotkeys 2026-04-28-06:15
+     * Native AppKit hotkeys now arrive as typed host events. Handle them
+     * before terminal-session event normalization, because shortcut actions do
+     * not carry a sessionId and should execute even while Ghostty owns focus.
+     */
+    logNativeHotkeyDebug("nativeHotkeys.hostEventReceived", {
+      actionId: hostEvent.actionId,
+    });
+    runNativeHotkeyAction(hostEvent.actionId);
     return;
   }
   const sidebarSessionId = sidebarSessionIdForNativeSession(hostEvent.sessionId);

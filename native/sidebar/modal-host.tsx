@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { AgentConfigModal, type AgentConfigDraft } from "../../sidebar/agent-config-modal";
 import { CommandConfigModal, type CommandConfigDraft } from "../../sidebar/command-config-modal";
 import { DaemonSessionsModal } from "../../sidebar/daemon-sessions-modal";
+import { HotkeysModal } from "../../sidebar/hotkeys-modal";
+import { FirstUserMessageModal } from "../../sidebar/first-user-message-modal";
 import { PinnedPromptsModal } from "../../sidebar/pinned-prompts-modal";
 import { PreviousSessionsModal } from "../../sidebar/previous-sessions-modal";
 import { ScratchPadModal } from "../../sidebar/scratch-pad-modal";
@@ -27,8 +29,10 @@ type AppModalKind =
   | "agentConfig"
   | "commandConfig"
   | "daemonSessions"
+  | "hotkeys"
   | "pinnedPrompts"
   | "previousSessions"
+  | "firstUserMessage"
   | "renameSession"
   | "scratchPad"
   | "settings"
@@ -39,10 +43,12 @@ type AppModalHostMessage =
       agentDraft?: AgentConfigDraft;
       commandDraft?: CommandConfigDraft;
       initialTitle?: string;
+      message?: string;
       lockedActionType?: SidebarActionType;
       modal: AppModalKind;
       projectConfigDraft?: WorkspaceProjectConfigDraft;
       sessionId?: string;
+      title?: string;
       type: "open";
     }
   | { type: "close" }
@@ -51,6 +57,11 @@ type AppModalHostMessage =
 type RenameSessionModalState = {
   initialTitle: string;
   sessionId: string;
+};
+
+type FirstUserMessageModalState = {
+  message: string;
+  title?: string;
 };
 
 type ConfigModalState = {
@@ -106,7 +117,7 @@ function closeModal() {
 }
 
 function AppModalHost() {
-  const { activeModal, config, renameSession } = useModalStateFromNative();
+  const { activeModal, config, firstUserMessage, renameSession } = useModalStateFromNative();
   const settings = useSidebarStore((state) => state.hud.settings);
 
   return (
@@ -121,6 +132,12 @@ function AppModalHost() {
         onClose={closeModal}
         vscode={vscode}
       />
+      <FirstUserMessageModal
+        isOpen={activeModal === "firstUserMessage" && firstUserMessage !== undefined}
+        message={firstUserMessage?.message ?? ""}
+        onClose={closeModal}
+        title={firstUserMessage?.title}
+      />
       <DaemonSessionsModal
         isOpen={activeModal === "daemonSessions"}
         onClose={closeModal}
@@ -129,12 +146,40 @@ function AppModalHost() {
       <ScratchPadModal
         isOpen={activeModal === "scratchPad"}
         onClose={closeModal}
+        onDebug={(event, details) => {
+          /**
+           * CDXC:ScratchPadFocus 2026-04-28-05:21
+           * Scratch Pad focus repros run inside the full-window modal host, not
+           * the narrow sidebar webview. Forward those modal-host events through
+           * the normal sidebar command bridge so native logs can correlate
+           * textarea blur/focus with terminal first-responder changes.
+           */
+          vscode.postMessage({
+            details,
+            event,
+            type: "sidebarDebugLog",
+          });
+        }}
         onSave={(content) => {
           vscode.postMessage({
             content,
             type: "saveScratchPad",
           });
         }}
+      />
+      <HotkeysModal
+        hotkeys={settings?.hotkeys}
+        isOpen={activeModal === "hotkeys"}
+        onChange={(hotkeys) => {
+          if (!settings) {
+            return;
+          }
+          vscode.postMessage({
+            settings: { ...settings, hotkeys },
+            type: "updateSettings",
+          });
+        }}
+        onClose={closeModal}
       />
       <SettingsModal
         isOpen={activeModal === "settings"}
@@ -229,6 +274,7 @@ function AppModalHost() {
 function useModalStateFromNative() {
   const [activeModal, setActiveModal] = useState<AppModalKind | undefined>();
   const [config, setConfig] = useState<ConfigModalState>({});
+  const [firstUserMessage, setFirstUserMessage] = useState<FirstUserMessageModalState>();
   const [renameSession, setRenameSession] = useState<RenameSessionModalState>();
 
   useEffect(() => {
@@ -249,6 +295,17 @@ function useModalStateFromNative() {
               sessionId: message.sessionId,
             });
             setConfig({});
+            setFirstUserMessage(undefined);
+          } else if (message.modal === "firstUserMessage") {
+            if (typeof message.message !== "string" || !message.message.trim()) {
+              throw new Error("First message modal request is missing message text.");
+            }
+            setFirstUserMessage({
+              message: message.message,
+              title: typeof message.title === "string" ? message.title : undefined,
+            });
+            setConfig({});
+            setRenameSession(undefined);
           } else if (message.modal === "commandConfig") {
             if (!message.commandDraft) {
               throw new Error("Command config modal request is missing commandDraft.");
@@ -257,21 +314,25 @@ function useModalStateFromNative() {
               commandDraft: message.commandDraft,
               lockedActionType: message.lockedActionType,
             });
+            setFirstUserMessage(undefined);
             setRenameSession(undefined);
           } else if (message.modal === "agentConfig") {
             if (!message.agentDraft) {
               throw new Error("Agent config modal request is missing agentDraft.");
             }
             setConfig({ agentDraft: message.agentDraft });
+            setFirstUserMessage(undefined);
             setRenameSession(undefined);
           } else if (message.modal === "workspaceConfig") {
             if (!message.projectConfigDraft) {
               throw new Error("Workspace config modal request is missing projectConfigDraft.");
             }
             setConfig({ projectConfigDraft: message.projectConfigDraft });
+            setFirstUserMessage(undefined);
             setRenameSession(undefined);
           } else {
             setConfig({});
+            setFirstUserMessage(undefined);
             setRenameSession(undefined);
           }
           setActiveModal(message.modal);
@@ -281,6 +342,7 @@ function useModalStateFromNative() {
         if (message.type === "close") {
           setActiveModal(undefined);
           setConfig({});
+          setFirstUserMessage(undefined);
           setRenameSession(undefined);
           return;
         }
@@ -301,7 +363,7 @@ function useModalStateFromNative() {
     };
   }, []);
 
-  return { activeModal, config, renameSession };
+  return { activeModal, config, firstUserMessage, renameSession };
 }
 
 function createEmptyCommandDraft(): CommandConfigDraft {

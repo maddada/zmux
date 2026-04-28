@@ -1,4 +1,4 @@
-import { IconTrash } from "@tabler/icons-react";
+import { IconMessageCircle, IconTrash } from "@tabler/icons-react";
 import { useRef } from "react";
 import type { SidebarPreviousSessionItem } from "../shared/session-grid-contract";
 import {
@@ -12,6 +12,7 @@ import { getSessionHistoryCardTitle } from "./session-history-card-title";
 export type SessionHistoryCardProps = {
   isSearchSelected?: boolean;
   onDelete: () => void;
+  onViewFirstMessage?: () => void;
   onRestore: () => void;
   session: SidebarPreviousSessionItem;
   showDebugSessionNumbers: boolean;
@@ -21,6 +22,7 @@ export type SessionHistoryCardProps = {
 export function SessionHistoryCard({
   isSearchSelected = false,
   onDelete,
+  onViewFirstMessage,
   onRestore,
   session,
   showDebugSessionNumbers,
@@ -116,6 +118,21 @@ export function SessionHistoryCard({
           >
             <IconTrash aria-hidden="true" size={12} stroke={1.9} />
           </button>
+          {session.firstUserMessage?.trim() ? (
+            <button
+              aria-label={`View 1st message for ${displayTitle}`}
+              className="previous-session-first-message-button"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onViewFirstMessage?.();
+              }}
+              type="button"
+            >
+              <IconMessageCircle aria-hidden="true" size={12} stroke={1.9} />
+              <span>View 1st message</span>
+            </button>
+          ) : null}
           <SessionCardContent
             aliasHeadingRef={aliasHeadingRef}
             session={displaySession}

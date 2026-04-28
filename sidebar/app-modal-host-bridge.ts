@@ -8,8 +8,10 @@ export type AppModalKind =
   | "agentConfig"
   | "commandConfig"
   | "daemonSessions"
+  | "hotkeys"
   | "pinnedPrompts"
   | "previousSessions"
+  | "firstUserMessage"
   | "renameSession"
   | "scratchPad"
   | "settings"
@@ -19,7 +21,7 @@ export type OpenAppModalMessage =
   | {
       modal: Exclude<
         AppModalKind,
-        "agentConfig" | "commandConfig" | "renameSession" | "workspaceConfig"
+        "agentConfig" | "commandConfig" | "firstUserMessage" | "renameSession" | "workspaceConfig"
       >;
       type: "open";
     }
@@ -33,6 +35,12 @@ export type OpenAppModalMessage =
   | {
       modal: "workspaceConfig";
       projectConfigDraft: WorkspaceProjectConfigDraft;
+      type: "open";
+    }
+  | {
+      message: string;
+      modal: "firstUserMessage";
+      title?: string;
       type: "open";
     }
   | { initialTitle: string; modal: "renameSession"; sessionId: string; type: "open" };
