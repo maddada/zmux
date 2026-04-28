@@ -14,5 +14,6 @@ metadata describe the same shipped behavior. -->
 - Added managed native sidebar action sessions with command run indicators and close-on-exit behavior.
 - Improved first-prompt auto-title logic so meaningful existing titles are not overwritten.
 - Improved session rename modal Enter-key submission.
+- Improved IDE attachment settings so Zed and Zed Preview are distinguishable.
 - Removed the browser section tab-count badge.
 - Removed persistent helper terminal mode in favor of the embedded Ghostty SurfaceView backend.
