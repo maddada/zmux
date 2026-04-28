@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.4 - 2026-04-28
+
+<!-- CDXC:Distribution 2026-04-28-06:27: Release notes for 1.0.4 must be
+derived from the commits after v1.0.3 so README, GitHub, and Homebrew users see
+the same user-facing feature set. -->
+
+- Added configurable app hotkeys, including native AppKit handling while terminal panes have focus.
+- Added saved first-message metadata for agent sessions and a copyable "View 1st Message" modal in active and previous session flows.
+- Added terminal workspace background color settings and native pane-gap/background rendering.
+- Added automatic Zed workspace syncing after zmux workspace switches, controlled by a setting.
+- Added native main-window size persistence between launches.
+- Added native terminal search bar rendering and focus preservation improvements for modal workflows.
+- Improved sidebar sessions to default to last-activity ordering and keep agent-icon mode blank for iconless sessions until hover.
+- Expanded command/workspace icon choices and kept the icon picker search fixed while the icon list scrolls.
+- Removed T3 Code from default sidebar agents while preserving existing T3 session recognition.
+- Improved Previous Sessions by using the search field for "Find Session" prompts and keeping the native full-window modal compact.
+- Added Scratch Pad focus diagnostics to help trace terminal-first-responder focus steals without logging note text.
+
 ## 1.0.3 - 2026-04-28
 
 <!-- CDXC:Distribution 2026-04-28-16:00: Release notes must summarize the
