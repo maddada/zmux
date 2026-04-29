@@ -43,6 +43,9 @@ brew install --cask maddada/tap/zmux
 - Automatic session resuming on restart
 - Workspace dock configuration for names, themes, Tabler icons, and uploaded images.
 - Search all previous sessions and start "Find Session" prompts directly from the previous-session search field.
+- Full-window native Find Previous Session and T3 Thread ID modals for app-hosted workflows.
+- Embedded terminal panes resize on Ghostty character-cell boundaries so agent TUIs rewrap more reliably.
+- Agent CLIs stay attached to the foreground terminal TTY so resize signals reach tools such as Claude Code.
 - Supports all agent clis (Codex/Claude/Pi/OpenCode/Copilot/Gemini/More) <- Please ask if missing any features
 - 1 click actions (run commands, tests, etc.) with run indicators and close-on-exit action sessions.
 - Expanded command/workspace icon picker for action, code, project, git, runtime, and agent icons.

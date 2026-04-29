@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 - 2026-04-29
+
+<!-- CDXC:Distribution 2026-04-29-08:42: Release notes for 1.1.0 must include
+all user-facing commits after v1.0.4 so README, GitHub, and Homebrew release
+metadata describe the same shipped behavior. -->
+
+- Added full-window native modals for Find Previous Session and T3 Thread ID entry.
+- Improved previous-session search launching by routing modal input through the sidebar/native command bridge.
+- Improved T3 session thread binding controls in the native sidebar workflow.
+- Fixed agent wrapper process launch so interactive CLIs stay attached to the foreground terminal TTY and receive resize signals.
+- Added agent wrapper debug logging for TTY/process details used to diagnose resize and child-process issues.
+- Fixed native embedded terminal layout to step pane sizes to whole Ghostty character cells, including configured terminal padding.
+- Expanded native terminal resize diagnostics with core Ghostty grid, padding, backing-pixel, and pane geometry metrics.
+
 ## 1.0.4 - 2026-04-28
 
 <!-- CDXC:Distribution 2026-04-28-06:27: Release notes for 1.0.4 must be
