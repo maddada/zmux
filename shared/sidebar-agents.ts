@@ -1,16 +1,11 @@
 /**
- * CDXC:SidebarAgents 2026-04-30-01:50
- * T3 Code is a default sidebar agent again to match the reference
- * agent-tiler implementation. The controller already routes the `t3` agent
- * id through the managed T3 runtime instead of launching a generic terminal.
+ * CDXC:SidebarAgents 2026-04-30-03:45
+ * T3 Code is temporarily removed from the default agent list so deploys do
+ * not expose the broken native T3 pane path while the fd/bootstrap integration
+ * is corrected. Existing T3 session support remains in place for explicit
+ * session records and future restoration.
  */
 export const DEFAULT_SIDEBAR_AGENTS = [
-  {
-    agentId: "t3",
-    command: "npx --yes t3",
-    icon: "t3",
-    name: "T3 Code",
-  },
   {
     agentId: "codex",
     command: "codex",
@@ -45,7 +40,7 @@ export const DEFAULT_SIDEBAR_AGENTS = [
 
 export type DefaultSidebarAgent = (typeof DEFAULT_SIDEBAR_AGENTS)[number];
 export type DefaultSidebarAgentId = DefaultSidebarAgent["agentId"];
-export type SidebarAgentIcon = "browser" | DefaultSidebarAgent["icon"];
+export type SidebarAgentIcon = "browser" | "t3" | DefaultSidebarAgent["icon"];
 export type DefaultSidebarAgentCommandOverrides = Partial<
   Record<DefaultSidebarAgentId, string | null>
 >;
