@@ -542,6 +542,24 @@ export function SortableSessionCard({
 
   const requestGenerateSessionName = () => {
     setContextMenuPosition(undefined);
+    /**
+     * CDXC:SessionNaming 2026-04-30-02:20
+     * The Generate Name click needs a sidebar-origin log before posting the
+     * command so failures can be separated into UI, bridge, and controller
+     * stages.
+     */
+    vscode.postMessage({
+      details: {
+        agentIcon: session.agentIcon,
+        hasFirstUserMessage: Boolean(session.firstUserMessage?.trim()),
+        isGeneratingFirstPromptTitle: session.isGeneratingFirstPromptTitle === true,
+        primaryTitle: session.primaryTitle,
+        sessionId: session.sessionId,
+        terminalTitle: session.terminalTitle,
+      },
+      event: "session.generateName.clicked",
+      type: "sidebarDebugLog",
+    });
     vscode.postMessage({
       sessionId: session.sessionId,
       type: "generateSessionName",

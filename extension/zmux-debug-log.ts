@@ -29,6 +29,14 @@ const DEBUG_EVENT_PREFIX_ALLOWLIST = [
   "controller.handleSidebarMessage.",
   "controller.focusSession.",
   "controller.focusGroup.",
+  /**
+   * CDXC:SessionNaming 2026-04-30-02:20
+   * Manual Generate Name needs controller-stage debug events in the main zmux
+   * log so a silent context-menu click can be traced without relying only on
+   * first-prompt repro logs.
+   */
+  "controller.generateSessionName.",
+  "controller.sidebarMessage.generateSessionName.",
   "controller.reloadWorkspacePanel.",
   "backend.daemon.sessionActivity.",
   "daemon.runtime.",

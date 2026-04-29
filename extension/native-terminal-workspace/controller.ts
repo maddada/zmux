@@ -1998,17 +1998,82 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
   public async generateSessionName(sessionId: string): Promise<void> {
     if (this.isFirstPromptAutoRenameInProgress(sessionId)) {
+      logzmuxDebug("controller.generateSessionName.skippedInProgress", { sessionId });
+      await this.appendFirstPromptAutoRenameReproLog(
+        "controller.generateSessionName.skippedInProgress",
+        { sessionId },
+      );
       return;
     }
 
+    logzmuxDebug("controller.generateSessionName.requested", { sessionId });
+    await this.appendFirstPromptAutoRenameReproLog("controller.generateSessionName.requested", {
+      sessionId,
+    });
+
     const sessionRecord = this.store.getSession(sessionId);
     if (!sessionRecord || !isTerminalSession(sessionRecord)) {
+      logzmuxDebug("controller.generateSessionName.skippedMissingTerminalSession", {
+        hasSessionRecord: Boolean(sessionRecord),
+        sessionId,
+        sessionKind: sessionRecord?.kind,
+      });
+      await this.appendFirstPromptAutoRenameReproLog(
+        "controller.generateSessionName.skippedMissingTerminalSession",
+        {
+          hasSessionRecord: Boolean(sessionRecord),
+          sessionId,
+          sessionKind: sessionRecord?.kind,
+        },
+      );
       return;
     }
 
     const persistedState = await this.backend.readPersistedSessionState(sessionId);
     const autoRenameStrategy = resolveFirstPromptAutoRenameStrategy(persistedState.agentName);
+    /**
+     * CDXC:SessionNaming 2026-04-30-02:20
+     * Manual naming logs the persisted agent identity and prompt availability
+     * before branching because the visible sidebar icon can differ from the
+     * state file that controls Claude/Codex naming behavior.
+     */
+    logzmuxDebug("controller.generateSessionName.strategyResolved", {
+      agentName: persistedState.agentName,
+      hasFirstUserMessage: Boolean(persistedState.firstUserMessage?.trim()),
+      hasPendingFirstPromptAutoRenamePrompt: Boolean(
+        persistedState.pendingFirstPromptAutoRenamePrompt?.trim(),
+      ),
+      hasTitle: Boolean(persistedState.title?.trim()),
+      sessionId,
+      strategy: autoRenameStrategy,
+      title: persistedState.title,
+    });
+    await this.appendFirstPromptAutoRenameReproLog(
+      "controller.generateSessionName.strategyResolved",
+      {
+        agentName: persistedState.agentName,
+        hasFirstUserMessage: Boolean(persistedState.firstUserMessage?.trim()),
+        hasPendingFirstPromptAutoRenamePrompt: Boolean(
+          persistedState.pendingFirstPromptAutoRenamePrompt?.trim(),
+        ),
+        hasTitle: Boolean(persistedState.title?.trim()),
+        sessionId,
+        strategy: autoRenameStrategy,
+        title: persistedState.title,
+      },
+    );
     if (!autoRenameStrategy) {
+      logzmuxDebug("controller.generateSessionName.skippedUnsupportedAgent", {
+        agentName: persistedState.agentName,
+        sessionId,
+      });
+      await this.appendFirstPromptAutoRenameReproLog(
+        "controller.generateSessionName.skippedUnsupportedAgent",
+        {
+          agentName: persistedState.agentName,
+          sessionId,
+        },
+      );
       void vscode.window.showErrorMessage("Generate Name is only available for Claude and Codex.");
       return;
     }
@@ -2023,10 +2088,20 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.setFirstPromptAutoRenameInProgress(sessionId, true);
     try {
       if (autoRenameStrategy === "sendBareRenameCommand") {
+        logzmuxDebug("controller.generateSessionName.claudeBareRename.start", { sessionId });
+        await this.appendFirstPromptAutoRenameReproLog(
+          "controller.generateSessionName.claudeBareRename.start",
+          { sessionId },
+        );
         await this.writeTerminalTextPreservingLastActivity(sessionId, "/rename", false);
         await this.submitStagedRenameInAgentCli(sessionId);
         this.claudeFirstPromptAutoRenameTriggeredSessionIds.add(sessionId);
         await this.backend.markFirstPromptAutoRenameTriggered(sessionId);
+        logzmuxDebug("controller.generateSessionName.claudeBareRename.sent", { sessionId });
+        await this.appendFirstPromptAutoRenameReproLog(
+          "controller.generateSessionName.claudeBareRename.sent",
+          { sessionId },
+        );
         return;
       }
 
@@ -2034,6 +2109,23 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         persistedState.pendingFirstPromptAutoRenamePrompt?.trim() ||
         persistedState.firstUserMessage?.trim();
       if (!prompt) {
+        logzmuxDebug("controller.generateSessionName.skippedMissingPrompt", {
+          hasFirstUserMessage: Boolean(persistedState.firstUserMessage?.trim()),
+          hasPendingFirstPromptAutoRenamePrompt: Boolean(
+            persistedState.pendingFirstPromptAutoRenamePrompt?.trim(),
+          ),
+          sessionId,
+        });
+        await this.appendFirstPromptAutoRenameReproLog(
+          "controller.generateSessionName.skippedMissingPrompt",
+          {
+            hasFirstUserMessage: Boolean(persistedState.firstUserMessage?.trim()),
+            hasPendingFirstPromptAutoRenamePrompt: Boolean(
+              persistedState.pendingFirstPromptAutoRenamePrompt?.trim(),
+            ),
+            sessionId,
+          },
+        );
         void vscode.window.showErrorMessage(
           "Generate Name needs the session's first user message, but none was recorded.",
         );
@@ -2042,6 +2134,11 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
 
       const generator = getGitTextGenerationSettings();
       if (!hasConfiguredGitTextGenerationProvider(generator)) {
+        logzmuxDebug("controller.generateSessionName.skippedMissingGenerator", { sessionId });
+        await this.appendFirstPromptAutoRenameReproLog(
+          "controller.generateSessionName.skippedMissingGenerator",
+          { sessionId },
+        );
         void vscode.window.showErrorMessage(
           "Git text generation is set to custom, but zmux.gitTextGenerationCustomCommand is empty.",
         );
@@ -2055,13 +2152,37 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       });
       const normalizedTitle = resolvedTitle.trim();
       if (!normalizedTitle) {
+        logzmuxDebug("controller.generateSessionName.skippedEmptyGeneratedTitle", { sessionId });
+        await this.appendFirstPromptAutoRenameReproLog(
+          "controller.generateSessionName.skippedEmptyGeneratedTitle",
+          { sessionId },
+        );
         void vscode.window.showErrorMessage("Generate Name returned an empty session title.");
         return;
       }
 
+      logzmuxDebug("controller.generateSessionName.codexGeneratedTitle", {
+        sessionId,
+        title: normalizedTitle,
+      });
+      await this.appendFirstPromptAutoRenameReproLog(
+        "controller.generateSessionName.codexGeneratedTitle",
+        {
+          sessionId,
+          title: normalizedTitle,
+        },
+      );
       await this.renameSession(sessionId, normalizedTitle);
       await this.backend.applyFirstPromptAutoRename(sessionId, normalizedTitle);
     } catch (error) {
+      logzmuxDebug("controller.generateSessionName.failed", {
+        error: getErrorMessage(error),
+        sessionId,
+      });
+      await this.appendFirstPromptAutoRenameReproLog("controller.generateSessionName.failed", {
+        error: getErrorMessage(error),
+        sessionId,
+      });
       void vscode.window.showErrorMessage(getErrorMessage(error));
     } finally {
       await this.setFirstPromptAutoRenameInProgress(sessionId, false);
@@ -3560,6 +3681,24 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         this.logSidebarOrderTrace(`sidebar.webview.${message.event}`, message.details);
       }
       return;
+    }
+
+    if (message.type === "generateSessionName") {
+      /**
+       * CDXC:SessionNaming 2026-04-30-02:20
+       * Log bridge receipt separately from the sidebar click log so a silent
+       * Generate Name action can be diagnosed before dispatch reaches the
+       * controller method.
+       */
+      logzmuxDebug("controller.sidebarMessage.generateSessionName.received", {
+        sessionId: message.sessionId,
+      });
+      await this.appendFirstPromptAutoRenameReproLog(
+        "controller.sidebarMessage.generateSessionName.received",
+        {
+          sessionId: message.sessionId,
+        },
+      );
     }
 
     await dispatchSidebarMessage(message, {
