@@ -32,7 +32,9 @@ final class ZedOverlayController: NSObject {
   private static let attachedWindowInset: CGFloat = 40
   private static let measuredHiddenTopRight = CGPoint(x: -1437, y: 1022)
   private static let programmaticWorkspaceOpenActivationSuppressionSeconds: TimeInterval = 3
-  private static let targetActivationRetryDelays: [TimeInterval] = [0.05, 0.14, 0.28]
+  private static let targetActivationRetryDelays: [TimeInterval] = [0.02, 0.06, 0.1]
+  private static let targetActivationRefocusDelay: TimeInterval = 0.14
+  private static let targetActivationCompletionDelay: TimeInterval = 0.24
 
   private weak var window: NSWindow?
   private let didActivateAttachment: () -> Void
@@ -415,6 +417,30 @@ final class ZedOverlayController: NSObject {
         ])
       return
     }
+    if targetApplication.isActive {
+      /**
+       CDXC:IDEAttachment 2026-04-30-02:33
+       Alt-tab into zmux should not pay the IDE surfacing delay when the
+       attached IDE is already active. Preserve the successful ordering flow
+       for inactive targets, but bring zmux back immediately from the hidden
+       attached position when Zed is already the front app.
+       */
+      if isWindowVisibleInAttachment {
+        refocusWindowAfterProgrammaticWorkspaceOpen()
+      } else {
+        showWindow()
+      }
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.surfaceTargetBehindWindow.skippedTargetAlreadyActive",
+        [
+          "frontmostApplication": NSWorkspace.shared.frontmostApplication.map {
+            applicationSummary($0)
+          } as Any,
+          "targetApplication": applicationSummary(targetApplication),
+          "windowState": windowStateSummary(),
+        ])
+      return
+    }
     isSurfacingTargetBehindWindow = true
     let didRaiseTargetWindow = raiseTargetApplicationWindow(targetApplication)
     BrowserOverlayRestoreReproLog.append(
@@ -436,11 +462,13 @@ final class ZedOverlayController: NSObject {
       ])
 
     /**
-     CDXC:IDEAttachment 2026-04-29-04:13
+     CDXC:IDEAttachment 2026-04-30-02:33
      Dock-click surfacing must retain the matched IDE application through the
-     delayed activation retries. Capturing the NSRunningApplication weakly made
-     the retry closures disappear after AXRaise, so zmux re-keyed itself while
-     the previous app, not Zed, remained directly behind it.
+     delayed activation retries, but the retry window must stay short because
+     alt-tab activation shows zmux only after the refocus pass. Logs at 02:33
+     showed Zed activating on the first retry while zmux waited another 365ms
+     offscreen, so keep the same raise/retry/refocus sequence with tighter
+     timers.
      */
     for delay in Self.targetActivationRetryDelays {
       DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, targetApplication] in
@@ -464,7 +492,7 @@ final class ZedOverlayController: NSObject {
       }
     }
 
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.targetActivationRefocusDelay) { [weak self] in
       guard let self else {
         return
       }
@@ -483,7 +511,7 @@ final class ZedOverlayController: NSObject {
           "windowState": self.windowStateSummary(),
         ])
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.targetActivationCompletionDelay) { [weak self] in
       guard let self else {
         return
       }
