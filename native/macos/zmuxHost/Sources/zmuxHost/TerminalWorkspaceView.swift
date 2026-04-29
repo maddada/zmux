@@ -12,6 +12,8 @@ final class TerminalWorkspaceView: NSView {
     let searchBarView: TerminalSearchBarView
     let titleBarView: TerminalSessionTitleBarView
     let borderView: TerminalPaneBorderView
+    var foregroundPid: Int?
+    var ttyName: String?
     var cancellables: Set<AnyCancellable> = []
   }
 
@@ -104,7 +106,9 @@ final class TerminalWorkspaceView: NSView {
       scrollView: scrollView,
       searchBarView: searchBarView,
       titleBarView: titleBarView,
-      borderView: borderView)
+      borderView: borderView,
+      foregroundPid: nil,
+      ttyName: nil)
     surfaceView.$title
       .removeDuplicates()
       .sink { [weak self] title in
@@ -153,11 +157,15 @@ final class TerminalWorkspaceView: NSView {
     needsLayout = true
     focusTerminal(sessionId: command.sessionId, reason: "createTerminalNew")
 
+    let ttyName = surfaceView.surfaceModel?.ttyName
+    let foregroundPid = surfaceView.surfaceModel?.foregroundPID
+    sessions[command.sessionId]?.ttyName = ttyName
+    sessions[command.sessionId]?.foregroundPid = foregroundPid
     sendEvent(
       .terminalReady(
         sessionId: command.sessionId,
-        ttyName: surfaceView.surfaceModel?.ttyName,
-        foregroundPid: surfaceView.surfaceModel?.foregroundPID
+        ttyName: ttyName,
+        foregroundPid: foregroundPid
       ))
     sendEvent(.terminalCwdChanged(sessionId: command.sessionId, cwd: command.cwd))
     startExitPollingIfNeeded()
@@ -173,6 +181,10 @@ final class TerminalWorkspaceView: NSView {
     if let surface = session.view.surface {
       ghostty.requestClose(surface: surface)
     }
+    NativeTerminalProcessMonitor.terminateSessionProcesses(
+      ttyName: session.view.surfaceModel?.ttyName ?? session.ttyName,
+      foregroundPid: session.view.surfaceModel?.foregroundPID ?? session.foregroundPid,
+      reason: "closeTerminal")
     session.scrollView.removeFromSuperview()
     session.searchBarView.removeFromSuperview()
     session.titleBarView.removeFromSuperview()
@@ -1059,12 +1071,90 @@ private func normalizedTerminalSessionTitle(_ title: String?, sessionId: String)
   return trimmedTitle.isEmpty ? sessionId : trimmedTitle
 }
 
+private enum NativeTerminalProcessMonitor {
+  /**
+   CDXC:NativeTerminals 2026-04-29-09:16
+   Closing a managed Ghostty surface should also clean up processes still bound
+   to that terminal tty. This prevents agent helper trees from becoming
+   launchd-owned orphans after the user closes or restores terminal sessions.
+   */
+  static func terminateSessionProcesses(ttyName: String?, foregroundPid: Int?, reason: String) {
+    if let normalizedTtyName = normalizedTTYName(ttyName) {
+      signalProcesses(attachedToTTY: normalizedTtyName, signal: "TERM", reason: reason)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+        signalProcesses(attachedToTTY: normalizedTtyName, signal: "KILL", reason: reason)
+      }
+      return
+    }
+
+    guard let foregroundPid, foregroundPid > 1 else {
+      return
+    }
+    _ = kill(pid_t(foregroundPid), SIGHUP)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+      _ = kill(pid_t(foregroundPid), SIGTERM)
+    }
+  }
+
+  private static func normalizedTTYName(_ ttyName: String?) -> String? {
+    let trimmed = ttyName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !trimmed.isEmpty else {
+      return nil
+    }
+    return URL(fileURLWithPath: trimmed).lastPathComponent
+  }
+
+  private static func signalProcesses(attachedToTTY ttyName: String, signal: String, reason: String) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+    process.arguments = ["-\(signal)", "-t", ttyName]
+    process.standardOutput = Pipe()
+    process.standardError = Pipe()
+    do {
+      try process.run()
+    } catch {
+      TerminalFocusDebugLog.append(
+        event: "nativeWorkspace.processMonitor.signalFailed",
+        details: [
+          "error": error.localizedDescription,
+          "reason": reason,
+          "signal": signal,
+          "ttyName": ttyName,
+        ])
+    }
+  }
+}
+
 private final class ZmuxGhosttySurfaceView: Ghostty.SurfaceView {
+  /**
+   CDXC:NativeTerminals 2026-04-29-08:57
+   Embedded Ghostty terminals should use the default pointer cursor instead
+   of advertising a text-selection I-beam at all times. Keep this scoped to
+   zmux's SurfaceView subclass so Ghostty.app cursor behavior is unchanged.
+   */
+  override func resetCursorRects() {
+    addCursorRect(bounds, cursor: .arrow)
+  }
+
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
     if handleZmuxSearchKeyEquivalent(event) {
       return true
     }
     return super.performKeyEquivalent(with: event)
+  }
+
+  /**
+   CDXC:NativeTerminals 2026-04-29-08:53
+   Once Cmd+F opens embedded Ghostty search, Escape should dismiss search
+   before terminal programs receive the key. This mirrors normal find panels
+   and keeps Escape from leaking into the shell while search is active.
+   */
+  override func keyDown(with event: NSEvent) {
+    if event.keyCode == 53, searchState != nil {
+      searchState = nil
+      return
+    }
+    super.keyDown(with: event)
   }
 
   /**
@@ -1155,6 +1245,10 @@ private final class TerminalSearchTextField: NSTextField {
       return
     }
     super.keyDown(with: event)
+  }
+
+  override func cancelOperation(_ sender: Any?) {
+    onClose?()
   }
 }
 
@@ -1276,6 +1370,21 @@ private final class TerminalSearchBarView: NSView, NSTextFieldDelegate {
       return
     }
     searchState?.needle = textField.stringValue
+  }
+
+  func control(
+    _ control: NSControl,
+    textView: NSTextView,
+    doCommandBy commandSelector: Selector
+  ) -> Bool {
+    guard control === textField else {
+      return false
+    }
+    if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+      closeSearch()
+      return true
+    }
+    return false
   }
 
   private func configureTextField() {
