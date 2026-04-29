@@ -769,32 +769,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       return
     }
 
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    process.arguments = [
-      "npx", "--yes", "t3",
-      "--mode", "desktop",
-      "--host", "127.0.0.1",
-      "--port", "3774",
-      "--no-browser",
-    ]
-    process.currentDirectoryURL = URL(fileURLWithPath: command.cwd, isDirectory: true)
-    process.standardInput = FileHandle.nullDevice
-    let outputCapture = NativeT3RuntimeOutputCapture()
-    outputCapture.attach(to: process)
+    NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "nativeHost")
     NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.spawn", [
-      "args": process.arguments ?? [],
       "cwd": command.cwd,
-      "executable": process.executableURL?.path ?? NSNull(),
+      "mode": "desktop-bootstrap",
     ])
     do {
+      let launch = try NativeT3RuntimeLauncher.createLaunch(cwd: command.cwd)
+      let process = launch.process
       try process.run()
       t3CodeRuntimeProcess = process
       NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.spawned", [
+        "args": process.arguments ?? [],
         "cwd": command.cwd,
+        "executable": process.executableURL?.path ?? NSNull(),
         "pid": process.processIdentifier,
       ])
-      process.terminationHandler = { [outputCapture] terminatedProcess in
+      process.terminationHandler = { [outputCapture = launch.outputCapture] terminatedProcess in
         var details = outputCapture.finish()
         details["pid"] = terminatedProcess.processIdentifier
         details["reason"] = terminatedProcess.terminationReason.rawValue
@@ -1868,32 +1859,23 @@ final class zmuxRootView: NSView {
       return
     }
 
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    process.arguments = [
-      "npx", "--yes", "t3",
-      "--mode", "desktop",
-      "--host", "127.0.0.1",
-      "--port", "3774",
-      "--no-browser",
-    ]
-    process.currentDirectoryURL = URL(fileURLWithPath: command.cwd, isDirectory: true)
-    process.standardInput = FileHandle.nullDevice
-    let outputCapture = NativeT3RuntimeOutputCapture()
-    outputCapture.attach(to: process)
+    NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "nativeSidebar")
     NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.spawn", [
-      "args": process.arguments ?? [],
       "cwd": command.cwd,
-      "executable": process.executableURL?.path ?? NSNull(),
+      "mode": "desktop-bootstrap",
     ])
     do {
+      let launch = try NativeT3RuntimeLauncher.createLaunch(cwd: command.cwd)
+      let process = launch.process
       try process.run()
       t3CodeRuntimeProcess = process
       NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.spawned", [
+        "args": process.arguments ?? [],
         "cwd": command.cwd,
+        "executable": process.executableURL?.path ?? NSNull(),
         "pid": process.processIdentifier,
       ])
-      process.terminationHandler = { [outputCapture] terminatedProcess in
+      process.terminationHandler = { [outputCapture = launch.outputCapture] terminatedProcess in
         var details = outputCapture.finish()
         details["pid"] = terminatedProcess.processIdentifier
         details["reason"] = terminatedProcess.terminationReason.rawValue

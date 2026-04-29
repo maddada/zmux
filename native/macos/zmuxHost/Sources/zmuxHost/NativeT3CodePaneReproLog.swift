@@ -136,3 +136,182 @@ final class NativeT3RuntimeOutputCapture {
     String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
   }
 }
+
+struct NativeT3RuntimeLaunch {
+  let outputCapture: NativeT3RuntimeOutputCapture
+  let process: Process
+}
+
+enum NativeT3RuntimeLauncher {
+  private static let host = "127.0.0.1"
+  private static let port = 3774
+  private static let staleRuntimeShutdownTimeout: TimeInterval = 2.0
+
+  /**
+   CDXC:T3Code 2026-04-30-03:39
+   Native T3 panes must own the localhost provider they render. If zmux has no
+   tracked runtime but a previous T3 desktop process still owns port 3774, kill
+   only that T3-looking listener before launching so the pane does not attach to
+   stale unauthenticated UI and new launches do not fail with EADDRINUSE.
+   */
+  static func clearStaleRuntimeIfNeeded(logPrefix: String) {
+    let listeners = listeningProcesses(onPort: port)
+    if listeners.isEmpty {
+      NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.port.available", [
+        "port": port
+      ])
+      return
+    }
+
+    for listener in listeners {
+      guard isManagedT3RuntimeCommand(listener.command) else {
+        NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.port.occupiedByForeignProcess", [
+          "command": listener.command,
+          "pid": listener.pid,
+          "port": port,
+        ])
+        continue
+      }
+
+      NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.staleProcess.terminate", [
+        "command": listener.command,
+        "pid": listener.pid,
+        "port": port,
+      ])
+      terminate(pid: listener.pid)
+      waitForPortToClear(port)
+    }
+  }
+
+  /**
+   CDXC:T3Code 2026-04-30-03:39
+   The reference T3 pane starts the provider with a desktop bootstrap credential
+   on fd 3. Plain `npx --yes t3 --mode desktop` reaches the pairing route, so
+   native zmux must provide the same bootstrap envelope at launch time instead
+   of relying on an unauthenticated browser flow.
+   */
+  static func createLaunch(cwd: String) throws -> NativeT3RuntimeLaunch {
+    let bootstrapURL = try writeBootstrapJsonFile()
+    let bootstrapPath = shellQuote(bootstrapURL.path)
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    process.arguments = [
+      "-lc",
+      [
+        "exec 3< \(bootstrapPath)",
+        "rm -f \(bootstrapPath)",
+        "exec /usr/bin/env npx --yes t3 --mode desktop --host \(host) --port \(port) --no-browser --bootstrap-fd 3",
+      ].joined(separator: "\n"),
+    ]
+    process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+    process.environment = createRuntimeEnvironment()
+    process.standardInput = FileHandle.nullDevice
+    let outputCapture = NativeT3RuntimeOutputCapture()
+    outputCapture.attach(to: process)
+    return NativeT3RuntimeLaunch(outputCapture: outputCapture, process: process)
+  }
+
+  private static func createRuntimeEnvironment() -> [String: String] {
+    var environment = ProcessInfo.processInfo.environment
+    environment["T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"] = "false"
+    environment["T3CODE_HOME"] = t3HomeDirectory().path
+    environment["T3CODE_HOST"] = host
+    environment["T3CODE_NO_BROWSER"] = "true"
+    environment["T3CODE_PORT"] = String(port)
+    return environment
+  }
+
+  private static func writeBootstrapJsonFile() throws -> URL {
+    try FileManager.default.createDirectory(
+      at: t3HomeDirectory(), withIntermediateDirectories: true)
+    let payload: [String: Any] = [
+      "desktopBootstrapToken": UUID().uuidString,
+      "host": host,
+      "mode": "desktop",
+      "noBrowser": true,
+      "port": port,
+      "t3Home": t3HomeDirectory().path,
+    ]
+    let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+    let bootstrapURL = t3HomeDirectory().appendingPathComponent(
+      "bootstrap-\(UUID().uuidString).json")
+    try data.write(to: bootstrapURL, options: [.atomic])
+    return bootstrapURL
+  }
+
+  private static func t3HomeDirectory() -> URL {
+    ZmuxAppStorage.sharedRootDirectory
+      .appendingPathComponent("t3-runtime", isDirectory: true)
+      .appendingPathComponent("managed-home-t3code-0.0.0", isDirectory: true)
+  }
+
+  private static func listeningProcesses(onPort port: Int) -> [NativeT3ListeningProcess] {
+    let process = Process()
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+    process.arguments = ["-nP", "-tiTCP:\(port)", "-sTCP:LISTEN"]
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.lsof.failed", [
+        "error": error.localizedDescription,
+        "port": port,
+      ])
+      return []
+    }
+    return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .split(separator: "\n", omittingEmptySubsequences: true)
+      .compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+      .map { NativeT3ListeningProcess(command: processCommand(pid: $0), pid: $0) } ?? []
+  }
+
+  private static func processCommand(pid: Int) -> String {
+    let process = Process()
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/ps")
+    process.arguments = ["-p", String(pid), "-o", "command="]
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      return ""
+    }
+    return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  }
+
+  private static func isManagedT3RuntimeCommand(_ command: String) -> Bool {
+    let normalized = command.lowercased()
+    return normalized.contains("t3")
+      && normalized.contains("--mode desktop")
+      && normalized.contains("--port \(port)")
+  }
+
+  private static func terminate(pid: Int) {
+    kill(pid_t(pid), SIGTERM)
+  }
+
+  private static func shellQuote(_ value: String) -> String {
+    "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+  }
+
+  private static func waitForPortToClear(_ port: Int) {
+    let deadline = Date().addingTimeInterval(staleRuntimeShutdownTimeout)
+    while Date() < deadline {
+      if listeningProcesses(onPort: port).isEmpty {
+        return
+      }
+      Thread.sleep(forTimeInterval: 0.1)
+    }
+  }
+}
+
+private struct NativeT3ListeningProcess {
+  let command: String
+  let pid: Int
+}
