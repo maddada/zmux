@@ -96,6 +96,7 @@ const DEFAULT_AGENT_COMMANDS: DefaultAgentCommandsSetting = {
   copilot: null,
   gemini: null,
   opencode: null,
+  t3: null,
 };
 
 export function getBackgroundSessionTimeoutConfigurationKey(): string {
@@ -389,6 +390,7 @@ export function getDefaultAgentCommands(): DefaultAgentCommandsSetting {
     copilot: normalizeDefaultAgentCommandValue(candidate, "copilot"),
     gemini: normalizeDefaultAgentCommandValue(candidate, "gemini"),
     opencode: normalizeDefaultAgentCommandValue(candidate, "opencode"),
+    t3: normalizeDefaultAgentCommandValue(candidate, "t3"),
   };
 }
 

@@ -1,11 +1,16 @@
 /**
- * CDXC:SidebarAgents 2026-04-30-03:45
- * T3 Code is temporarily removed from the default agent list so deploys do
- * not expose the broken native T3 pane path while the fd/bootstrap integration
- * is corrected. Existing T3 session support remains in place for explicit
- * session records and future restoration.
+ * CDXC:SidebarAgents 2026-04-30-03:55
+ * T3 Code is shown in the default agent list again after the native runtime
+ * launch was changed to exec the resolved provider binary directly, preserving
+ * the desktop bootstrap fd required by the T3 pane.
  */
 export const DEFAULT_SIDEBAR_AGENTS = [
+  {
+    agentId: "t3",
+    command: "npx --yes t3",
+    icon: "t3",
+    name: "T3 Code",
+  },
   {
     agentId: "codex",
     command: "codex",
