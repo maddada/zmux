@@ -76,9 +76,15 @@ describe("extractCodexSessionId", () => {
 });
 
 describe("agent child process ownership", () => {
-  test("should spawn unix agents in a detached process group", () => {
-    expect(shouldSpawnAgentInDetachedGroup("darwin")).toBe(true);
-    expect(shouldSpawnAgentInDetachedGroup("linux")).toBe(true);
+  test("should keep unix agents attached to the foreground terminal process group", () => {
+    /**
+     * CDXC:AgentTerminalResize 2026-04-29-08:13
+     * Claude Code uses Ink/Node TTY resize signals to rewrap when embedded
+     * Ghostty changes columns. The wrapper must not detach interactive agents
+     * because detached Unix children lose the controlling TTY and miss SIGWINCH.
+     */
+    expect(shouldSpawnAgentInDetachedGroup("darwin")).toBe(false);
+    expect(shouldSpawnAgentInDetachedGroup("linux")).toBe(false);
   });
 
   test("should keep Windows agent launches attached to their direct pid", () => {
@@ -86,8 +92,8 @@ describe("agent child process ownership", () => {
     expect(getProcessTreeKillTarget(4321, "win32")).toBe(4321);
   });
 
-  test("should target the whole unix process group during cleanup", () => {
-    expect(getProcessTreeKillTarget(4321, "darwin")).toBe(-4321);
-    expect(getProcessTreeKillTarget(-4321, "linux")).toBe(-4321);
+  test("should target the child pid on unix after preserving foreground TTY ownership", () => {
+    expect(getProcessTreeKillTarget(4321, "darwin")).toBe(4321);
+    expect(getProcessTreeKillTarget(-4321, "linux")).toBe(4321);
   });
 });

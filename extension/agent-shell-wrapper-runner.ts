@@ -112,9 +112,11 @@ async function main(): Promise<void> {
     agent: options.agent,
     args,
     codexHome: environment.CODEX_HOME,
+    detached: shouldSpawnAgentInDetachedGroup(),
     notifyRunnerPath: options.notifyRunnerPath,
     sessionLogPath: environment.CODEX_TUI_SESSION_LOG_PATH,
     sessionStateFilePath: environment.zmux_SESSION_STATE_FILE,
+    wrapperTty: readWrapperTtySnapshot(),
   });
   const exitCode = await spawnAgentProcess(options.agent, executablePath, args, environment);
   await appendAgentShellDebugLog("wrapper.launch.exit", {
@@ -412,7 +414,15 @@ function emitNotifyEvent(eventName: "Start" | "Stop", notifyRunnerPath: string):
 }
 
 export function shouldSpawnAgentInDetachedGroup(platform = process.platform): boolean {
-  return platform !== "win32";
+  void platform;
+  /**
+   * CDXC:AgentTerminalResize 2026-04-29-08:13
+   * Interactive agent CLIs must stay in the terminal's foreground process
+   * group. Detaching the child creates a new session on Unix, which leaves
+   * Claude Code without the controlling TTY it uses through Ink/Node to receive
+   * SIGWINCH and recompute terminal columns during embedded Ghostty resizes.
+   */
+  return false;
 }
 
 export function getProcessTreeKillTarget(pid: number, platform = process.platform): number {
@@ -485,6 +495,12 @@ function waitForAgentProcessExit(
   child: ReturnType<typeof spawn>,
 ): Promise<number> {
   const cleanup = registerWrapperTerminationHandlers(agent, child);
+  void appendAgentShellDebugLog("wrapper.launch.spawned", {
+    agent,
+    childPid: child.pid,
+    detached: shouldSpawnAgentInDetachedGroup(),
+    wrapperTty: readWrapperTtySnapshot(),
+  });
 
   return new Promise((resolve, reject) => {
     child.once("error", (error) => {
@@ -526,6 +542,22 @@ function registerWrapperTerminationHandlers(
   const signalHandlers = new Map<NodeJS.Signals, () => void>();
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     const handler = () => {
+      if (signal === "SIGINT") {
+        /**
+         * CDXC:AgentTerminalResize 2026-04-29-08:13
+         * Attached agent children share the foreground terminal process group
+         * so they receive Ctrl-C directly. The wrapper must not convert that
+         * user interrupt into a process-tree kill because Claude/Codex use
+         * SIGINT for in-app cancellation.
+         */
+        void appendAgentShellDebugLog("wrapper.launch.agentOwnedSignal", {
+          agent,
+          childPid: child.pid,
+          signal,
+        });
+        return;
+      }
+
       terminateChildTree(signal, "wrapper-signal");
     };
     signalHandlers.set(signal, handler);
@@ -546,6 +578,19 @@ function registerWrapperTerminationHandlers(
       process.removeListener(signal, handler);
     }
     process.removeListener("exit", exitHandler);
+  };
+}
+
+function readWrapperTtySnapshot(): Record<string, unknown> {
+  return {
+    columns: process.stdout.isTTY ? process.stdout.columns : undefined,
+    pid: process.pid,
+    platform: process.platform,
+    ppid: process.ppid,
+    rows: process.stdout.isTTY ? process.stdout.rows : undefined,
+    stderrIsTTY: process.stderr.isTTY === true,
+    stdinIsTTY: process.stdin.isTTY === true,
+    stdoutIsTTY: process.stdout.isTTY === true,
   };
 }
 
