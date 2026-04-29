@@ -1571,7 +1571,19 @@ private final class TerminalSessionTitleBarView: NSView {
       titleTrailing - insetX - (activity == nil ? 2 : indicatorSize + indicatorGap + 2),
       0
     )
-    let titleWidth = min(ceil(titleLabel.intrinsicContentSize.width), maxTitleWidth)
+    /**
+     CDXC:NativeTerminals 2026-04-30-03:08
+     Title-bar text width must be measured from the full raw title, not the
+     label's post-layout intrinsic size. Truncating NSTextField instances can
+     otherwise preserve an already-ellipsized width and keep cutting titles
+     early even when the pane has much more horizontal space available.
+     */
+    let measuredTitleWidth = ceil(
+      (titleLabel.stringValue as NSString).size(withAttributes: [
+        .font: titleLabel.font ?? NSFont.systemFont(ofSize: 12, weight: .bold)
+      ]).width
+    )
+    let titleWidth = min(measuredTitleWidth, maxTitleWidth)
     titleLabel.frame = CGRect(
       x: insetX,
       y: floor((bounds.height - 16) / 2),
@@ -1590,6 +1602,7 @@ private final class TerminalSessionTitleBarView: NSView {
   func setTitle(_ title: String) {
     if titleLabel.stringValue != title {
       titleLabel.stringValue = title
+      needsLayout = true
     }
   }
 
