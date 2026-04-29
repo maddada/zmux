@@ -439,6 +439,13 @@ describe("visible primary titles", () => {
     expect(getVisiblePrimaryTitle("Claude Code")).toBe("Claude Code");
   });
 
+  test("should hide bare agent status word terminal titles", () => {
+    expect(getVisibleTerminalTitle("Working")).toBeUndefined();
+    expect(getVisibleTerminalTitle("Fix attention title filtering")).toBe(
+      "Fix attention title filtering",
+    );
+  });
+
   test("should prefer the terminal title when choosing a visible session title", () => {
     expect(getPreferredSessionTitle("Session 1", "Claude Code / repo sweep")).toBe(
       "Claude Code / repo sweep",

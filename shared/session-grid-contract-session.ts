@@ -70,6 +70,8 @@ const DEFAULT_SESSION_AGENT_TITLE_NAMES = new Map<string, string>([
 const ELLIPSIZED_PATH_TITLE_PATTERN = /^(?:…|\.\.\.)[\\/]/u;
 const WINDOWS_DEFAULT_POWERSHELL_TITLE_PATTERN =
   /^[a-z]:\\windows\\system32\\windowspowershell\\v1\.0\\powershell\.exe(?:\s+\.)?$/iu;
+const AGENT_STATUS_WORD_TITLE_PATTERN =
+  /^(?:[\s.:[\](){}!|/\\_-]*)(?:done|error|idle|thinking|working)(?:[\s.:[\](){}!|/\\_-]*)$/iu;
 
 export function clampVisibleSessionCount(value: number): VisibleSessionCount {
   if (value <= 1) {
@@ -513,6 +515,10 @@ export function getVisibleTerminalTitle(title: string | undefined): string | und
     return undefined;
   }
 
+  if (AGENT_STATUS_WORD_TITLE_PATTERN.test(normalizedTitle)) {
+    return undefined;
+  }
+
   if (WINDOWS_DEFAULT_POWERSHELL_TITLE_PATTERN.test(normalizedTitle)) {
     return undefined;
   }
@@ -531,6 +537,7 @@ function isIgnoredPlaceholderSessionTitle(title: string): boolean {
    */
   return (
     /^Session \d+$/iu.test(normalizedTitle) ||
+    AGENT_STATUS_WORD_TITLE_PATTERN.test(normalizedTitle) ||
     IGNORED_PLACEHOLDER_SESSION_TITLES.has(normalizedTitle.toLowerCase()) ||
     isPathLikeTerminalTitle(normalizedTitle)
   );
