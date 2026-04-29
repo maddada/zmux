@@ -44,6 +44,7 @@ import {
 const NUMERIC_SETTINGS_DEBOUNCE_MS = 180;
 
 export type SettingsModalProps = {
+  accessibilityPermissionGranted?: boolean;
   isOpen: boolean;
   onChange: (settings: zmuxSettings) => void;
   onClose: () => void;
@@ -52,6 +53,7 @@ export type SettingsModalProps = {
 };
 
 export function SettingsModal({
+  accessibilityPermissionGranted,
   isOpen,
   onChange,
   onClose,
@@ -163,6 +165,18 @@ export function SettingsModal({
             height instead of letting Dialog crop an auto-height viewport. */}
         <ScrollArea className="h-[min(560px,calc(100vh-9rem))] min-h-0">
           <div className="flex flex-col gap-6 px-5 pb-5">
+            {accessibilityPermissionGranted === false ? (
+              /**
+               * CDXC:AccessibilityPermissions 2026-04-28-16:57
+               * Settings should keep a short, persistent notice when macOS
+               * Accessibility is disabled because browser placement and IDE
+               * attachment are the two user-facing features that depend on it.
+               */
+              <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-foreground">
+                Accessibility is off. Browser placement and IDE attachment won't work.
+              </div>
+            ) : null}
+
             <SettingsSection title="Sidebar">
               <SelectField
                 description="Choose the sidebar color scheme."

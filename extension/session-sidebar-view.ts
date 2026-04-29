@@ -640,6 +640,14 @@ export function isSidebarMessage(candidate: unknown): candidate is SidebarToExte
         typeof message.title === "string"
       );
 
+    case "setT3SessionThreadId":
+      return (
+        typeof message.sessionId === "string" &&
+        message.sessionId.length > 0 &&
+        typeof message.threadId === "string" &&
+        message.threadId.trim().length > 0
+      );
+
     case "renameGroup":
       return (
         typeof message.groupId === "string" &&

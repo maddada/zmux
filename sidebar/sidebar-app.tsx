@@ -455,6 +455,35 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       return;
     }
 
+    if (event.data.type === "showSessionRenameModal") {
+      openAppModal({
+        initialTitle: event.data.initialTitle,
+        modal: "renameSession",
+        sessionId: event.data.sessionId,
+        type: "open",
+      });
+      return;
+    }
+
+    if (event.data.type === "showFindPreviousSessionModal") {
+      openAppModal({
+        initialQuery: event.data.initialQuery,
+        modal: "findPreviousSession",
+        type: "open",
+      });
+      return;
+    }
+
+    if (event.data.type === "showT3ThreadIdModal") {
+      openAppModal({
+        modal: "t3ThreadId",
+        sessionId: event.data.sessionId,
+        threadId: event.data.currentThreadId,
+        type: "open",
+      });
+      return;
+    }
+
     if (event.data.type !== "hydrate" && event.data.type !== "sessionState") {
       return;
     }

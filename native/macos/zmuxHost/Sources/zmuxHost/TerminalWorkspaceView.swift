@@ -31,6 +31,7 @@ final class TerminalWorkspaceView: NSView {
   private var paneGap = TerminalWorkspaceView.defaultPaneGap
   private var programmaticFocusDepth = 0
   private var terminalLayout: NativeTerminalLayout?
+  private var resizeLogSignatureBySessionId = [String: String]()
   private var exitPollTimer: Timer?
 
   /**
@@ -155,6 +156,7 @@ final class TerminalWorkspaceView: NSView {
     }
     activeSessionIds.remove(sessionId)
     sessionActivities.removeValue(forKey: sessionId)
+    resizeLogSignatureBySessionId.removeValue(forKey: sessionId)
     if let surface = session.view.surface {
       ghostty.requestClose(surface: surface)
     }
@@ -550,18 +552,103 @@ final class TerminalWorkspaceView: NSView {
     session.scrollView.layoutSubtreeIfNeeded()
     session.searchBarView.frame = searchBarFrame(in: terminalRect)
     session.borderView.frame = rect
+    logTerminalResizeIfNeeded(
+      session: session,
+      paneRect: rect,
+      titleBarRect: titleBarRect,
+      terminalRect: terminalRect)
     updateTerminalBorder(for: sessionId)
   }
 
   private func searchBarFrame(in terminalRect: CGRect) -> CGRect {
-    let width = min(CGFloat(320), max(terminalRect.width - 16, 180))
-    let height = CGFloat(40)
+    let width = min(CGFloat(300), max(terminalRect.width - 16, 180))
+    let height = CGFloat(34)
     return CGRect(
       x: terminalRect.maxX - width - 8,
       y: terminalRect.maxY - height - 8,
       width: width,
       height: height
     )
+  }
+
+  private func logTerminalResizeIfNeeded(
+    session: TerminalSession,
+    paneRect: CGRect,
+    titleBarRect: CGRect,
+    terminalRect: CGRect
+  ) {
+    /**
+     CDXC:NativeTerminalResize 2026-04-29-02:22
+     Narrow-pane Claude Code rendering regressions need geometry diagnostics
+     from every native resize layer. Log only changed signatures so PTY size,
+     Ghostty surface size, scroll content size, and visible pane dimensions can
+     be compared without flooding the app log during no-op layout passes.
+     */
+    let nestedScrollView = firstNestedScrollView(in: session.scrollView)
+    let surfaceSize = session.view.surfaceSize
+    let cellSize = session.view.cellSize
+    let estimatedColumns =
+      cellSize.width > 0 ? Int(floor(terminalRect.width / cellSize.width)) : nil
+    let estimatedRows =
+      cellSize.height > 0 ? Int(floor(terminalRect.height / cellSize.height)) : nil
+    let signature = [
+      roundedSignature(paneRect.size.width),
+      roundedSignature(paneRect.size.height),
+      roundedSignature(terminalRect.size.width),
+      roundedSignature(terminalRect.size.height),
+      roundedSignature(session.scrollView.bounds.size.width),
+      roundedSignature(session.scrollView.bounds.size.height),
+      roundedSignature(session.view.frame.size.width),
+      roundedSignature(session.view.frame.size.height),
+      String(surfaceSize?.columns ?? 0),
+      String(surfaceSize?.rows ?? 0),
+      String(estimatedColumns ?? 0),
+      String(estimatedRows ?? 0),
+    ].joined(separator: "x")
+    if resizeLogSignatureBySessionId[session.sessionId] == signature {
+      return
+    }
+    resizeLogSignatureBySessionId[session.sessionId] = signature
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.terminalResize",
+      details: [
+        "cellSize": describeSize(cellSize),
+        "estimatedColumns": nullableInt(estimatedColumns),
+        "estimatedRows": nullableInt(estimatedRows),
+        "focusedSessionId": nullableString(focusedSessionId),
+        "nestedScrollContentSize": nestedScrollView.map { describeSize($0.contentSize) }
+          ?? NSNull(),
+        "nestedScrollDocumentVisibleRect": nestedScrollView.map {
+          describeFrame($0.contentView.documentVisibleRect)
+        } ?? NSNull(),
+        "paneGap": Double(paneGap),
+        "paneRect": describeFrame(paneRect),
+        "scrollViewBounds": describeFrame(session.scrollView.bounds),
+        "scrollViewFrame": describeFrame(session.scrollView.frame),
+        "sessionId": session.sessionId,
+        "surfaceFrame": describeFrame(session.view.frame),
+        "surfaceSizeColumns": surfaceSize.map { Int($0.columns) } ?? NSNull(),
+        "surfaceSizeRows": surfaceSize.map { Int($0.rows) } ?? NSNull(),
+        "terminalRect": describeFrame(terminalRect),
+        "titleBarRect": describeFrame(titleBarRect),
+        "visibleSessionIds": orderedVisibleSessionIds(),
+      ])
+  }
+
+  private func firstNestedScrollView(in view: NSView) -> NSScrollView? {
+    if let scrollView = view as? NSScrollView {
+      return scrollView
+    }
+    for subview in view.subviews {
+      if let scrollView = firstNestedScrollView(in: subview) {
+        return scrollView
+      }
+    }
+    return nil
+  }
+
+  private func roundedSignature(_ value: CGFloat) -> String {
+    String(Int(value.rounded()))
   }
 
   private func moveOffscreen(_ view: NSView) {
@@ -691,6 +778,13 @@ final class TerminalWorkspaceView: NSView {
     ]
   }
 
+  private func describeSize(_ size: CGSize) -> [String: Double] {
+    [
+      "height": Double(size.height),
+      "width": Double(size.width),
+    ]
+  }
+
   private func summarizeTerminalText(_ text: String) -> String {
     String(
       text.replacingOccurrences(of: "\r", with: "\\r")
@@ -699,6 +793,10 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func nullableString(_ value: String?) -> Any {
+    value ?? NSNull()
+  }
+
+  private func nullableInt(_ value: Int?) -> Any {
     value ?? NSNull()
   }
 
@@ -934,29 +1032,48 @@ private final class TerminalSearchBarView: NSView, NSTextFieldDelegate {
     configureButton(previousButton, symbolName: "chevron.up", action: #selector(findPrevious))
     configureButton(nextButton, symbolName: "chevron.down", action: #selector(findNext))
     configureButton(closeButton, symbolName: "xmark", action: #selector(closeSearch))
-
-    let stackView = NSStackView(views: [textField, countLabel, previousButton, nextButton, closeButton])
-    stackView.alignment = .centerY
-    stackView.distribution = .fill
-    stackView.spacing = 4
-    stackView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(stackView)
-
-    NSLayoutConstraint.activate([
-      stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-      stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-      stackView.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-      stackView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
-      textField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
-      countLabel.widthAnchor.constraint(equalToConstant: 54),
-      previousButton.widthAnchor.constraint(equalToConstant: 26),
-      nextButton.widthAnchor.constraint(equalToConstant: 26),
-      closeButton.widthAnchor.constraint(equalToConstant: 26),
-    ])
+    addSubview(textField)
+    addSubview(countLabel)
+    addSubview(previousButton)
+    addSubview(nextButton)
+    addSubview(closeButton)
   }
 
   required init?(coder: NSCoder) {
     fatalError("init(coder:) is not supported")
+  }
+
+  override func layout() {
+    super.layout()
+    /**
+     CDXC:NativeTerminals 2026-04-29-02:00
+     Native Ghostty search must stay a compact floating control. Manual
+     AppKit frames prevent stack-view expansion from stretching the search
+     input across the terminal pane and obscuring terminal content.
+     */
+    let inset = CGFloat(7)
+    let buttonSize = CGFloat(24)
+    let gap = CGFloat(4)
+    let contentHeight = max(bounds.height - inset * 2, 20)
+    var right = bounds.maxX - inset
+
+    closeButton.frame = CGRect(
+      x: right - buttonSize, y: inset - 1, width: buttonSize, height: contentHeight + 2)
+    right = closeButton.frame.minX - gap
+    nextButton.frame = CGRect(
+      x: right - buttonSize, y: inset - 1, width: buttonSize, height: contentHeight + 2)
+    right = nextButton.frame.minX - gap
+    previousButton.frame = CGRect(
+      x: right - buttonSize, y: inset - 1, width: buttonSize, height: contentHeight + 2)
+    right = previousButton.frame.minX - gap
+    countLabel.frame = CGRect(x: right - 50, y: inset, width: 50, height: contentHeight)
+    right = countLabel.frame.minX - gap
+    textField.frame = CGRect(
+      x: inset + 2,
+      y: inset,
+      width: max(right - inset - 2, 80),
+      height: contentHeight
+    )
   }
 
   func setSearchState(_ nextSearchState: Ghostty.SurfaceView.SearchState?) {
@@ -1013,10 +1130,11 @@ private final class TerminalSearchBarView: NSView, NSTextFieldDelegate {
     countLabel.alignment = .right
     countLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
     countLabel.textColor = NSColor(calibratedWhite: 0.72, alpha: 1)
+    countLabel.lineBreakMode = .byTruncatingMiddle
   }
 
   private func configureButton(_ button: NSButton, symbolName: String, action: Selector) {
-    button.bezelStyle = .texturedRounded
+    button.bezelStyle = .regularSquare
     button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
     button.imagePosition = .imageOnly
     button.isBordered = false

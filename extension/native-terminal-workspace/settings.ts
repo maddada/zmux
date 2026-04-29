@@ -45,7 +45,6 @@ export const SHOW_SIDEBAR_BROWSERS_SETTING = "showSidebarBrowsers";
 export const SHOW_SIDEBAR_GIT_BUTTON_SETTING = "showSidebarGitButton";
 export const HIDE_SIDEBAR_PROJECT_HEADER_SETTING = "hideSidebarProjectHeader";
 export const DEBUGGING_MODE_SETTING = "debuggingMode";
-export const OPEN_PROMPT_TEMP_FILES_IN_MODAL_EDITOR_SETTING = "openPromptTempFilesInModalEditor";
 export const COMPLETION_SOUND_SETTING = "completionSound";
 export const ACTION_COMPLETION_SOUND_SETTING = "actionCompletionSound";
 export const DEFAULT_BROWSER_LAUNCH_URL_SETTING = "defaultBrowserLaunchUrl";
@@ -210,20 +209,8 @@ export function getDebuggingModeConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${DEBUGGING_MODE_SETTING}`;
 }
 
-export function getOpenPromptTempFilesInModalEditorConfigurationKey(): string {
-  return `${SETTINGS_SECTION}.${OPEN_PROMPT_TEMP_FILES_IN_MODAL_EDITOR_SETTING}`;
-}
-
 export function getShowHotkeysOnSessionCardsConfigurationKey(): string {
   return `${SETTINGS_SECTION}.${SHOW_HOTKEYS_ON_SESSION_CARDS_SETTING}`;
-}
-
-export function getOpenPromptTempFilesInModalEditor(): boolean {
-  return (
-    vscode.workspace
-      .getConfiguration(SETTINGS_SECTION)
-      .get<boolean>(OPEN_PROMPT_TEMP_FILES_IN_MODAL_EDITOR_SETTING, true) ?? true
-  );
 }
 
 export function getShowSidebarActions(): boolean {

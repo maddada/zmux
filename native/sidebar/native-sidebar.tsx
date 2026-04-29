@@ -39,7 +39,6 @@ import {
   createSidebarHudState,
   DEFAULT_TERMINAL_SESSION_TITLE,
   createSidebarSessionItems,
-  getOrderedSessions,
   getSessionCardPrimaryTitle,
   normalizeTerminalTitle,
   getVisiblePrimaryTitle,
@@ -64,7 +63,9 @@ import {
   type VisibleSessionCount,
   type SidebarCommandSessionIndicator,
   type SessionGridDirection,
+  type SessionGroupRecord,
 } from "../../shared/session-grid-contract";
+import { createDisplaySessionLayout } from "../../shared/active-sessions-sort";
 import { focusDirectionInSnapshot } from "../../shared/session-grid-state-create-focus";
 import {
   createDefaultSidebarGitState,
@@ -271,6 +272,7 @@ type NativeHostEvent =
 type NativeProcessResult = Extract<NativeHostEvent, { type: "processResult" }>;
 
 type NativeBootstrap = {
+  accessibilityPermissionGranted?: boolean;
   cwd?: string;
   homeDir?: string;
   sharedSidebarStorage?: {
@@ -1976,12 +1978,16 @@ function forgetNativeSessionMapping(sidebarSessionId: string): string {
   return nativeSessionId;
 }
 
-function activeSnapshot(): SessionGridSnapshot {
+function activeWorkspaceGroup(): SessionGroupRecord {
   const workspace = activeProject().workspace;
   return (
-    workspace.groups.find((group) => group.groupId === workspace.activeGroupId)?.snapshot ??
-    workspace.groups[0]!.snapshot
+    workspace.groups.find((group) => group.groupId === workspace.activeGroupId) ??
+    workspace.groups[0]!
   );
+}
+
+function activeSnapshot(): SessionGridSnapshot {
+  return activeWorkspaceGroup().snapshot;
 }
 
 function replaceActiveSnapshot(snapshot: SessionGridSnapshot): void {
@@ -2046,45 +2052,58 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
     isFocusModeActive: group.snapshot.visibleCount === 1,
     kind: "workspace",
     layoutVisibleCount: group.snapshot.visibleCount,
-    sessions: createSidebarSessionItems(group.snapshot, "mac").map((session) => {
-      const sessionRecord = group.snapshot.sessions.find(
-        (candidate) => candidate.sessionId === session.sessionId,
-      );
-      const persistedAgentName =
-        sessionRecord?.kind === "terminal" ? sessionRecord.agentName : undefined;
-      const terminalState = terminalStateById.get(session.sessionId);
-      if (session.sessionKind !== "terminal") {
-        return session;
-      }
-      const visibleTerminalTitle = getVisibleTerminalTitle(terminalState?.terminalTitle);
-      const displayPrimaryTitle =
-        sessionRecord && sessionRecord.kind === "terminal"
-          ? getSessionCardPrimaryTitle(sessionRecord)
-          : session.primaryTitle;
-      const visiblePrimaryTitle = getVisiblePrimaryTitle(displayPrimaryTitle ?? "");
-      /**
-       * CDXC:AgentDetection 2026-04-27-02:36
-       * Session cards must show the detected agent from the canonical session
-       * record even when the native terminal state is not currently mounted.
-       * Live terminal state can still refine the value as title detection runs.
-       */
-      const projectedAgentName = terminalState?.agentName ?? persistedAgentName;
-      const agentIcon = resolveNativeSidebarAgentIcon(projectedAgentName);
-      const shouldPreferTerminalTitle =
-        Boolean(visibleTerminalTitle) && shouldPreferTerminalTitleForAgentIcon(agentIcon);
-      const hasTrustedStoredResumeTitle =
-        sessionRecord?.kind === "terminal" &&
-        getNativeStoredTrustedResumeTitle(sessionRecord).title !== undefined;
-      const primaryTitle = shouldPreferTerminalTitle
+    sessions: createProjectedSidebarSessionsForGroup(group),
+    title: group.title,
+    viewMode: group.snapshot.viewMode,
+    visibleCount: group.snapshot.visibleCount,
+  }));
+}
+
+function createProjectedSidebarSessionsForGroup(
+  group: SessionGroupRecord,
+  options: { logProjectionDiagnostics?: boolean } = {},
+): SidebarSessionItem[] {
+  const logProjectionDiagnostics = options.logProjectionDiagnostics !== false;
+  return createSidebarSessionItems(group.snapshot, "mac").map((session) => {
+    const sessionRecord = group.snapshot.sessions.find(
+      (candidate) => candidate.sessionId === session.sessionId,
+    );
+    const persistedAgentName =
+      sessionRecord?.kind === "terminal" ? sessionRecord.agentName : undefined;
+    const terminalState = terminalStateById.get(session.sessionId);
+    if (session.sessionKind !== "terminal") {
+      return session;
+    }
+    const visibleTerminalTitle = getVisibleTerminalTitle(terminalState?.terminalTitle);
+    const displayPrimaryTitle =
+      sessionRecord && sessionRecord.kind === "terminal"
+        ? getSessionCardPrimaryTitle(sessionRecord)
+        : session.primaryTitle;
+    const visiblePrimaryTitle = getVisiblePrimaryTitle(displayPrimaryTitle ?? "");
+    /**
+     * CDXC:AgentDetection 2026-04-27-02:36
+     * Session cards must show the detected agent from the canonical session
+     * record even when the native terminal state is not currently mounted.
+     * Live terminal state can still refine the value as title detection runs.
+     */
+    const projectedAgentName = terminalState?.agentName ?? persistedAgentName;
+    const agentIcon = resolveNativeSidebarAgentIcon(projectedAgentName);
+    const shouldPreferTerminalTitle =
+      Boolean(visibleTerminalTitle) && shouldPreferTerminalTitleForAgentIcon(agentIcon);
+    const hasTrustedStoredResumeTitle =
+      sessionRecord?.kind === "terminal" &&
+      getNativeStoredTrustedResumeTitle(sessionRecord).title !== undefined;
+    const primaryTitle = shouldPreferTerminalTitle
+      ? visibleTerminalTitle
+      : visiblePrimaryTitle
+        ? displayPrimaryTitle
+        : (visibleTerminalTitle ?? displayPrimaryTitle);
+    const secondaryTerminalTitle = shouldPreferTerminalTitle
+      ? undefined
+      : displayPrimaryTitle
         ? visibleTerminalTitle
-        : visiblePrimaryTitle
-          ? displayPrimaryTitle
-          : (visibleTerminalTitle ?? displayPrimaryTitle);
-      const secondaryTerminalTitle = shouldPreferTerminalTitle
-        ? undefined
-        : displayPrimaryTitle
-          ? visibleTerminalTitle
-          : undefined;
+        : undefined;
+    if (logProjectionDiagnostics) {
       appendSessionTitleDebugLog("nativeSidebar.sidebarTitleProjection", {
         agentIcon,
         primaryTitle,
@@ -2118,33 +2137,30 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
         }),
         visibleTerminalTitle,
       });
-      return {
-        ...session,
-        activity: terminalState?.activity ?? session.activity,
-        agentIcon,
-        firstUserMessage: sessionRecord?.firstUserMessage ?? terminalState?.firstUserMessage,
-        lifecycleState: terminalState?.lifecycleState ?? session.lifecycleState,
-        isGeneratingFirstPromptTitle: terminalState?.firstPromptAutoRenameInProgress === true,
-        isRunning: terminalState?.lifecycleState === "running",
-        isPrimaryTitleTerminalTitle:
-          (Boolean(visibleTerminalTitle) && (!visiblePrimaryTitle || shouldPreferTerminalTitle)) ||
-          (!visibleTerminalTitle && hasTrustedStoredResumeTitle),
-        primaryTitle,
-        /**
-         * CDXC:NativeSidebar 2026-04-28-05:14
-         * Session-card hover timestamps follow agent-tiler's projection rule:
-         * terminal sessions always expose a last-interaction value, using the
-         * live activity timestamp when known and the session creation time as
-         * the canonical baseline.
-         */
-        lastInteractionAt: terminalState?.lastActivityAt ?? sessionRecord?.createdAt,
-        terminalTitle: secondaryTerminalTitle,
-      };
-    }),
-    title: group.title,
-    viewMode: group.snapshot.viewMode,
-    visibleCount: group.snapshot.visibleCount,
-  }));
+    }
+    return {
+      ...session,
+      activity: terminalState?.activity ?? session.activity,
+      agentIcon,
+      firstUserMessage: sessionRecord?.firstUserMessage ?? terminalState?.firstUserMessage,
+      lifecycleState: terminalState?.lifecycleState ?? session.lifecycleState,
+      isGeneratingFirstPromptTitle: terminalState?.firstPromptAutoRenameInProgress === true,
+      isRunning: terminalState?.lifecycleState === "running",
+      isPrimaryTitleTerminalTitle:
+        (Boolean(visibleTerminalTitle) && (!visiblePrimaryTitle || shouldPreferTerminalTitle)) ||
+        (!visibleTerminalTitle && hasTrustedStoredResumeTitle),
+      primaryTitle,
+      /**
+       * CDXC:NativeSidebar 2026-04-28-05:14
+       * Session-card hover timestamps follow agent-tiler's projection rule:
+       * terminal sessions always expose a last-interaction value, using the
+       * live activity timestamp when known and the session creation time as
+       * the canonical baseline.
+       */
+      lastInteractionAt: terminalState?.lastActivityAt ?? sessionRecord?.createdAt,
+      terminalTitle: secondaryTerminalTitle,
+    };
+  });
 }
 
 function resolveNativeSidebarAgentIcon(agentName: string | undefined): SidebarAgentButton["icon"] {
@@ -4100,20 +4116,22 @@ function focusNativeHotkeyDirection(direction: SessionGridDirection): void {
 }
 
 function focusNativeHotkeySessionSlot(slotNumber: number): void {
-  const session = getOrderedSessions(activeSnapshot())[slotNumber - 1];
+  const sessions = getVisualNativeHotkeySessionsForActiveGroup();
+  const session = sessions[slotNumber - 1];
   if (session) {
     focusSidebarSession(session.sessionId);
     return;
   }
   logNativeHotkeyDebug("nativeHotkeys.sessionSlotMissing", {
-    sessionCount: getOrderedSessions(activeSnapshot()).length,
+    activeSessionsSortMode,
+    sessionCount: sessions.length,
     slotNumber,
   });
 }
 
 function focusAdjacentNativeHotkeySession(direction: -1 | 1): void {
   const snapshot = activeSnapshot();
-  const sessions = getOrderedSessions(snapshot);
+  const sessions = getVisualNativeHotkeySessionsForActiveGroup();
   if (sessions.length === 0) {
     logNativeHotkeyDebug("nativeHotkeys.adjacentSessionMissing", { direction });
     return;
@@ -4124,6 +4142,33 @@ function focusAdjacentNativeHotkeySession(direction: -1 | 1): void {
   );
   const nextIndex = (focusedIndex + direction + sessions.length) % sessions.length;
   focusSidebarSession(sessions[nextIndex]!.sessionId);
+}
+
+function getVisualNativeHotkeySessionsForActiveGroup(): SidebarSessionItem[] {
+  const group = activeWorkspaceGroup();
+  const projectedSessions = createProjectedSidebarSessionsForGroup(group, {
+    logProjectionDiagnostics: false,
+  });
+  const sessionsById = Object.fromEntries(
+    projectedSessions.map((session) => [session.sessionId, session]),
+  );
+  const manualSessionIds = projectedSessions.map((session) => session.sessionId);
+  const displayLayout = createDisplaySessionLayout({
+    sessionIdsByGroup: { [group.groupId]: manualSessionIds },
+    sessionsById,
+    sortMode: activeSessionsSortMode,
+    workspaceGroupIds: [group.groupId],
+  });
+  const visualSessionIds = displayLayout.sessionIdsByGroup[group.groupId] ?? manualSessionIds;
+  /**
+   * CDXC:Hotkeys 2026-04-28-16:08
+   * Numeric session hotkeys must target the same visual order the user sees in
+   * the sidebar. Reuse the rendered active-session sorting projection so
+   * Cmd+Opt+number follows last-activity order when that mode is selected.
+   */
+  return visualSessionIds
+    .map((sessionId) => sessionsById[sessionId])
+    .filter((session): session is SidebarSessionItem => session !== undefined);
 }
 
 function promptRenameFocusedNativeHotkeySession(): void {
@@ -4137,14 +4182,17 @@ function promptRenameFocusedNativeHotkeySession(): void {
     logNativeHotkeyDebug("nativeHotkeys.renameFocusedSessionNotTerminal", { focusedSessionId });
     return;
   }
-  const title = window.prompt("Rename session", session.title || DEFAULT_TERMINAL_SESSION_TITLE);
-  if (title?.trim()) {
-    renameNativeSidebarTerminalSession(
-      focusedSessionId,
-      title,
-      "native-sidebar-hotkey-rename-session",
-    );
-  }
+  /**
+   * CDXC:AppModals 2026-04-28-16:18
+   * Native hotkey rename must use the shared React modal host instead of
+   * browser prompt UI, matching the no VS Code/native prompt requirement.
+   */
+  openAppModal({
+    initialTitle: session.title || DEFAULT_TERMINAL_SESSION_TITLE,
+    modal: "renameSession",
+    sessionId: focusedSessionId,
+    type: "open",
+  });
 }
 
 function acknowledgeNativeTerminalAttention(
@@ -5559,17 +5607,12 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "promptRenameSession": {
       const session = findTerminalSession(message.sessionId);
       if (session) {
-        const title = window.prompt(
-          "Rename session",
-          session.title || DEFAULT_TERMINAL_SESSION_TITLE,
-        );
-        if (title?.trim()) {
-          renameNativeSidebarTerminalSession(
-            message.sessionId,
-            title,
-            "native-sidebar-prompt-rename-session",
-          );
-        }
+        openAppModal({
+          initialTitle: session.title || DEFAULT_TERMINAL_SESSION_TITLE,
+          modal: "renameSession",
+          sessionId: message.sessionId,
+          type: "open",
+        });
       }
       return;
     }
@@ -5704,7 +5747,13 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       clearGeneratedPreviousSessions();
       return;
     case "promptFindPreviousSession":
-      promptFindPreviousSession(message.query);
+      if (message.query?.trim()) {
+        promptFindPreviousSession(message.query);
+      } else {
+        openAppModal({ modal: "findPreviousSession", type: "open" });
+      }
+      return;
+    case "setT3SessionThreadId":
       return;
     case "runSidebarGitAction":
       void runSidebarGitAction(message.action);

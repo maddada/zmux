@@ -48,6 +48,7 @@ export type SidebarMessageHandlers = {
   promptRenameSession: (sessionId: string) => Promise<void>;
   renameGroup: (groupId: string, title: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
+  setT3SessionThreadId: (sessionId: string, threadId: string) => Promise<void>;
   refreshGitState: () => Promise<void>;
   refreshDaemonSessions: () => Promise<void>;
   restartSession: (sessionId: string) => Promise<void>;
@@ -232,6 +233,9 @@ export async function dispatchSidebarMessage(
       if (message.sessionId) {
         await handlers.renameSession(message.sessionId, message.title);
       }
+      return;
+    case "setT3SessionThreadId":
+      await handlers.setT3SessionThreadId(message.sessionId, message.threadId);
       return;
     case "renameGroup":
       await handlers.renameGroup(message.groupId, message.title);

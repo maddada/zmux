@@ -8,6 +8,7 @@ export type AppModalKind =
   | "agentConfig"
   | "commandConfig"
   | "daemonSessions"
+  | "findPreviousSession"
   | "hotkeys"
   | "pinnedPrompts"
   | "previousSessions"
@@ -15,16 +16,25 @@ export type AppModalKind =
   | "renameSession"
   | "scratchPad"
   | "settings"
+  | "t3ThreadId"
   | "workspaceConfig";
 
 export type OpenAppModalMessage =
   | {
       modal: Exclude<
         AppModalKind,
-        "agentConfig" | "commandConfig" | "firstUserMessage" | "renameSession" | "workspaceConfig"
+        | "agentConfig"
+        | "commandConfig"
+        | "firstUserMessage"
+        | "findPreviousSession"
+        | "renameSession"
+        | "t3ThreadId"
+        | "workspaceConfig"
       >;
       type: "open";
     }
+  | { initialQuery?: string; modal: "findPreviousSession"; type: "open" }
+  | { modal: "t3ThreadId"; sessionId: string; threadId: string; type: "open" }
   | { agentDraft: AgentConfigDraft; modal: "agentConfig"; type: "open" }
   | {
       commandDraft: CommandConfigDraft;

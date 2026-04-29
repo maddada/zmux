@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import GhosttyKit
 import OSLog
 import UniformTypeIdentifiers
@@ -20,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   private weak var workspaceView: TerminalWorkspaceView?
   private var zedOverlayController: ZedOverlayController?
   private var browserOverlayController: BrowserOverlayController?
+  private var hasPresentedAccessibilityPermissionDialog = false
   private var pendingZedOverlayConfiguration: ConfigureZedOverlay?
   private var pendingGhosttyConfigReloadTimer: Timer?
   private weak var attachToIdeTitlebarButton: NSButton?
@@ -54,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
        */
       makeWindow()
       startBridge()
+      presentAccessibilityPermissionDialogIfNeeded()
     }
     tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
       self?.ghostty.appTick()
@@ -64,6 +67,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     Self.appendNativeHostLifecycleLog(
       "applicationWillTerminate pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false)"
     )
+  }
+
+  func applicationWillBecomeActive(_ notification: Notification) {
+    /**
+     CDXC:IDEAttachment 2026-04-29-03:08
+     Dock-click surfacing needs native activation breadcrumbs outside the
+     overlay controller so a repro can distinguish "macOS never activated
+     zmux" from "the overlay activation branch made the wrong ordering call."
+     */
+    Self.appendNativeHostLifecycleLog(
+      "applicationWillBecomeActive pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false) frontmost=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "<missing>")"
+    )
+    BrowserOverlayRestoreReproLog.append(
+      "appDelegate.applicationWillBecomeActive",
+      [
+        "frontmostApplication": NSWorkspace.shared.frontmostApplication?.localizedName as Any,
+        "keyWindow": window?.isKeyWindow as Any,
+        "windowVisible": window?.isVisible as Any,
+      ])
+  }
+
+  func applicationDidBecomeActive(_ notification: Notification) {
+    Self.appendNativeHostLifecycleLog(
+      "applicationDidBecomeActive pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false) frontmost=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "<missing>")"
+    )
+    BrowserOverlayRestoreReproLog.append(
+      "appDelegate.applicationDidBecomeActive",
+      [
+        "frontmostApplication": NSWorkspace.shared.frontmostApplication?.localizedName as Any,
+        "keyWindow": window?.isKeyWindow as Any,
+        "windowFrame": window.map {
+          "x=\($0.frame.minX),y=\($0.frame.minY),w=\($0.frame.width),h=\($0.frame.height)"
+        } as Any,
+        "windowLevel": window?.level.rawValue as Any,
+        "windowVisible": window?.isVisible as Any,
+      ])
   }
 
   private struct GhosttyConfigSelection {
@@ -670,6 +709,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      */
     NSApp.activate(ignoringOtherApps: true)
     window?.makeKeyAndOrderFront(nil)
+  }
+
+  @MainActor private func presentAccessibilityPermissionDialogIfNeeded() {
+    guard !hasPresentedAccessibilityPermissionDialog, !AXIsProcessTrusted() else {
+      return
+    }
+    hasPresentedAccessibilityPermissionDialog = true
+    NSApp.activate(ignoringOtherApps: true)
+    window?.makeKeyAndOrderFront(nil)
+
+    /**
+     CDXC:AccessibilityPermissions 2026-04-28-16:57
+     Accessibility permission should be requested on first startup when it is
+     missing, independent of whether the user has enabled IDE attachment. Keep
+     the copy narrow: zmux uses this permission only to move/resize the
+     integrated browser window and attach to Zed, VS Code, or other supported
+     IDE windows.
+     */
+    let alert = NSAlert()
+    alert.messageText = "Accessibility Permissions Required"
+    alert.informativeText =
+      "zmux uses Accessibility only to move the integrated browser to the correct position and size, and to attach to Zed, VS Code, or other IDE windows. Click OK to open System Settings and enable Accessibility for zmux. A restart may be required after granting permission."
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: "OK")
+    alert.addButton(withTitle: "Cancel")
+
+    if let primaryButton = alert.buttons.first {
+      primaryButton.keyEquivalent = "\r"
+      primaryButton.bezelColor = .controlAccentColor
+    }
+    if alert.buttons.count > 1 {
+      alert.buttons[1].keyEquivalent = "\u{1b}"
+    }
+
+    let result = alert.runModal()
+    guard result == .alertFirstButtonReturn else {
+      return
+    }
+    openAccessibilityPreferences()
+  }
+
+  private func openAccessibilityPreferences() {
+    guard
+      let url = URL(
+        string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+    else {
+      return
+    }
+    NSWorkspace.shared.open(url)
   }
 
   @MainActor private func runSidebarCliCommand(_ command: SidebarCliCommand) {
@@ -1314,6 +1402,7 @@ final class zmuxRootView: NSView {
       ?? FileManager.default.currentDirectoryPath
     let workspaceName = URL(fileURLWithPath: cwd).lastPathComponent
     var bootstrap: [String: Any] = [
+      "accessibilityPermissionGranted": AXIsProcessTrusted(),
       "cwd": cwd,
       "homeDir": FileManager.default.homeDirectoryForCurrentUser.path,
       "zmuxHomeDir": ZmuxAppStorage.sharedRootDirectory.path,
@@ -1338,12 +1427,20 @@ final class zmuxRootView: NSView {
     if let data = try? JSONSerialization.data(withJSONObject: bootstrap),
       let json = String(data: data, encoding: .utf8)
     {
-      configuration.userContentController.addUserScript(
-        WKUserScript(
-          source: "window.__zmux_NATIVE_HOST__ = \(json);",
-          injectionTime: .atDocumentStart,
-          forMainFrameOnly: true
-        ))
+      let bootstrapScript = WKUserScript(
+        source: "window.__zmux_NATIVE_HOST__ = \(json);",
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: true
+      )
+      /**
+       CDXC:AccessibilityPermissions 2026-04-28-16:57
+       Settings are rendered in the full-window modal host, while the sidebar
+       state lives in the sidebar webview. Inject the native Accessibility
+       grant state into both webviews so settings can show a short disabled
+       notice without asking the React layer to infer macOS privacy state.
+       */
+      configuration.userContentController.addUserScript(bootstrapScript)
+      modalHostConfiguration.userContentController.addUserScript(bootstrapScript)
     }
     configuration.userContentController.addUserScript(
       WKUserScript(

@@ -1415,7 +1415,13 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async revealSession(sessionId?: string): Promise<void> {
-    const resolvedSessionId = sessionId ?? (await this.promptForSessionId("Reveal session"));
+    /**
+     * CDXC:AppModals 2026-04-28-16:18
+     * Commands must not open VS Code quick-pick modals. Without an explicit
+     * target, reveal the already focused sidebar/workspace session.
+     */
+    const resolvedSessionId =
+      sessionId ?? this.store.getFocusedSession()?.sessionId ?? this.getFocusedSidebarSessionId();
     if (resolvedSessionId) {
       await this.focusSession(resolvedSessionId);
     }
@@ -1549,20 +1555,16 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       }
 
       try {
-        resolvedTitle = await vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: "zmux",
-          },
-          async (progress) => {
-            progress.report({ message: "Generating session name..." });
-            return resolveSessionRenameTitle({
-              cwd: getDefaultWorkspaceCwd(),
-              settings: generator,
-              title: trimmedTitle,
-            });
-          },
-        );
+        /**
+         * CDXC:AppModals 2026-04-28-16:18
+         * Rename submission comes from React modals; do not wrap follow-up
+         * generation work in VS Code progress UI.
+         */
+        resolvedTitle = await resolveSessionRenameTitle({
+          cwd: getDefaultWorkspaceCwd(),
+          settings: generator,
+          title: trimmedTitle,
+        });
       } catch (error) {
         void vscode.window.showErrorMessage(getErrorMessage(error));
         return;
@@ -1971,17 +1973,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    const nextTitle = await vscode.window.showInputBox({
-      prompt: "Rename session - Paste text over 50 char to auto-generate a name",
-      value:
-        getPreferredSessionTitle(
-          sessionRecord.title,
-          this.terminalTitleBySessionId.get(sessionId),
-        ) ?? sessionRecord.title,
+    await this.sidebarProvider.postMessage({
+      initialTitle:
+        getPreferredSessionTitle(sessionRecord.title, this.terminalTitleBySessionId.get(sessionId)) ??
+        sessionRecord.title,
+      sessionId,
+      type: "showSessionRenameModal",
     });
-    if (nextTitle) {
-      await this.renameSessionFromUserInput(sessionId, nextTitle);
-    }
+    await this.revealSidebar();
   }
 
   public async promptRenameFocusedSession(): Promise<void> {
@@ -2520,19 +2519,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return;
     }
 
-    const nextThreadId = await vscode.window.showInputBox({
-      ignoreFocusOut: true,
-      placeHolder: "Paste a T3 thread id",
-      prompt: "Set Thread ID",
-      validateInput: (value) => (value.trim().length > 0 ? undefined : "Thread ID is required."),
-      value: getT3SessionBoundThreadId(sessionRecord.t3),
-      valueSelection: [0, getT3SessionBoundThreadId(sessionRecord.t3).length],
+    await this.sidebarProvider.postMessage({
+      currentThreadId: getT3SessionBoundThreadId(sessionRecord.t3),
+      sessionId,
+      type: "showT3ThreadIdModal",
     });
-    if (nextThreadId === undefined) {
-      return;
-    }
-
-    await this.setT3SessionThreadId(sessionId, nextThreadId);
+    await this.revealSidebar();
   }
 
   public async setT3SessionThreadId(sessionId: string, threadId: string): Promise<void> {
@@ -2583,15 +2575,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
   }
 
   public async promptFindPreviousSession(queryInput?: string): Promise<void> {
-    const query =
-      queryInput?.trim() ||
-      (await vscode.window.showInputBox({
-        ignoreFocusOut: true,
-        placeHolder: "e.g. full reload should not update last active",
-        prompt: "What do you remember talking about in that session?",
-      }));
-    const normalizedQuery = query?.trim();
+    const normalizedQuery = queryInput?.trim();
     if (!normalizedQuery) {
+      await this.sidebarProvider.postMessage({
+        type: "showFindPreviousSessionModal",
+      });
+      await this.revealSidebar();
       return;
     }
 
@@ -2756,19 +2745,12 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         needsCommit && getSidebarGitConfirmSuggestedCommit(this.context, this.workspaceId);
 
       if (shouldPromptForCommit) {
-        const preparedCommit = await vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: "zmux Git",
-          },
-          async (progress) =>
-            prepareSidebarGitCommit({
-              action,
-              cwd,
-              generator,
-              onProgress: (message) => progress.report({ message }),
-            }),
-        );
+        const preparedCommit = await prepareSidebarGitCommit({
+          action,
+          cwd,
+          generator,
+          onProgress: () => undefined,
+        });
 
         const sidebarGitState = this.withSidebarGitPreferences(
           await loadSidebarGitState(cwd, action, false),
@@ -2874,20 +2856,13 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     await this.refreshSidebar();
 
     try {
-      const result = await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: "zmux Git",
-        },
-        async (progress) =>
-          runSidebarGitActionWorkflow({
-            action,
-            cwd: getDefaultWorkspaceCwd(),
-            generator,
-            onProgress: (message) => progress.report({ message }),
-            preparedCommit,
-          }),
-      );
+      const result = await runSidebarGitActionWorkflow({
+        action,
+        cwd: getDefaultWorkspaceCwd(),
+        generator,
+        onProgress: () => undefined,
+        preparedCommit,
+      });
 
       if (result.prUrl) {
         await vscode.env.openExternal(vscode.Uri.parse(result.prUrl));
@@ -3556,12 +3531,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         await this.workspacePanel.reveal();
       },
       openSettings: async () => this.openSettings(),
-      promptFindPreviousSession: async () => this.promptFindPreviousSession(),
+      promptFindPreviousSession: async (query) => this.promptFindPreviousSession(query),
       promptRenameSession: async (sessionId) => this.promptRenameSession(sessionId),
       refreshDaemonSessions: async () => this.refreshDaemonSessions(),
       refreshGitState: async () => this.refreshGitState(),
       renameGroup: async (groupId, title) => this.renameGroup(groupId, title),
       renameSession: async (sessionId, title) => this.renameSessionFromUserInput(sessionId, title),
+      setT3SessionThreadId: async (sessionId, threadId) =>
+        this.setT3SessionThreadId(sessionId, threadId),
       restartSession: async (sessionId) => this.restartSession(sessionId),
       restorePreviousSession: async (historyId) => this.restorePreviousSession(historyId),
       runSidebarAgent: async (agentId) => this.runSidebarAgent(agentId),
@@ -6566,21 +6543,16 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       return true;
     }
 
-    const approval = await vscode.window.showWarningMessage(
-      "zmux is about to start a shell in an untrusted workspace.",
-      {
-        detail:
-          "Shell sessions can run commands against files in this workspace. Trust the workspace or explicitly allow shell access to continue.",
-        modal: true,
-      },
-      "Allow Shell Access",
+    /**
+     * CDXC:AppModals 2026-04-28-16:18
+     * Shell approval must not use VS Code modal message boxes. In untrusted
+     * workspaces, block shell creation until the workspace is trusted rather
+     * than adding another native approval prompt.
+     */
+    void vscode.window.showWarningMessage(
+      "Trust this workspace before starting zmux shell sessions.",
     );
-    if (!approval) {
-      return false;
-    }
-
-    this.hasApprovedUntrustedShells = true;
-    return true;
+    return false;
   }
 
   private async acknowledgeSessionAttentionIfNeeded(
@@ -6985,16 +6957,6 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     void vscode.window.showInformationMessage(
       'If zmux\'s icon is shwoing on the left side then right click on it and select "Move to" then "Secondary Side Bar".',
     );
-  }
-
-  private async promptForSessionId(placeHolder: string): Promise<string | undefined> {
-    const items = this.getAllSessionRecords().map((sessionRecord) => ({
-      description: sessionRecord.kind,
-      label: sessionRecord.alias,
-      sessionId: sessionRecord.sessionId,
-    }));
-    const selection = await vscode.window.showQuickPick(items, { placeHolder });
-    return selection?.sessionId;
   }
 
   private async waitForSessionAgentPromptTarget(

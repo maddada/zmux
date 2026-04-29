@@ -10,10 +10,6 @@ import { runStaleVsmuxProcessJanitor } from "./stale-process-janitor";
 import { appendTerminalRestartReproLog } from "./terminal-restart-repro-log";
 import { getWorkspaceId } from "./terminal-workspace-environment";
 import { initializezmuxDebugLog } from "./zmux-debug-log";
-import {
-  registerModalPromptEditorInterceptor,
-  saveAndCloseActivePromptTempModalEditor,
-} from "./modal-prompt-editor-interceptor";
 
 let activeWorkspaceController: NativeTerminalWorkspaceController | undefined;
 
@@ -41,16 +37,12 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     workspace,
     debuggingStatusIndicator,
-    registerModalPromptEditorInterceptor(),
     vscode.window.registerWebviewViewProvider(SESSIONS_VIEW_ID, workspace.sidebarProvider, {
       webviewOptions: {
         retainContextWhenHidden: true,
       },
     }),
     registerCommand("zmux.openWorkspace", () => workspace.openWorkspace()),
-    registerCommand("zmux.saveAndClosePromptTempModal", () =>
-      saveAndCloseActivePromptTempModalEditor(),
-    ),
     registerCommand("zmux.revealWorkspaceInBackground", () =>
       workspace.revealWorkspaceInBackground(),
     ),

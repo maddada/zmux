@@ -32,6 +32,7 @@ final class ZedOverlayController: NSObject {
   private static let attachedWindowInset: CGFloat = 40
   private static let measuredHiddenTopRight = CGPoint(x: -1437, y: 1022)
   private static let programmaticWorkspaceOpenActivationSuppressionSeconds: TimeInterval = 3
+  private static let targetActivationRetryDelays: [TimeInterval] = [0.05, 0.14, 0.28]
 
   private weak var window: NSWindow?
   private let didActivateAttachment: () -> Void
@@ -52,6 +53,7 @@ final class ZedOverlayController: NSObject {
   private var companionApplicationBundleIdentifiers: Set<String> = []
   private var hasRequestedAccessibilityPermission = false
   private var suppressTargetActivationHideUntil: Date?
+  private var isSurfacingTargetBehindWindow = false
 
   /**
    CDXC:IDEAttachment 2026-04-26-22:38
@@ -180,11 +182,14 @@ final class ZedOverlayController: NSObject {
         "bundleIdentifier": application?.bundleIdentifier as Any,
         "companionBundles": Array(companionApplicationBundleIdentifiers).sorted(),
         "isTargetApplication": application.map { isTargetApplication($0) } as Any,
+        "isSurfacingTargetBehindWindow": isSurfacingTargetBehindWindow,
         "isUserInitiated": userInitiatedActivation,
         "isWindowVisibleInAttachment": isWindowVisibleInAttachment,
         "localizedName": application?.localizedName as Any,
         "processIdentifier": application?.processIdentifier as Any,
         "shouldRestoreWindowWhenZedReturns": shouldRestoreWindowWhenZedReturns,
+        "suppressTargetActivationHideUntil": suppressTargetActivationHideUntil as Any,
+        "targetApplications": runningTargetApplications().map { applicationSummary($0) },
       ])
 
     if let application, isTargetApplication(application) {
@@ -192,8 +197,22 @@ final class ZedOverlayController: NSObject {
       startFollowingTargetWindow()
       let shouldSuppressProgrammaticActivationHide =
         suppressTargetActivationHideUntil.map { Date() <= $0 } ?? false
+      let shouldIgnoreTargetActivationForDockSurfacing = isSurfacingTargetBehindWindow
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.activation.targetBranch",
+        [
+          "application": applicationSummary(application),
+          "isSurfacingTargetBehindWindow": isSurfacingTargetBehindWindow,
+          "isUserInitiated": userInitiatedActivation,
+          "isWindowVisibleInAttachment": isWindowVisibleInAttachment,
+          "shouldIgnoreTargetActivationForDockSurfacing":
+            shouldIgnoreTargetActivationForDockSurfacing,
+          "shouldSuppressProgrammaticActivationHide": shouldSuppressProgrammaticActivationHide,
+          "suppressTargetActivationHideUntil": suppressTargetActivationHideUntil as Any,
+        ])
       if userInitiatedActivation, isWindowVisibleInAttachment,
-        !shouldSuppressProgrammaticActivationHide
+        !shouldSuppressProgrammaticActivationHide,
+        !shouldIgnoreTargetActivationForDockSurfacing
       {
         /**
          CDXC:ZedOverlay 2026-04-26-07:19
@@ -203,6 +222,15 @@ final class ZedOverlayController: NSObject {
         */
         moveWindowOffscreen()
         updateButtonPosition()
+      } else if shouldIgnoreTargetActivationForDockSurfacing {
+        /**
+         CDXC:IDEAttachment 2026-04-29-04:09
+         Dock-click surfacing intentionally activates the IDE as an ordering
+         step before re-keying zmux. Only that in-flight ordering activation
+         should skip the normal "click IDE to hide zmux" behavior; later direct
+         user clicks on Zed must tuck zmux again.
+         */
+        showButtonAndRestoreWindowIfNeeded()
       } else {
         /**
          CDXC:ZedOverlayWorkspace 2026-04-28-05:34
@@ -226,6 +254,18 @@ final class ZedOverlayController: NSObject {
       didActivateAttachment()
       startFollowingTargetWindow()
       updateButtonPosition()
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.activation.zmuxBranch",
+        [
+          "application": applicationSummary(application),
+          "isSurfacingTargetBehindWindow": isSurfacingTargetBehindWindow,
+          "isUserInitiated": userInitiatedActivation,
+          "targetApplications": runningTargetApplications().map { applicationSummary($0) },
+          "windowState": windowStateSummary(),
+        ])
+      if userInitiatedActivation, !isSurfacingTargetBehindWindow {
+        surfaceTargetApplicationBehindWindow()
+      }
       return
     }
 
@@ -335,6 +375,179 @@ final class ZedOverlayController: NSObject {
     }
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)
+  }
+
+  private func surfaceTargetApplicationBehindWindow() {
+    /**
+     CDXC:IDEAttachment 2026-04-29-03:08
+     Dock-click ordering diagnostics must capture each early-exit reason and
+     delayed focus pass. The failed behavior depends on AppKit activation
+     timing, so logs should show both the requested ordering and the observed
+     window/frontmost state after each async step.
+     */
+    guard !isSurfacingTargetBehindWindow else {
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.surfaceTargetBehindWindow.skippedInFlight",
+        [
+          "targetApplications": runningTargetApplications().map { applicationSummary($0) },
+          "windowState": windowStateSummary(),
+        ])
+      return
+    }
+    guard let window else {
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.surfaceTargetBehindWindow.skippedMissingWindow",
+        [
+          "targetApplications": runningTargetApplications().map { applicationSummary($0) }
+        ])
+      return
+    }
+    let targetApplications = runningTargetApplications()
+    guard let targetApplication = targetApplications.first else {
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.surfaceTargetBehindWindow.skippedMissingTarget",
+        [
+          "frontmostApplication": NSWorkspace.shared.frontmostApplication.map {
+            applicationSummary($0)
+          } as Any,
+          "targetApp": targetApp.rawValue,
+          "windowState": windowStateSummary(),
+        ])
+      return
+    }
+    isSurfacingTargetBehindWindow = true
+    let didRaiseTargetWindow = raiseTargetApplicationWindow(targetApplication)
+    BrowserOverlayRestoreReproLog.append(
+      "zedOverlay.surfaceTargetBehindWindow",
+      [
+        "didRaiseTargetWindow": didRaiseTargetWindow,
+        "frontmostApplication": NSWorkspace.shared.frontmostApplication.map {
+          applicationSummary($0)
+        } as Any,
+        "isWindowVisibleInAttachment": isWindowVisibleInAttachment,
+        "suppressTargetActivationHideUntil": suppressTargetActivationHideUntil as Any,
+        "targetApplications": targetApplications.map { applicationSummary($0) },
+        "targetBundleIdentifier": targetApplication.bundleIdentifier as Any,
+        "targetLocalizedName": targetApplication.localizedName as Any,
+        "targetProcessIdentifier": targetApplication.processIdentifier,
+        "windowState": windowStateSummary(),
+        "windowFrame":
+          "x=\(window.frame.minX),y=\(window.frame.minY),w=\(window.frame.width),h=\(window.frame.height)",
+      ])
+
+    /**
+     CDXC:IDEAttachment 2026-04-29-04:13
+     Dock-click surfacing must retain the matched IDE application through the
+     delayed activation retries. Capturing the NSRunningApplication weakly made
+     the retry closures disappear after AXRaise, so zmux re-keyed itself while
+     the previous app, not Zed, remained directly behind it.
+     */
+    for delay in Self.targetActivationRetryDelays {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, targetApplication] in
+        guard let self else {
+          return
+        }
+        let didActivateTarget = targetApplication.activate(options: [
+          .activateAllWindows, .activateIgnoringOtherApps,
+        ])
+        BrowserOverlayRestoreReproLog.append(
+          "zedOverlay.surfaceTargetBehindWindow.delayedTargetActivation",
+          [
+            "delay": delay,
+            "didActivateTarget": didActivateTarget,
+            "frontmostApplication": NSWorkspace.shared.frontmostApplication.map {
+              self.applicationSummary($0)
+            } as Any,
+            "targetApplication": self.applicationSummary(targetApplication),
+            "windowState": self.windowStateSummary(),
+          ])
+      }
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+      guard let self else {
+        return
+      }
+      if self.isWindowVisibleInAttachment {
+        self.refocusWindowAfterProgrammaticWorkspaceOpen()
+      } else {
+        self.showWindow()
+      }
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.surfaceTargetBehindWindow.asyncRefocus",
+        [
+          "frontmostApplication": NSWorkspace.shared.frontmostApplication.map {
+            self.applicationSummary($0)
+          } as Any,
+          "isWindowVisibleInAttachment": self.isWindowVisibleInAttachment,
+          "windowState": self.windowStateSummary(),
+        ])
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+      guard let self else {
+        return
+      }
+      self.isSurfacingTargetBehindWindow = false
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.surfaceTargetBehindWindow.completed",
+        [
+          "frontmostApplication": NSWorkspace.shared.frontmostApplication.map {
+            self.applicationSummary($0)
+          } as Any,
+          "windowState": self.windowStateSummary(),
+        ])
+    }
+  }
+
+  private func raiseTargetApplicationWindow(_ application: NSRunningApplication) -> Bool {
+    /**
+     CDXC:IDEAttachment 2026-04-29-03:52
+     Dock-click surfacing cannot depend only on NSRunningApplication.activate:
+     logs showed macOS returning false while Zed was running and matched. It
+     also cannot stop after AXRaise because Accessibility can report success
+     without making the IDE the active app. Raise the concrete window, retry
+     app activation after the current zmux activation notification settles,
+     then re-key zmux so the IDE becomes the normal-level window directly
+     behind the floating terminal.
+     */
+    guard isAccessibilityTrusted() else {
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.raiseTargetWindow.accessibilityDenied",
+        [
+          "application": applicationSummary(application)
+        ])
+      return false
+    }
+
+    let axApplication = AXUIElementCreateApplication(application.processIdentifier)
+    var windowsValue: CFTypeRef?
+    let windowsResult = AXUIElementCopyAttributeValue(
+      axApplication,
+      kAXWindowsAttribute as CFString,
+      &windowsValue
+    )
+    guard windowsResult == .success,
+      let windows = windowsValue as? [AXUIElement],
+      let targetWindow = windows.first
+    else {
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.raiseTargetWindow.missingWindow",
+        [
+          "application": applicationSummary(application),
+          "windowsResult": windowsResult.rawValue,
+        ])
+      return false
+    }
+
+    let raiseResult = AXUIElementPerformAction(targetWindow, kAXRaiseAction as CFString)
+    BrowserOverlayRestoreReproLog.append(
+      "zedOverlay.raiseTargetWindow.result",
+      [
+        "application": applicationSummary(application),
+        "raiseResult": raiseResult.rawValue,
+        "windowCount": windows.count,
+      ])
+    return raiseResult == .success
   }
 
   private func moveWindowOffscreen() {
@@ -497,18 +710,18 @@ final class ZedOverlayController: NSObject {
 
   private func readTargetWindowFrame() -> TargetWindowFrame? {
     let shouldPromptForAccessibility = enabled && !hasRequestedAccessibilityPermission
-    guard isAccessibilityTrusted(promptIfNeeded: shouldPromptForAccessibility) else {
+    guard isAccessibilityTrusted() else {
       if shouldPromptForAccessibility {
         hasRequestedAccessibilityPermission = true
       }
       /**
-       CDXC:IDEAttachment 2026-04-27-01:08
-       Attach mode depends on Accessibility to read the IDE window frame.
-       If macOS has not granted zmux permission, request it at the moment
-       attach is enabled and keep the native button hidden until the same
-       signed /Applications/zmux.app identity is allowed.
-       Only prompt once per app run; the follow timer keeps polling so the
-       button appears after the user grants access without prompt spam.
+       CDXC:IDEAttachment 2026-04-28-16:55
+       Accessibility permission must be framed narrowly for users: zmux uses
+       it only to move/resize the integrated browser window and to read IDE
+       window frames for attaching to Zed, VS Code, and other supported IDEs.
+       The actual DockDoor-style request dialog is now owned by AppDelegate on
+       first startup, so attachment should only keep the native button hidden
+       until the same signed /Applications/zmux.app identity is allowed.
        */
       BrowserOverlayRestoreReproLog.append(
         "zedOverlay.readTargetWindowFrame.accessibilityDenied",
@@ -600,12 +813,8 @@ final class ZedOverlayController: NSObject {
     return TargetWindowFrame(axTopLeft: topLeft, size: windowSize, screen: screen)
   }
 
-  private func isAccessibilityTrusted(promptIfNeeded shouldPrompt: Bool) -> Bool {
-    let options =
-      [
-        kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: shouldPrompt
-      ] as CFDictionary
-    return AXIsProcessTrustedWithOptions(options)
+  private func isAccessibilityTrusted() -> Bool {
+    AXIsProcessTrusted()
   }
 
   private func windowFrame(attachedTo frame: TargetWindowFrame) -> NSRect {
@@ -760,6 +969,30 @@ final class ZedOverlayController: NSObject {
       return true
     }
     return application.bundleURL?.lastPathComponent == target.bundleName
+  }
+
+  private func applicationSummary(_ application: NSRunningApplication) -> String {
+    [
+      "name=\(application.localizedName ?? "<missing>")",
+      "pid=\(application.processIdentifier)",
+      "bundle=\(application.bundleIdentifier ?? "<missing>")",
+      "bundleApp=\(application.bundleURL?.lastPathComponent ?? "<missing>")",
+      "active=\(application.isActive)",
+      "policy=\(application.activationPolicy.rawValue)",
+    ].joined(separator: ",")
+  }
+
+  private func windowStateSummary() -> String {
+    guard let window else {
+      return "missing"
+    }
+    return [
+      "visible=\(window.isVisible)",
+      "key=\(window.isKeyWindow)",
+      "main=\(window.isMainWindow)",
+      "level=\(window.level.rawValue)",
+      "frame=x=\(window.frame.minX),y=\(window.frame.minY),w=\(window.frame.width),h=\(window.frame.height)",
+    ].joined(separator: ",")
   }
 
   private func targetAppConfiguration() -> TargetApp {

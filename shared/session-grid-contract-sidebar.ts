@@ -309,6 +309,29 @@ export type SidebarShowT3BrowserAccessMessage = {
   type: "showT3BrowserAccess";
 };
 
+/**
+ * CDXC:AppModals 2026-04-28-16:18
+ * User-input flows must not use VS Code input boxes, quick picks, or modal
+ * editors. Extension-initiated prompts are represented as sidebar messages so
+ * the existing React modal host owns rendering and styling.
+ */
+export type SidebarShowSessionRenameModalMessage = {
+  initialTitle: string;
+  sessionId: string;
+  type: "showSessionRenameModal";
+};
+
+export type SidebarShowFindPreviousSessionModalMessage = {
+  initialQuery?: string;
+  type: "showFindPreviousSessionModal";
+};
+
+export type SidebarShowT3ThreadIdModalMessage = {
+  currentThreadId: string;
+  sessionId: string;
+  type: "showT3ThreadIdModal";
+};
+
 export type ExtensionToSidebarMessage =
   | SidebarHydrateMessage
   | SidebarSessionStateMessage
@@ -319,7 +342,10 @@ export type ExtensionToSidebarMessage =
   | SidebarCommandRunStateClearedMessage
   | SidebarDaemonSessionsStateMessage
   | SidebarPromptGitCommitMessage
-  | SidebarShowT3BrowserAccessMessage;
+  | SidebarShowT3BrowserAccessMessage
+  | SidebarShowSessionRenameModalMessage
+  | SidebarShowFindPreviousSessionModalMessage
+  | SidebarShowT3ThreadIdModalMessage;
 
 export type SidebarToExtensionMessage =
   | {
@@ -396,6 +422,11 @@ export type SidebarToExtensionMessage =
       type: "renameSession";
       sessionId: string;
       title: string;
+    }
+  | {
+      sessionId: string;
+      threadId: string;
+      type: "setT3SessionThreadId";
     }
   | {
       type: "renameGroup";
