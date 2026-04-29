@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0 - 2026-04-29
+
+<!-- CDXC:Distribution 2026-04-29-09:31: Release notes for 1.2.0 must include
+all user-facing commits after v1.1.0 so README, GitHub, and Homebrew release
+metadata describe the same shipped behavior. -->
+
+- Added terminal scroll multiplier settings for precision devices and discrete mouse wheels.
+- Synced Ghostty mouse-scroll-multiplier values into the shared Ghostty config and reloads scroll-only changes immediately.
+- Added native AVFoundation sound playback for completion/action sounds and settings previews, with sound assets bundled in the app.
+- Gated non-error native/sidebar diagnostics behind Debugging Mode and reduced high-frequency focus/title logging.
+- Improved terminal close cleanup by terminating processes still attached to the closed terminal tty.
+- Improved embedded terminal search behavior so Escape closes search before reaching terminal programs.
+- Changed embedded terminal cursor rects to use the default pointer cursor instead of always showing the I-beam.
+
 ## 1.1.0 - 2026-04-29
 
 <!-- CDXC:Distribution 2026-04-29-08:42: Release notes for 1.1.0 must include

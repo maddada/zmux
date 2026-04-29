@@ -32,6 +32,7 @@ brew install --cask maddada/tap/zmux
 - Native terminal title bars with rename, fork, reload, sleep, and close controls.
 - Native Ghostty scrollbars inside embedded terminals.
 - Configurable native app hotkeys for creating sessions, changing split counts, moving focus, renaming, settings, and sidebar placement.
+- Configurable Ghostty scroll speed for trackpads/high-resolution wheels and traditional mouse wheels.
 - Uses your own ghostty configuration out of the box
 - Stay close to the code and edit it easily with the IDE attachment integration (Zed, VS Code, more soon!)
 - Sync the active zmux workspace back into Zed after workspace switches.
@@ -46,6 +47,9 @@ brew install --cask maddada/tap/zmux
 - Full-window native Find Previous Session and T3 Thread ID modals for app-hosted workflows.
 - Embedded terminal panes resize on Ghostty character-cell boundaries so agent TUIs rewrap more reliably.
 - Agent CLIs stay attached to the foreground terminal TTY so resize signals reach tools such as Claude Code.
+- Native completion/action sounds with instant settings previews.
+- Debug logs stay behind Debugging Mode to avoid routine disk/memory pressure.
+- Closing a terminal also cleans up processes still attached to that terminal tty.
 - Supports all agent clis (Codex/Claude/Pi/OpenCode/Copilot/Gemini/More) <- Please ask if missing any features
 - 1 click actions (run commands, tests, etc.) with run indicators and close-on-exit action sessions.
 - Expanded command/workspace icon picker for action, code, project, git, runtime, and agent icons.
