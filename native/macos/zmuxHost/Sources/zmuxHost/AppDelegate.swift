@@ -439,6 +439,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       syncGhosttyTerminalSettings: { [weak self] command in
         self?.handle(.syncGhosttyTerminalSettings(command))
       },
+      applyGhosttyConfigSettings: { [weak self] command in
+        self?.handle(.applyGhosttyConfigSettings(command))
+      },
+      openGhosttyConfigFile: { [weak self] in
+        self?.handle(.openGhosttyConfigFile)
+      },
       openBrowserWindow: { [weak self] command in
         self?.handle(.openBrowserWindow(command))
       },
@@ -700,6 +706,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       }
     case .syncGhosttyTerminalSettings(let command):
       syncGhosttyTerminalSettings(command)
+    case .applyGhosttyConfigSettings(let command):
+      applyGhosttyConfigSettings(command)
+    case .openGhosttyConfigFile:
+      openGhosttyConfigFile()
     case .openExternalUrl(let command):
       openExternalUrl(command)
     case .openBrowserWindow(let command):
@@ -932,6 +942,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     }
   }
 
+  private func applyGhosttyConfigSettings(_ command: ApplyGhosttyConfigSettings) {
+    /**
+     CDXC:GhosttySettings 2026-04-30-01:48
+     Ghostty config action buttons must edit the real selected config file,
+     not only zmux sidebar state. Merge only managed keys so reset restores
+     Ghostty defaults without discarding unrelated user configuration.
+     */
+    do {
+      let configURL =
+        ghosttyConfigSelection.path.map { URL(fileURLWithPath: $0) }
+        ?? Self.defaultWritableGhosttyConfigURL()
+      let existingConfig = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+      let mergedConfig = Self.mergeGhosttyConfigSettings(
+        existingConfig,
+        lines: command.lines,
+        managedKeys: Set(command.managedKeys)
+      )
+      try FileManager.default.createDirectory(
+        at: configURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+      )
+      try mergedConfig.write(to: configURL, atomically: true, encoding: .utf8)
+      scheduleGhosttyConfigReload(immediate: command.reloadImmediately == true)
+    } catch {
+      Self.logger.error("Failed to apply Ghostty config settings: \(error.localizedDescription)")
+    }
+  }
+
   private func scheduleGhosttyConfigReload(immediate: Bool = false) {
     /**
      CDXC:TerminalSettings 2026-04-26-20:21
@@ -996,6 +1034,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
         "mouse-scroll-multiplier = precision:\(formatGhosttyNumber(command.mouseScrollMultiplierPrecision)),discrete:\(formatGhosttyNumber(command.mouseScrollMultiplierDiscrete))",
       ]
     return lines.joined(separator: "\n") + "\n"
+  }
+
+  private static func mergeGhosttyConfigSettings(
+    _ config: String,
+    lines: [String],
+    managedKeys: Set<String>
+  ) -> String {
+    var retainedLines =
+      config
+      .components(separatedBy: .newlines)
+      .filter { !managedKeys.contains(readGhosttyConfigKey($0)) }
+    while retainedLines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+      retainedLines.removeLast()
+    }
+    var nextLines = retainedLines + lines
+    while nextLines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+      nextLines.removeLast()
+    }
+    return nextLines.isEmpty ? "" : nextLines.joined(separator: "\n") + "\n"
   }
 
   private static func shouldRetainGhosttyConfigLine(_ line: String) -> Bool {
@@ -1082,6 +1139,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       return
     }
     NSWorkspace.shared.open(url)
+  }
+
+  private func openGhosttyConfigFile() {
+    /**
+     CDXC:GhosttySettings 2026-04-30-01:48
+     The settings modal's config-file button should open the selected Ghostty
+     config path directly. Create an empty file when missing so the editor has
+     a concrete target instead of opening only the parent directory.
+     */
+    do {
+      let configURL =
+        ghosttyConfigSelection.path.map { URL(fileURLWithPath: $0) }
+        ?? Self.defaultWritableGhosttyConfigURL()
+      try FileManager.default.createDirectory(
+        at: configURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+      )
+      if !FileManager.default.fileExists(atPath: configURL.path) {
+        try "".write(to: configURL, atomically: true, encoding: .utf8)
+      }
+      NSWorkspace.shared.open(configURL)
+    } catch {
+      Self.logger.error("Failed to open Ghostty config file: \(error.localizedDescription)")
+    }
   }
 
   private func runProcess(_ command: RunProcess, sendEvent: @escaping (HostEvent) -> Void) {
@@ -1394,6 +1475,8 @@ final class zmuxRootView: NSView {
   private let eventEncoder = JSONEncoder()
   private let configureZedOverlay: (ConfigureZedOverlay) -> Void
   private let syncGhosttyTerminalSettings: (SyncGhosttyTerminalSettings) -> Void
+  private let applyGhosttyConfigSettings: (ApplyGhosttyConfigSettings) -> Void
+  private let openGhosttyConfigFile: () -> Void
   private let openBrowserWindow: (OpenBrowserWindow) -> Void
   private let openZedWorkspace: (OpenZedWorkspace) -> Void
   private let showBrowserWindow: () -> Void
@@ -1425,6 +1508,8 @@ final class zmuxRootView: NSView {
     sendEvent: @escaping (HostEvent) -> Void,
     configureZedOverlay: @escaping (ConfigureZedOverlay) -> Void,
     syncGhosttyTerminalSettings: @escaping (SyncGhosttyTerminalSettings) -> Void,
+    applyGhosttyConfigSettings: @escaping (ApplyGhosttyConfigSettings) -> Void,
+    openGhosttyConfigFile: @escaping () -> Void,
     openBrowserWindow: @escaping (OpenBrowserWindow) -> Void,
     openZedWorkspace: @escaping (OpenZedWorkspace) -> Void,
     showBrowserWindow: @escaping () -> Void
@@ -1436,6 +1521,8 @@ final class zmuxRootView: NSView {
     self.scriptBridge = SidebarScriptBridge(router: sidebarCommandRouter)
     self.configureZedOverlay = configureZedOverlay
     self.syncGhosttyTerminalSettings = syncGhosttyTerminalSettings
+    self.applyGhosttyConfigSettings = applyGhosttyConfigSettings
+    self.openGhosttyConfigFile = openGhosttyConfigFile
     self.openBrowserWindow = openBrowserWindow
     self.openZedWorkspace = openZedWorkspace
     self.showBrowserWindow = showBrowserWindow
@@ -1554,6 +1641,13 @@ final class zmuxRootView: NSView {
     sidebarView.evaluateJavaScript(
       """
       window.dispatchEvent(new CustomEvent('zmux-native-host-event', { detail: \(json) }));
+      /**
+       CDXC:NativeBridge 2026-04-29-22:03
+       Native-to-sidebar event delivery is signaled through DOM events; return
+       undefined so WebKit never treats a CustomEvent return object as a bridge
+       failure.
+       */
+      undefined;
       """)
   }
 
@@ -1632,6 +1726,10 @@ final class zmuxRootView: NSView {
       runProcess(command)
     case .syncGhosttyTerminalSettings(let command):
       syncGhosttyTerminalSettings(command)
+    case .applyGhosttyConfigSettings(let command):
+      applyGhosttyConfigSettings(command)
+    case .openGhosttyConfigFile:
+      openGhosttyConfigFile()
     case .openExternalUrl(let command):
       openExternalUrl(command)
     case .openBrowserWindow(let command):
@@ -2017,6 +2115,13 @@ final class zmuxRootView: NSView {
     modalHostView.evaluateJavaScript(
       """
       window.dispatchEvent(new CustomEvent('zmux-app-modal-host-message', { detail: \(json) }));
+      /**
+       CDXC:AppModals 2026-04-29-22:03
+       WKWebView reports a successful dispatch as an error when the evaluated
+       script returns the CustomEvent object. Return undefined so only actual
+       modal bridge failures reach the app-modal error log.
+       */
+      undefined;
       """
     ) { _, error in
       if let error {
@@ -2044,6 +2149,12 @@ final class zmuxRootView: NSView {
     sidebarView.evaluateJavaScript(
       """
       window.__zmux_NATIVE_MODAL_BRIDGE__?.handleSidebarMessage(\(json));
+      /**
+       CDXC:AppModals 2026-04-29-22:03
+       Sidebar modal commands are fire-and-forget at the WebKit boundary; state
+       changes carry the result, so the evaluated script should return nothing.
+       */
+      undefined;
       """
     ) { _, error in
       if let error {

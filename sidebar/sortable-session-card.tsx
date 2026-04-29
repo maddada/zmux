@@ -6,6 +6,7 @@ import {
   IconPencil,
   IconPlayerPlay,
   IconRefresh,
+  IconSparkles,
   IconStar,
   IconX,
 } from "@tabler/icons-react";
@@ -170,6 +171,9 @@ export function SortableSessionCard({
     ? !isBrowserSession && supportsResumeCommandCopy(session)
     : false;
   const canFullReloadSession = session ? !isBrowserSession && supportsFullReload(session) : false;
+  const canGenerateSessionName = session
+    ? !isBrowserSession && supportsGeneratedName(session)
+    : false;
   const canSleepSession = session ? !isBrowserSession : false;
   const postSessionDragDebugLog = useEffectEvent(
     (event: string, details: Record<string, unknown>) => {
@@ -536,6 +540,14 @@ export function SortableSessionCard({
     });
   };
 
+  const requestGenerateSessionName = () => {
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      sessionId: session.sessionId,
+      type: "generateSessionName",
+    });
+  };
+
   const requestFullReloadSession = () => {
     setContextMenuPosition(undefined);
     vscode.postMessage({
@@ -665,6 +677,27 @@ export function SortableSessionCard({
       key: "fork",
       label: "Fork",
       onClick: requestForkSession,
+    });
+  }
+  if (canGenerateSessionName) {
+    /**
+     * CDXC:SessionNaming 2026-04-30-01:50
+     * Claude and Codex thread cards need a direct "Generate Name" action in
+     * the context menu. The backend owns the agent-specific behavior so the
+     * sidebar only exposes the command for supported agent identities.
+     */
+    sessionActions.push({
+      icon: (
+        <IconSparkles
+          aria-hidden="true"
+          className="session-context-menu-icon"
+          size={16}
+          stroke={1.8}
+        />
+      ),
+      key: "generate-name",
+      label: "Generate Name",
+      onClick: requestGenerateSessionName,
     });
   }
   if (canFullReloadSession) {
@@ -956,6 +989,10 @@ function supportsResumeCommandCopy(session: SidebarSessionItem): boolean {
 }
 
 function supportsFork(session: SidebarSessionItem): boolean {
+  return session.agentIcon === "codex" || session.agentIcon === "claude";
+}
+
+function supportsGeneratedName(session: SidebarSessionItem): boolean {
   return session.agentIcon === "codex" || session.agentIcon === "claude";
 }
 

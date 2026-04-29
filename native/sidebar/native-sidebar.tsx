@@ -146,6 +146,11 @@ import {
 } from "../../shared/completion-sound";
 import { getzmuxHotkeyActionById, type zmuxHotkeyActionId } from "../../shared/zmux-hotkeys";
 import { getGhosttyTerminalConfigValues } from "../../shared/ghostty-terminal-settings";
+import {
+  GHOSTTY_SETTINGS_DOCS_URL,
+  ZMUX_GHOSTTY_MANAGED_CONFIG_KEYS,
+  ZMUX_RECOMMENDED_GHOSTTY_CONFIG_LINES,
+} from "../../shared/ghostty-config-actions";
 import "../../sidebar/styles.css";
 
 type NativeHostCommand =
@@ -208,6 +213,13 @@ type NativeHostCommand =
       reloadImmediately?: boolean;
       type: "syncGhosttyTerminalSettings";
     }
+  | {
+      lines: string[];
+      managedKeys: string[];
+      reloadImmediately?: boolean;
+      type: "applyGhosttyConfigSettings";
+    }
+  | { type: "openGhosttyConfigFile" }
   | { type: "openExternalUrl"; url: string }
   | { type: "openBrowserWindow"; url: string }
   | { type: "showBrowserWindow" }
@@ -593,10 +605,16 @@ class AgentManagerXNativeBridgeClient {
   }
 }
 
+let settings = readStoredSettings();
+/**
+ * CDXC:NativeSidebar 2026-04-29-22:03
+ * Debug-gated startup diagnostics can run while reading persisted projects, so
+ * settings must initialize first; otherwise the sidebar can fail before React
+ * renders and leave only the native shell surface visible.
+ */
 const restoredProjectState = readStoredProjects();
 let projects: NativeProject[] = restoredProjectState.projects;
 let activeProjectId = restoredProjectState.activeProjectId;
-let settings = readStoredSettings();
 let revision = 0;
 let pendingZedProjectSyncTimeout: number | undefined;
 const sidebarBus = new SurfaceMessageBus<ExtensionToSidebarMessage>();
@@ -906,6 +924,33 @@ function openNativeBrowserWindow(url: string): void {
    * window above the currently attached zmux window.
    */
   postNative({ type: "openBrowserWindow", url });
+}
+
+function applyRecommendedGhosttySettings(): void {
+  /**
+   * CDXC:GhosttySettings 2026-04-30-01:48
+   * Recommended Ghostty settings are written as a managed config block through
+   * the native host so the app updates the same file embedded Ghostty reads.
+   */
+  postNative({
+    lines: [...ZMUX_RECOMMENDED_GHOSTTY_CONFIG_LINES],
+    managedKeys: [...ZMUX_GHOSTTY_MANAGED_CONFIG_KEYS],
+    reloadImmediately: true,
+    type: "applyGhosttyConfigSettings",
+  });
+}
+
+function resetGhosttySettingsToDefault(): void {
+  postNative({
+    lines: [],
+    managedKeys: [...ZMUX_GHOSTTY_MANAGED_CONFIG_KEYS],
+    reloadImmediately: true,
+    type: "applyGhosttyConfigSettings",
+  });
+}
+
+function openGhosttyConfigFile(): void {
+  postNative({ type: "openGhosttyConfigFile" });
 }
 
 function showNativeBrowserWindow(): void {
@@ -5789,6 +5834,18 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "updateSettings":
       saveSettings(message.settings);
+      return;
+    case "applyRecommendedGhosttySettings":
+      applyRecommendedGhosttySettings();
+      return;
+    case "resetGhosttySettingsToDefault":
+      resetGhosttySettingsToDefault();
+      return;
+    case "openGhosttySettingsDocs":
+      openNativeExternalUrl(GHOSTTY_SETTINGS_DOCS_URL);
+      return;
+    case "openGhosttyConfigFile":
+      openGhosttyConfigFile();
       return;
     case "setVisibleCount":
       updateActiveProjectWorkspace((workspace) =>

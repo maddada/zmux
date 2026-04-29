@@ -11,6 +11,7 @@ function createHandlers(): SidebarMessageHandlers {
     confirmSidebarGitCommit: vi.fn(async () => undefined),
     copyResumeCommand: vi.fn(async () => undefined),
     forkSession: vi.fn(async () => undefined),
+    generateSessionName: vi.fn(async () => undefined),
     createGroup: vi.fn(async () => undefined),
     createGroupFromSession: vi.fn(async () => undefined),
     createSession: vi.fn(async () => undefined),
@@ -146,6 +147,20 @@ describe("dispatchSidebarMessage", () => {
     );
 
     expect(handlers.forkSession).toHaveBeenCalledWith("session-3");
+  });
+
+  test("should route generateSessionName to the matching handler", async () => {
+    const handlers = createHandlers();
+
+    await dispatchSidebarMessage(
+      {
+        sessionId: "session-3",
+        type: "generateSessionName",
+      },
+      handlers,
+    );
+
+    expect(handlers.generateSessionName).toHaveBeenCalledWith("session-3");
   });
 
   test("should route setSessionSleeping to the matching handler", async () => {

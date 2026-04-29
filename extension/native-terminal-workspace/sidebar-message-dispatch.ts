@@ -17,6 +17,7 @@ export type SidebarMessageHandlers = {
   confirmSidebarGitCommit: (requestId: string, message: string) => Promise<void>;
   copyResumeCommand: (sessionId: string) => Promise<void>;
   forkSession: (sessionId: string) => Promise<void>;
+  generateSessionName: (sessionId: string) => Promise<void>;
   fullReloadGroup: (groupId: string) => Promise<void>;
   fullReloadSession: (sessionId: string) => Promise<void>;
   openT3SessionBrowserAccessLink: (url: string) => Promise<void>;
@@ -41,10 +42,14 @@ export type SidebarMessageHandlers = {
   focusSession: (sessionId: string, source?: "sidebar" | "workspace") => Promise<void>;
   moveSessionToGroup: (sessionId: string, groupId: string, targetIndex?: number) => Promise<void>;
   moveSidebarToOtherSide: () => Promise<void>;
+  applyRecommendedGhosttySettings: () => Promise<void>;
+  openGhosttyConfigFile: () => Promise<void>;
+  openGhosttySettingsDocs: () => Promise<void>;
   openBrowser: () => Promise<void>;
   openWorkspaceWelcome: () => Promise<void>;
   openSettings: () => Promise<void>;
   promptFindPreviousSession: (query?: string) => Promise<void>;
+  resetGhosttySettingsToDefault: () => Promise<void>;
   promptRenameSession: (sessionId: string) => Promise<void>;
   renameGroup: (groupId: string, title: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
@@ -124,6 +129,18 @@ export async function dispatchSidebarMessage(
       return;
     case "openSettings":
       await handlers.openSettings();
+      return;
+    case "applyRecommendedGhosttySettings":
+      await handlers.applyRecommendedGhosttySettings();
+      return;
+    case "resetGhosttySettingsToDefault":
+      await handlers.resetGhosttySettingsToDefault();
+      return;
+    case "openGhosttySettingsDocs":
+      await handlers.openGhosttySettingsDocs();
+      return;
+    case "openGhosttyConfigFile":
+      await handlers.openGhosttyConfigFile();
       return;
     case "promptFindPreviousSession":
       await handlers.promptFindPreviousSession(message.query);
@@ -269,6 +286,16 @@ export async function dispatchSidebarMessage(
     case "forkSession":
       if (message.sessionId) {
         await handlers.forkSession(message.sessionId);
+      }
+      return;
+    case "generateSessionName":
+      /**
+       * CDXC:SessionNaming 2026-04-30-01:50
+       * "Generate Name" is an explicit context-menu command for Claude/Codex
+       * threads and routes separately from user-entered rename text.
+       */
+      if (message.sessionId) {
+        await handlers.generateSessionName(message.sessionId);
       }
       return;
     case "fullReloadSession":

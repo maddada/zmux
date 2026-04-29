@@ -356,6 +356,19 @@ export type SidebarToExtensionMessage =
       type: "updateSettings";
     }
   | {
+      /**
+       * CDXC:GhosttySettings 2026-04-30-01:48
+       * The settings modal exposes Ghostty-specific actions that are not plain
+       * zmux preference changes: reset managed config keys, apply the
+       * recommended config block, open docs, and open the platform config file.
+       */
+      type:
+        | "applyRecommendedGhosttySettings"
+        | "openGhosttyConfigFile"
+        | "openGhosttySettingsDocs"
+        | "resetGhosttySettingsToDefault";
+    }
+  | {
       type: "toggleCompletionBell";
     }
   | {
@@ -462,6 +475,17 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "forkSession";
+      sessionId: string;
+    }
+  | {
+      /**
+       * CDXC:SessionNaming 2026-04-30-01:50
+       * Sidebar context menus can manually request the existing per-agent
+       * thread naming flow. The controller must choose Claude or Codex naming
+       * behavior from persisted agent identity instead of the UI sending a
+       * generated title.
+       */
+      type: "generateSessionName";
       sessionId: string;
     }
   | {

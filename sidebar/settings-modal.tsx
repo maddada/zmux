@@ -25,6 +25,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { COMPLETION_SOUND_OPTIONS, type CompletionSoundSetting } from "../shared/completion-sound";
 import { TERMINAL_FONT_PRESETS, type TerminalFontPreset } from "../shared/terminal-font-preset";
+import { ZMUX_RECOMMENDED_GHOSTTY_CONFIG_LINES } from "../shared/ghostty-config-actions";
 import {
   resolveSidebarTheme,
   type SidebarTheme,
@@ -43,11 +44,18 @@ import {
 
 const NUMERIC_SETTINGS_DEBOUNCE_MS = 180;
 
+export type GhosttySettingsAction =
+  | "applyRecommendedGhosttySettings"
+  | "openGhosttyConfigFile"
+  | "openGhosttySettingsDocs"
+  | "resetGhosttySettingsToDefault";
+
 export type SettingsModalProps = {
   accessibilityPermissionGranted?: boolean;
   isOpen: boolean;
   onChange: (settings: zmuxSettings) => void;
   onClose: () => void;
+  onGhosttySettingsAction?: (action: GhosttySettingsAction) => void;
   settings?: zmuxSettings;
   theme?: SidebarTheme;
 };
@@ -57,6 +65,7 @@ export function SettingsModal({
   isOpen,
   onChange,
   onClose,
+  onGhosttySettingsAction,
   settings,
   theme = "dark-blue",
 }: SettingsModalProps) {
@@ -141,6 +150,50 @@ export function SettingsModal({
   };
 
   const resetSettings = () => applySettings(DEFAULT_zmux_SETTINGS);
+
+  const applyRecommendedGhosttySettings = () => {
+    /**
+     * CDXC:GhosttySettings 2026-04-30-01:48
+     * The recommended Ghostty button must update both the visible zmux controls
+     * and the real Ghostty config keys that are not modeled in zmux settings.
+     */
+    applySettings({
+      ...draft,
+      terminalCursorStyle: "bar",
+      terminalFontFamily: "JetBrains Mono",
+      terminalFontSize: 13,
+      terminalFontWeight: 400,
+      terminalLetterSpacing: 0,
+      terminalLineHeight: 1.2,
+      terminalMouseScrollMultiplierDiscrete: 1,
+      terminalMouseScrollMultiplierPrecision: 1,
+    });
+    onGhosttySettingsAction?.("applyRecommendedGhosttySettings");
+  };
+
+  const resetGhosttySettingsToDefault = () => {
+    /**
+     * CDXC:GhosttySettings 2026-04-30-01:48
+     * Resetting Ghostty defaults should also move the visible terminal
+     * controls back to zmux defaults, then remove managed keys from the real
+     * Ghostty config so Ghostty's own defaults take effect.
+     */
+    applySettings({
+      ...draft,
+      terminalCursorStyle: DEFAULT_zmux_SETTINGS.terminalCursorStyle,
+      terminalFontFamily: DEFAULT_zmux_SETTINGS.terminalFontFamily,
+      terminalFontSize: DEFAULT_zmux_SETTINGS.terminalFontSize,
+      terminalFontWeight: DEFAULT_zmux_SETTINGS.terminalFontWeight,
+      terminalLetterSpacing: DEFAULT_zmux_SETTINGS.terminalLetterSpacing,
+      terminalLineHeight: DEFAULT_zmux_SETTINGS.terminalLineHeight,
+      terminalMouseScrollMultiplierDiscrete:
+        DEFAULT_zmux_SETTINGS.terminalMouseScrollMultiplierDiscrete,
+      terminalMouseScrollMultiplierPrecision:
+        DEFAULT_zmux_SETTINGS.terminalMouseScrollMultiplierPrecision,
+      terminalScrollToBottomWhenTyping: DEFAULT_zmux_SETTINGS.terminalScrollToBottomWhenTyping,
+    });
+    onGhosttySettingsAction?.("resetGhosttySettingsToDefault");
+  };
 
   return (
     <Dialog
@@ -261,6 +314,12 @@ export function SettingsModal({
                 terminal about 3 seconds after you stop changing these controls; external Ghostty
                 windows may still need Cmd+Shift+, to reload.
               </div>
+              <GhosttySettingsActions
+                onApplyRecommended={applyRecommendedGhosttySettings}
+                onOpenConfigFile={() => onGhosttySettingsAction?.("openGhosttyConfigFile")}
+                onOpenDocs={() => onGhosttySettingsAction?.("openGhosttySettingsDocs")}
+                onResetDefaults={resetGhosttySettingsToDefault}
+              />
               <SelectField
                 description="Pick the terminal typeface."
                 label="Font Family"
@@ -464,6 +523,46 @@ export function SettingsModal({
         </ScrollArea>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function GhosttySettingsActions({
+  onApplyRecommended,
+  onOpenConfigFile,
+  onOpenDocs,
+  onResetDefaults,
+}: {
+  onApplyRecommended: () => void;
+  onOpenConfigFile: () => void;
+  onOpenDocs: () => void;
+  onResetDefaults: () => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <Button className="h-10 px-4 text-sm" onClick={onResetDefaults} type="button" variant="outline">
+        Reset Ghostty defaults
+      </Button>
+      <Button
+        className="h-10 px-4 text-sm"
+        onClick={onApplyRecommended}
+        title={ZMUX_RECOMMENDED_GHOSTTY_CONFIG_LINES.join("\n")}
+        type="button"
+        variant="outline"
+      >
+        Apply recommended
+      </Button>
+      <Button className="h-10 px-4 text-sm" onClick={onOpenDocs} type="button" variant="outline">
+        Open Ghostty docs
+      </Button>
+      <Button
+        className="h-10 px-4 text-sm"
+        onClick={onOpenConfigFile}
+        type="button"
+        variant="outline"
+      >
+        Open Ghostty config
+      </Button>
+    </div>
   );
 }
 

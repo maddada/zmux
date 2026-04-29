@@ -59,6 +59,12 @@ import {
   runSidebarGitActionWorkflow,
   type PreparedSidebarGitCommit,
 } from "../git/actions";
+import {
+  applyRecommendedGhosttySettings,
+  openGhosttyConfigFile,
+  openGhosttySettingsDocs,
+  resetGhosttySettingsToDefault,
+} from "../ghostty-config-actions";
 import { getGitStatusDetails, loadSidebarGitState } from "../git/status";
 import {
   getGitTextGenerationSettings,
@@ -1990,6 +1996,78 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
     }
   }
 
+  public async generateSessionName(sessionId: string): Promise<void> {
+    if (this.isFirstPromptAutoRenameInProgress(sessionId)) {
+      return;
+    }
+
+    const sessionRecord = this.store.getSession(sessionId);
+    if (!sessionRecord || !isTerminalSession(sessionRecord)) {
+      return;
+    }
+
+    const persistedState = await this.backend.readPersistedSessionState(sessionId);
+    const autoRenameStrategy = resolveFirstPromptAutoRenameStrategy(persistedState.agentName);
+    if (!autoRenameStrategy) {
+      void vscode.window.showErrorMessage("Generate Name is only available for Claude and Codex.");
+      return;
+    }
+
+    /**
+     * CDXC:SessionNaming 2026-04-30-01:50
+     * Manual "Generate Name" must run the same naming behavior as each agent's
+     * automatic first-prompt naming: Claude receives bare `/rename`; Codex uses
+     * the configured title generator with the first user message and then syncs
+     * the generated title back into the agent CLI.
+     */
+    await this.setFirstPromptAutoRenameInProgress(sessionId, true);
+    try {
+      if (autoRenameStrategy === "sendBareRenameCommand") {
+        await this.writeTerminalTextPreservingLastActivity(sessionId, "/rename", false);
+        await this.submitStagedRenameInAgentCli(sessionId);
+        this.claudeFirstPromptAutoRenameTriggeredSessionIds.add(sessionId);
+        await this.backend.markFirstPromptAutoRenameTriggered(sessionId);
+        return;
+      }
+
+      const prompt =
+        persistedState.pendingFirstPromptAutoRenamePrompt?.trim() ||
+        persistedState.firstUserMessage?.trim();
+      if (!prompt) {
+        void vscode.window.showErrorMessage(
+          "Generate Name needs the session's first user message, but none was recorded.",
+        );
+        return;
+      }
+
+      const generator = getGitTextGenerationSettings();
+      if (!hasConfiguredGitTextGenerationProvider(generator)) {
+        void vscode.window.showErrorMessage(
+          "Git text generation is set to custom, but zmux.gitTextGenerationCustomCommand is empty.",
+        );
+        return;
+      }
+
+      const resolvedTitle = await resolveSessionRenameTitleFromPrompt({
+        cwd: getDefaultWorkspaceCwd(),
+        prompt,
+        settings: generator,
+      });
+      const normalizedTitle = resolvedTitle.trim();
+      if (!normalizedTitle) {
+        void vscode.window.showErrorMessage("Generate Name returned an empty session title.");
+        return;
+      }
+
+      await this.renameSession(sessionId, normalizedTitle);
+      await this.backend.applyFirstPromptAutoRename(sessionId, normalizedTitle);
+    } catch (error) {
+      void vscode.window.showErrorMessage(getErrorMessage(error));
+    } finally {
+      await this.setFirstPromptAutoRenameInProgress(sessionId, false);
+    }
+  }
+
   public async closeSession(
     sessionId: string,
     source: CloseSessionSource = "internal",
@@ -3494,6 +3572,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
         this.confirmSidebarGitCommit(requestId, subject),
       copyResumeCommand: async (sessionId) => this.copyResumeCommand(sessionId),
       forkSession: async (sessionId) => this.forkSession(sessionId),
+      generateSessionName: async (sessionId) => this.generateSessionName(sessionId),
       fullReloadGroup: async (groupId) => this.fullReloadGroup(groupId),
       fullReloadSession: async (sessionId) => this.fullReloadSession(sessionId),
       openT3SessionBrowserAccessLink: async (url) => this.openT3SessionBrowserAccessLink(url),
@@ -3517,11 +3596,14 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       deleteSidebarAgent: async (agentId) => this.deleteSidebarAgent(agentId),
       deleteSidebarCommand: async (commandId) => this.deleteSidebarCommand(commandId),
       endSidebarCommandRun: async (commandId) => this.endSidebarCommandRun(commandId),
+      applyRecommendedGhosttySettings,
       focusGroup: async (groupId, source) => this.focusGroup(groupId, source),
       focusSession: async (sessionId, source) => this.focusSession(sessionId, source),
       moveSessionToGroup: async (sessionId, groupId, targetIndex) =>
         this.moveSessionToGroup(sessionId, groupId, targetIndex),
       moveSidebarToOtherSide: async () => this.moveSidebarToOtherSide(),
+      openGhosttyConfigFile,
+      openGhosttySettingsDocs,
       openBrowser: async () => this.openDefaultBrowserUrl(),
       openWorkspaceWelcome: async () => {
         await this.workspacePanel.postMessage({
@@ -3532,6 +3614,7 @@ export class NativeTerminalWorkspaceController implements vscode.Disposable {
       },
       openSettings: async () => this.openSettings(),
       promptFindPreviousSession: async (query) => this.promptFindPreviousSession(query),
+      resetGhosttySettingsToDefault,
       promptRenameSession: async (sessionId) => this.promptRenameSession(sessionId),
       refreshDaemonSessions: async () => this.refreshDaemonSessions(),
       refreshGitState: async () => this.refreshGitState(),

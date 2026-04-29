@@ -496,6 +496,10 @@ export function isSidebarMessage(candidate: unknown): candidate is SidebarToExte
     case "toggleCompletionBell":
     case "toggleShowLastInteractionTimeOnSessionCards":
     case "openWorkspaceWelcome":
+    case "applyRecommendedGhosttySettings":
+    case "openGhosttyConfigFile":
+    case "openGhosttySettingsDocs":
+    case "resetGhosttySettingsToDefault":
     case "promptFindPreviousSession":
     case "refreshDaemonSessions":
     case "killTerminalDaemon":

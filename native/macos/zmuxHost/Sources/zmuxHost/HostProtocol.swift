@@ -22,6 +22,8 @@ enum HostCommand: Decodable {
   case playSound(PlaySound)
   case runProcess(RunProcess)
   case syncGhosttyTerminalSettings(SyncGhosttyTerminalSettings)
+  case applyGhosttyConfigSettings(ApplyGhosttyConfigSettings)
+  case openGhosttyConfigFile
   case openExternalUrl(OpenExternalUrl)
   case openBrowserWindow(OpenBrowserWindow)
   case showBrowserWindow
@@ -56,6 +58,8 @@ enum HostCommand: Decodable {
     case playSound
     case runProcess
     case syncGhosttyTerminalSettings
+    case applyGhosttyConfigSettings
+    case openGhosttyConfigFile
     case openExternalUrl
     case openBrowserWindow
     case showBrowserWindow
@@ -111,6 +115,10 @@ enum HostCommand: Decodable {
       self = .runProcess(try RunProcess(from: decoder))
     case .syncGhosttyTerminalSettings:
       self = .syncGhosttyTerminalSettings(try SyncGhosttyTerminalSettings(from: decoder))
+    case .applyGhosttyConfigSettings:
+      self = .applyGhosttyConfigSettings(try ApplyGhosttyConfigSettings(from: decoder))
+    case .openGhosttyConfigFile:
+      self = .openGhosttyConfigFile
     case .openExternalUrl:
       self = .openExternalUrl(try OpenExternalUrl(from: decoder))
     case .openBrowserWindow:
@@ -237,6 +245,12 @@ struct SyncGhosttyTerminalSettings: Decodable {
   let fontThickenStrength: Int
   let mouseScrollMultiplierDiscrete: Double
   let mouseScrollMultiplierPrecision: Double
+  let reloadImmediately: Bool?
+}
+
+struct ApplyGhosttyConfigSettings: Decodable {
+  let lines: [String]
+  let managedKeys: [String]
   let reloadImmediately: Bool?
 }
 

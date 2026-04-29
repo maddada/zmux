@@ -218,6 +218,9 @@ function AppModalHost() {
             type: "updateSettings",
           });
         }}
+        onGhosttySettingsAction={(action) => {
+          vscode.postMessage({ type: action });
+        }}
         onClose={closeModal}
         settings={settings}
       />
