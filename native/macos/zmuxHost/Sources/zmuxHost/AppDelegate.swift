@@ -762,6 +762,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   @MainActor
   private func startT3CodeRuntime(_ command: StartT3CodeRuntime) {
     if let process = t3CodeRuntimeProcess, process.isRunning {
+      NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.reused", [
+        "cwd": command.cwd,
+        "pid": process.processIdentifier,
+      ])
       return
     }
 
@@ -778,10 +782,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
+    NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.spawn", [
+      "args": process.arguments ?? [],
+      "cwd": command.cwd,
+      "executable": process.executableURL?.path ?? NSNull(),
+    ])
     do {
       try process.run()
       t3CodeRuntimeProcess = process
+      NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.spawned", [
+        "cwd": command.cwd,
+        "pid": process.processIdentifier,
+      ])
+      process.terminationHandler = { terminatedProcess in
+        NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.exit", [
+          "pid": terminatedProcess.processIdentifier,
+          "reason": terminatedProcess.terminationReason.rawValue,
+          "status": terminatedProcess.terminationStatus,
+        ])
+      }
     } catch {
+      NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.failed", [
+        "cwd": command.cwd,
+        "error": error.localizedDescription,
+      ])
       Self.logger.error("Failed to start T3 Code runtime: \(error.localizedDescription)")
     }
   }
@@ -1837,6 +1861,10 @@ final class zmuxRootView: NSView {
    */
   private func startT3CodeRuntime(_ command: StartT3CodeRuntime) {
     if let process = t3CodeRuntimeProcess, process.isRunning {
+      NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.reused", [
+        "cwd": command.cwd,
+        "pid": process.processIdentifier,
+      ])
       return
     }
 
@@ -1853,10 +1881,30 @@ final class zmuxRootView: NSView {
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
+    NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.spawn", [
+      "args": process.arguments ?? [],
+      "cwd": command.cwd,
+      "executable": process.executableURL?.path ?? NSNull(),
+    ])
     do {
       try process.run()
       t3CodeRuntimeProcess = process
+      NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.spawned", [
+        "cwd": command.cwd,
+        "pid": process.processIdentifier,
+      ])
+      process.terminationHandler = { terminatedProcess in
+        NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.exit", [
+          "pid": terminatedProcess.processIdentifier,
+          "reason": terminatedProcess.terminationReason.rawValue,
+          "status": terminatedProcess.terminationStatus,
+        ])
+      }
     } catch {
+      NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.failed", [
+        "cwd": command.cwd,
+        "error": error.localizedDescription,
+      ])
       zmuxRootView.logger.error("Failed to start T3 Code runtime: \(error.localizedDescription)")
     }
   }

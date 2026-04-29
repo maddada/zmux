@@ -19,6 +19,7 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private struct WebPaneSession {
+    let diagnosticsBridge: T3CodePaneDiagnosticsBridge
     let sessionId: String
     let webView: WKWebView
     let titleBarView: TerminalSessionTitleBarView
@@ -222,15 +223,36 @@ final class TerminalWorkspaceView: NSView {
    */
   func createWebPane(_ command: CreateWebPane) {
     if webPaneSessions[command.sessionId] != nil {
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.create.reused", [
+        "sessionId": command.sessionId,
+        "url": command.url,
+      ])
       focusWebPane(sessionId: command.sessionId, reason: "createWebPaneExisting")
       return
     }
 
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.create.start", [
+      "sessionId": command.sessionId,
+      "title": command.title,
+      "url": command.url,
+    ])
     let configuration = WKWebViewConfiguration()
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+    let diagnosticsBridge = T3CodePaneDiagnosticsBridge(sessionId: command.sessionId)
+    configuration.userContentController.add(
+      diagnosticsBridge,
+      name: T3CodePaneDiagnosticsBridge.messageHandlerName
+    )
+    configuration.userContentController.addUserScript(
+      WKUserScript(
+        source: Self.t3WebPaneDiagnosticsScript,
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: false
+      ))
     let webView = WKWebView(frame: .zero, configuration: configuration)
     webView.translatesAutoresizingMaskIntoConstraints = false
     webView.allowsBackForwardNavigationGestures = true
+    webView.navigationDelegate = self
     webView.underPageBackgroundColor = .clear
 
     let titleBarView = TerminalSessionTitleBarView(
@@ -248,6 +270,7 @@ final class TerminalWorkspaceView: NSView {
     borderView.translatesAutoresizingMaskIntoConstraints = false
 
     webPaneSessions[command.sessionId] = WebPaneSession(
+      diagnosticsBridge: diagnosticsBridge,
       sessionId: command.sessionId,
       webView: webView,
       titleBarView: titleBarView,
@@ -260,8 +283,17 @@ final class TerminalWorkspaceView: NSView {
     terminalLayout = terminalLayout ?? .leaf(sessionId: command.sessionId)
 
     if let url = URL(string: command.url) {
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.requested", [
+        "sessionId": command.sessionId,
+        "url": url.absoluteString,
+      ])
       webView.load(URLRequest(url: url))
       scheduleWebPaneReload(sessionId: command.sessionId, url: url, remainingAttempts: 16)
+    } else {
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.invalidUrl", [
+        "sessionId": command.sessionId,
+        "url": command.url,
+      ])
     }
 
     needsLayout = true
@@ -270,10 +302,21 @@ final class TerminalWorkspaceView: NSView {
 
   func closeWebPane(sessionId: String) {
     guard let session = webPaneSessions.removeValue(forKey: sessionId) else {
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.close.missing", [
+        "sessionId": sessionId,
+      ])
       return
     }
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.close.start", [
+      "currentUrl": session.webView.url?.absoluteString ?? NSNull(),
+      "sessionId": sessionId,
+    ])
     activeSessionIds.remove(sessionId)
     sessionActivities.removeValue(forKey: sessionId)
+    session.webView.navigationDelegate = nil
+    session.webView.configuration.userContentController.removeScriptMessageHandler(
+      forName: T3CodePaneDiagnosticsBridge.messageHandlerName
+    )
     session.webView.stopLoading()
     session.webView.removeFromSuperview()
     session.titleBarView.removeFromSuperview()
@@ -289,6 +332,11 @@ final class TerminalWorkspaceView: NSView {
 
   func focusWebPane(sessionId: String, reason: String = "explicitFocusWebPaneCommand") {
     guard let view = webPaneSessions[sessionId]?.webView else {
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.focus.missing", [
+        "knownSessionIds": Array(webPaneSessions.keys).sorted(),
+        "reason": reason,
+        "sessionId": sessionId,
+      ])
       TerminalFocusDebugLog.append(
         event: "nativeWorkspace.focusWebPane.missingSession",
         details: [
@@ -302,6 +350,11 @@ final class TerminalWorkspaceView: NSView {
     focusedSessionId = sessionId
     updateAllTerminalBorders()
     _ = window?.makeFirstResponder(view)
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.focus.applied", [
+      "currentUrl": view.url?.absoluteString ?? NSNull(),
+      "reason": reason,
+      "sessionId": sessionId,
+    ])
     sendEvent(.terminalFocused(sessionId: sessionId))
   }
 
@@ -749,6 +802,11 @@ final class TerminalWorkspaceView: NSView {
         return
       }
       if session.webView.url == nil {
+        NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.retry", [
+          "remainingAttempts": remainingAttempts,
+          "sessionId": sessionId,
+          "url": url.absoluteString,
+        ])
         session.webView.load(URLRequest(url: url))
         self.scheduleWebPaneReload(
           sessionId: sessionId,
@@ -758,6 +816,70 @@ final class TerminalWorkspaceView: NSView {
       }
     }
   }
+
+  private func sessionId(for webView: WKWebView) -> String? {
+    webPaneSessions.first { _, session in session.webView === webView }?.key
+  }
+
+  private static let t3WebPaneDiagnosticsScript = """
+    (() => {
+      const handler = window.webkit?.messageHandlers?.\(T3CodePaneDiagnosticsBridge.messageHandlerName);
+      if (!handler) {
+        return;
+      }
+      const summarize = (value) => {
+        try {
+          if (value instanceof Error) {
+            return value.stack || value.message || String(value);
+          }
+          if (typeof value === "object" && value !== null) {
+            return JSON.stringify(value);
+          }
+          return String(value);
+        } catch {
+          return String(value);
+        }
+      };
+      const post = (payload) => {
+        try {
+          handler.postMessage({
+            href: String(location.href || ""),
+            readyState: String(document.readyState || ""),
+            timestamp: new Date().toISOString(),
+            ...payload
+          });
+        } catch {}
+      };
+      window.addEventListener("error", (event) => {
+        const target = event.target;
+        const isResourceError = target && target !== window;
+        post({
+          column: event.colno || 0,
+          line: event.lineno || 0,
+          message: String(event.message || ""),
+          resourceHref: isResourceError ? String(target.src || target.href || "") : "",
+          source: String(event.filename || ""),
+          stack: event.error && event.error.stack ? String(event.error.stack) : "",
+          type: isResourceError ? "resource-error" : "error"
+        });
+      }, true);
+      window.addEventListener("unhandledrejection", (event) => {
+        post({
+          message: summarize(event.reason),
+          stack: event.reason && event.reason.stack ? String(event.reason.stack) : "",
+          type: "unhandledrejection"
+        });
+      });
+      for (const method of ["error", "warn"]) {
+        const original = console[method]?.bind(console);
+        console[method] = (...args) => {
+          post({ message: args.map(summarize).join(" "), type: `console.${method}` });
+          original?.(...args);
+        };
+      }
+      post({ type: "diagnostics-ready" });
+    })();
+    """
 
   private func steppedTerminalRect(_ rect: CGRect, for surfaceView: Ghostty.SurfaceView) -> CGRect {
     /**
@@ -1252,6 +1374,166 @@ final class TerminalWorkspaceView: NSView {
       return nextChildren.isEmpty
         ? nil : .split(direction: direction, ratio: ratio, children: nextChildren)
     }
+  }
+}
+
+extension TerminalWorkspaceView: WKNavigationDelegate {
+  func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.start", [
+      "sessionId": sessionId(for: webView) ?? NSNull(),
+      "url": webView.url?.absoluteString ?? NSNull(),
+    ])
+  }
+
+  func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.commit", [
+      "sessionId": sessionId(for: webView) ?? NSNull(),
+      "url": webView.url?.absoluteString ?? NSNull(),
+    ])
+  }
+
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    let sessionId = sessionId(for: webView)
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.finish", [
+      "sessionId": sessionId ?? NSNull(),
+      "title": webView.title ?? NSNull(),
+      "url": webView.url?.absoluteString ?? NSNull(),
+    ])
+    webView.evaluateJavaScript(
+      """
+      JSON.stringify({
+        bodyText: document.body ? document.body.innerText.slice(0, 500) : "",
+        documentTitle: document.title || "",
+        href: location.href,
+        readyState: document.readyState,
+        rootHtml: document.getElementById("root") ? document.getElementById("root").innerHTML.slice(0, 500) : ""
+      })
+      """
+    ) { result, error in
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.domProbe", [
+        "error": error?.localizedDescription ?? NSNull(),
+        "result": String(describing: result ?? NSNull()),
+        "sessionId": sessionId ?? NSNull(),
+        "url": webView.url?.absoluteString ?? NSNull(),
+      ])
+    }
+  }
+
+  func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.fail", [
+      "error": error.localizedDescription,
+      "errorCode": (error as NSError).code,
+      "errorDomain": (error as NSError).domain,
+      "sessionId": sessionId(for: webView) ?? NSNull(),
+      "url": webView.url?.absoluteString ?? NSNull(),
+    ])
+  }
+
+  func webView(
+    _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+    withError error: Error
+  ) {
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.provisionalFail", [
+      "error": error.localizedDescription,
+      "errorCode": (error as NSError).code,
+      "errorDomain": (error as NSError).domain,
+      "sessionId": sessionId(for: webView) ?? NSNull(),
+      "url": webView.url?.absoluteString ?? NSNull(),
+    ])
+  }
+
+  func webView(
+    _ webView: WKWebView,
+    decidePolicyFor navigationAction: WKNavigationAction,
+    decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+  ) {
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.action", [
+      "isMainFrame": navigationAction.targetFrame?.isMainFrame ?? false,
+      "method": navigationAction.request.httpMethod ?? NSNull(),
+      "navigationType": String(describing: navigationAction.navigationType),
+      "sessionId": sessionId(for: webView) ?? NSNull(),
+      "url": navigationAction.request.url?.absoluteString ?? NSNull(),
+    ])
+    decisionHandler(.allow)
+  }
+
+  func webView(
+    _ webView: WKWebView,
+    decidePolicyFor navigationResponse: WKNavigationResponse,
+    decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+  ) {
+    let httpResponse = navigationResponse.response as? HTTPURLResponse
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.response", [
+      "isForMainFrame": navigationResponse.isForMainFrame,
+      "mimeType": navigationResponse.response.mimeType ?? NSNull(),
+      "sessionId": sessionId(for: webView) ?? NSNull(),
+      "statusCode": httpResponse?.statusCode ?? 0,
+      "url": navigationResponse.response.url?.absoluteString ?? NSNull(),
+    ])
+    decisionHandler(.allow)
+  }
+
+  func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.process.terminated", [
+      "sessionId": sessionId(for: webView) ?? NSNull(),
+      "url": webView.url?.absoluteString ?? NSNull(),
+    ])
+  }
+}
+
+private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandler {
+  static let messageHandlerName = "zmuxT3CodePaneDiagnostics"
+
+  private let sessionId: String
+
+  init(sessionId: String) {
+    self.sessionId = sessionId
+  }
+
+  func userContentController(
+    _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
+  ) {
+    var details = normalizeBody(message.body)
+    let type = (details["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    details["frameInfoIsMainFrame"] = message.frameInfo.isMainFrame
+    details["sessionId"] = sessionId
+    NativeT3CodePaneReproLog.append(
+      "nativeWorkspace.t3WebPane.javascript.\(type?.isEmpty == false ? type! : "message")",
+      details
+    )
+  }
+
+  private func normalizeBody(_ body: Any) -> [String: Any] {
+    if let dictionary = body as? [String: Any] {
+      return dictionary.reduce(into: [String: Any]()) { result, entry in
+        result[entry.key] = normalizeValue(entry.value)
+      }
+    }
+    return ["body": String(describing: body)]
+  }
+
+  private func normalizeValue(_ value: Any) -> Any {
+    if value is NSNull {
+      return NSNull()
+    }
+    if let string = value as? String {
+      return string
+    }
+    if let number = value as? NSNumber {
+      return number
+    }
+    if let bool = value as? Bool {
+      return bool
+    }
+    if let array = value as? [Any] {
+      return array.map(normalizeValue)
+    }
+    if let dictionary = value as? [String: Any] {
+      return dictionary.reduce(into: [String: Any]()) { result, entry in
+        result[entry.key] = normalizeValue(entry.value)
+      }
+    }
+    return String(describing: value)
   }
 }
 
