@@ -7,6 +7,14 @@ import WebKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, GhosttyAppDelegate {
   static let logger = Logger(subsystem: "com.madda.zmux.host", category: "app")
+  private static let logDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = .current
+    return formatter
+  }()
+  private static var createdLogDirectories = Set<String>()
 
   nonisolated(unsafe) let ghostty: Ghostty.App
   let undoManager = UndoManager()
@@ -209,6 +217,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   }
 
   private static func appendGhosttyConfigLog(_ message: String) {
+    guard NativeDebugLogging.isEnabled else {
+      return
+    }
     let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("native-ghostty-config.log")
     appendLogLine(
@@ -222,6 +233,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      same app storage logs location as the Bun controller so missing Codex
      auto-renames can be correlated with native Ghostty title events.
      */
+    guard NativeDebugLogging.isEnabled else {
+      return
+    }
     let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("session-title-sync-debug.log")
     let message = details.map { "\(event) \($0)" } ?? event
@@ -235,6 +249,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      title events, detector output, and sidebar projection can be correlated
      without mixing them with session rename diagnostics.
      */
+    guard NativeDebugLogging.isEnabled else {
+      return
+    }
     let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("agent-detection-debug.log")
     let message = details.map { "\(event) \($0)" } ?? event
@@ -258,6 +275,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      localStorage persistence, and native terminal recreation can be traced
      independently from session-title logs.
      */
+    guard NativeDebugLogging.isEnabled else {
+      return
+    }
     let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("workspace-restore-debug.log")
     let message = details.map { "\(event) \($0)" } ?? event
@@ -272,6 +292,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      app storage logs because this UI is rendered from the native sidebar webview,
      not the older Electrobun mainview dock.
      */
+    guard NativeDebugLogging.isEnabled else {
+      return
+    }
     let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("workspace-dock-indicator-debug.log")
     let message = details.map { "\(event) \($0)" } ?? event
@@ -302,6 +325,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      survive outside WebKit and JS logs so close-button, last-window, and
      termination paths can be separated from renderer crashes.
      */
+    guard NativeDebugLogging.isEnabled else {
+      return
+    }
     let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("native-host-lifecycle.log")
     appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "native host lifecycle")
@@ -327,14 +353,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     logsDirectory: URL,
     label: String
   ) {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = .current
-    let line = "[\(formatter.string(from: Date()))] \(message)\n"
+    /**
+     CDXC:Diagnostics 2026-04-29-09:16
+     Native logging can be called from title/focus paths. Reuse timestamp
+     formatting and avoid recreating the logs directory on every append so
+     enabled diagnostics do not become the app's hot path.
+     */
+    let line = "[\(logDateFormatter.string(from: Date()))] \(message)\n"
 
     do {
-      try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+      if !createdLogDirectories.contains(logsDirectory.path) {
+        try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+        createdLogDirectories.insert(logsDirectory.path)
+      }
       if FileManager.default.fileExists(atPath: logURL.path) {
         let handle = try FileHandle(forWritingTo: logURL)
         try handle.seekToEnd()
@@ -661,6 +692,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       Self.appendWorkspaceDockIndicatorDebugLog(event: command.event, details: command.details)
     case .persistSharedSidebarStorage(let command):
       Self.persistSharedSidebarStorage(command)
+    case .playSound(let command):
+      NativeSoundPlayer.shared.play(command)
     case .runProcess(let command):
       runProcess(command) { [weak self] event in
         self?.bridge?.send(event)
@@ -893,21 +926,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
         withIntermediateDirectories: true
       )
       try mergedConfig.write(to: configURL, atomically: true, encoding: .utf8)
-      scheduleGhosttyConfigReload()
+      scheduleGhosttyConfigReload(immediate: command.reloadImmediately == true)
     } catch {
       Self.logger.error("Failed to sync Ghostty terminal settings: \(error.localizedDescription)")
     }
   }
 
-  private func scheduleGhosttyConfigReload() {
+  private func scheduleGhosttyConfigReload(immediate: Bool = false) {
     /**
      CDXC:TerminalSettings 2026-04-26-20:21
      Slider drags can emit many terminal-setting writes. Reload embedded
      Ghostty automatically only after the user stops changing values for
      three seconds, matching Ghostty's reloadConfig API without causing
      repeated font/metric rebuilds during a continuous drag.
+
+     CDXC:TerminalScrollSettings 2026-04-29-08:56
+     Mouse scroll multiplier changes do not rebuild font metrics and need
+     immediate feedback, so scroll-only changes bypass the delayed reload.
      */
     pendingGhosttyConfigReloadTimer?.invalidate()
+    if immediate {
+      pendingGhosttyConfigReloadTimer = nil
+      ghostty.reloadConfig()
+      return
+    }
     pendingGhosttyConfigReloadTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) {
       [weak self] _ in
       MainActor.assumeIsolated {
@@ -945,6 +987,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
         "font-thicken-strength = \(max(0, min(255, command.fontThickenStrength)))",
         "adjust-cell-height = \(formatGhosttyPercent(command.adjustCellHeightPercent))",
         "adjust-cell-width = \(formatGhosttyNumber(command.adjustCellWidth))",
+        /**
+         CDXC:TerminalScrollSettings 2026-04-29-08:56
+         zmux manages Ghostty scroll speed through the documented prefixed
+         mouse-scroll-multiplier values so precision devices and discrete
+         mouse wheels keep separate settings in the shared Ghostty config.
+         */
+        "mouse-scroll-multiplier = precision:\(formatGhosttyNumber(command.mouseScrollMultiplierPrecision)),discrete:\(formatGhosttyNumber(command.mouseScrollMultiplierDiscrete))",
       ]
     return lines.joined(separator: "\n") + "\n"
   }
@@ -957,6 +1006,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       "font-size",
       "font-thicken",
       "font-thicken-strength",
+      "mouse-scroll-multiplier",
     ]
     let key = readGhosttyConfigKey(line)
     if managedKeys.contains(key) {
@@ -1570,6 +1620,14 @@ final class zmuxRootView: NSView {
         event: command.event, details: command.details)
     case .persistSharedSidebarStorage(let command):
       AppDelegate.persistSharedSidebarStorage(command)
+    case .playSound(let command):
+      /**
+       CDXC:NativeSound 2026-04-29-16:30
+       Sidebar-driven completion sounds are intentionally routed through
+       AppDelegate so the native app owns playback and settings previews even
+       when the sidebar webview has never unlocked browser audio.
+       */
+      NativeSoundPlayer.shared.play(command)
     case .runProcess(let command):
       runProcess(command)
     case .syncGhosttyTerminalSettings(let command):

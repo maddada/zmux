@@ -517,21 +517,36 @@ final class BrowserOverlayController {
 enum BrowserOverlayRestoreReproLog {
   private static let logger = Logger(
     subsystem: "com.madda.zmux.host", category: "browser-overlay-repro")
+  private static let logDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = .current
+    return formatter
+  }()
+  private static var didCreateLogsDirectory = false
 
   /**
-   CDXC:BrowserOverlay 2026-04-26-09:16
+   CDXC:BrowserOverlay 2026-04-29-09:16
    The browser restore issue needs a dedicated native trace because the
    failure depends on AppKit activation order, sidebar focus, and whether the
    tracked Canary window was actually shown when zmux was tucked. Keep these
-   traces in a separate file so a repro can be inspected without general logs.
+   traces behind debugging mode so normal browser attachment does not write
+   non-error logs.
    */
   static func append(_ event: String, _ details: [String: Any] = [:]) {
+    guard NativeDebugLogging.isEnabled else {
+      return
+    }
     let logsDirectory = ZmuxAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("browser-overlay-restore-repro.log")
     let line = "[\(timestamp())] \(event) \(serialize(details))\n"
 
     do {
-      try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+      if !didCreateLogsDirectory {
+        try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+        didCreateLogsDirectory = true
+      }
       if FileManager.default.fileExists(atPath: logURL.path) {
         let handle = try FileHandle(forWritingTo: logURL)
         try handle.seekToEnd()
@@ -549,11 +564,7 @@ enum BrowserOverlayRestoreReproLog {
   }
 
   private static func timestamp() -> String {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = .current
-    return formatter.string(from: Date())
+    logDateFormatter.string(from: Date())
   }
 
   private static func serialize(_ value: Any) -> String {

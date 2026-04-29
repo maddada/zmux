@@ -80,6 +80,12 @@ fi
 
 mkdir -p "$WEB_DIR"
 cp "$REPO_ROOT/native/sidebar/index.html" "$WEB_DIR/index.html"
+rm -rf "$WEB_DIR/sounds"
+mkdir -p "$WEB_DIR/sounds"
+# CDXC:NativeSound 2026-04-29-16:30: Bundle completion sound assets beside
+# the native Web resources so AVFoundation playback works from installed apps
+# without relying on repository-relative media paths.
+cp "$REPO_ROOT"/media/sounds/*.mp3 "$WEB_DIR/sounds/"
 # CDXC:NativeSidebarBuild 2026-04-27-09:32
 # The native sidebar is loaded by WKWebView as a classic script, while
 # Storybook imports some sidebar components as ES modules. Force the packaged

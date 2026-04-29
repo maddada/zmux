@@ -19,6 +19,7 @@ enum HostCommand: Decodable {
   case appendSessionTitleDebugLog(AppendSessionTitleDebugLog)
   case appendWorkspaceDockIndicatorDebugLog(AppendWorkspaceDockIndicatorDebugLog)
   case persistSharedSidebarStorage(PersistSharedSidebarStorage)
+  case playSound(PlaySound)
   case runProcess(RunProcess)
   case syncGhosttyTerminalSettings(SyncGhosttyTerminalSettings)
   case openExternalUrl(OpenExternalUrl)
@@ -52,6 +53,7 @@ enum HostCommand: Decodable {
     case appendSessionTitleDebugLog
     case appendWorkspaceDockIndicatorDebugLog
     case persistSharedSidebarStorage
+    case playSound
     case runProcess
     case syncGhosttyTerminalSettings
     case openExternalUrl
@@ -103,6 +105,8 @@ enum HostCommand: Decodable {
         try AppendWorkspaceDockIndicatorDebugLog(from: decoder))
     case .persistSharedSidebarStorage:
       self = .persistSharedSidebarStorage(try PersistSharedSidebarStorage(from: decoder))
+    case .playSound:
+      self = .playSound(try PlaySound(from: decoder))
     case .runProcess:
       self = .runProcess(try RunProcess(from: decoder))
     case .syncGhosttyTerminalSettings:
@@ -205,6 +209,11 @@ struct PersistSharedSidebarStorage: Decodable {
   let payloadJson: String
 }
 
+struct PlaySound: Decodable {
+  let fileName: String
+  let volume: Double?
+}
+
 enum MessageLevel: String, Decodable {
   case info
   case warning
@@ -226,6 +235,9 @@ struct SyncGhosttyTerminalSettings: Decodable {
   let fontSize: Double
   let fontThicken: Bool
   let fontThickenStrength: Int
+  let mouseScrollMultiplierDiscrete: Double
+  let mouseScrollMultiplierPrecision: Double
+  let reloadImmediately: Bool?
 }
 
 struct OpenExternalUrl: Decodable {

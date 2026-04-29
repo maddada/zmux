@@ -30,6 +30,7 @@ import {
 import {
   acknowledgeTitleDerivedSessionActivity,
   getTitleDerivedSessionActivityFromTransition,
+  haveSameTitleDerivedSessionActivity,
   type TitleDerivedSessionActivity,
 } from "../../extension/session-title-activity";
 import {
@@ -139,6 +140,10 @@ import {
   type ZedOverlayTargetApp,
   type zmuxSettings,
 } from "../../shared/zmux-settings";
+import {
+  getCompletionSoundFileName,
+  type CompletionSoundSetting,
+} from "../../shared/completion-sound";
 import { getzmuxHotkeyActionById, type zmuxHotkeyActionId } from "../../shared/zmux-hotkeys";
 import { getGhosttyTerminalConfigValues } from "../../shared/ghostty-terminal-settings";
 import "../../sidebar/styles.css";
@@ -182,6 +187,7 @@ type NativeHostCommand =
       payloadJson: string;
       type: "persistSharedSidebarStorage";
     }
+  | { fileName: string; type: "playSound"; volume?: number }
   | {
       args: string[];
       cwd?: string;
@@ -197,6 +203,9 @@ type NativeHostCommand =
       fontSize: number;
       fontThicken: boolean;
       fontThickenStrength: number;
+      mouseScrollMultiplierDiscrete: number;
+      mouseScrollMultiplierPrecision: number;
+      reloadImmediately?: boolean;
       type: "syncGhosttyTerminalSettings";
     }
   | { type: "openExternalUrl"; url: string }
@@ -718,6 +727,9 @@ document.addEventListener(
  * modifier/prefix candidates so normal typing does not flood native logs.
  */
 function logNativeHotkeyDebug(event: string, details: Record<string, unknown>): void {
+  if (!isNativeSidebarDebugLoggingEnabled()) {
+    return;
+  }
   console.debug("[zmux-native-hotkeys]", event, details);
   appendTerminalFocusDebugLog(event, details);
 }
@@ -743,6 +755,9 @@ function showNativeMessage(level: "info" | "warning" | "error", message: string)
 }
 
 function appendSessionTitleDebugLog(event: string, details?: unknown): void {
+  if (!isNativeSidebarDebugLoggingEnabled()) {
+    return;
+  }
   postNative({
     details: details === undefined ? undefined : safeSerializeForNativeLog(details),
     event,
@@ -752,12 +767,14 @@ function appendSessionTitleDebugLog(event: string, details?: unknown): void {
 
 function appendAgentDetectionDebugLog(event: string, details?: unknown): void {
   /**
-   * CDXC:AgentDetection 2026-04-26-11:14
-   * Agent icons can disappear at several boundaries: Ghostty title events,
-   * title-derived agent detection, terminal state storage, or sidebar card
-   * projection. Keep this issue isolated in its own log file so repro traces
-   * identify the first boundary that loses the agent.
+   * CDXC:AgentDetection 2026-04-29-09:16
+   * Non-error native sidebar diagnostics must follow the settings debug switch,
+   * and high-frequency title/projection traces are intentionally not emitted so
+   * spinner-driven status updates do not create multi-GB log files.
    */
+  if (!isNativeSidebarDebugLoggingEnabled()) {
+    return;
+  }
   postNative({
     details: details === undefined ? undefined : safeSerializeForNativeLog(details),
     event,
@@ -767,11 +784,14 @@ function appendAgentDetectionDebugLog(event: string, details?: unknown): void {
 
 function appendTerminalFocusDebugLog(event: string, details?: unknown): void {
   /**
-   * CDXC:NativeTerminalFocus 2026-04-26-21:32
+   * CDXC:NativeTerminalFocus 2026-04-29-09:16
    * Native sidebar actions can focus terminals directly or indirectly through
    * layout sync. Mirror those actions into the focus-only log so split-terminal
-   * focus jumps can be traced from sidebar state to AppKit first responder.
+   * focus jumps can be traced only when debugging mode is enabled.
    */
+  if (!isNativeSidebarDebugLoggingEnabled()) {
+    return;
+  }
   window.webkit?.messageHandlers?.zmuxNativeHost?.postMessage({
     details: details === undefined ? undefined : safeSerializeForNativeLog(details),
     event,
@@ -780,6 +800,9 @@ function appendTerminalFocusDebugLog(event: string, details?: unknown): void {
 }
 
 function appendRestoreDebugLog(event: string, details?: unknown): void {
+  if (!isNativeSidebarDebugLoggingEnabled()) {
+    return;
+  }
   postNative({
     details: details === undefined ? undefined : safeSerializeForNativeLog(details),
     event,
@@ -788,11 +811,18 @@ function appendRestoreDebugLog(event: string, details?: unknown): void {
 }
 
 function appendWorkspaceDockIndicatorDebugLog(event: string, details?: unknown): void {
+  if (!isNativeSidebarDebugLoggingEnabled()) {
+    return;
+  }
   postNative({
     details: details === undefined ? undefined : safeSerializeForNativeLog(details),
     event,
     type: "appendWorkspaceDockIndicatorDebugLog",
   });
+}
+
+function isNativeSidebarDebugLoggingEnabled(): boolean {
+  return settings.debuggingMode;
 }
 
 function isTerminalFocusDebugCommand(command: NativeHostCommand): boolean {
@@ -1018,25 +1048,41 @@ function readStoredSettings(): zmuxSettings {
 }
 
 function saveSettings(nextSettings: zmuxSettings): void {
+  const previousSettings = settings;
   settings = normalizezmuxSettings(nextSettings);
   if (!settings.zedOverlayEnabled || !settings.syncOpenProjectWithZed) {
     clearPendingZedProjectSync();
   }
   persistSharedSettingsSnapshot(settings);
-  syncGhosttyTerminalSettings(settings);
+  syncGhosttyTerminalSettings(settings, previousSettings);
   postZedOverlaySettings();
   publish();
+  previewNativeSoundSettingChange(previousSettings, settings);
 }
 
-function syncGhosttyTerminalSettings(nextSettings: zmuxSettings): void {
+function syncGhosttyTerminalSettings(
+  nextSettings: zmuxSettings,
+  previousSettings?: zmuxSettings,
+): void {
   /**
    * CDXC:TerminalSettings 2026-04-26-19:02
    * Native zmux settings are stored in sidebar localStorage, so terminal
    * typography must also be posted to AppDelegate to update the shared Ghostty
    * config file used by external Ghostty windows.
+   *
+   * CDXC:TerminalScrollSettings 2026-04-29-08:56
+   * Scroll multipliers must be testable as soon as the slider settles. Reload
+   * Ghostty immediately for scroll-only changes instead of waiting for the
+   * delayed font-metric reload path used during typography drags.
    */
   postNative({
     ...getGhosttyTerminalConfigValues(nextSettings),
+    reloadImmediately:
+      previousSettings !== undefined &&
+      (previousSettings.terminalMouseScrollMultiplierDiscrete !==
+        nextSettings.terminalMouseScrollMultiplierDiscrete ||
+        previousSettings.terminalMouseScrollMultiplierPrecision !==
+          nextSettings.terminalMouseScrollMultiplierPrecision),
     type: "syncGhosttyTerminalSettings",
   });
 }
@@ -1060,6 +1106,53 @@ function persistSharedSettingsSnapshot(nextSettings: zmuxSettings): void {
   const payloadJson = JSON.stringify(nextSettings);
   localStorage.setItem(SETTINGS_STORAGE_KEY, payloadJson);
   postNative({ key: "settings", payloadJson, type: "persistSharedSidebarStorage" });
+}
+
+function playNativeSound(sound: CompletionSoundSetting, volume = 0.5): void {
+  postNative({
+    fileName: getCompletionSoundFileName(sound),
+    type: "playSound",
+    volume,
+  });
+}
+
+function playNativeSessionCompletionSound(sessionId: string, source: string): void {
+  /**
+   * CDXC:NativeSound 2026-04-29-16:30
+   * Session completion sounds follow the completion bell setting and play when
+   * a terminal first enters attention/done state. Native playback uses the
+   * configured completion sound instead of the sidebar webview audio path.
+   */
+  if (!settings.completionBellEnabled) {
+    return;
+  }
+
+  appendAgentDetectionDebugLog("nativeSidebar.completionSound.session", {
+    sessionId,
+    sound: settings.completionSound,
+    source,
+  });
+  playNativeSound(settings.completionSound);
+}
+
+function previewNativeSoundSettingChange(
+  previousSettings: zmuxSettings,
+  nextSettings: zmuxSettings,
+): void {
+  /**
+   * CDXC:Settings 2026-04-29-16:30
+   * Sound picker changes should immediately preview the selected sound so
+   * users can choose completion and action alerts by ear without waiting for a
+   * terminal session or action to finish.
+   */
+  if (previousSettings.completionSound !== nextSettings.completionSound) {
+    playNativeSound(nextSettings.completionSound);
+    return;
+  }
+
+  if (previousSettings.actionCompletionSound !== nextSettings.actionCompletionSound) {
+    playNativeSound(nextSettings.actionCompletionSound);
+  }
 }
 
 function readStoredAgents(): StoredSidebarAgent[] {
@@ -2059,11 +2152,7 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
   }));
 }
 
-function createProjectedSidebarSessionsForGroup(
-  group: SessionGroupRecord,
-  options: { logProjectionDiagnostics?: boolean } = {},
-): SidebarSessionItem[] {
-  const logProjectionDiagnostics = options.logProjectionDiagnostics !== false;
+function createProjectedSidebarSessionsForGroup(group: SessionGroupRecord): SidebarSessionItem[] {
   return createSidebarSessionItems(group.snapshot, "mac").map((session) => {
     const sessionRecord = group.snapshot.sessions.find(
       (candidate) => candidate.sessionId === session.sessionId,
@@ -2103,41 +2192,6 @@ function createProjectedSidebarSessionsForGroup(
       : displayPrimaryTitle
         ? visibleTerminalTitle
         : undefined;
-    if (logProjectionDiagnostics) {
-      appendSessionTitleDebugLog("nativeSidebar.sidebarTitleProjection", {
-        agentIcon,
-        primaryTitle,
-        rawTerminalTitle: terminalState?.terminalTitle,
-        reason: getNativeSidebarTitleProjectionReason({
-          hasTerminalState: Boolean(terminalState),
-          shouldPreferTerminalTitle,
-          visiblePrimaryTitle,
-          visibleTerminalTitle,
-        }),
-        sessionId: session.sessionId,
-        terminalTitle: secondaryTerminalTitle,
-        visiblePrimaryTitle,
-        visibleTerminalTitle,
-      });
-      appendAgentDetectionDebugLog("nativeSidebar.sidebarCardProjection", {
-        agentIcon,
-        agentName: projectedAgentName,
-        hasTerminalState: Boolean(terminalState),
-        lifecycleState: terminalState?.lifecycleState,
-        persistedAgentName,
-        rawTerminalTitle: terminalState?.terminalTitle,
-        sessionActivity: session.activity,
-        sessionId: session.sessionId,
-        terminalActivity: terminalState?.activity,
-        titleProjectionReason: getNativeSidebarTitleProjectionReason({
-          hasTerminalState: Boolean(terminalState),
-          shouldPreferTerminalTitle,
-          visiblePrimaryTitle,
-          visibleTerminalTitle,
-        }),
-        visibleTerminalTitle,
-      });
-    }
     return {
       ...session,
       activity: terminalState?.activity ?? session.activity,
@@ -2275,31 +2329,6 @@ function buildSidebarMessage(): SidebarHydrateMessage {
   };
 }
 
-function getNativeSidebarTitleProjectionReason(args: {
-  hasTerminalState: boolean;
-  shouldPreferTerminalTitle: boolean;
-  visiblePrimaryTitle: string | undefined;
-  visibleTerminalTitle: string | undefined;
-}): string {
-  if (!args.hasTerminalState) {
-    return "terminal-state-missing";
-  }
-
-  if (!args.visibleTerminalTitle) {
-    return "terminal-title-empty-or-filtered";
-  }
-
-  if (args.shouldPreferTerminalTitle) {
-    return "agent-terminal-title-promoted-to-primary";
-  }
-
-  if (args.visiblePrimaryTitle) {
-    return "terminal-title-visible-as-secondary";
-  }
-
-  return "terminal-title-used-because-primary-title-missing";
-}
-
 function createAgentManagerXWorkspaceSnapshots(): AgentManagerXWorkspaceSnapshotMessage[] {
   const updatedAt = new Date().toISOString();
   return projects.map((project) => {
@@ -2405,12 +2434,12 @@ function publish(): void {
 }
 
 function ensureVisibleNativeTerminals(reason: string): void {
-  const decisions: unknown[] = [];
   /**
-   * CDXC:SessionRestore 2026-04-27-09:12
+   * CDXC:SessionRestore 2026-04-29-09:16
    * Native zmux only recreates terminal processes for sessions that are actually
    * on screen: the active workspace, active group, and current visible card set.
-   * Hidden terminals remain sleeping until focus/wake asks for their resume.
+   * Hidden terminals remain sleeping until focus/wake asks for their resume;
+   * this hot publish path must not emit per-session diagnostics.
    */
   for (const project of projects) {
     for (const group of project.workspace.groups) {
@@ -2421,63 +2450,18 @@ function ensureVisibleNativeTerminals(reason: string): void {
           group.groupId === project.workspace.activeGroupId &&
           visibleIds.has(session.sessionId);
         if (session.kind !== "terminal" || session.isSleeping === true) {
-          decisions.push({
-            groupId: group.groupId,
-            isSleeping: session.isSleeping === true,
-            isVisible: isVisibleOnScreen,
-            kind: session.kind,
-            persistedAgentName: session.kind === "terminal" ? session.agentName : undefined,
-            projectId: project.projectId,
-            reason: session.kind !== "terminal" ? "non-terminal" : "sleeping",
-            sessionId: session.sessionId,
-            title: session.title,
-          });
           continue;
         }
         if (!isVisibleOnScreen) {
-          decisions.push({
-            groupId: group.groupId,
-            isSleeping: false,
-            isVisible: false,
-            persistedAgentName: session.agentName,
-            projectId: project.projectId,
-            reason: "hidden-session-left-sleeping",
-            sessionId: session.sessionId,
-            title: session.title,
-          });
           continue;
         }
         if (terminalStateById.has(session.sessionId)) {
-          decisions.push({
-            groupId: group.groupId,
-            isVisible: true,
-            persistedAgentName: session.agentName,
-            projectId: project.projectId,
-            reason: "already-has-terminal-state",
-            sessionId: session.sessionId,
-            title: session.title,
-          });
           continue;
         }
         restoreNativeTerminalSession(project, session, reason);
-        decisions.push({
-          groupId: group.groupId,
-          isVisible: true,
-          persistedAgentName: session.agentName,
-          projectId: project.projectId,
-          reason: "restored-native-terminal",
-          sessionId: session.sessionId,
-          title: session.title,
-        });
       }
     }
   }
-  appendRestoreDebugLog("nativeSidebar.ensureVisibleNativeTerminals", {
-    activeProjectId,
-    decisions,
-    projects: projects.map(summarizeNativeProject),
-    reason,
-  });
 }
 
 function restoreNativeTerminalSession(
@@ -2535,7 +2519,13 @@ function restoreNativeTerminalSession(
 }
 
 function createWorkspaceBarState(): WorkspaceBarStateMessage {
-  const workspaceBarState: WorkspaceBarStateMessage = {
+  /**
+   * CDXC:WorkspaceDock 2026-04-29-09:16
+   * Workspace dock badges are recomputed on every sidebar publish. Keep that
+   * state path silent by default so routine spinner/status updates do not write
+   * dock snapshots continuously.
+   */
+  return {
     activeProjectId,
     projects: projects.map((project) => ({
       icon: project.icon ?? normalizeLegacyWorkspaceDockIcon(project),
@@ -2549,12 +2539,6 @@ function createWorkspaceBarState(): WorkspaceBarStateMessage {
     })),
     type: "workspaceBarState",
   };
-  appendWorkspaceDockIndicatorDebugLog("nativeSidebar.workspaceBarState", {
-    activeProjectId,
-    projects: workspaceBarState.projects,
-    sourceProjects: projects.map((project) => summarizeWorkspaceBarIndicatorProject(project)),
-  });
-  return workspaceBarState;
 }
 
 function countWorkspaceBarSessions(project: NativeProject): WorkspaceBarProject["sessionCounts"] {
@@ -2594,58 +2578,6 @@ function countWorkspaceBarSessions(project: NativeProject): WorkspaceBarProject[
     }
   }
   return counts;
-}
-
-function summarizeWorkspaceBarIndicatorProject(project: NativeProject) {
-  return {
-    name: project.name,
-    path: project.path,
-    projectId: project.projectId,
-    groups: project.workspace.groups.map((group) => ({
-      groupId: group.groupId,
-      sessions: group.snapshot.sessions.map((session) => ({
-        countedAs: getWorkspaceBarIndicatorDecision(
-          session.isSleeping === true,
-          session.kind,
-          terminalStateById.get(session.sessionId)?.activity,
-          terminalStateById.get(session.sessionId)?.lifecycleState,
-        ),
-        activity: terminalStateById.get(session.sessionId)?.activity,
-        kind: session.kind,
-        lifecycleState: terminalStateById.get(session.sessionId)?.lifecycleState,
-        sessionId: session.sessionId,
-        sleeping: session.isSleeping === true,
-        title: session.title,
-      })),
-    })),
-  };
-}
-
-function getWorkspaceBarIndicatorDecision(
-  isSleeping: boolean,
-  kind: string,
-  activity: string | undefined,
-  lifecycleState: string | undefined,
-): "done" | "ignored-error" | "ignored-sleeping" | "running" | "working" {
-  if (isSleeping) {
-    return "ignored-sleeping";
-  }
-  if (kind === "browser") {
-    return "running";
-  }
-  if (kind === "t3") {
-    return "done";
-  }
-  if (lifecycleState === "running" && activity === "working") {
-    return "working";
-  }
-  if (lifecycleState === "running") {
-    return "running";
-  }
-  if (lifecycleState === "error") {
-    return "ignored-error";
-  }
-  return "done";
 }
 
 function postWorkspaceBarState(): void {
@@ -4146,9 +4078,7 @@ function focusAdjacentNativeHotkeySession(direction: -1 | 1): void {
 
 function getVisualNativeHotkeySessionsForActiveGroup(): SidebarSessionItem[] {
   const group = activeWorkspaceGroup();
-  const projectedSessions = createProjectedSidebarSessionsForGroup(group, {
-    logProjectionDiagnostics: false,
-  });
+  const projectedSessions = createProjectedSidebarSessionsForGroup(group);
   const sessionsById = Object.fromEntries(
     projectedSessions.map((session) => [session.sessionId, session]),
   );
@@ -4648,11 +4578,17 @@ function clearNativeSidebarCommandRunState(commandId: string): void {
 }
 
 function playNativeSidebarActionCompletionSound(sessionId?: string): void {
-  sidebarBus.post({
+  /**
+   * CDXC:NativeActions 2026-04-29-16:30
+   * Terminal action completion sounds are per-command feedback and use the
+   * action completion sound, independent of the global session completion
+   * bell toggle.
+   */
+  appendAgentDetectionDebugLog("nativeSidebar.completionSound.action", {
     sessionId,
-    sound: settings.completionSound,
-    type: "playCompletionSound",
+    sound: settings.actionCompletionSound,
   });
+  playNativeSound(settings.actionCompletionSound);
 }
 
 function setNativeSidebarCommandSession(
@@ -5784,6 +5720,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       openNativeExternalUrl(message.url);
       return;
     case "sidebarDebugLog":
+      if (!isNativeSidebarDebugLoggingEnabled()) {
+        return;
+      }
       if (message.event.startsWith("sidebar.agentIcon.")) {
         appendAgentDetectionDebugLog(message.event, message.details);
       }
@@ -5995,8 +5934,10 @@ window.addEventListener("zmux-native-host-event", (event) => {
     return;
   }
   if (hostEvent.type === "terminalTitleChanged") {
+    const previousActivity = terminalState.activity;
     const previousTerminalTitle = terminalState.terminalTitle;
     const knownAgentNameBeforeDetection = terminalState.agentName;
+    const previousVisibleTerminalTitle = getVisibleTerminalTitle(previousTerminalTitle);
     const previousDerivedActivity = titleDerivedActivityBySessionId.get(sidebarSessionId);
     const nextDerivedActivity = getTitleDerivedSessionActivityFromTransition(
       previousTerminalTitle,
@@ -6020,35 +5961,32 @@ window.addEventListener("zmux-native-host-event", (event) => {
       terminalState.agentName = effectiveDerivedActivity.agentName;
       terminalState.activity = effectiveDerivedActivity.activity;
       setTerminalSessionAgentName(sidebarSessionId, effectiveDerivedActivity.agentName);
+      if (previousActivity !== "attention" && terminalState.activity === "attention") {
+        playNativeSessionCompletionSound(sidebarSessionId, "terminal-title");
+      }
     } else {
       titleDerivedActivityBySessionId.delete(sidebarSessionId);
     }
-    appendAgentDetectionDebugLog("nativeSidebar.terminalTitleDetection", {
-      knownAgentNameAfterDetection: terminalState.agentName,
-      knownAgentNameBeforeDetection,
-      nativeSessionId: hostEvent.sessionId,
-      effectiveDerivedActivity,
-      nextDerivedActivity,
-      previousDerivedActivity,
-      previousTerminalTitle,
-      sessionId: sidebarSessionId,
-      title: hostEvent.title,
-      titleDerivedActivityStored: titleDerivedActivityBySessionId.has(sidebarSessionId),
-    });
-    appendSessionTitleDebugLog("terminalRenameCommand.notSent", {
-      detectedAgentName: effectiveDerivedActivity?.agentName,
-      detectedAgentStatus: effectiveDerivedActivity?.activity,
-      nativeSessionId: hostEvent.sessionId,
-      previousTerminalTitle,
-      reason: "native-title-event-is-source-of-truth",
-      sessionId: sidebarSessionId,
-      title: hostEvent.title,
-    });
     syncSessionTitleFromNativeTerminalTitle(
       sidebarSessionId,
       hostEvent.title,
       previousTerminalTitle,
     );
+    /**
+     * CDXC:AgentDetection 2026-04-29-09:16
+     * Codex/Claude spinner glyphs can change terminal titles many times per
+     * second. Preserve the title-derived activity state above, but skip sidebar
+     * publishes when only the spinner glyph changed and the visible title/status
+     * stayed equivalent.
+     */
+    if (
+      previousVisibleTerminalTitle === getVisibleTerminalTitle(hostEvent.title) &&
+      previousActivity === terminalState.activity &&
+      knownAgentNameBeforeDetection === terminalState.agentName &&
+      haveSameTitleDerivedSessionActivity(previousDerivedActivity, effectiveDerivedActivity)
+    ) {
+      return;
+    }
   } else if (hostEvent.type === "terminalTitleBarAction") {
     handleNativeTerminalTitleBarAction(sidebarSessionId, hostEvent.action);
     return;
@@ -6075,7 +6013,11 @@ window.addEventListener("zmux-native-host-event", (event) => {
       });
       return;
     }
+    const previousActivity = terminalState.activity;
     terminalState.activity = "attention";
+    if (previousActivity !== "attention") {
+      playNativeSessionCompletionSound(sidebarSessionId, "terminal-bell");
+    }
   } else if (hostEvent.type === "terminalReady") {
     terminalState.lifecycleState = "running";
   } else if (hostEvent.type === "terminalFocused") {

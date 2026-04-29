@@ -56,6 +56,10 @@ enum ZmuxAppStorage {
     diagnosticsRootDirectory.appendingPathComponent("logs", isDirectory: true)
   }
 
+  static var sharedSidebarSettingsURL: URL {
+    sharedStateDirectory.appendingPathComponent("native-sidebar-settings.json")
+  }
+
   static func readSharedSidebarStorage() -> [String: String] {
     sharedSidebarStorageFiles.reduce(into: [String: String]()) { result, entry in
       let key = entry.key
@@ -277,5 +281,23 @@ enum ZmuxAppStorage {
       index = nextIndex
     }
     return data
+  }
+}
+
+enum NativeDebugLogging {
+  /**
+   CDXC:Diagnostics 2026-04-29-09:16
+   Non-error native diagnostics must honor the sidebar Settings debug switch so
+   routine title, focus, restore, and workspace updates cannot create persistent
+   memory and disk pressure when debugging UI is disabled.
+   */
+  static var isEnabled: Bool {
+    guard let data = try? Data(contentsOf: ZmuxAppStorage.sharedSidebarSettingsURL),
+      let object = try? JSONSerialization.jsonObject(with: data),
+      let settings = object as? [String: Any]
+    else {
+      return false
+    }
+    return settings["debuggingMode"] as? Bool ?? false
   }
 }
