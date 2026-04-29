@@ -129,6 +129,19 @@ final class TerminalWorkspaceView: NSView {
         searchBarView?.setSearchState(searchState)
       }
       .store(in: &session.cancellables)
+    surfaceView.$cellSize
+      .removeDuplicates()
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        /**
+         CDXC:NativeTerminalResize 2026-04-29-07:29
+         Cell-stepped embedded terminal layout depends on Ghostty's measured
+         cell size. Relayout when the initial measurement arrives or font
+         settings change so pane geometry stays aligned to terminal columns.
+         */
+        self?.needsLayout = true
+      }
+      .store(in: &session.cancellables)
 
     sessions[command.sessionId] = session
     activeSessionIds.insert(command.sessionId)
@@ -537,17 +550,17 @@ final class TerminalWorkspaceView: NSView {
       width: rect.width,
       height: titleBarHeight
     )
-    let terminalRect = CGRect(
+    let availableTerminalRect = CGRect(
       x: rect.minX,
       y: rect.minY,
       width: rect.width,
       height: max(rect.height - titleBarHeight, 1)
     )
+    let terminalRect = steppedTerminalRect(availableTerminalRect, for: session.view)
     session.titleBarView.frame = titleBarRect
     session.titleBarView.needsLayout = true
     session.titleBarView.layoutSubtreeIfNeeded()
     session.scrollView.frame = terminalRect
-    session.view.sizeDidChange(terminalRect.size)
     session.scrollView.needsLayout = true
     session.scrollView.layoutSubtreeIfNeeded()
     session.searchBarView.frame = searchBarFrame(in: terminalRect)
@@ -556,8 +569,52 @@ final class TerminalWorkspaceView: NSView {
       session: session,
       paneRect: rect,
       titleBarRect: titleBarRect,
+      availableTerminalRect: availableTerminalRect,
       terminalRect: terminalRect)
     updateTerminalBorder(for: sessionId)
+  }
+
+  private func steppedTerminalRect(_ rect: CGRect, for surfaceView: Ghostty.SurfaceView) -> CGRect {
+    /**
+     CDXC:NativeTerminalResize 2026-04-29-08:00
+     Embedded Ghostty panes should resize like Ghostty windows with
+     `window-step-resize`: terminal content advances in whole character-cell
+     increments, but Ghostty subtracts effective terminal padding before
+     computing PTY rows and columns. Step the whole surface to
+     `padding + N * cellSize` so TUIs such as Claude Code receive the same
+     grid size that a real Ghostty window would report during resize.
+     */
+    let cellSize = surfaceView.cellSize
+    guard cellSize.width > 0, cellSize.height > 0, let surface = surfaceView.surface else {
+      return rect
+    }
+    let padding = ghostty_surface_padding(surface)
+    let totalPadding = surfaceView.convertFromBacking(
+      NSSize(
+        width: Double(padding.left_px + padding.right_px),
+        height: Double(padding.top_px + padding.bottom_px)))
+    let steppedWidth = steppedTerminalLength(
+      available: rect.width,
+      cell: cellSize.width,
+      padding: totalPadding.width)
+    let steppedHeight = steppedTerminalLength(
+      available: rect.height,
+      cell: cellSize.height,
+      padding: totalPadding.height)
+    return CGRect(
+      x: rect.minX,
+      y: rect.maxY - steppedHeight,
+      width: min(steppedWidth, rect.width),
+      height: min(steppedHeight, rect.height)
+    )
+  }
+
+  private func steppedTerminalLength(available: CGFloat, cell: CGFloat, padding: CGFloat) -> CGFloat {
+    guard available > 1, cell > 0, padding >= 0, available > padding else {
+      return max(available, 1)
+    }
+    let cells = max(floor((available - padding) / cell), 1)
+    return max(min(padding + cells * cell, available), 1)
   }
 
   private func searchBarFrame(in terminalRect: CGRect) -> CGRect {
@@ -575,6 +632,7 @@ final class TerminalWorkspaceView: NSView {
     session: TerminalSession,
     paneRect: CGRect,
     titleBarRect: CGRect,
+    availableTerminalRect: CGRect,
     terminalRect: CGRect
   ) {
     /**
@@ -585,12 +643,45 @@ final class TerminalWorkspaceView: NSView {
      be compared without flooding the app log during no-op layout passes.
      */
     let nestedScrollView = firstNestedScrollView(in: session.scrollView)
-    let surfaceSize = session.view.surfaceSize
+    let publishedSurfaceSize = session.view.surfaceSize
+    let surfaceSize = session.view.surface.map { ghostty_surface_size($0) } ?? publishedSurfaceSize
+    let surfacePadding = session.view.surface.map { ghostty_surface_padding($0) }
     let cellSize = session.view.cellSize
     let estimatedColumns =
       cellSize.width > 0 ? Int(floor(terminalRect.width / cellSize.width)) : nil
     let estimatedRows =
       cellSize.height > 0 ? Int(floor(terminalRect.height / cellSize.height)) : nil
+    /**
+     CDXC:NativeTerminalResize 2026-04-29-07:50
+     Claude Code/Ink rerenders from the PTY rows and columns that Ghostty
+     reports after subtracting terminal padding. Log synchronous core size,
+     published AppKit size, backing-pixel metrics, actual Ghostty padding, and
+     residual non-grid space so resize bugs can distinguish stale Swift state
+     from Ghostty grid math.
+     */
+    let coreSurfaceSize = surfaceSize.map { size in
+      session.view.convertFromBacking(
+        NSSize(width: Double(size.width_px), height: Double(size.height_px)))
+    }
+    let inferredHorizontalPaddingPx = surfaceSize.map {
+      Int($0.width_px) - Int($0.columns) * Int($0.cell_width_px)
+    }
+    let inferredVerticalPaddingPx = surfaceSize.map {
+      Int($0.height_px) - Int($0.rows) * Int($0.cell_height_px)
+    }
+    let inferredPadding = inferredPaddingPoints(
+      view: session.view,
+      horizontalPx: inferredHorizontalPaddingPx,
+      verticalPx: inferredVerticalPaddingPx)
+    let actualPadding = actualPaddingPoints(view: session.view, padding: surfacePadding)
+    let paddingAwareEstimatedColumns = paddingAwareEstimatedCellCount(
+      available: terminalRect.width,
+      padding: actualPadding?.width,
+      cell: cellSize.width)
+    let paddingAwareEstimatedRows = paddingAwareEstimatedCellCount(
+      available: terminalRect.height,
+      padding: actualPadding?.height,
+      cell: cellSize.height)
     let signature = [
       roundedSignature(paneRect.size.width),
       roundedSignature(paneRect.size.height),
@@ -604,6 +695,10 @@ final class TerminalWorkspaceView: NSView {
       String(surfaceSize?.rows ?? 0),
       String(estimatedColumns ?? 0),
       String(estimatedRows ?? 0),
+      String(paddingAwareEstimatedColumns ?? 0),
+      String(paddingAwareEstimatedRows ?? 0),
+      String(surfaceSize?.width_px ?? 0),
+      String(surfaceSize?.height_px ?? 0),
     ].joined(separator: "x")
     if resizeLogSignatureBySessionId[session.sessionId] == signature {
       return
@@ -613,9 +708,38 @@ final class TerminalWorkspaceView: NSView {
       event: "nativeWorkspace.terminalResize",
       details: [
         "cellSize": describeSize(cellSize),
+        "coreSurfaceSizeLogical": coreSurfaceSize.map { describeSize($0) } ?? NSNull(),
+        "coreSurfaceSizePixels": surfaceSize.map {
+          ["height": Int($0.height_px), "width": Int($0.width_px)]
+        } ?? NSNull(),
+        "coreSurfaceCellSizePixels": surfaceSize.map {
+          ["height": Int($0.cell_height_px), "width": Int($0.cell_width_px)]
+        } ?? NSNull(),
+        "coreSurfaceGridSizePixels": surfaceSize.map {
+          [
+            "height": Int($0.rows) * Int($0.cell_height_px),
+            "width": Int($0.columns) * Int($0.cell_width_px),
+          ]
+        } ?? NSNull(),
         "estimatedColumns": nullableInt(estimatedColumns),
         "estimatedRows": nullableInt(estimatedRows),
         "focusedSessionId": nullableString(focusedSessionId),
+        "inferredPaddingPixels": inferredHorizontalPaddingPx.map { horizontal in
+          [
+            "horizontal": horizontal,
+            "vertical": inferredVerticalPaddingPx ?? 0,
+          ]
+        } ?? NSNull(),
+        "inferredPaddingPoints": inferredPadding.map { describeSize($0) } ?? NSNull(),
+        "surfacePaddingPixels": surfacePadding.map {
+          [
+            "bottom": Int($0.bottom_px),
+            "left": Int($0.left_px),
+            "right": Int($0.right_px),
+            "top": Int($0.top_px),
+          ]
+        } ?? NSNull(),
+        "surfacePaddingPoints": actualPadding.map { describeSize($0) } ?? NSNull(),
         "nestedScrollContentSize": nestedScrollView.map { describeSize($0.contentSize) }
           ?? NSNull(),
         "nestedScrollDocumentVisibleRect": nestedScrollView.map {
@@ -623,6 +747,11 @@ final class TerminalWorkspaceView: NSView {
         } ?? NSNull(),
         "paneGap": Double(paneGap),
         "paneRect": describeFrame(paneRect),
+        "paddingAwareEstimatedColumns": nullableInt(paddingAwareEstimatedColumns),
+        "paddingAwareEstimatedRows": nullableInt(paddingAwareEstimatedRows),
+        "publishedSurfaceSizeColumns": publishedSurfaceSize.map { Int($0.columns) } ?? NSNull(),
+        "publishedSurfaceSizeRows": publishedSurfaceSize.map { Int($0.rows) } ?? NSNull(),
+        "rawTerminalRect": describeFrame(availableTerminalRect),
         "scrollViewBounds": describeFrame(session.scrollView.bounds),
         "scrollViewFrame": describeFrame(session.scrollView.frame),
         "sessionId": session.sessionId,
@@ -633,6 +762,42 @@ final class TerminalWorkspaceView: NSView {
         "titleBarRect": describeFrame(titleBarRect),
         "visibleSessionIds": orderedVisibleSessionIds(),
       ])
+  }
+
+  private func inferredPaddingPoints(
+    view: NSView,
+    horizontalPx: Int?,
+    verticalPx: Int?
+  ) -> NSSize? {
+    guard let horizontalPx, let verticalPx else {
+      return nil
+    }
+    let backingSize = NSSize(width: Double(horizontalPx), height: Double(verticalPx))
+    return view.convertFromBacking(backingSize)
+  }
+
+  private func actualPaddingPoints(
+    view: NSView,
+    padding: ghostty_surface_padding_s?
+  ) -> NSSize? {
+    guard let padding else {
+      return nil
+    }
+    let backingSize = NSSize(
+      width: Double(padding.left_px + padding.right_px),
+      height: Double(padding.top_px + padding.bottom_px))
+    return view.convertFromBacking(backingSize)
+  }
+
+  private func paddingAwareEstimatedCellCount(
+    available: CGFloat,
+    padding: CGFloat?,
+    cell: CGFloat
+  ) -> Int? {
+    guard let padding, cell > 0 else {
+      return nil
+    }
+    return Int(floor(max(available - padding, 0) / cell))
   }
 
   private func firstNestedScrollView(in view: NSView) -> NSScrollView? {
