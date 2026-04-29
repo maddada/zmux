@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import WebKit
 
 enum NativeT3CodePaneReproLog {
   private static let logger = Logger(
@@ -143,8 +144,10 @@ struct NativeT3RuntimeLaunch {
 }
 
 enum NativeT3RuntimeLauncher {
-  private static let host = "127.0.0.1"
-  private static let port = 3774
+  static let host = "127.0.0.1"
+  static let port = 3774
+  private static let bootstrapCredentialLock = NSLock()
+  private static var bootstrapCredential: String?
   private static let staleRuntimeShutdownTimeout: TimeInterval = 2.0
 
   /**
@@ -193,8 +196,9 @@ enum NativeT3RuntimeLauncher {
    preserve fd 3 reliably for the provider process.
    */
   static func createLaunch(cwd: String) throws -> NativeT3RuntimeLaunch {
-    let bootstrapURL = try writeBootstrapJsonFile()
-    let bootstrapPath = shellQuote(bootstrapURL.path)
+    let bootstrap = try writeBootstrapJsonFile()
+    rememberBootstrapCredential(bootstrap.credential)
+    let bootstrapPath = shellQuote(bootstrap.url.path)
     let t3ExecutablePath = try resolveT3ExecutablePath()
     let t3Executable = shellQuote(t3ExecutablePath)
     let process = Process()
@@ -215,6 +219,24 @@ enum NativeT3RuntimeLauncher {
     return NativeT3RuntimeLaunch(outputCapture: outputCapture, process: process)
   }
 
+  static func currentBootstrapCredential() -> String? {
+    bootstrapCredentialLock.lock()
+    defer { bootstrapCredentialLock.unlock() }
+    return bootstrapCredential
+  }
+
+  static func clearBootstrapCredential(_ credential: String) {
+    bootstrapCredentialLock.lock()
+    defer { bootstrapCredentialLock.unlock() }
+    if bootstrapCredential == credential {
+      bootstrapCredential = nil
+    }
+  }
+
+  static func isManagedRuntimeURL(_ url: URL) -> Bool {
+    url.host == host && url.port == port
+  }
+
   private static func createRuntimeEnvironment() -> [String: String] {
     var environment = ProcessInfo.processInfo.environment
     environment["T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"] = "false"
@@ -225,11 +247,12 @@ enum NativeT3RuntimeLauncher {
     return environment
   }
 
-  private static func writeBootstrapJsonFile() throws -> URL {
+  private static func writeBootstrapJsonFile() throws -> NativeT3BootstrapFile {
     try FileManager.default.createDirectory(
       at: t3HomeDirectory(), withIntermediateDirectories: true)
+    let credential = UUID().uuidString
     let payload: [String: Any] = [
-      "desktopBootstrapToken": UUID().uuidString,
+      "desktopBootstrapToken": credential,
       "host": host,
       "mode": "desktop",
       "noBrowser": true,
@@ -240,7 +263,16 @@ enum NativeT3RuntimeLauncher {
     let bootstrapURL = t3HomeDirectory().appendingPathComponent(
       "bootstrap-\(UUID().uuidString).json")
     try data.write(to: bootstrapURL, options: [.atomic])
-    return bootstrapURL
+    return NativeT3BootstrapFile(credential: credential, url: bootstrapURL)
+  }
+
+  private static func rememberBootstrapCredential(_ credential: String) {
+    bootstrapCredentialLock.lock()
+    bootstrapCredential = credential
+    bootstrapCredentialLock.unlock()
+    NativeT3CodePaneReproLog.append("nativeT3Runtime.bootstrapCredential.remembered", [
+      "credentialPresent": true
+    ])
   }
 
   private static func resolveT3ExecutablePath() throws -> String {
@@ -364,6 +396,189 @@ enum NativeT3RuntimeLauncher {
       }
       Thread.sleep(forTimeInterval: 0.1)
     }
+  }
+}
+
+private struct NativeT3BootstrapFile {
+  let credential: String
+  let url: URL
+}
+
+enum NativeT3RuntimeBrowserAuth {
+  private static let queue = DispatchQueue(label: "com.madda.zmux.t3-browser-auth")
+  private static var isAuthenticating = false
+  private static var pendingCompletions: [(sessionId: String, completion: () -> Void)] = []
+
+  /**
+   CDXC:T3Code 2026-04-30-03:47
+   Native T3 Code panes must render the already-owned desktop provider, not the
+   unauthenticated pairing shell. Before WKWebView loads the app, exchange the
+   desktop bootstrap credential for T3's browser-session cookie through the
+   provider's documented `/api/auth/bootstrap` endpoint. Serialize exchanges
+   because the desktop bootstrap credential is single-use.
+   */
+  static func prepareManagedWebSession(
+    for url: URL,
+    sessionId: String,
+    completion: @escaping () -> Void
+  ) {
+    guard NativeT3RuntimeLauncher.isManagedRuntimeURL(url) else {
+      DispatchQueue.main.async(execute: completion)
+      return
+    }
+
+    queue.async {
+      pendingCompletions.append((sessionId: sessionId, completion: completion))
+      guard !isAuthenticating else {
+        NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.queued", [
+          "pendingCount": pendingCompletions.count,
+          "sessionId": sessionId,
+        ])
+        return
+      }
+      isAuthenticating = true
+      checkSession(origin: url)
+    }
+  }
+
+  private static func checkSession(origin: URL) {
+    guard let sessionURL = endpointURL(origin: origin, path: "/api/auth/session") else {
+      finishPending(reason: "invalidSessionUrl")
+      return
+    }
+    var request = URLRequest(url: sessionURL)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    URLSession.shared.dataTask(with: request) { data, response, error in
+      let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+      let authenticated = parseAuthenticated(data)
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.session.response", [
+        "authenticated": authenticated ?? NSNull(),
+        "error": error?.localizedDescription ?? NSNull(),
+        "statusCode": statusCode,
+        "url": sessionURL.absoluteString,
+      ])
+
+      if authenticated == true {
+        finishPending(reason: "alreadyAuthenticated")
+        return
+      }
+      exchangeBootstrapCredential(origin: origin)
+    }.resume()
+  }
+
+  private static func exchangeBootstrapCredential(origin: URL) {
+    guard let credential = NativeT3RuntimeLauncher.currentBootstrapCredential() else {
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.bootstrap.missingCredential")
+      finishPending(reason: "missingCredential")
+      return
+    }
+    guard let bootstrapURL = endpointURL(origin: origin, path: "/api/auth/bootstrap") else {
+      finishPending(reason: "invalidBootstrapUrl")
+      return
+    }
+
+    var request = URLRequest(url: bootstrapURL)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try? JSONSerialization.data(withJSONObject: ["credential": credential])
+    NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.bootstrap.start", [
+      "credentialPresent": true,
+      "url": bootstrapURL.absoluteString,
+    ])
+    URLSession.shared.dataTask(with: request) { data, response, error in
+      guard let httpResponse = response as? HTTPURLResponse else {
+        NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.bootstrap.noResponse", [
+          "error": error?.localizedDescription ?? NSNull(),
+          "url": bootstrapURL.absoluteString,
+        ])
+        finishPending(reason: "bootstrapNoResponse")
+        return
+      }
+
+      let headers = httpResponse.allHeaderFields.reduce(into: [String: String]()) { result, entry in
+        if let key = entry.key as? String {
+          result[key] = String(describing: entry.value)
+        }
+      }
+      let cookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: bootstrapURL)
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.bootstrap.response", [
+        "authenticated": parseAuthenticated(data) ?? NSNull(),
+        "cookieCount": cookies.count,
+        "error": error?.localizedDescription ?? NSNull(),
+        "statusCode": httpResponse.statusCode,
+        "url": bootstrapURL.absoluteString,
+      ])
+
+      guard httpResponse.statusCode == 200 else {
+        finishPending(reason: "bootstrapStatus\(httpResponse.statusCode)")
+        return
+      }
+      NativeT3RuntimeLauncher.clearBootstrapCredential(credential)
+      setCookies(cookies, reason: "bootstrapComplete")
+    }.resume()
+  }
+
+  private static func setCookies(_ cookies: [HTTPCookie], reason: String) {
+    DispatchQueue.main.async {
+      guard !cookies.isEmpty else {
+        finishPending(reason: "\(reason)NoCookies")
+        return
+      }
+
+      let group = DispatchGroup()
+      let store = WKWebsiteDataStore.default().httpCookieStore
+      for cookie in cookies {
+        group.enter()
+        store.setCookie(cookie) {
+          NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.cookie.set", [
+            "domain": cookie.domain,
+            "expiresDate": cookie.expiresDate?.description ?? NSNull(),
+            "name": cookie.name,
+            "path": cookie.path,
+          ])
+          group.leave()
+        }
+      }
+      group.notify(queue: .main) {
+        finishPending(reason: reason)
+      }
+    }
+  }
+
+  private static func finishPending(reason: String) {
+    queue.async {
+      let completions = pendingCompletions
+      pendingCompletions = []
+      isAuthenticating = false
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.finish", [
+        "completionCount": completions.count,
+        "reason": reason,
+        "sessionIds": completions.map(\.sessionId),
+      ])
+      DispatchQueue.main.async {
+        completions.forEach { $0.completion() }
+      }
+    }
+  }
+
+  private static func endpointURL(origin: URL, path: String) -> URL? {
+    var components = URLComponents()
+    components.scheme = origin.scheme ?? "http"
+    components.host = origin.host
+    components.port = origin.port
+    components.path = path
+    return components.url
+  }
+
+  private static func parseAuthenticated(_ data: Data?) -> Bool? {
+    guard let data,
+      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let authenticated = payload["authenticated"] as? Bool
+    else {
+      return nil
+    }
+    return authenticated
   }
 }
 

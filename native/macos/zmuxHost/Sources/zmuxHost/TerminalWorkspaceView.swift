@@ -35,6 +35,7 @@ final class TerminalWorkspaceView: NSView {
   private let sendEvent: (HostEvent) -> Void
   private var sessions: [String: TerminalSession] = [:]
   private var webPaneSessions: [String: WebPaneSession] = [:]
+  private var completedWebPaneLoadSessionIds = Set<String>()
   private var activeSessionIds = Set<String>()
   private var attentionSessionIds = Set<String>()
   private var sessionActivities = [String: NativeTerminalActivity]()
@@ -238,6 +239,7 @@ final class TerminalWorkspaceView: NSView {
     ])
     let configuration = WKWebViewConfiguration()
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+    configuration.websiteDataStore = .default()
     let diagnosticsBridge = T3CodePaneDiagnosticsBridge(sessionId: command.sessionId)
     configuration.userContentController.add(
       diagnosticsBridge,
@@ -287,7 +289,7 @@ final class TerminalWorkspaceView: NSView {
         "sessionId": command.sessionId,
         "url": url.absoluteString,
       ])
-      webView.load(URLRequest(url: url))
+      loadWebPane(sessionId: command.sessionId, url: url, reason: "initial")
       scheduleWebPaneReload(sessionId: command.sessionId, url: url, remainingAttempts: 16)
     } else {
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.invalidUrl", [
@@ -313,6 +315,7 @@ final class TerminalWorkspaceView: NSView {
     ])
     activeSessionIds.remove(sessionId)
     sessionActivities.removeValue(forKey: sessionId)
+    completedWebPaneLoadSessionIds.remove(sessionId)
     session.webView.navigationDelegate = nil
     session.webView.configuration.userContentController.removeScriptMessageHandler(
       forName: T3CodePaneDiagnosticsBridge.messageHandlerName
@@ -801,19 +804,61 @@ final class TerminalWorkspaceView: NSView {
       guard let self, let session = self.webPaneSessions[sessionId] else {
         return
       }
-      if session.webView.url == nil {
-        NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.retry", [
+      guard !self.completedWebPaneLoadSessionIds.contains(sessionId) else {
+        return
+      }
+      if session.webView.isLoading {
+        NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.retry.waiting", [
           "remainingAttempts": remainingAttempts,
           "sessionId": sessionId,
           "url": url.absoluteString,
         ])
-        session.webView.load(URLRequest(url: url))
         self.scheduleWebPaneReload(
           sessionId: sessionId,
           url: url,
           remainingAttempts: remainingAttempts - 1
         )
+        return
       }
+
+      /**
+       CDXC:T3Code 2026-04-30-03:47
+       WKWebView keeps `url` populated after a provisional localhost failure,
+       so retrying only when `webView.url == nil` strands T3 Code on a gray
+       pane if the first load races provider startup. Retry until navigation
+       actually finishes, then stop.
+       */
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.retry", [
+        "currentUrl": session.webView.url?.absoluteString ?? NSNull(),
+        "remainingAttempts": remainingAttempts,
+        "sessionId": sessionId,
+        "url": url.absoluteString,
+      ])
+      self.loadWebPane(sessionId: sessionId, url: url, reason: "retry")
+      self.scheduleWebPaneReload(
+        sessionId: sessionId,
+        url: url,
+        remainingAttempts: remainingAttempts - 1
+      )
+    }
+  }
+
+  private func loadWebPane(sessionId: String, url: URL, reason: String) {
+    guard webPaneSessions[sessionId] != nil else {
+      return
+    }
+    NativeT3RuntimeBrowserAuth.prepareManagedWebSession(for: url, sessionId: sessionId) {
+      [weak self] in
+      guard let self, let session = self.webPaneSessions[sessionId] else {
+        return
+      }
+      self.completedWebPaneLoadSessionIds.remove(sessionId)
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.start", [
+        "reason": reason,
+        "sessionId": sessionId,
+        "url": url.absoluteString,
+      ])
+      session.webView.load(URLRequest(url: url))
     }
   }
 
@@ -1379,6 +1424,9 @@ final class TerminalWorkspaceView: NSView {
 
 extension TerminalWorkspaceView: WKNavigationDelegate {
   func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+    if let sessionId = sessionId(for: webView) {
+      completedWebPaneLoadSessionIds.remove(sessionId)
+    }
     NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.start", [
       "sessionId": sessionId(for: webView) ?? NSNull(),
       "url": webView.url?.absoluteString ?? NSNull(),
@@ -1394,6 +1442,9 @@ extension TerminalWorkspaceView: WKNavigationDelegate {
 
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
     let sessionId = sessionId(for: webView)
+    if let sessionId {
+      completedWebPaneLoadSessionIds.insert(sessionId)
+    }
     NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.finish", [
       "sessionId": sessionId ?? NSNull(),
       "title": webView.title ?? NSNull(),
@@ -1420,6 +1471,9 @@ extension TerminalWorkspaceView: WKNavigationDelegate {
   }
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+    if let sessionId = sessionId(for: webView) {
+      completedWebPaneLoadSessionIds.remove(sessionId)
+    }
     NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.fail", [
       "error": error.localizedDescription,
       "errorCode": (error as NSError).code,
@@ -1433,6 +1487,9 @@ extension TerminalWorkspaceView: WKNavigationDelegate {
     _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
     withError error: Error
   ) {
+    if let sessionId = sessionId(for: webView) {
+      completedWebPaneLoadSessionIds.remove(sessionId)
+    }
     NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.provisionalFail", [
       "error": error.localizedDescription,
       "errorCode": (error as NSError).code,
