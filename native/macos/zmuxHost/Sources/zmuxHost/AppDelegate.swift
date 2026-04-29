@@ -780,8 +780,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     ]
     process.currentDirectoryURL = URL(fileURLWithPath: command.cwd, isDirectory: true)
     process.standardInput = FileHandle.nullDevice
-    process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
+    let outputCapture = NativeT3RuntimeOutputCapture()
+    outputCapture.attach(to: process)
     NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.spawn", [
       "args": process.arguments ?? [],
       "cwd": command.cwd,
@@ -794,12 +794,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
         "cwd": command.cwd,
         "pid": process.processIdentifier,
       ])
-      process.terminationHandler = { terminatedProcess in
-        NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.exit", [
-          "pid": terminatedProcess.processIdentifier,
-          "reason": terminatedProcess.terminationReason.rawValue,
-          "status": terminatedProcess.terminationStatus,
-        ])
+      process.terminationHandler = { [outputCapture] terminatedProcess in
+        var details = outputCapture.finish()
+        details["pid"] = terminatedProcess.processIdentifier
+        details["reason"] = terminatedProcess.terminationReason.rawValue
+        details["status"] = terminatedProcess.terminationStatus
+        NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.exit", details)
       }
     } catch {
       NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.failed", [
@@ -1879,8 +1879,8 @@ final class zmuxRootView: NSView {
     ]
     process.currentDirectoryURL = URL(fileURLWithPath: command.cwd, isDirectory: true)
     process.standardInput = FileHandle.nullDevice
-    process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
+    let outputCapture = NativeT3RuntimeOutputCapture()
+    outputCapture.attach(to: process)
     NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.spawn", [
       "args": process.arguments ?? [],
       "cwd": command.cwd,
@@ -1893,12 +1893,12 @@ final class zmuxRootView: NSView {
         "cwd": command.cwd,
         "pid": process.processIdentifier,
       ])
-      process.terminationHandler = { terminatedProcess in
-        NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.exit", [
-          "pid": terminatedProcess.processIdentifier,
-          "reason": terminatedProcess.terminationReason.rawValue,
-          "status": terminatedProcess.terminationStatus,
-        ])
+      process.terminationHandler = { [outputCapture] terminatedProcess in
+        var details = outputCapture.finish()
+        details["pid"] = terminatedProcess.processIdentifier
+        details["reason"] = terminatedProcess.terminationReason.rawValue
+        details["status"] = terminatedProcess.terminationStatus
+        NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.exit", details)
       }
     } catch {
       NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.failed", [

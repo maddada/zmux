@@ -62,3 +62,77 @@ enum NativeT3CodePaneReproLog {
   }
 }
 
+final class NativeT3RuntimeOutputCapture {
+  private static let maxCapturedBytes = 64 * 1024
+  private let lock = NSLock()
+  private let stderrPipe = Pipe()
+  private let stdoutPipe = Pipe()
+  private var stderrData = Data()
+  private var stderrTruncatedBytes = 0
+  private var stdoutData = Data()
+  private var stdoutTruncatedBytes = 0
+
+  /**
+   CDXC:T3Code 2026-04-30-03:18
+   The gray native T3 pane repro needs the provider process stderr/stdout, not
+   only the exit status. Capture bounded output from the desktop/no-browser
+   launch so pairing/bootstrap failures can be diagnosed without changing the
+   launch behavior or risking unbounded log growth.
+   */
+  func attach(to process: Process) {
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+    stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+      self?.append(handle.availableData, stream: "stdout")
+    }
+    stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+      self?.append(handle.availableData, stream: "stderr")
+    }
+  }
+
+  func finish() -> [String: Any] {
+    stdoutPipe.fileHandleForReading.readabilityHandler = nil
+    stderrPipe.fileHandleForReading.readabilityHandler = nil
+    return snapshot()
+  }
+
+  private func append(_ data: Data, stream: String) {
+    guard !data.isEmpty else {
+      return
+    }
+    lock.lock()
+    defer { lock.unlock() }
+    if stream == "stdout" {
+      append(data, to: &stdoutData, truncatedBytes: &stdoutTruncatedBytes)
+      return
+    }
+    append(data, to: &stderrData, truncatedBytes: &stderrTruncatedBytes)
+  }
+
+  private func append(_ data: Data, to target: inout Data, truncatedBytes: inout Int) {
+    let availableBytes = max(Self.maxCapturedBytes - target.count, 0)
+    if availableBytes > 0 {
+      target.append(data.prefix(availableBytes))
+    }
+    if data.count > availableBytes {
+      truncatedBytes += data.count - availableBytes
+    }
+  }
+
+  private func snapshot() -> [String: Any] {
+    lock.lock()
+    defer { lock.unlock() }
+    return [
+      "stderr": decode(stderrData),
+      "stderrBytes": stderrData.count + stderrTruncatedBytes,
+      "stderrTruncatedBytes": stderrTruncatedBytes,
+      "stdout": decode(stdoutData),
+      "stdoutBytes": stdoutData.count + stdoutTruncatedBytes,
+      "stdoutTruncatedBytes": stdoutTruncatedBytes,
+    ]
+  }
+
+  private func decode(_ data: Data) -> String {
+    String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
+  }
+}
