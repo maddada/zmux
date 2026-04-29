@@ -34,6 +34,7 @@ brew install --cask maddada/tap/zmux
 - Configurable native app hotkeys for creating sessions, changing split counts, moving focus, renaming, settings, and sidebar placement.
 - Configurable Ghostty scroll speed for trackpads/high-resolution wheels and traditional mouse wheels.
 - Uses your own ghostty configuration out of the box
+- Apply zmux-recommended Ghostty settings while preserving unrelated config, including color, cursor, font, scroll, and split-opacity values.
 - Stay close to the code and edit it easily with the IDE attachment integration (Zed, VS Code, more soon!)
 - Sync the active zmux workspace back into Zed after workspace switches.
 - Remembers the native main window size between launches.
@@ -46,9 +47,12 @@ brew install --cask maddada/tap/zmux
 - Search all previous sessions and start "Find Session" prompts directly from the previous-session search field.
 - Full-window native Find Previous Session and T3 Thread ID modals for app-hosted workflows.
 - Embedded terminal panes resize on Ghostty character-cell boundaries so agent TUIs rewrap more reliably.
+- Terminal title bars keep long names visible for more of the available pane width before truncating.
+- Bare agent status words such as `Working`, `Done`, and `Idle` are hidden from terminal titles.
 - Agent CLIs stay attached to the foreground terminal TTY so resize signals reach tools such as Claude Code.
 - Native completion/action sounds with instant settings previews.
 - Debug logs stay behind Debugging Mode to avoid routine disk/memory pressure.
+- Generate Name writes staged diagnostics across sidebar, bridge, and controller paths for troubleshooting.
 - Closing a terminal also cleans up processes still attached to that terminal tty.
 - Supports all agent clis (Codex/Claude/Pi/OpenCode/Copilot/Gemini/More) <- Please ask if missing any features
 - 1 click actions (run commands, tests, etc.) with run indicators and close-on-exit action sessions.
@@ -112,3 +116,7 @@ bun install
 bun start
 bun storybook
 ```
+
+Local agent release workflow:
+
+- `.agents/skills/zmux-release-to-brew` documents the repeatable zmux release flow for split file-based commits, release notes, GitHub releases, notarized DMGs, and Homebrew cask updates.

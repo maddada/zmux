@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0 - 2026-04-30
+
+<!-- CDXC:Distribution 2026-04-30-03:37: Release notes for 1.3.0 must include
+all commits after v1.2.0 so README, GitHub, and Homebrew release metadata
+describe the same shipped behavior. -->
+
+- Added Ghostty config actions and a recommended Ghostty config that includes zmux-managed color, cursor, font, scroll, and split-opacity settings.
+- Added a cyan Ghostty palette default to improve terminal color readability with the recommended zmux-managed config.
+- Added a local agent release skill for repeatable split commits, release notes, GitHub releases, and Homebrew cask publishing.
+- Added Generate Name diagnostics across the sidebar, bridge, and controller paths so silent session-name failures are easier to trace.
+- Fixed terminal title bars so long titles are measured from raw text and use available pane width before truncating.
+- Improved attached IDE refocus timing so zmux resurfaces faster when the IDE is already active or when activation retries succeed quickly.
+- Hid bare agent status words such as `Working`, `Done`, `Idle`, `Thinking`, and `Error` from visible terminal titles.
+
 ## 1.2.0 - 2026-04-29
 
 <!-- CDXC:Distribution 2026-04-29-09:31: Release notes for 1.2.0 must include
