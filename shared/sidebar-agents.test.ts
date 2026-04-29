@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vite-plus/test";
+import { describe, expect, test } from "vitest";
 import {
   createSidebarAgentButtons,
   normalizeStoredSidebarAgentOrder,
@@ -7,8 +7,15 @@ import {
 } from "./sidebar-agents";
 
 describe("createSidebarAgentButtons", () => {
-  test("should expose the default UI agents", () => {
+  test("should expose the built-in agents by default", () => {
     expect(createSidebarAgentButtons([])).toEqual([
+      {
+        agentId: "t3",
+        command: "npx --yes t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
       {
         agentId: "codex",
         command: "codex",
@@ -49,6 +56,13 @@ describe("createSidebarAgentButtons", () => {
 
   test("should apply default command overrides to built-in agents when no stored override exists", () => {
     expect(createSidebarAgentButtons([], [], { claude: "cw", codex: "x" })).toEqual([
+      {
+        agentId: "t3",
+        command: "npx --yes t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
       {
         agentId: "codex",
         command: "x",
@@ -105,6 +119,13 @@ describe("createSidebarAgentButtons", () => {
         },
       ]),
     ).toEqual([
+      {
+        agentId: "t3",
+        command: "npx --yes t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
       {
         agentId: "codex",
         command: "codex --model gpt-5.4",
@@ -164,6 +185,13 @@ describe("createSidebarAgentButtons", () => {
       ]),
     ).toEqual([
       {
+        agentId: "t3",
+        command: "npx --yes t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
+      {
         agentId: "copilot",
         command: "copilot",
         icon: "copilot",
@@ -206,6 +234,13 @@ describe("createSidebarAgentButtons", () => {
         },
       ]),
     ).toEqual([
+      {
+        agentId: "t3",
+        command: "npx --yes t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
       {
         agentId: "codex",
         command: "codex",
@@ -288,6 +323,13 @@ describe("createSidebarAgentButtons", () => {
         name: "Claude",
       },
       {
+        agentId: "t3",
+        command: "npx --yes t3",
+        icon: "t3",
+        isDefault: true,
+        name: "T3 Code",
+      },
+      {
         agentId: "codex",
         command: "codex",
         icon: "codex",
@@ -309,20 +351,6 @@ describe("createSidebarAgentButtons", () => {
         name: "OpenCode",
       },
     ]);
-  });
-
-  test("should keep T3 Code out of defaults even when legacy settings contain it", () => {
-    expect(
-      createSidebarAgentButtons([
-        {
-          agentId: "t3",
-          command: "npx --yes t3",
-          icon: "t3",
-          isDefault: true,
-          name: "T3 Code",
-        },
-      ]).some((agent) => agent.agentId === "t3"),
-    ).toBe(false);
   });
 });
 

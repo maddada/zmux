@@ -1,4 +1,10 @@
-const BUILT_IN_SIDEBAR_AGENTS = [
+/**
+ * CDXC:SidebarAgents 2026-04-30-01:50
+ * T3 Code is a default sidebar agent again to match the reference
+ * agent-tiler implementation. The controller already routes the `t3` agent
+ * id through the managed T3 runtime instead of launching a generic terminal.
+ */
+export const DEFAULT_SIDEBAR_AGENTS = [
   {
     agentId: "t3",
     command: "npx --yes t3",
@@ -37,19 +43,9 @@ const BUILT_IN_SIDEBAR_AGENTS = [
   },
 ] as const;
 
-/**
- * CDXC:SidebarAgents 2026-04-28-05:48
- * T3 Code remains a recognized internal session kind and icon so existing
- * sessions render correctly, but it is not a default sidebar agent option.
- */
-export const DEFAULT_SIDEBAR_AGENTS = BUILT_IN_SIDEBAR_AGENTS.filter(
-  (agent) => agent.agentId !== "t3",
-);
-
-export type BuiltInSidebarAgent = (typeof BUILT_IN_SIDEBAR_AGENTS)[number];
 export type DefaultSidebarAgent = (typeof DEFAULT_SIDEBAR_AGENTS)[number];
-export type DefaultSidebarAgentId = BuiltInSidebarAgent["agentId"];
-export type SidebarAgentIcon = "browser" | BuiltInSidebarAgent["icon"];
+export type DefaultSidebarAgentId = DefaultSidebarAgent["agentId"];
+export type SidebarAgentIcon = "browser" | DefaultSidebarAgent["icon"];
 export type DefaultSidebarAgentCommandOverrides = Partial<
   Record<DefaultSidebarAgentId, string | null>
 >;
@@ -132,14 +128,14 @@ export function createSidebarAgentButtons(
 }
 
 export function isDefaultSidebarAgentId(agentId: string): boolean {
-  return BUILT_IN_SIDEBAR_AGENTS.some((agent) => agent.agentId === agentId);
+  return DEFAULT_SIDEBAR_AGENTS.some((agent) => agent.agentId === agentId);
 }
 
 export function getDefaultSidebarAgentById(
   agentId: string | undefined,
-): BuiltInSidebarAgent | undefined {
+): DefaultSidebarAgent | undefined {
   const normalizedAgentId = agentId?.trim().toLowerCase();
-  return BUILT_IN_SIDEBAR_AGENTS.find((agent) => agent.agentId === normalizedAgentId);
+  return DEFAULT_SIDEBAR_AGENTS.find((agent) => agent.agentId === normalizedAgentId);
 }
 
 export function getDefaultSidebarAgentByIcon(
@@ -161,7 +157,7 @@ export function getSidebarAgentNameByIcon(icon: SidebarAgentIcon | undefined): s
     return "Browser";
   }
 
-  return BUILT_IN_SIDEBAR_AGENTS.find((agent) => agent.icon === icon)?.name;
+  return DEFAULT_SIDEBAR_AGENTS.find((agent) => agent.icon === icon)?.name;
 }
 
 export function shouldPreferTerminalTitleForAgentIcon(icon: SidebarAgentIcon | undefined): boolean {
@@ -240,12 +236,12 @@ function isSidebarAgentIcon(candidate: unknown): candidate is SidebarAgentIcon {
 
   return (
     typeof candidate === "string" &&
-    BUILT_IN_SIDEBAR_AGENTS.some((agent) => agent.icon === candidate)
+    DEFAULT_SIDEBAR_AGENTS.some((agent) => agent.icon === candidate)
   );
 }
 
 function getDefaultSidebarAgentName(agentId: string, storedName: string): string {
-  const defaultName = BUILT_IN_SIDEBAR_AGENTS.find((agent) => agent.agentId === agentId)?.name;
+  const defaultName = DEFAULT_SIDEBAR_AGENTS.find((agent) => agent.agentId === agentId)?.name;
   if (!defaultName) {
     return storedName;
   }

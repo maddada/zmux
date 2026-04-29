@@ -2,8 +2,12 @@ import Foundation
 
 enum HostCommand: Decodable {
   case createTerminal(CreateTerminal)
+  case createWebPane(CreateWebPane)
   case closeTerminal(SessionCommand)
+  case closeWebPane(SessionCommand)
   case focusTerminal(SessionCommand)
+  case focusWebPane(SessionCommand)
+  case startT3CodeRuntime(StartT3CodeRuntime)
   case activateApp
   case writeTerminalText(WriteTerminalText)
   case sendTerminalEnter(SessionCommand)
@@ -38,8 +42,12 @@ enum HostCommand: Decodable {
 
   private enum CommandType: String, Decodable {
     case createTerminal
+    case createWebPane
     case closeTerminal
+    case closeWebPane
     case focusTerminal
+    case focusWebPane
+    case startT3CodeRuntime
     case activateApp
     case writeTerminalText
     case sendTerminalEnter
@@ -74,10 +82,18 @@ enum HostCommand: Decodable {
     switch try container.decode(CommandType.self, forKey: .type) {
     case .createTerminal:
       self = .createTerminal(try CreateTerminal(from: decoder))
+    case .createWebPane:
+      self = .createWebPane(try CreateWebPane(from: decoder))
     case .closeTerminal:
       self = .closeTerminal(try SessionCommand(from: decoder))
+    case .closeWebPane:
+      self = .closeWebPane(try SessionCommand(from: decoder))
     case .focusTerminal:
       self = .focusTerminal(try SessionCommand(from: decoder))
+    case .focusWebPane:
+      self = .focusWebPane(try SessionCommand(from: decoder))
+    case .startT3CodeRuntime:
+      self = .startT3CodeRuntime(try StartT3CodeRuntime(from: decoder))
     case .activateApp:
       self = .activateApp
     case .writeTerminalText:
@@ -145,8 +161,18 @@ struct CreateTerminal: Decodable {
   let title: String?
 }
 
+struct CreateWebPane: Decodable {
+  let sessionId: String
+  let title: String
+  let url: String
+}
+
 struct SessionCommand: Decodable {
   let sessionId: String
+}
+
+struct StartT3CodeRuntime: Decodable {
+  let cwd: String
 }
 
 struct WriteTerminalText: Decodable {

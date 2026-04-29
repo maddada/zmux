@@ -61,6 +61,7 @@ import {
   type SidebarTheme,
   type SidebarToExtensionMessage,
   type TerminalSessionRecord,
+  type T3SessionRecord,
   type VisibleSessionCount,
   type SidebarCommandSessionIndicator,
   type SessionGridDirection,
@@ -162,8 +163,17 @@ type NativeHostCommand =
       title?: string;
       type: "createTerminal";
     }
+  | {
+      sessionId: string;
+      title: string;
+      type: "createWebPane";
+      url: string;
+    }
   | { sessionId: string; type: "closeTerminal" }
+  | { sessionId: string; type: "closeWebPane" }
   | { sessionId: string; type: "focusTerminal" }
+  | { sessionId: string; type: "focusWebPane" }
+  | { cwd: string; type: "startT3CodeRuntime" }
   | { type: "activateApp" }
   | { sessionId: string; text: string; type: "writeTerminalText" }
   | { sessionId: string; type: "sendTerminalEnter" }
@@ -847,7 +857,9 @@ function isNativeSidebarDebugLoggingEnabled(): boolean {
 function isTerminalFocusDebugCommand(command: NativeHostCommand): boolean {
   return (
     command.type === "createTerminal" ||
+    command.type === "createWebPane" ||
     command.type === "focusTerminal" ||
+    command.type === "focusWebPane" ||
     command.type === "sendTerminalEnter" ||
     command.type === "setActiveTerminalSet" ||
     command.type === "setTerminalLayout" ||
@@ -2203,6 +2215,18 @@ function createProjectedSidebarSessionsForGroup(group: SessionGroupRecord): Side
     const sessionRecord = group.snapshot.sessions.find(
       (candidate) => candidate.sessionId === session.sessionId,
     );
+    if (sessionRecord?.kind === "t3") {
+      const isSleeping = sessionRecord.isSleeping === true;
+      return {
+        ...session,
+        agentIcon: "t3",
+        isRunning: !isSleeping,
+        lastInteractionAt: sessionRecord.createdAt,
+        lifecycleState: isSleeping ? "sleeping" : "running",
+        primaryTitle: session.primaryTitle ?? "T3 Code",
+      };
+    }
+
     const persistedAgentName =
       sessionRecord?.kind === "terminal" ? sessionRecord.agentName : undefined;
     const terminalState = terminalStateById.get(session.sessionId);
@@ -3304,6 +3328,48 @@ function createTerminal(
   return session;
 }
 
+function createNativeT3Session(groupId?: string): T3SessionRecord | undefined {
+  const project = activeProject();
+  const targetWorkspace = groupId
+    ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
+    : project.workspace;
+  const pendingThreadId = `pending-${Date.now().toString(36)}`;
+  /**
+   * CDXC:T3Code 2026-04-30-02:24
+   * Native T3 Code buttons must create T3 pane records, matching the reference
+   * app's special T3 path. Do not launch `npx --yes t3` in a terminal because
+   * the CLI opens its own browser instead of becoming an embedded zmux pane.
+   */
+  const result = createSessionInSimpleWorkspace(targetWorkspace, {
+    kind: "t3",
+    t3: {
+      boundThreadId: pendingThreadId,
+      projectId: `native-${project.projectId}`,
+      serverOrigin: "http://127.0.0.1:0",
+      threadId: pendingThreadId,
+      workspaceRoot: project.path,
+    },
+    title: "T3 Code",
+  });
+  const session = result.session?.kind === "t3" ? result.session : undefined;
+  if (!session) {
+    return undefined;
+  }
+
+  const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
+  updateActiveProjectWorkspace(() => result.snapshot);
+  postNative({ cwd: project.path, type: "startT3CodeRuntime" });
+  postNative({
+    sessionId: nativeSessionId,
+    title: "T3 Code",
+    type: "createWebPane",
+    url: "http://127.0.0.1:3774",
+  });
+  postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
+  publish();
+  return session;
+}
+
 function syncSessionTitleFromNativeTerminalTitle(
   sessionId: string,
   rawTitle: string,
@@ -3866,6 +3932,9 @@ function getNativePromptPreview(prompt: string | undefined): string | undefined 
 }
 
 function closeTerminal(sessionId: string): void {
+  const sessionRecord = activeSnapshot().sessions.find(
+    (candidate) => candidate.sessionId === sessionId,
+  );
   const nativeSessionId = forgetNativeSessionMapping(sessionId);
   clearNativeSidebarCommandSessionBySessionId(sessionId);
   rememberPreviousSession(sessionId);
@@ -3876,7 +3945,10 @@ function closeTerminal(sessionId: string): void {
   titleDerivedActivityBySessionId.delete(sessionId);
   nativeActivitySuppressedUntilBySessionId.delete(sessionId);
   nativeWorkingStartedAtBySessionId.delete(sessionId);
-  postNative({ sessionId: nativeSessionId, type: "closeTerminal" });
+  postNative({
+    sessionId: nativeSessionId,
+    type: sessionRecord?.kind === "t3" ? "closeWebPane" : "closeTerminal",
+  });
   publish();
 }
 
@@ -3895,7 +3967,14 @@ function focusTerminal(sessionId: string): void {
     restoreNativeTerminalSession(activeProject(), session, "focus-sleeping-session");
   }
   acknowledgeNativeTerminalAttention(sessionId, "sidebar-focus");
-  postNative({ sessionId: nativeSessionIdForSidebarSession(sessionId), type: "focusTerminal" });
+  postNative({
+    sessionId: nativeSessionIdForSidebarSession(sessionId),
+    type: activeSnapshot().sessions.some(
+      (candidate) => candidate.sessionId === sessionId && candidate.kind === "t3",
+    )
+      ? "focusWebPane"
+      : "focusTerminal",
+  });
   publish();
 }
 
@@ -4518,10 +4597,13 @@ async function waitForCliSidebarCard(payload: Record<string, unknown>) {
   };
 }
 
-function runCliAgent(agentId: string, groupId?: string): TerminalSessionRecord | undefined {
+function runCliAgent(agentId: string, groupId?: string): SessionRecord | undefined {
   const agent = agents.find((candidate) => candidate.agentId === agentId);
   if (!agent?.command) {
     throw new Error(`Unknown or unconfigured agent: ${agentId}`);
+  }
+  if (agent.agentId === "t3") {
+    return createNativeT3Session(groupId);
   }
   return createTerminal(
     createAgentSessionDefaultTitle(agent.name),
@@ -5801,7 +5883,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "runSidebarAgent": {
       const agent = agents.find((candidate) => candidate.agentId === message.agentId);
-      if (agent?.command) {
+      if (agent?.agentId === "t3") {
+        createNativeT3Session();
+      } else if (agent?.command) {
         createTerminal(
           createAgentSessionDefaultTitle(agent.name),
           `${agent.command}\r`,
@@ -5899,7 +5983,11 @@ function syncNativeLayout(): void {
   const snapshot = activeSnapshot();
   const visibleIds = new Set(snapshot.visibleSessionIds);
   const visibleSessionIds = snapshot.sessions
-    .filter((session) => session.kind === "terminal" && visibleIds.has(session.sessionId))
+    .filter(
+      (session) =>
+        (session.kind === "terminal" || session.kind === "t3") &&
+        visibleIds.has(session.sessionId),
+    )
     .map((session) => nativeSessionIdForSidebarSession(session.sessionId));
   const attentionSessionIds = snapshot.sessions
     .filter((session) => {

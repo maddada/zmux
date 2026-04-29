@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   private var pendingGhosttyConfigReloadTimer: Timer?
   private weak var attachToIdeTitlebarButton: NSButton?
   private let nativeSettingsStore = NativeSettingsStore()
+  private var t3CodeRuntimeProcess: Process?
 
   override init() {
     let configSelection = Self.preferredGhosttyConfig()
@@ -664,10 +665,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     switch command {
     case .createTerminal(let command):
       workspaceView?.createTerminal(command)
+    case .createWebPane(let command):
+      workspaceView?.createWebPane(command)
     case .closeTerminal(let command):
       workspaceView?.closeTerminal(sessionId: command.sessionId)
+    case .closeWebPane(let command):
+      workspaceView?.closeWebPane(sessionId: command.sessionId)
     case .focusTerminal(let command):
       workspaceView?.focusTerminal(sessionId: command.sessionId)
+    case .focusWebPane(let command):
+      workspaceView?.focusWebPane(sessionId: command.sessionId)
+    case .startT3CodeRuntime(let command):
+      startT3CodeRuntime(command)
     case .activateApp:
       activateAppWindow()
     case .writeTerminalText(let command):
@@ -741,6 +750,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
         targetApp: command.targetApp, workspacePath: command.workspacePath)
     case .sidebarCliCommand(let command):
       runSidebarCliCommand(command)
+    }
+  }
+
+  /**
+   CDXC:T3Code 2026-04-30-02:38
+   Native T3 Code launches must use desktop/no-browser mode before the WKWebView
+   pane loads localhost. Running the plain CLI would open an external browser,
+   which is the behavior this integration replaces.
+   */
+  @MainActor
+  private func startT3CodeRuntime(_ command: StartT3CodeRuntime) {
+    if let process = t3CodeRuntimeProcess, process.isRunning {
+      return
+    }
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = [
+      "npx", "--yes", "t3",
+      "--mode", "desktop",
+      "--host", "127.0.0.1",
+      "--port", "3774",
+      "--no-browser",
+    ]
+    process.currentDirectoryURL = URL(fileURLWithPath: command.cwd, isDirectory: true)
+    process.standardInput = FileHandle.nullDevice
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      t3CodeRuntimeProcess = process
+    } catch {
+      Self.logger.error("Failed to start T3 Code runtime: \(error.localizedDescription)")
     }
   }
 
@@ -1487,6 +1529,7 @@ final class zmuxRootView: NSView {
   private var latestModalHostSidebarState: [String: Any]?
   private var pendingHotkeyPrefix: String?
   private var pendingHotkeyPrefixExpiresAt: Date?
+  private var t3CodeRuntimeProcess: Process?
   private var sidebarWidth: CGFloat
   private var sidebarSide: SidebarSide = .left
 
@@ -1679,10 +1722,18 @@ final class zmuxRootView: NSView {
     switch command {
     case .createTerminal(let command):
       workspaceView.createTerminal(command)
+    case .createWebPane(let command):
+      workspaceView.createWebPane(command)
     case .closeTerminal(let command):
       workspaceView.closeTerminal(sessionId: command.sessionId)
+    case .closeWebPane(let command):
+      workspaceView.closeWebPane(sessionId: command.sessionId)
     case .focusTerminal(let command):
       workspaceView.focusTerminal(sessionId: command.sessionId)
+    case .focusWebPane(let command):
+      workspaceView.focusWebPane(sessionId: command.sessionId)
+    case .startT3CodeRuntime(let command):
+      startT3CodeRuntime(command)
     case .activateApp:
       activateAppWindow()
     case .writeTerminalText(let command):
@@ -1775,6 +1826,38 @@ final class zmuxRootView: NSView {
        HostCommand does not make the sidebar command switch non-exhaustive.
        */
       break
+    }
+  }
+
+  /**
+   CDXC:T3Code 2026-04-30-02:38
+   Native sidebar T3 Code panes must start the provider in desktop/no-browser
+   mode and then render localhost inside the workarea WKWebView. This preserves
+   the reference pane model instead of launching an external browser window.
+   */
+  private func startT3CodeRuntime(_ command: StartT3CodeRuntime) {
+    if let process = t3CodeRuntimeProcess, process.isRunning {
+      return
+    }
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = [
+      "npx", "--yes", "t3",
+      "--mode", "desktop",
+      "--host", "127.0.0.1",
+      "--port", "3774",
+      "--no-browser",
+    ]
+    process.currentDirectoryURL = URL(fileURLWithPath: command.cwd, isDirectory: true)
+    process.standardInput = FileHandle.nullDevice
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      t3CodeRuntimeProcess = process
+    } catch {
+      zmuxRootView.logger.error("Failed to start T3 Code runtime: \(error.localizedDescription)")
     }
   }
 

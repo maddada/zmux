@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import GhosttyKit
 import QuartzCore
+import WebKit
 
 @MainActor
 final class TerminalWorkspaceView: NSView {
@@ -17,6 +18,13 @@ final class TerminalWorkspaceView: NSView {
     var cancellables: Set<AnyCancellable> = []
   }
 
+  private struct WebPaneSession {
+    let sessionId: String
+    let webView: WKWebView
+    let titleBarView: TerminalSessionTitleBarView
+    let borderView: TerminalPaneBorderView
+  }
+
   private static let terminalTitleBarHeight: CGFloat = 33
   private static let defaultPaneGap: CGFloat = 12
   private static let singlePaneInset: CGFloat = 1
@@ -25,6 +33,7 @@ final class TerminalWorkspaceView: NSView {
   private let ghostty: Ghostty.App
   private let sendEvent: (HostEvent) -> Void
   private var sessions: [String: TerminalSession] = [:]
+  private var webPaneSessions: [String: WebPaneSession] = [:]
   private var activeSessionIds = Set<String>()
   private var attentionSessionIds = Set<String>()
   private var sessionActivities = [String: NativeTerminalActivity]()
@@ -203,6 +212,97 @@ final class TerminalWorkspaceView: NSView {
     needsLayout = true
     sendEvent(.terminalExited(sessionId: sessionId, exitCode: nil))
     stopExitPollingIfIdle()
+  }
+
+  /**
+   CDXC:T3Code 2026-04-30-02:38
+   T3 Code is a web pane in the reference workspace, not a terminal command.
+   Native zmux therefore mounts a WKWebView surface in the same pane layout so
+   the T3 button embeds the app instead of typing `npx --yes t3` into Ghostty.
+   */
+  func createWebPane(_ command: CreateWebPane) {
+    if webPaneSessions[command.sessionId] != nil {
+      focusWebPane(sessionId: command.sessionId, reason: "createWebPaneExisting")
+      return
+    }
+
+    let configuration = WKWebViewConfiguration()
+    configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+    let webView = WKWebView(frame: .zero, configuration: configuration)
+    webView.translatesAutoresizingMaskIntoConstraints = false
+    webView.allowsBackForwardNavigationGestures = true
+    webView.underPageBackgroundColor = .clear
+
+    let titleBarView = TerminalSessionTitleBarView(
+      title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId)
+    )
+    titleBarView.translatesAutoresizingMaskIntoConstraints = false
+    titleBarView.onMouseDown = { [weak self] in
+      self?.focusWebPane(sessionId: command.sessionId, reason: "nativeWebTitleBarMouseDown")
+    }
+    titleBarView.onAction = { [weak self] action in
+      self?.focusWebPane(sessionId: command.sessionId, reason: "nativeWebTitleBarAction")
+      self?.sendEvent(.terminalTitleBarAction(sessionId: command.sessionId, action: action))
+    }
+    let borderView = TerminalPaneBorderView()
+    borderView.translatesAutoresizingMaskIntoConstraints = false
+
+    webPaneSessions[command.sessionId] = WebPaneSession(
+      sessionId: command.sessionId,
+      webView: webView,
+      titleBarView: titleBarView,
+      borderView: borderView
+    )
+    activeSessionIds.insert(command.sessionId)
+    addSubview(webView)
+    addSubview(titleBarView)
+    addSubview(borderView)
+    terminalLayout = terminalLayout ?? .leaf(sessionId: command.sessionId)
+
+    if let url = URL(string: command.url) {
+      webView.load(URLRequest(url: url))
+      scheduleWebPaneReload(sessionId: command.sessionId, url: url, remainingAttempts: 16)
+    }
+
+    needsLayout = true
+    focusWebPane(sessionId: command.sessionId, reason: "createWebPaneNew")
+  }
+
+  func closeWebPane(sessionId: String) {
+    guard let session = webPaneSessions.removeValue(forKey: sessionId) else {
+      return
+    }
+    activeSessionIds.remove(sessionId)
+    sessionActivities.removeValue(forKey: sessionId)
+    session.webView.stopLoading()
+    session.webView.removeFromSuperview()
+    session.titleBarView.removeFromSuperview()
+    session.borderView.removeFromSuperview()
+    terminalLayout = prunedLayout(removing: sessionId, from: terminalLayout)
+    attentionSessionIds.remove(sessionId)
+    if focusedSessionId == sessionId {
+      focusedSessionId = nil
+    }
+    needsLayout = true
+    sendEvent(.terminalExited(sessionId: sessionId, exitCode: nil))
+  }
+
+  func focusWebPane(sessionId: String, reason: String = "explicitFocusWebPaneCommand") {
+    guard let view = webPaneSessions[sessionId]?.webView else {
+      TerminalFocusDebugLog.append(
+        event: "nativeWorkspace.focusWebPane.missingSession",
+        details: [
+          "activeSessionIds": Array(activeSessionIds).sorted(),
+          "knownSessionIds": Array(webPaneSessions.keys).sorted(),
+          "reason": reason,
+          "requestedSessionId": sessionId,
+        ])
+      return
+    }
+    focusedSessionId = sessionId
+    updateAllTerminalBorders()
+    _ = window?.makeFirstResponder(view)
+    sendEvent(.terminalFocused(sessionId: sessionId))
   }
 
   func focusTerminal(sessionId: String, reason: String = "explicitFocusTerminalCommand") {
@@ -420,6 +520,16 @@ final class TerminalWorkspaceView: NSView {
         moveOffscreen(session.borderView)
       }
     }
+    for session in webPaneSessions.values {
+      session.webView.isHidden = false
+      session.titleBarView.isHidden = false
+      session.borderView.isHidden = false
+      if !activeSessionIds.contains(session.sessionId) {
+        moveOffscreen(session.webView)
+        moveOffscreen(session.titleBarView)
+        moveOffscreen(session.borderView)
+      }
+    }
     needsLayout = true
     layoutSubtreeIfNeeded()
     updateAllTerminalBorders()
@@ -454,7 +564,11 @@ final class TerminalWorkspaceView: NSView {
           ])
         return
       }
-      focusTerminal(sessionId: focusedSessionId, reason: "setActiveTerminalSet")
+      if sessions[focusedSessionId] != nil {
+        focusTerminal(sessionId: focusedSessionId, reason: "setActiveTerminalSet")
+      } else if webPaneSessions[focusedSessionId] != nil {
+        focusWebPane(sessionId: focusedSessionId, reason: "setActiveTerminalSet")
+      }
     }
   }
 
@@ -477,7 +591,8 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func orderedVisibleSessionIds() -> [String] {
-    let fromLayout = terminalLayout.map(leafSessionIds) ?? Array(sessions.keys)
+    let fromLayout =
+      terminalLayout.map(leafSessionIds) ?? Array(sessions.keys) + Array(webPaneSessions.keys)
     return fromLayout.filter { activeSessionIds.contains($0) }
   }
 
@@ -558,6 +673,11 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func setFrame(_ rect: CGRect, for sessionId: String) {
+    if let webPane = webPaneSessions[sessionId] {
+      setWebPaneFrame(rect, for: webPane)
+      return
+    }
+
     guard let session = sessions[sessionId] else {
       return
     }
@@ -596,6 +716,47 @@ final class TerminalWorkspaceView: NSView {
       availableTerminalRect: availableTerminalRect,
       terminalRect: terminalRect)
     updateTerminalBorder(for: sessionId)
+  }
+
+  private func setWebPaneFrame(_ rect: CGRect, for session: WebPaneSession) {
+    let titleBarHeight = min(Self.terminalTitleBarHeight, max(rect.height, 0))
+    let titleBarRect = CGRect(
+      x: rect.minX,
+      y: rect.maxY - titleBarHeight,
+      width: rect.width,
+      height: titleBarHeight
+    )
+    let contentRect = CGRect(
+      x: rect.minX,
+      y: rect.minY,
+      width: rect.width,
+      height: max(rect.height - titleBarHeight, 1)
+    )
+    session.titleBarView.frame = titleBarRect
+    session.titleBarView.needsLayout = true
+    session.titleBarView.layoutSubtreeIfNeeded()
+    session.webView.frame = contentRect
+    session.borderView.frame = rect
+    updateTerminalBorder(for: session.sessionId)
+  }
+
+  private func scheduleWebPaneReload(sessionId: String, url: URL, remainingAttempts: Int) {
+    guard remainingAttempts > 0 else {
+      return
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+      guard let self, let session = self.webPaneSessions[sessionId] else {
+        return
+      }
+      if session.webView.url == nil {
+        session.webView.load(URLRequest(url: url))
+        self.scheduleWebPaneReload(
+          sessionId: sessionId,
+          url: url,
+          remainingAttempts: remainingAttempts - 1
+        )
+      }
+    }
   }
 
   private func steppedTerminalRect(_ rect: CGRect, for surfaceView: Ghostty.SurfaceView) -> CGRect {
@@ -857,9 +1018,25 @@ final class TerminalWorkspaceView: NSView {
     for sessionId in sessions.keys {
       updateTerminalBorder(for: sessionId)
     }
+    for sessionId in webPaneSessions.keys {
+      updateTerminalBorder(for: sessionId)
+    }
   }
 
   private func updateTerminalBorder(for sessionId: String) {
+    if let session = webPaneSessions[sessionId] {
+      let isActive = activeSessionIds.contains(sessionId)
+      session.webView.isHidden = !isActive
+      session.titleBarView.isHidden = !isActive
+      session.borderView.isHidden = !isActive
+      session.titleBarView.setState(activity: sessionActivities[sessionId])
+      session.borderView.setState(
+        isFocused: focusedSessionId == sessionId,
+        isAttention: attentionSessionIds.contains(sessionId)
+      )
+      return
+    }
+
     guard let session = sessions[sessionId] else {
       return
     }

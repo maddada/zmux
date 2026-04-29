@@ -23,11 +23,29 @@ export type NativeGhosttyHostCommand =
     }
   | {
       sessionId: string;
+      title: string;
+      type: "createWebPane";
+      url: string;
+    }
+  | {
+      sessionId: string;
       type: "closeTerminal";
     }
   | {
       sessionId: string;
+      type: "closeWebPane";
+    }
+  | {
+      sessionId: string;
       type: "focusTerminal";
+    }
+  | {
+      sessionId: string;
+      type: "focusWebPane";
+    }
+  | {
+      cwd: string;
+      type: "startT3CodeRuntime";
     }
   | {
       sessionId: string;
