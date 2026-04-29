@@ -188,11 +188,15 @@ enum NativeT3RuntimeLauncher {
    The reference T3 pane starts the provider with a desktop bootstrap credential
    on fd 3. Plain `npx --yes t3 --mode desktop` reaches the pairing route, so
    native zmux must provide the same bootstrap envelope at launch time instead
-   of relying on an unauthenticated browser flow.
+   of relying on an unauthenticated browser flow. Use npx only to resolve the
+   cached T3 executable, then exec that bin directly because npm/npx does not
+   preserve fd 3 reliably for the provider process.
    */
   static func createLaunch(cwd: String) throws -> NativeT3RuntimeLaunch {
     let bootstrapURL = try writeBootstrapJsonFile()
     let bootstrapPath = shellQuote(bootstrapURL.path)
+    let t3ExecutablePath = try resolveT3ExecutablePath()
+    let t3Executable = shellQuote(t3ExecutablePath)
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/zsh")
     process.arguments = [
@@ -200,7 +204,7 @@ enum NativeT3RuntimeLauncher {
       [
         "exec 3< \(bootstrapPath)",
         "rm -f \(bootstrapPath)",
-        "exec /usr/bin/env npx --yes t3 --mode desktop --host \(host) --port \(port) --no-browser --bootstrap-fd 3",
+        "exec \(t3Executable) --mode desktop --host \(host) --port \(port) --no-browser --bootstrap-fd 3",
       ].joined(separator: "\n"),
     ]
     process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
@@ -237,6 +241,58 @@ enum NativeT3RuntimeLauncher {
       "bootstrap-\(UUID().uuidString).json")
     try data.write(to: bootstrapURL, options: [.atomic])
     return bootstrapURL
+  }
+
+  private static func resolveT3ExecutablePath() throws -> String {
+    if let localPath = resolveCommand(["/bin/zsh", "-lc", "command -v t3"]),
+      FileManager.default.isExecutableFile(atPath: localPath)
+    {
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.executable.resolved", [
+        "path": localPath,
+        "source": "path",
+      ])
+      return localPath
+    }
+
+    if let npxPath = resolveCommand([
+      "/usr/bin/env", "npx", "--yes", "--package", "t3", "sh", "-c", "command -v t3",
+    ]), FileManager.default.isExecutableFile(atPath: npxPath) {
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.executable.resolved", [
+        "path": npxPath,
+        "source": "npx-package-cache",
+      ])
+      return npxPath
+    }
+
+    throw NSError(
+      domain: "NativeT3RuntimeLauncher",
+      code: 1,
+      userInfo: [NSLocalizedDescriptionKey: "Unable to resolve the T3 Code executable."])
+  }
+
+  private static func resolveCommand(_ command: [String]) -> String? {
+    guard let executable = command.first else {
+      return nil
+    }
+    let process = Process()
+    let stdout = Pipe()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = Array(command.dropFirst())
+    process.standardOutput = stdout
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      return nil
+    }
+    guard process.terminationStatus == 0 else {
+      return nil
+    }
+    return String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .split(separator: "\n", omittingEmptySubsequences: true)
+      .first
+      .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
   }
 
   private static func t3HomeDirectory() -> URL {
