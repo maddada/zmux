@@ -37,6 +37,36 @@ describe("normalizezmuxSettings", () => {
     });
   });
 
+  test("keeps Ghostty mouse scroll multipliers in the settings slider range", () => {
+    /**
+     * CDXC:TerminalScrollSettings 2026-04-29-08:56
+     * The settings modal exposes Ghostty's precision and discrete scroll
+     * multipliers as 0.25-step sliders, so normalization preserves valid
+     * tuning values and clamps saved values to the same practical range before
+     * writing the shared Ghostty config.
+     */
+    expect(DEFAULT_zmux_SETTINGS.terminalMouseScrollMultiplierPrecision).toBe(1);
+    expect(DEFAULT_zmux_SETTINGS.terminalMouseScrollMultiplierDiscrete).toBe(3);
+    expect(
+      normalizezmuxSettings({
+        terminalMouseScrollMultiplierDiscrete: 4,
+        terminalMouseScrollMultiplierPrecision: 0.75,
+      }),
+    ).toMatchObject({
+      terminalMouseScrollMultiplierDiscrete: 4,
+      terminalMouseScrollMultiplierPrecision: 0.75,
+    });
+    expect(
+      normalizezmuxSettings({
+        terminalMouseScrollMultiplierDiscrete: 10001,
+        terminalMouseScrollMultiplierPrecision: 0,
+      }),
+    ).toMatchObject({
+      terminalMouseScrollMultiplierDiscrete: 8,
+      terminalMouseScrollMultiplierPrecision: 0.25,
+    });
+  });
+
   test("keeps valid Zed overlay settings", () => {
     expect(
       normalizezmuxSettings({

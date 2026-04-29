@@ -12,6 +12,8 @@ describe("getGhosttyTerminalConfigValues", () => {
         terminalFontWeight: 650,
         terminalLetterSpacing: 0.5,
         terminalLineHeight: 1.1,
+        terminalMouseScrollMultiplierDiscrete: 4,
+        terminalMouseScrollMultiplierPrecision: 0.75,
       }),
     ).toEqual({
       adjustCellHeightPercent: 0.10000000000000009,
@@ -20,6 +22,8 @@ describe("getGhosttyTerminalConfigValues", () => {
       fontSize: 13,
       fontThicken: true,
       fontThickenStrength: 128,
+      mouseScrollMultiplierDiscrete: 4,
+      mouseScrollMultiplierPrecision: 0.75,
     });
   });
 });

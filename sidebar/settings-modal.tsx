@@ -324,6 +324,39 @@ export function SettingsModal({
                 ]}
                 value={draft.terminalCursorStyle}
               />
+            </SettingsSection>
+
+            <SettingsSection title="Terminal Scrolling">
+              {/* CDXC:TerminalScrollSettings 2026-04-29-08:56: Ghostty
+                  scroll speed is controlled by mouse-scroll-multiplier.
+                  Precision and discrete devices need separate controls because
+                  Ghostty defaults trackpads to 1 and notched wheels to 3.
+                  The modal exposes 0.25-step sliders from 0.25 to 8 because
+                  Ghostty's documented 0.01..10000 bounds are extreme. */}
+              <SliderNumberField
+                description="Trackpads and high-resolution scroll wheels. Ghostty default is 1."
+                label="Precision scroll multiplier"
+                max={8}
+                min={0.25}
+                onCommit={(value) => updateDraft("terminalMouseScrollMultiplierPrecision", value)}
+                onChange={(value) =>
+                  updateDraftDebounced("terminalMouseScrollMultiplierPrecision", value)
+                }
+                step={0.25}
+                value={draft.terminalMouseScrollMultiplierPrecision}
+              />
+              <SliderNumberField
+                description="Traditional notched mouse wheels. Ghostty default is 3."
+                label="Discrete scroll multiplier"
+                max={8}
+                min={0.25}
+                onCommit={(value) => updateDraft("terminalMouseScrollMultiplierDiscrete", value)}
+                onChange={(value) =>
+                  updateDraftDebounced("terminalMouseScrollMultiplierDiscrete", value)
+                }
+                step={0.25}
+                value={draft.terminalMouseScrollMultiplierDiscrete}
+              />
               <ToggleField
                 checked={draft.terminalScrollToBottomWhenTyping}
                 description="Keep the prompt visible while typing."
@@ -505,13 +538,15 @@ function SliderNumberField({
     if (!Number.isFinite(nextValue)) {
       return value;
     }
-    const clampedValue = clampNumber(nextValue, min, max);
+    const clampedValue = clampNumber(snapNumberToStep(nextValue, min, step), min, max);
     onChange(clampedValue);
     return clampedValue;
   };
 
   const commitValue = (nextValue: number) => {
-    const clampedValue = Number.isFinite(nextValue) ? clampNumber(nextValue, min, max) : value;
+    const clampedValue = Number.isFinite(nextValue)
+      ? clampNumber(snapNumberToStep(nextValue, min, step), min, max)
+      : value;
     setInputText(formatSliderNumber(clampedValue, step));
     onCommit(clampedValue);
   };
@@ -527,7 +562,7 @@ function SliderNumberField({
     ) {
       return;
     }
-    onChange(nextValue);
+    onChange(clampNumber(snapNumberToStep(nextValue, min, step), min, max));
   };
 
   return (
@@ -564,6 +599,18 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function snapNumberToStep(value: number, min: number, step: number): number {
+  /**
+   * CDXC:Settings 2026-04-29-08:56
+   * Slider-backed numeric settings must persist the same step increments the
+   * UI presents. This keeps Ghostty scroll multipliers on 0.25 increments even
+   * when users type values into the adjacent number field.
+   */
+  const decimals = Math.max(0, step.toString().split(".")[1]?.length ?? 0);
+  const scaledValue = Math.round((value - min) / step) * step + min;
+  return Number(scaledValue.toFixed(decimals));
+}
+
 function formatSliderNumber(value: number, step: number): string {
   if (Number.isInteger(step)) {
     return String(Math.round(value));
@@ -573,16 +620,20 @@ function formatSliderNumber(value: number, step: number): string {
 }
 
 function SelectField({
+  contentClassName,
   description,
   label,
   onChange,
   options,
+  showScrollButtons,
   value,
 }: {
+  contentClassName?: string;
   description?: string;
   label: string;
   onChange: (value: string) => void;
   options: ReadonlyArray<{ label: string; value: string }>;
+  showScrollButtons?: boolean;
   value: string;
 }) {
   const id = useId();
@@ -592,7 +643,7 @@ function SelectField({
         <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className={contentClassName} showScrollButtons={showScrollButtons}>
           <SelectGroup>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
@@ -617,12 +668,20 @@ function SoundField({
   onChange: (value: CompletionSoundSetting) => void;
   value: CompletionSoundSetting;
 }) {
+  /**
+   * CDXC:Settings 2026-04-29-17:01
+   * Sound pickers have enough options that Radix hover-scroll buttons can
+   * fight wheel scrolling inside the modal. Disable those auto-scroll zones so
+   * mouse and trackpad wheel direction remains stable.
+   */
   return (
     <SelectField
+      contentClassName="max-h-72"
       description={description}
       label={label}
       onChange={(nextValue) => onChange(nextValue as CompletionSoundSetting)}
       options={COMPLETION_SOUND_OPTIONS}
+      showScrollButtons={false}
       value={value}
     />
   );

@@ -8,6 +8,8 @@ export type GhosttyTerminalConfigValues = {
   fontSize: number;
   fontThicken: boolean;
   fontThickenStrength: number;
+  mouseScrollMultiplierDiscrete: number;
+  mouseScrollMultiplierPrecision: number;
 };
 
 /**
@@ -15,6 +17,11 @@ export type GhosttyTerminalConfigValues = {
  * Ghostty does not expose a CSS-style font-weight setting. zmux maps weights
  * above normal to Ghostty's macOS font-thicken controls and writes line height
  * through adjust-cell-height, matching the documented Ghostty config keys.
+ *
+ * CDXC:TerminalScrollSettings 2026-04-29-08:56
+ * Mouse wheel speed is a native Ghostty setting, not a zmux event transform.
+ * Emit precision and discrete mouse-scroll-multiplier values so Ghostty starts
+ * in the requested scroll mode and external Ghostty windows share the setting.
  */
 export function getGhosttyTerminalConfigValues(
   settings: zmuxSettings,
@@ -28,6 +35,8 @@ export function getGhosttyTerminalConfigValues(
     fontThickenStrength: Math.round(
       clampNumber((settings.terminalFontWeight - 400) / 500, 0, 1) * 255,
     ),
+    mouseScrollMultiplierDiscrete: settings.terminalMouseScrollMultiplierDiscrete,
+    mouseScrollMultiplierPrecision: settings.terminalMouseScrollMultiplierPrecision,
   };
 }
 

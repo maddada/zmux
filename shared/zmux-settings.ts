@@ -27,6 +27,8 @@ import {
 
 export type TerminalCursorStyle = "bar" | "block" | "underline";
 export type ZedOverlayTargetApp = "zed" | "zed-preview" | "vscode" | "vscode-insiders";
+const MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 0.25;
+const MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 8;
 
 /**
  * CDXC:Branding 2026-04-26-20:16
@@ -56,6 +58,8 @@ export type zmuxSettings = {
   terminalFontWeight: number;
   terminalLetterSpacing: number;
   terminalLineHeight: number;
+  terminalMouseScrollMultiplierDiscrete: number;
+  terminalMouseScrollMultiplierPrecision: number;
   terminalScrollToBottomWhenTyping: boolean;
   hotkeys: zmuxHotkeySettings;
   workspaceActivePaneBorderColor: string;
@@ -94,6 +98,8 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   terminalFontWeight: 300,
   terminalLetterSpacing: 0,
   terminalLineHeight: 1.2,
+  terminalMouseScrollMultiplierDiscrete: 3,
+  terminalMouseScrollMultiplierPrecision: 1,
   terminalScrollToBottomWhenTyping: true,
   hotkeys: DEFAULT_zmux_HOTKEYS,
   workspaceActivePaneBorderColor: "#3b82f6",
@@ -239,6 +245,35 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
       0.8,
       2,
       DEFAULT_zmux_SETTINGS.terminalLineHeight,
+    ),
+    /**
+     * CDXC:TerminalScrollSettings 2026-04-29-08:56
+     * Ghostty exposes mouse wheel speed through mouse-scroll-multiplier with
+     * separate precision and discrete device prefixes. Store both values so
+     * trackpads and notched mouse wheels can be tuned independently while
+     * matching the settings modal's 0.25-step practical range. Ghostty accepts
+     * 0.01..10000, but those extremes are intentionally not exposed because
+     * the docs warn they produce a bad experience.
+     */
+    terminalMouseScrollMultiplierDiscrete: clampNumber(
+      readNumber(
+        source,
+        "terminalMouseScrollMultiplierDiscrete",
+        DEFAULT_zmux_SETTINGS.terminalMouseScrollMultiplierDiscrete,
+      ),
+      MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+      MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+      DEFAULT_zmux_SETTINGS.terminalMouseScrollMultiplierDiscrete,
+    ),
+    terminalMouseScrollMultiplierPrecision: clampNumber(
+      readNumber(
+        source,
+        "terminalMouseScrollMultiplierPrecision",
+        DEFAULT_zmux_SETTINGS.terminalMouseScrollMultiplierPrecision,
+      ),
+      MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+      MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+      DEFAULT_zmux_SETTINGS.terminalMouseScrollMultiplierPrecision,
     ),
     terminalScrollToBottomWhenTyping: readBoolean(
       source,
