@@ -255,11 +255,27 @@ final class TerminalWorkspaceView: NSView {
         injectionTime: .atDocumentStart,
         forMainFrameOnly: false
       ))
+    configuration.userContentController.addUserScript(
+      WKUserScript(
+        source: Self.t3WebPaneBridgeScript(
+          sessionId: command.sessionId, title: command.title, workspaceRoot: command.cwd),
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: true
+      ))
     let webView = WKWebView(frame: .zero, configuration: configuration)
-    webView.translatesAutoresizingMaskIntoConstraints = false
+    webView.translatesAutoresizingMaskIntoConstraints = true
     webView.allowsBackForwardNavigationGestures = true
     webView.navigationDelegate = self
-    webView.underPageBackgroundColor = .clear
+    /**
+     CDXC:T3Code 2026-04-30-19:17
+     Native T3 panes must use WKWebView's default opaque drawing path. The
+     accessibility tree can report a live T3 DOM even when transparent WebKit
+     compositing only shows the workspace's gray backing layer, so do not make
+     the embedded app transparent while debugging or rendering production panes.
+     */
+    webView.wantsLayer = true
+    webView.layer?.masksToBounds = true
+    webView.underPageBackgroundColor = NSColor(calibratedRed: 0.086, green: 0.086, blue: 0.086, alpha: 1)
 
     let titleBarView = TerminalSessionTitleBarView(
       title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId)
@@ -285,9 +301,9 @@ final class TerminalWorkspaceView: NSView {
       borderView: borderView
     )
     activeSessionIds.insert(command.sessionId)
-    addSubview(webView)
     addSubview(titleBarView)
     addSubview(borderView)
+    orderWebPaneViewsToFront(webPaneSessions[command.sessionId])
     terminalLayout = terminalLayout ?? .leaf(sessionId: command.sessionId)
 
     if let url = URL(string: command.url) {
@@ -341,7 +357,7 @@ final class TerminalWorkspaceView: NSView {
   }
 
   func focusWebPane(sessionId: String, reason: String = "explicitFocusWebPaneCommand") {
-    guard let view = webPaneSessions[sessionId]?.webView else {
+    guard let session = webPaneSessions[sessionId] else {
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.focus.missing", [
         "knownSessionIds": Array(webPaneSessions.keys).sorted(),
         "reason": reason,
@@ -354,10 +370,12 @@ final class TerminalWorkspaceView: NSView {
           "knownSessionIds": Array(webPaneSessions.keys).sorted(),
           "reason": reason,
           "requestedSessionId": sessionId,
-        ])
+      ])
       return
     }
+    let view = session.webView
     focusedSessionId = sessionId
+    orderWebPaneViewsToFront(session)
     updateAllTerminalBorders()
     _ = window?.makeFirstResponder(view)
     NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.focus.applied", [
@@ -798,9 +816,55 @@ final class TerminalWorkspaceView: NSView {
     session.titleBarView.frame = titleBarRect
     session.titleBarView.needsLayout = true
     session.titleBarView.layoutSubtreeIfNeeded()
-    session.webView.frame = contentRect
+    session.webView.frame = webPaneContentFrameInHostingView(contentRect)
+    session.webView.needsDisplay = true
     session.borderView.frame = rect
+    if focusedSessionId == session.sessionId {
+      orderWebPaneViewsToFront(session)
+    }
     updateTerminalBorder(for: session.sessionId)
+  }
+
+  /**
+   CDXC:T3Code 2026-04-30-19:17
+   The T3 Code pane is a native WKWebView, not React DOM inside the sidebar.
+   Host the WebKit surface in the root content view instead of inside the
+   terminal workspace view: live nested WKWebView compositing can show only the
+   workspace background even when the page has finished loading.
+   Keep native title and border chrome in the workspace so split layout,
+   focus borders, and pane controls continue to follow terminal behavior.
+   */
+  private func orderWebPaneViewsToFront(_ optionalSession: WebPaneSession?) {
+    guard let session = optionalSession else {
+      return
+    }
+    if let webPaneHost = superview {
+      session.webView.removeFromSuperview()
+      webPaneHost.addSubview(session.webView)
+    } else {
+      session.webView.removeFromSuperview()
+      addSubview(session.webView)
+    }
+    session.webView.alphaValue = 1
+    session.webView.layer?.zPosition = 100
+    if session.titleBarView.superview === self {
+      session.titleBarView.removeFromSuperview()
+    }
+    addSubview(session.titleBarView)
+    session.titleBarView.wantsLayer = true
+    session.titleBarView.layer?.zPosition = 110
+    if session.borderView.superview === self {
+      session.borderView.removeFromSuperview()
+    }
+    addSubview(session.borderView)
+    session.borderView.layer?.zPosition = 120
+  }
+
+  private func webPaneContentFrameInHostingView(_ contentRect: CGRect) -> CGRect {
+    guard let host = superview else {
+      return contentRect
+    }
+    return convert(contentRect, to: host)
   }
 
   private func scheduleWebPaneReload(sessionId: String, url: URL, remainingAttempts: Int) {
@@ -925,6 +989,185 @@ final class TerminalWorkspaceView: NSView {
 
   private func sessionId(for webView: WKWebView) -> String? {
     webPaneSessions.first { _, session in session.webView === webView }?.key
+  }
+
+  /**
+   CDXC:T3Code 2026-04-30-15:42
+   Native T3 panes must install the same desktop bridge contract before the T3
+   bundle runs. Directly loading `/{projectId}/{threadId}` without this bridge
+   leaves the React route waiting for environment bootstrap and the pane remains
+   on the gray boot shell even though WK navigation finishes successfully.
+   */
+  private static func t3WebPaneBridgeScript(
+    sessionId: String, title: String, workspaceRoot: String?
+  ) -> String {
+    let encodedSessionId = javascriptStringLiteral(sessionId)
+    let encodedTitle = javascriptStringLiteral(title.isEmpty ? "T3 Code" : title)
+    let encodedWorkspaceRoot = javascriptStringLiteral(workspaceRoot ?? "")
+    return """
+      (() => {
+        const isManagedT3Origin = () => {
+          try {
+            return location.protocol === "http:" &&
+              (location.hostname === "127.0.0.1" || location.hostname === "localhost") &&
+              location.port === "3774";
+          } catch {
+            return false;
+          }
+        };
+        if (!isManagedT3Origin()) {
+          return;
+        }
+        const sessionId = \(encodedSessionId);
+        const sessionTitle = \(encodedTitle);
+        const workspaceRoot = \(encodedWorkspaceRoot);
+        const threadIdFromPath = () => {
+          const parts = location.pathname.split("/").filter(Boolean);
+          return parts.length >= 2 ? parts[1] : "";
+        };
+        const wsUrl = () => `${location.origin.replace(/^http/i, "ws")}/ws`;
+        const currentThreadId = () => threadIdFromPath();
+        window.__VSMUX_T3_ACTIVE_THREAD_ID__ = currentThreadId();
+        window.__VSMUX_T3_COMPOSER_FOCUS_ENABLED__ = false;
+        window.__VSMUX_T3_BOOTSTRAP__ = {
+          embedMode: "vsmux-mobile",
+          httpOrigin: location.origin,
+          sessionId,
+          threadId: currentThreadId(),
+          workspaceRoot,
+          wsUrl: wsUrl()
+        };
+        const serverExposureState = {
+          advertisedHost: null,
+          endpointUrl: null,
+          mode: "local-only"
+        };
+        const updateState = {
+          canRetry: false,
+          checkedAt: null,
+          checkedVersion: null,
+          downloadPercent: null,
+          downloadedVersion: null,
+          errorContext: null,
+          message: null,
+          phase: "idle"
+        };
+        window.desktopBridge = {
+          browser: {
+            close: async () => null,
+            closeTab: async () => null,
+            getState: async (input) => ({
+              activeTabId: null,
+              lastError: null,
+              open: false,
+              tabs: [],
+              threadId: input?.threadId ?? currentThreadId()
+            }),
+            goBack: async () => null,
+            goForward: async () => null,
+            hide: async () => undefined,
+            navigate: async () => null,
+            newTab: async () => null,
+            onState: () => () => undefined,
+            open: async () => null,
+            openDevTools: async () => undefined,
+            reload: async () => null,
+            selectTab: async () => null,
+            setPanelBounds: async () => null
+          },
+          confirm: async (message) => window.confirm(String(message)),
+          getClientSettings: async () => null,
+          getLocalEnvironmentBootstrap: () => ({
+            bootstrapToken: "",
+            httpBaseUrl: location.origin,
+            label: sessionTitle || "T3 Code",
+            wsBaseUrl: wsUrl()
+          }),
+          getWsUrl: () => wsUrl(),
+          getSavedEnvironmentRegistry: async () => [],
+          getSavedEnvironmentSecret: async () => null,
+          getServerExposureState: async () => serverExposureState,
+          notifications: {
+            isSupported: async () => false,
+            show: async () => false
+          },
+          getUpdateState: async () => updateState,
+          installUpdate: async () => ({ accepted: false, completed: false, state: updateState }),
+          checkForUpdate: async () => ({ checked: false, state: updateState }),
+          downloadUpdate: async () => ({ accepted: false, completed: false, state: updateState }),
+          onMenuAction: () => () => undefined,
+          onUpdateState: () => () => undefined,
+          openExternal: async (url) => {
+            try {
+              window.open(String(url), "_blank", "noopener,noreferrer");
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          pickFolder: async () => null,
+          removeSavedEnvironmentSecret: async () => undefined,
+          setClientSettings: async () => undefined,
+          setSavedEnvironmentRegistry: async () => undefined,
+          setSavedEnvironmentSecret: async () => false,
+          setServerExposureMode: async () => serverExposureState,
+          setTheme: async () => undefined,
+          showContextMenu: async () => null
+        };
+        /**
+         * CDXC:T3Code 2026-04-30-23:46
+         * Evaluate runtime patching as an embed strategy by injecting a small
+         * visible modal directly into the managed T3 page. This is intentionally
+         * simple and scoped to the T3 origin so we can verify WebKit injection
+         * works before deciding whether to patch real T3 UI issues this way.
+         */
+        const injectZmuxT3RuntimePatchProbe = () => {
+          if (document.getElementById("zmux-t3-runtime-patch-probe")) {
+            return;
+          }
+          const modal = document.createElement("div");
+          modal.id = "zmux-t3-runtime-patch-probe";
+          modal.textContent = "zmux JS injection test";
+          Object.assign(modal.style, {
+            alignItems: "center",
+            background: "rgba(17, 24, 39, 0.94)",
+            border: "1px solid rgba(255, 255, 255, 0.18)",
+            borderRadius: "10px",
+            boxShadow: "0 18px 48px rgba(0, 0, 0, 0.45)",
+            color: "#f9fafb",
+            display: "flex",
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            fontSize: "14px",
+            fontWeight: "600",
+            height: "96px",
+            justifyContent: "center",
+            left: "50%",
+            padding: "0 24px",
+            position: "fixed",
+            top: "50%",
+            transform: "translate(-50%, -50%)",
+            zIndex: "2147483647"
+          });
+          document.documentElement.appendChild(modal);
+        };
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", injectZmuxT3RuntimePatchProbe, { once: true });
+        } else {
+          injectZmuxT3RuntimePatchProbe();
+        }
+      })();
+      """
+  }
+
+  private static func javascriptStringLiteral(_ value: String) -> String {
+    guard let data = try? JSONSerialization.data(withJSONObject: [value], options: []),
+      let json = String(data: data, encoding: .utf8),
+      json.hasPrefix("["),
+      json.hasSuffix("]")
+    else {
+      return "\"\""
+    }
+    return String(json.dropFirst().dropLast())
   }
 
   private static let t3WebPaneDiagnosticsScript = """
@@ -1511,24 +1754,6 @@ extension TerminalWorkspaceView: WKNavigationDelegate {
       "title": webView.title ?? NSNull(),
       "url": webView.url?.absoluteString ?? NSNull(),
     ])
-    webView.evaluateJavaScript(
-      """
-      JSON.stringify({
-        bodyText: document.body ? document.body.innerText.slice(0, 500) : "",
-        documentTitle: document.title || "",
-        href: location.href,
-        readyState: document.readyState,
-        rootHtml: document.getElementById("root") ? document.getElementById("root").innerHTML.slice(0, 500) : ""
-      })
-      """
-    ) { result, error in
-      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.domProbe", [
-        "error": error?.localizedDescription ?? NSNull(),
-        "result": String(describing: result ?? NSNull()),
-        "sessionId": sessionId ?? NSNull(),
-        "url": webView.url?.absoluteString ?? NSNull(),
-      ])
-    }
   }
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

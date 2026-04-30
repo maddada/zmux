@@ -2491,7 +2491,7 @@ function handleAgentManagerXSessionCommand(rawData: unknown): void {
 }
 
 function publish(): void {
-  ensureVisibleNativeTerminals("publish");
+  ensureVisibleNativeSessions("publish");
   const sidebarMessage = buildSidebarMessage();
   sidebarBus.post(sidebarMessage);
   agentManagerXBridgeClient.publish(createAgentManagerXWorkspaceSnapshots());
@@ -2506,13 +2506,19 @@ function publish(): void {
   syncNativeLayout();
 }
 
-function ensureVisibleNativeTerminals(reason: string): void {
+function ensureVisibleNativeSessions(reason: string): void {
   /**
    * CDXC:SessionRestore 2026-04-29-09:16
    * Native zmux only recreates terminal processes for sessions that are actually
    * on screen: the active workspace, active group, and current visible card set.
    * Hidden terminals remain sleeping until focus/wake asks for their resume;
    * this hot publish path must not emit per-session diagnostics.
+   *
+   * CDXC:T3Code 2026-04-30-19:23
+   * Visible restored T3 sessions also need their native WKWebView recreated at
+   * startup. A persisted T3 card without a native web-pane surface leaves the
+   * workspace focused on a session id AppKit cannot render, producing the blank
+   * gray pane even though the sidebar card is selected.
    */
   for (const project of projects) {
     for (const group of project.workspace.groups) {
@@ -2522,10 +2528,16 @@ function ensureVisibleNativeTerminals(reason: string): void {
           project.projectId === activeProjectId &&
           group.groupId === project.workspace.activeGroupId &&
           visibleIds.has(session.sessionId);
-        if (session.kind !== "terminal" || session.isSleeping === true) {
+        if (!isVisibleOnScreen) {
           continue;
         }
-        if (!isVisibleOnScreen) {
+        if (session.kind === "t3") {
+          if (!nativeSessionIdBySidebarSessionId.has(session.sessionId)) {
+            restoreNativeT3Session(project, session, reason);
+          }
+          continue;
+        }
+        if (session.kind !== "terminal" || session.isSleeping === true) {
           continue;
         }
         if (terminalStateById.has(session.sessionId)) {
