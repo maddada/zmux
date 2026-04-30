@@ -22,6 +22,7 @@ export type NativeGhosttyHostCommand =
       type: "createTerminal";
     }
   | {
+      cwd?: string;
       sessionId: string;
       title: string;
       type: "createWebPane";
@@ -46,6 +47,9 @@ export type NativeGhosttyHostCommand =
   | {
       cwd: string;
       type: "startT3CodeRuntime";
+    }
+  | {
+      type: "stopT3CodeRuntime";
     }
   | {
       sessionId: string;

@@ -21,6 +21,8 @@ final class TerminalWorkspaceView: NSView {
   private struct WebPaneSession {
     let diagnosticsBridge: T3CodePaneDiagnosticsBridge
     let sessionId: String
+    let title: String
+    let workspaceRoot: String?
     let webView: WKWebView
     let titleBarView: TerminalSessionTitleBarView
     let borderView: TerminalPaneBorderView
@@ -237,6 +239,7 @@ final class TerminalWorkspaceView: NSView {
       "sessionId": command.sessionId,
       "title": command.title,
       "url": command.url,
+      "workspaceRoot": command.cwd ?? NSNull(),
     ])
     let configuration = WKWebViewConfiguration()
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
@@ -275,6 +278,8 @@ final class TerminalWorkspaceView: NSView {
     webPaneSessions[command.sessionId] = WebPaneSession(
       diagnosticsBridge: diagnosticsBridge,
       sessionId: command.sessionId,
+      title: command.title,
+      workspaceRoot: command.cwd,
       webView: webView,
       titleBarView: titleBarView,
       borderView: borderView
@@ -289,6 +294,7 @@ final class TerminalWorkspaceView: NSView {
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.requested", [
         "sessionId": command.sessionId,
         "url": url.absoluteString,
+        "workspaceRoot": command.cwd ?? NSNull(),
       ])
       loadWebPane(sessionId: command.sessionId, url: url, reason: "initial")
     } else {
@@ -859,14 +865,62 @@ final class TerminalWorkspaceView: NSView {
       }
       self.pendingAuthenticatedWebPaneLoadSessionIds.remove(sessionId)
       self.completedWebPaneLoadSessionIds.remove(sessionId)
-      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.start", [
-        "reason": reason,
-        "sessionId": sessionId,
-        "url": url.absoluteString,
-      ])
-      session.webView.load(URLRequest(url: url))
-      self.scheduleWebPaneReload(sessionId: sessionId, url: url, remainingAttempts: 16)
+      NativeT3RuntimeSessionBootstrap.prepareThreadRoute(
+        origin: url,
+        sessionId: sessionId,
+        title: session.title,
+        workspaceRoot: session.workspaceRoot
+      ) { [weak self] result in
+        guard let self, let session = self.webPaneSessions[sessionId] else {
+          return
+        }
+        switch result {
+        case .success(let routeURL):
+          NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.start", [
+            "reason": reason,
+            "routeUrl": routeURL.absoluteString,
+            "sessionId": sessionId,
+            "url": url.absoluteString,
+            "workspaceRoot": session.workspaceRoot ?? NSNull(),
+          ])
+          session.webView.load(URLRequest(url: routeURL))
+          self.scheduleWebPaneReload(sessionId: sessionId, url: routeURL, remainingAttempts: 16)
+        case .failure(let error):
+          NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.threadRouteFailed", [
+            "error": error.localizedDescription,
+            "reason": reason,
+            "sessionId": sessionId,
+            "url": url.absoluteString,
+            "workspaceRoot": session.workspaceRoot ?? NSNull(),
+          ])
+          self.loadWebPaneError(session: session, message: error.localizedDescription)
+        }
+      }
     }
+  }
+
+  private func loadWebPaneError(session: WebPaneSession, message: String) {
+    let escaped = message
+      .replacingOccurrences(of: "&", with: "&amp;")
+      .replacingOccurrences(of: "<", with: "&lt;")
+      .replacingOccurrences(of: ">", with: "&gt;")
+    session.webView.loadHTMLString(
+      """
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { margin: 0; background: #1f1f1f; color: #f5f5f5; font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+            main { padding: 24px; }
+            pre { white-space: pre-wrap; color: #ffb4ab; }
+          </style>
+        </head>
+        <body><main><h1>T3 Code failed to open</h1><pre>\(escaped)</pre></main></body>
+      </html>
+      """,
+      baseURL: nil
+    )
   }
 
   private func sessionId(for webView: WKWebView) -> String? {

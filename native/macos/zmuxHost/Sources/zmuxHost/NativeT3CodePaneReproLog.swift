@@ -186,6 +186,10 @@ enum NativeT3RuntimeLauncher {
     }
   }
 
+  static func hasManagedRuntimeListener() -> Bool {
+    listeningProcesses(onPort: port).contains { isManagedT3RuntimeCommand($0.command) }
+  }
+
   /**
    CDXC:T3Code 2026-04-30-03:39
    The reference T3 pane starts the provider with a desktop bootstrap credential
@@ -404,8 +408,298 @@ private struct NativeT3BootstrapFile {
   let url: URL
 }
 
+struct NativeT3ThreadRoute {
+  let projectId: String
+  let threadId: String
+  let url: URL
+}
+
+enum NativeT3RuntimeSessionBootstrap {
+  private static let defaultModelSelection: [String: Any] = [
+    "model": "gpt-5-codex",
+    "provider": "codex",
+  ]
+
+  /**
+   CDXC:T3Code 2026-04-30-09:23
+   T3 Code's desktop root URL is only a boot shell. Native panes must create
+   the same project/thread records as the reference app, then load the concrete
+   `/{projectId}/{threadId}` route so WKWebView renders the T3 workspace page
+   instead of the blank gray splash surface.
+   */
+  static func prepareThreadRoute(
+    origin: URL,
+    sessionId: String,
+    title: String,
+    workspaceRoot: String?,
+    completion: @escaping (Result<URL, Error>) -> Void
+  ) {
+    guard NativeT3RuntimeLauncher.isManagedRuntimeURL(origin) else {
+      DispatchQueue.main.async { completion(.success(origin)) }
+      return
+    }
+    guard let workspaceRoot, !workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      DispatchQueue.main.async {
+        completion(.failure(error("T3 Code pane is missing its workspace root.")))
+      }
+      return
+    }
+
+    getSnapshot(origin: origin, sessionId: sessionId) { result in
+      switch result {
+      case .success(let snapshot):
+        createThreadRoute(
+          origin: origin,
+          sessionId: sessionId,
+          snapshot: snapshot,
+          title: title,
+          workspaceRoot: workspaceRoot,
+          completion: completion
+        )
+      case .failure(let error):
+        DispatchQueue.main.async { completion(.failure(error)) }
+      }
+    }
+  }
+
+  private static func createThreadRoute(
+    origin: URL,
+    sessionId: String,
+    snapshot: [String: Any],
+    title: String,
+    workspaceRoot: String,
+    completion: @escaping (Result<URL, Error>) -> Void
+  ) {
+    let project = findProject(in: snapshot, workspaceRoot: workspaceRoot)
+    let ensureProject: (@escaping (Result<[String: Any], Error>) -> Void) -> Void = { callback in
+      if let project {
+        callback(.success(project))
+        return
+      }
+      createProject(origin: origin, sessionId: sessionId, workspaceRoot: workspaceRoot, completion: callback)
+    }
+
+    ensureProject { projectResult in
+      switch projectResult {
+      case .success(let project):
+        guard let projectId = project["id"] as? String else {
+          DispatchQueue.main.async { completion(.failure(error("T3 project is missing an id."))) }
+          return
+        }
+        let threadId = UUID().uuidString
+        let modelSelection = (project["defaultModelSelection"] as? [String: Any])
+          ?? defaultModelSelection
+        let command: [String: Any] = [
+          "branch": NSNull(),
+          "commandId": UUID().uuidString,
+          "createdAt": isoNow(),
+          "interactionMode": "default",
+          "modelSelection": modelSelection,
+          "projectId": projectId,
+          "runtimeMode": "full-access",
+          "threadId": threadId,
+          "title": title.isEmpty ? "T3 Code" : title,
+          "type": "thread.create",
+          "worktreePath": NSNull(),
+        ]
+        dispatchCommand(origin: origin, sessionId: sessionId, command: command) { dispatchResult in
+          switch dispatchResult {
+          case .success:
+            guard let route = routeURL(origin: origin, projectId: projectId, threadId: threadId) else {
+              DispatchQueue.main.async {
+                completion(.failure(error("Failed to build T3 thread route URL.")))
+              }
+              return
+            }
+            NativeT3CodePaneReproLog.append("nativeT3Runtime.threadRoute.ready", [
+              "projectId": projectId,
+              "routeUrl": route.absoluteString,
+              "sessionId": sessionId,
+              "threadId": threadId,
+              "workspaceRoot": workspaceRoot,
+            ])
+            DispatchQueue.main.async { completion(.success(route)) }
+          case .failure(let error):
+            DispatchQueue.main.async { completion(.failure(error)) }
+          }
+        }
+      case .failure(let error):
+        DispatchQueue.main.async { completion(.failure(error)) }
+      }
+    }
+  }
+
+  private static func getSnapshot(
+    origin: URL,
+    sessionId: String,
+    completion: @escaping (Result<[String: Any], Error>) -> Void
+  ) {
+    guard let url = endpointURL(origin: origin, path: "/api/orchestration/snapshot") else {
+      completion(.failure(error("Invalid T3 snapshot URL.")))
+      return
+    }
+    requestJSON(url: url, sessionId: sessionId, method: "GET", body: nil) { result in
+      if case .success(let payload) = result {
+        NativeT3CodePaneReproLog.append("nativeT3Runtime.snapshot.loaded", [
+          "projectCount": (payload["projects"] as? [Any])?.count ?? 0,
+          "sessionId": sessionId,
+          "threadCount": (payload["threads"] as? [Any])?.count ?? 0,
+        ])
+      }
+      completion(result)
+    }
+  }
+
+  private static func createProject(
+    origin: URL,
+    sessionId: String,
+    workspaceRoot: String,
+    completion: @escaping (Result<[String: Any], Error>) -> Void
+  ) {
+    let projectId = UUID().uuidString
+    let now = isoNow()
+    let title = URL(fileURLWithPath: workspaceRoot).lastPathComponent.isEmpty
+      ? "project"
+      : URL(fileURLWithPath: workspaceRoot).lastPathComponent
+    let project: [String: Any] = [
+      "createdAt": now,
+      "defaultModelSelection": defaultModelSelection,
+      "deletedAt": NSNull(),
+      "id": projectId,
+      "title": title,
+      "updatedAt": now,
+      "workspaceRoot": workspaceRoot,
+    ]
+    let command: [String: Any] = [
+      "commandId": UUID().uuidString,
+      "createdAt": now,
+      "defaultModelSelection": defaultModelSelection,
+      "projectId": projectId,
+      "title": title,
+      "type": "project.create",
+      "workspaceRoot": workspaceRoot,
+    ]
+    dispatchCommand(origin: origin, sessionId: sessionId, command: command) { result in
+      switch result {
+      case .success:
+        NativeT3CodePaneReproLog.append("nativeT3Runtime.project.created", [
+          "projectId": projectId,
+          "sessionId": sessionId,
+          "workspaceRoot": workspaceRoot,
+        ])
+        completion(.success(project))
+      case .failure(let error):
+        completion(.failure(error))
+      }
+    }
+  }
+
+  private static func dispatchCommand(
+    origin: URL,
+    sessionId: String,
+    command: [String: Any],
+    completion: @escaping (Result<[String: Any], Error>) -> Void
+  ) {
+    guard let url = endpointURL(origin: origin, path: "/api/orchestration/dispatch") else {
+      completion(.failure(error("Invalid T3 dispatch URL.")))
+      return
+    }
+    let body = try? JSONSerialization.data(withJSONObject: command, options: [])
+    requestJSON(url: url, sessionId: sessionId, method: "POST", body: body, completion: completion)
+  }
+
+  private static func requestJSON(
+    url: URL,
+    sessionId: String,
+    method: String,
+    body: Data?,
+    completion: @escaping (Result<[String: Any], Error>) -> Void
+  ) {
+    var request = URLRequest(url: url)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.httpMethod = method
+    request.timeoutInterval = 30
+    if let body {
+      request.httpBody = body
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    }
+    URLSession.shared.dataTask(with: request) { data, response, requestError in
+      let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.api.response", [
+        "bodyBytes": data?.count ?? 0,
+        "error": requestError?.localizedDescription ?? NSNull(),
+        "method": method,
+        "sessionId": sessionId,
+        "statusCode": statusCode,
+        "url": url.absoluteString,
+      ])
+      if let requestError {
+        completion(.failure(requestError))
+        return
+      }
+      guard (200..<300).contains(statusCode) else {
+        let bodyText = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        completion(.failure(error("T3 API \(method) \(url.path) returned \(statusCode): \(bodyText)")))
+        return
+      }
+      guard let data, !data.isEmpty else {
+        completion(.success([:]))
+        return
+      }
+      guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        completion(.failure(error("T3 API \(method) \(url.path) did not return JSON.")))
+        return
+      }
+      completion(.success(payload))
+    }.resume()
+  }
+
+  private static func findProject(in snapshot: [String: Any], workspaceRoot: String) -> [String: Any]? {
+    guard let projects = snapshot["projects"] as? [[String: Any]] else {
+      return nil
+    }
+    return projects.first { project in
+      let deletedAt = project["deletedAt"]
+      let isDeleted = !(deletedAt == nil || deletedAt is NSNull)
+      return !isDeleted && project["workspaceRoot"] as? String == workspaceRoot
+    }
+  }
+
+  private static func endpointURL(origin: URL, path: String) -> URL? {
+    var components = URLComponents()
+    components.scheme = origin.scheme ?? "http"
+    components.host = origin.host
+    components.port = origin.port
+    components.path = path
+    return components.url
+  }
+
+  private static func routeURL(origin: URL, projectId: String, threadId: String) -> URL? {
+    var components = URLComponents()
+    components.scheme = origin.scheme ?? "http"
+    components.host = origin.host
+    components.port = origin.port
+    components.path = "/\(projectId)/\(threadId)"
+    return components.url
+  }
+
+  private static func isoNow() -> String {
+    ISO8601DateFormatter().string(from: Date())
+  }
+
+  private static func error(_ message: String) -> NSError {
+    NSError(
+      domain: "NativeT3RuntimeSessionBootstrap",
+      code: 1,
+      userInfo: [NSLocalizedDescriptionKey: message]
+    )
+  }
+}
+
 enum NativeT3RuntimeBrowserAuth {
   private static let authRetryDelay: TimeInterval = 0.5
+  private static let authRequestTimeout: TimeInterval = 3
   private static let maxAuthAttempts = 40
   private static let queue = DispatchQueue(label: "com.madda.zmux.t3-browser-auth")
   private static var isAuthenticating = false
@@ -452,6 +746,14 @@ enum NativeT3RuntimeBrowserAuth {
     }
     var request = URLRequest(url: sessionURL)
     request.cachePolicy = .reloadIgnoringLocalCacheData
+    /**
+     CDXC:T3Code 2026-04-30-09:30
+     Native T3 panes can begin auth while the managed provider is being
+     replaced. Session probes must fail quickly so the existing retry loop
+     can catch the newly launched provider instead of leaving a gray pane
+     until URLSession's default timeout expires.
+     */
+    request.timeoutInterval = authRequestTimeout
     URLSession.shared.dataTask(with: request) { data, response, error in
       let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
       let authenticated = parseAuthenticated(data)
@@ -483,6 +785,7 @@ enum NativeT3RuntimeBrowserAuth {
     var request = URLRequest(url: bootstrapURL)
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.httpMethod = "POST"
+    request.timeoutInterval = authRequestTimeout
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try? JSONSerialization.data(withJSONObject: ["credential": credential])
     NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.bootstrap.start", [

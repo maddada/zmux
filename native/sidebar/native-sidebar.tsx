@@ -53,6 +53,7 @@ import {
   type SidebarCollapsibleSection,
   type SidebarDaemonSessionItem,
   type SidebarDaemonSessionsStateMessage,
+  type SidebarT3SessionItem,
   type SidebarHydrateMessage,
   type SidebarPreviousSessionItem,
   type SidebarSectionCollapseState,
@@ -164,6 +165,7 @@ type NativeHostCommand =
       type: "createTerminal";
     }
   | {
+      cwd?: string;
       sessionId: string;
       title: string;
       type: "createWebPane";
@@ -174,6 +176,7 @@ type NativeHostCommand =
   | { sessionId: string; type: "focusTerminal" }
   | { sessionId: string; type: "focusWebPane" }
   | { cwd: string; type: "startT3CodeRuntime" }
+  | { type: "stopT3CodeRuntime" }
   | { type: "activateApp" }
   | { sessionId: string; text: string; type: "writeTerminalText" }
   | { sessionId: string; type: "sendTerminalEnter" }
@@ -3360,6 +3363,7 @@ function createNativeT3Session(groupId?: string): T3SessionRecord | undefined {
   updateActiveProjectWorkspace(() => result.snapshot);
   postNative({ cwd: project.path, type: "startT3CodeRuntime" });
   postNative({
+    cwd: project.path,
     sessionId: nativeSessionId,
     title: "T3 Code",
     type: "createWebPane",
@@ -3368,6 +3372,40 @@ function createNativeT3Session(groupId?: string): T3SessionRecord | undefined {
   postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
   publish();
   return session;
+}
+
+function restoreNativeT3Session(
+  project: NativeProject,
+  session: T3SessionRecord,
+  reason: string,
+): void {
+  /**
+   * CDXC:T3Code 2026-04-30-09:33
+   * Persisted native T3 cards outlive their WKWebView surfaces across app
+   * restarts. Focusing a restored T3 card must recreate the embedded web pane
+   * and managed runtime instead of only sending focus to a missing native id.
+   */
+  const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
+  const workspaceRoot = session.t3?.workspaceRoot ?? project.path;
+  const serverOrigin =
+    session.t3?.serverOrigin?.startsWith("http") && !session.t3.serverOrigin.endsWith(":0")
+      ? session.t3.serverOrigin
+      : "http://127.0.0.1:3774";
+  postNative({ cwd: workspaceRoot, type: "startT3CodeRuntime" });
+  postNative({
+    cwd: workspaceRoot,
+    sessionId: nativeSessionId,
+    title: session.title || "T3 Code",
+    type: "createWebPane",
+    url: serverOrigin,
+  });
+  postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
+  appendAgentDetectionDebugLog("nativeSidebar.t3Session.restored", {
+    nativeSessionId,
+    reason,
+    sessionId: session.sessionId,
+    workspaceRoot,
+  });
 }
 
 function syncSessionTitleFromNativeTerminalTitle(
@@ -3956,6 +3994,18 @@ function focusTerminal(sessionId: string): void {
   updateActiveProjectWorkspace(
     (workspace) => focusSessionInSimpleWorkspace(workspace, sessionId).snapshot,
   );
+  const sessionRecord = findSessionRecord(sessionId);
+  if (sessionRecord?.kind === "t3") {
+    if (!nativeSessionIdBySidebarSessionId.has(sessionId)) {
+      restoreNativeT3Session(activeProject(), sessionRecord, "focus-restored-session");
+    }
+    postNative({
+      sessionId: nativeSessionIdForSidebarSession(sessionId),
+      type: "focusWebPane",
+    });
+    publish();
+    return;
+  }
   const session = findTerminalSession(sessionId);
   /**
    * CDXC:SessionSleep 2026-04-27-09:09
@@ -5143,9 +5193,27 @@ function copyResumeCommand(sessionId: string): void {
 function refreshDaemonSessionsState(): void {
   const now = new Date().toISOString();
   const sessions: SidebarDaemonSessionItem[] = [];
+  const t3Sessions: SidebarT3SessionItem[] = [];
   for (const project of projects) {
     for (const group of project.workspace.groups) {
       for (const session of group.snapshot.sessions) {
+        if (session.kind === "t3") {
+          t3Sessions.push({
+            activity: "idle",
+            detail: session.t3?.serverOrigin ?? "Native T3 Code pane",
+            isCurrentWorkspace: project.projectId === activeProjectId,
+            isFocused: group.snapshot.focusedSessionId === session.sessionId,
+            isRunning: true,
+            isSleeping: false,
+            lastInteractionAt: now,
+            sessionId: session.sessionId,
+            threadId: session.t3?.threadId,
+            title: session.title,
+            workspaceId: project.projectId,
+            workspaceRoot: session.t3?.workspaceRoot ?? project.path,
+          });
+          continue;
+        }
         if (session.kind !== "terminal") {
           continue;
         }
@@ -5180,7 +5248,15 @@ function refreshDaemonSessionsState(): void {
       startedAt: now,
     },
     sessions,
-    t3Sessions: [],
+    t3Server:
+      t3Sessions.length > 0
+        ? {
+            pid: 0,
+            port: 3774,
+            startedAt: now,
+          }
+        : undefined,
+    t3Sessions,
     type: "daemonSessionsState",
   };
   sidebarBus.post(message);
@@ -5646,7 +5722,17 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       refreshDaemonSessionsState();
       return;
     case "killT3RuntimeServer":
+      /**
+       * CDXC:T3Code 2026-04-30-09:23
+       * The native Running modal must control the same embedded T3 resources
+       * that T3 panes create. Killing the T3 server asks Swift to stop the
+       * managed localhost runtime instead of only refreshing modal state.
+       */
+      postNative({ type: "stopT3CodeRuntime" });
+      refreshDaemonSessionsState();
+      return;
     case "killT3RuntimeSession":
+      closeTerminal(message.sessionId);
       refreshDaemonSessionsState();
       return;
     case "killDaemonSession":

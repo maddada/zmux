@@ -8,6 +8,7 @@ enum HostCommand: Decodable {
   case focusTerminal(SessionCommand)
   case focusWebPane(SessionCommand)
   case startT3CodeRuntime(StartT3CodeRuntime)
+  case stopT3CodeRuntime
   case activateApp
   case writeTerminalText(WriteTerminalText)
   case sendTerminalEnter(SessionCommand)
@@ -48,6 +49,7 @@ enum HostCommand: Decodable {
     case focusTerminal
     case focusWebPane
     case startT3CodeRuntime
+    case stopT3CodeRuntime
     case activateApp
     case writeTerminalText
     case sendTerminalEnter
@@ -94,6 +96,8 @@ enum HostCommand: Decodable {
       self = .focusWebPane(try SessionCommand(from: decoder))
     case .startT3CodeRuntime:
       self = .startT3CodeRuntime(try StartT3CodeRuntime(from: decoder))
+    case .stopT3CodeRuntime:
+      self = .stopT3CodeRuntime
     case .activateApp:
       self = .activateApp
     case .writeTerminalText:
@@ -162,6 +166,7 @@ struct CreateTerminal: Decodable {
 }
 
 struct CreateWebPane: Decodable {
+  let cwd: String?
   let sessionId: String
   let title: String
   let url: String

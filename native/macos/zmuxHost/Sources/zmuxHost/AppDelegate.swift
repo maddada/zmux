@@ -677,6 +677,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       workspaceView?.focusWebPane(sessionId: command.sessionId)
     case .startT3CodeRuntime(let command):
       startT3CodeRuntime(command)
+    case .stopT3CodeRuntime:
+      stopT3CodeRuntime(logPrefix: "nativeHost")
     case .activateApp:
       activateAppWindow()
     case .writeTerminalText(let command):
@@ -769,6 +771,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       return
     }
 
+    /**
+     CDXC:T3Code 2026-04-30-09:35
+     App restarts lose the Process handle for a still-running managed T3
+     provider. Adopt that listener instead of killing it as stale, because T3
+     pane restore may already be creating a thread route against the provider.
+     */
+    if NativeT3RuntimeLauncher.hasManagedRuntimeListener() {
+      NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.adoptedExisting", [
+        "cwd": command.cwd,
+        "port": NativeT3RuntimeLauncher.port,
+      ])
+      return
+    }
+
     NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "nativeHost")
     NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.spawn", [
       "cwd": command.cwd,
@@ -799,6 +815,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       ])
       Self.logger.error("Failed to start T3 Code runtime: \(error.localizedDescription)")
     }
+  }
+
+  /**
+   CDXC:T3Code 2026-04-30-09:23
+   The Running modal owns native T3 lifecycle controls. Stop the tracked
+   desktop/no-browser provider and clear any managed listener on port 3774 so
+   users can recover a blank or stale pane without shelling out manually.
+   */
+  @MainActor
+  private func stopT3CodeRuntime(logPrefix: String) {
+    if let process = t3CodeRuntimeProcess {
+      NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.stop.tracked", [
+        "isRunning": process.isRunning,
+        "pid": process.processIdentifier,
+      ])
+      if process.isRunning {
+        process.terminate()
+      }
+      t3CodeRuntimeProcess = nil
+    }
+    NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "\(logPrefix).stop")
   }
 
   @MainActor private func activateAppWindow() {
@@ -1749,6 +1786,8 @@ final class zmuxRootView: NSView {
       workspaceView.focusWebPane(sessionId: command.sessionId)
     case .startT3CodeRuntime(let command):
       startT3CodeRuntime(command)
+    case .stopT3CodeRuntime:
+      stopT3CodeRuntime(logPrefix: "nativeSidebar")
     case .activateApp:
       activateAppWindow()
     case .writeTerminalText(let command):
@@ -1859,6 +1898,20 @@ final class zmuxRootView: NSView {
       return
     }
 
+    /**
+     CDXC:T3Code 2026-04-30-09:35
+     Native sidebar restores can focus a T3 card while the previous managed
+     provider still owns port 3774. Reuse that provider rather than killing it
+     after a pane has already created a valid thread route.
+     */
+    if NativeT3RuntimeLauncher.hasManagedRuntimeListener() {
+      NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.adoptedExisting", [
+        "cwd": command.cwd,
+        "port": NativeT3RuntimeLauncher.port,
+      ])
+      return
+    }
+
     NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "nativeSidebar")
     NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.spawn", [
       "cwd": command.cwd,
@@ -1889,6 +1942,26 @@ final class zmuxRootView: NSView {
       ])
       zmuxRootView.logger.error("Failed to start T3 Code runtime: \(error.localizedDescription)")
     }
+  }
+
+  /**
+   CDXC:T3Code 2026-04-30-09:23
+   Native-sidebar Running modal controls must kill the embedded T3 provider
+   they display. This command stops tracked process state and any managed T3
+   listener on the shared localhost port.
+   */
+  private func stopT3CodeRuntime(logPrefix: String) {
+    if let process = t3CodeRuntimeProcess {
+      NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.stop.tracked", [
+        "isRunning": process.isRunning,
+        "pid": process.processIdentifier,
+      ])
+      if process.isRunning {
+        process.terminate()
+      }
+      t3CodeRuntimeProcess = nil
+    }
+    NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "\(logPrefix).stop")
   }
 
   private func activateAppWindow() {
