@@ -405,17 +405,21 @@ private struct NativeT3BootstrapFile {
 }
 
 enum NativeT3RuntimeBrowserAuth {
+  private static let authRetryDelay: TimeInterval = 0.5
+  private static let maxAuthAttempts = 40
   private static let queue = DispatchQueue(label: "com.madda.zmux.t3-browser-auth")
   private static var isAuthenticating = false
   private static var pendingCompletions: [(sessionId: String, completion: () -> Void)] = []
 
   /**
-   CDXC:T3Code 2026-04-30-03:47
+   CDXC:T3Code 2026-04-30-09:10
    Native T3 Code panes must render the already-owned desktop provider, not the
    unauthenticated pairing shell. Before WKWebView loads the app, exchange the
    desktop bootstrap credential for T3's browser-session cookie through the
    provider's documented `/api/auth/bootstrap` endpoint. Serialize exchanges
-   because the desktop bootstrap credential is single-use.
+   because the desktop bootstrap credential is single-use. If the pane command
+   arrives before the runtime-start command registers that credential, retry
+   auth instead of loading the unauthenticated boot shell.
    */
   static func prepareManagedWebSession(
     for url: URL,
@@ -437,11 +441,11 @@ enum NativeT3RuntimeBrowserAuth {
         return
       }
       isAuthenticating = true
-      checkSession(origin: url)
+      checkSession(origin: url, attemptsRemaining: maxAuthAttempts)
     }
   }
 
-  private static func checkSession(origin: URL) {
+  private static func checkSession(origin: URL, attemptsRemaining: Int) {
     guard let sessionURL = endpointURL(origin: origin, path: "/api/auth/session") else {
       finishPending(reason: "invalidSessionUrl")
       return
@@ -462,14 +466,13 @@ enum NativeT3RuntimeBrowserAuth {
         finishPending(reason: "alreadyAuthenticated")
         return
       }
-      exchangeBootstrapCredential(origin: origin)
+      exchangeBootstrapCredential(origin: origin, attemptsRemaining: attemptsRemaining)
     }.resume()
   }
 
-  private static func exchangeBootstrapCredential(origin: URL) {
+  private static func exchangeBootstrapCredential(origin: URL, attemptsRemaining: Int) {
     guard let credential = NativeT3RuntimeLauncher.currentBootstrapCredential() else {
-      NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.bootstrap.missingCredential")
-      finishPending(reason: "missingCredential")
+      retryAuth(origin: origin, reason: "missingCredential", attemptsRemaining: attemptsRemaining)
       return
     }
     guard let bootstrapURL = endpointURL(origin: origin, path: "/api/auth/bootstrap") else {
@@ -492,7 +495,7 @@ enum NativeT3RuntimeBrowserAuth {
           "error": error?.localizedDescription ?? NSNull(),
           "url": bootstrapURL.absoluteString,
         ])
-        finishPending(reason: "bootstrapNoResponse")
+        retryAuth(origin: origin, reason: "bootstrapNoResponse", attemptsRemaining: attemptsRemaining)
         return
       }
 
@@ -511,12 +514,36 @@ enum NativeT3RuntimeBrowserAuth {
       ])
 
       guard httpResponse.statusCode == 200 else {
-        finishPending(reason: "bootstrapStatus\(httpResponse.statusCode)")
+        retryAuth(
+          origin: origin,
+          reason: "bootstrapStatus\(httpResponse.statusCode)",
+          attemptsRemaining: attemptsRemaining
+        )
         return
       }
       NativeT3RuntimeLauncher.clearBootstrapCredential(credential)
       setCookies(cookies, reason: "bootstrapComplete")
     }.resume()
+  }
+
+  private static func retryAuth(origin: URL, reason: String, attemptsRemaining: Int) {
+    guard attemptsRemaining > 0 else {
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.retry.exhausted", [
+        "reason": reason,
+        "url": origin.absoluteString,
+      ])
+      finishPending(reason: reason)
+      return
+    }
+
+    NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.retry.scheduled", [
+      "attemptsRemaining": attemptsRemaining,
+      "reason": reason,
+      "url": origin.absoluteString,
+    ])
+    queue.asyncAfter(deadline: .now() + authRetryDelay) {
+      checkSession(origin: origin, attemptsRemaining: attemptsRemaining - 1)
+    }
   }
 
   private static func setCookies(_ cookies: [HTTPCookie], reason: String) {

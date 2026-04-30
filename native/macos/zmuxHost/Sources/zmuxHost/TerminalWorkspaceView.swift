@@ -36,6 +36,7 @@ final class TerminalWorkspaceView: NSView {
   private var sessions: [String: TerminalSession] = [:]
   private var webPaneSessions: [String: WebPaneSession] = [:]
   private var completedWebPaneLoadSessionIds = Set<String>()
+  private var pendingAuthenticatedWebPaneLoadSessionIds = Set<String>()
   private var activeSessionIds = Set<String>()
   private var attentionSessionIds = Set<String>()
   private var sessionActivities = [String: NativeTerminalActivity]()
@@ -290,7 +291,6 @@ final class TerminalWorkspaceView: NSView {
         "url": url.absoluteString,
       ])
       loadWebPane(sessionId: command.sessionId, url: url, reason: "initial")
-      scheduleWebPaneReload(sessionId: command.sessionId, url: url, remainingAttempts: 16)
     } else {
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.invalidUrl", [
         "sessionId": command.sessionId,
@@ -316,6 +316,7 @@ final class TerminalWorkspaceView: NSView {
     activeSessionIds.remove(sessionId)
     sessionActivities.removeValue(forKey: sessionId)
     completedWebPaneLoadSessionIds.remove(sessionId)
+    pendingAuthenticatedWebPaneLoadSessionIds.remove(sessionId)
     session.webView.navigationDelegate = nil
     session.webView.configuration.userContentController.removeScriptMessageHandler(
       forName: T3CodePaneDiagnosticsBridge.messageHandlerName
@@ -835,11 +836,6 @@ final class TerminalWorkspaceView: NSView {
         "url": url.absoluteString,
       ])
       self.loadWebPane(sessionId: sessionId, url: url, reason: "retry")
-      self.scheduleWebPaneReload(
-        sessionId: sessionId,
-        url: url,
-        remainingAttempts: remainingAttempts - 1
-      )
     }
   }
 
@@ -847,11 +843,21 @@ final class TerminalWorkspaceView: NSView {
     guard webPaneSessions[sessionId] != nil else {
       return
     }
+    guard !pendingAuthenticatedWebPaneLoadSessionIds.contains(sessionId) else {
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.authPending", [
+        "reason": reason,
+        "sessionId": sessionId,
+        "url": url.absoluteString,
+      ])
+      return
+    }
+    pendingAuthenticatedWebPaneLoadSessionIds.insert(sessionId)
     NativeT3RuntimeBrowserAuth.prepareManagedWebSession(for: url, sessionId: sessionId) {
       [weak self] in
       guard let self, let session = self.webPaneSessions[sessionId] else {
         return
       }
+      self.pendingAuthenticatedWebPaneLoadSessionIds.remove(sessionId)
       self.completedWebPaneLoadSessionIds.remove(sessionId)
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.start", [
         "reason": reason,
@@ -859,6 +865,7 @@ final class TerminalWorkspaceView: NSView {
         "url": url.absoluteString,
       ])
       session.webView.load(URLRequest(url: url))
+      self.scheduleWebPaneReload(sessionId: sessionId, url: url, remainingAttempts: 16)
     }
   }
 
