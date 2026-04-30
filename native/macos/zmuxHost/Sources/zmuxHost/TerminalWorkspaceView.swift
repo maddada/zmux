@@ -28,6 +28,7 @@ final class TerminalWorkspaceView: NSView {
   private var activeSessionIds = Set<String>()
   private var attentionSessionIds = Set<String>()
   private var sessionActivities = [String: NativeTerminalActivity]()
+  private var sessionTitles = [String: String]()
   private var focusedSessionId: String?
   private var lastEmittedFocusedSessionId: String?
   private var paneGap = TerminalWorkspaceView.defaultPaneGap
@@ -113,9 +114,13 @@ final class TerminalWorkspaceView: NSView {
       .removeDuplicates()
       .sink { [weak self] title in
         guard !title.isEmpty else { return }
-        self?.sessions[command.sessionId]?.titleBarView.setTitle(
-          normalizedTerminalSessionTitle(title, sessionId: command.sessionId)
-        )
+        /**
+         CDXC:NativeTerminals 2026-04-30-03:41
+         Ghostty terminal/window titles are still forwarded to the sidebar for
+         agent detection, but they must not directly replace the native pane
+         title. The pane title comes from setActiveTerminalSet.sessionTitles so
+         already-ellipsized OSC/window titles cannot poison AppKit chrome.
+         */
         self?.sendEvent(.terminalTitleChanged(sessionId: command.sessionId, title: title))
       }
       .store(in: &session.cancellables)
@@ -177,6 +182,7 @@ final class TerminalWorkspaceView: NSView {
     }
     activeSessionIds.remove(sessionId)
     sessionActivities.removeValue(forKey: sessionId)
+    sessionTitles.removeValue(forKey: sessionId)
     resizeLogSignatureBySessionId.removeValue(forKey: sessionId)
     if let surface = session.view.surface {
       ghostty.requestClose(surface: surface)
@@ -385,6 +391,7 @@ final class TerminalWorkspaceView: NSView {
     activeSessionIds = Set(command.activeSessionIds)
     attentionSessionIds = Set(command.attentionSessionIds ?? [])
     sessionActivities = command.sessionActivities ?? [:]
+    sessionTitles = command.sessionTitles ?? [:]
     focusedSessionId = command.focusedSessionId
     terminalLayout = command.layout
     paneGap = Self.clampedPaneGap(command.paneGap)
@@ -401,6 +408,11 @@ final class TerminalWorkspaceView: NSView {
         !activeSessionIds.contains(session.sessionId) || session.view.searchState == nil
       session.titleBarView.isHidden = false
       session.borderView.isHidden = false
+      if let title = sessionTitles[session.sessionId] {
+        session.titleBarView.setTitle(
+          normalizedTerminalSessionTitle(title, sessionId: session.sessionId)
+        )
+      }
       if !activeSessionIds.contains(session.sessionId) {
         moveOffscreen(session.scrollView)
         moveOffscreen(session.searchBarView)

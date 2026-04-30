@@ -175,6 +175,7 @@ type NativeHostCommand =
       layout?: NativeTerminalLayout;
       paneGap?: number;
       sessionActivities?: Record<string, "attention" | "working">;
+      sessionTitles?: Record<string, string>;
       type: "setActiveTerminalSet";
     }
   | { layout?: NativeTerminalLayout; type: "setTerminalLayout" }
@@ -3327,6 +3328,24 @@ function syncSessionTitleFromNativeTerminalTitle(
     });
     return;
   }
+  if (isEllipsizedNativeTerminalWindowTitle(visibleTitle)) {
+    /**
+     * CDXC:NativeTerminals 2026-04-30-03:41
+     * Agent/window titles that already include trailing ellipses are display
+     * artifacts, not canonical session names. Do not sync them into the
+     * workspace record, because native pane title bars now read that record.
+     */
+    appendSessionTitleDebugLog("nativeSidebar.sessionRenameSkipped", {
+      agentName: terminalState.agentName,
+      currentSessionTitle: session.title,
+      previousTerminalTitle,
+      rawTitle,
+      reason: "terminal-title-already-ellipsized",
+      sessionId,
+      visibleTitle,
+    });
+    return;
+  }
 
   const decision = getNativeTerminalTitleSessionSyncDecision({
     agentName: terminalState.agentName,
@@ -3361,6 +3380,10 @@ function syncSessionTitleFromNativeTerminalTitle(
     sessionId,
     visibleTitle,
   });
+}
+
+function isEllipsizedNativeTerminalWindowTitle(title: string): boolean {
+  return /\u2026$|\.{3}$/.test(title.trim());
 }
 
 function getNativeTerminalTitleSessionSyncDecision(args: {
@@ -5888,13 +5911,16 @@ function syncNativeLayout(): void {
     })
     .map((session) => nativeSessionIdForSidebarSession(session.sessionId));
   const sessionActivities: Record<string, "attention" | "working"> = {};
+  const sessionTitles: Record<string, string> = {};
   for (const session of snapshot.sessions) {
     if (session.kind !== "terminal" || !visibleIds.has(session.sessionId)) {
       continue;
     }
+    const nativeSessionId = nativeSessionIdForSidebarSession(session.sessionId);
+    sessionTitles[nativeSessionId] = session.title;
     const activity = terminalStateById.get(session.sessionId)?.activity;
     if (activity === "attention" || activity === "working") {
-      sessionActivities[nativeSessionIdForSidebarSession(session.sessionId)] = activity;
+      sessionActivities[nativeSessionId] = activity;
     }
   }
   const layout = buildLayout(visibleSessionIds, snapshot.visibleCount);
@@ -5904,6 +5930,11 @@ function syncNativeLayout(): void {
    * cards: green for done/attention and orange for working. Send the activity
    * projection with the layout command so AppKit renders the indicator from
    * the same source of truth as the React card indicator.
+   *
+   * CDXC:NativeTerminals 2026-04-30-03:41
+   * Native pane title bars must render the full sidebar session title, not the
+   * Ghostty window title. Agent terminal titles can already contain an
+   * ellipsis, so the layout sync owns the display title used by AppKit chrome.
    */
   postNative({
     activeSessionIds: visibleSessionIds,
@@ -5921,6 +5952,7 @@ function syncNativeLayout(): void {
      */
     paneGap: settings.workspacePaneGap,
     sessionActivities,
+    sessionTitles,
     type: "setActiveTerminalSet",
   });
 }

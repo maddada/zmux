@@ -162,6 +162,7 @@ struct SetActiveTerminalSet: Decodable {
   let layout: NativeTerminalLayout?
   let paneGap: Double?
   let sessionActivities: [String: NativeTerminalActivity]?
+  let sessionTitles: [String: String]?
 }
 
 struct SetTerminalLayout: Decodable {
