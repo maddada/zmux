@@ -1114,47 +1114,6 @@ final class TerminalWorkspaceView: NSView {
           setTheme: async () => undefined,
           showContextMenu: async () => null
         };
-        /**
-         * CDXC:T3Code 2026-04-30-23:46
-         * Evaluate runtime patching as an embed strategy by injecting a small
-         * visible modal directly into the managed T3 page. This is intentionally
-         * simple and scoped to the T3 origin so we can verify WebKit injection
-         * works before deciding whether to patch real T3 UI issues this way.
-         */
-        const injectZmuxT3RuntimePatchProbe = () => {
-          if (document.getElementById("zmux-t3-runtime-patch-probe")) {
-            return;
-          }
-          const modal = document.createElement("div");
-          modal.id = "zmux-t3-runtime-patch-probe";
-          modal.textContent = "zmux JS injection test";
-          Object.assign(modal.style, {
-            alignItems: "center",
-            background: "rgba(17, 24, 39, 0.94)",
-            border: "1px solid rgba(255, 255, 255, 0.18)",
-            borderRadius: "10px",
-            boxShadow: "0 18px 48px rgba(0, 0, 0, 0.45)",
-            color: "#f9fafb",
-            display: "flex",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            fontSize: "14px",
-            fontWeight: "600",
-            height: "96px",
-            justifyContent: "center",
-            left: "50%",
-            padding: "0 24px",
-            position: "fixed",
-            top: "50%",
-            transform: "translate(-50%, -50%)",
-            zIndex: "2147483647"
-          });
-          document.documentElement.appendChild(modal);
-        };
-        if (document.readyState === "loading") {
-          document.addEventListener("DOMContentLoaded", injectZmuxT3RuntimePatchProbe, { once: true });
-        } else {
-          injectZmuxT3RuntimePatchProbe();
-        }
       })();
       """
   }
@@ -2386,26 +2345,26 @@ private final class TerminalSessionTitleBarView: NSView {
       0
     )
     /**
-     CDXC:NativeTerminals 2026-04-30-03:08
-     Title-bar text width must be measured from the full raw title, not the
-     label's post-layout intrinsic size. Truncating NSTextField instances can
-     otherwise preserve an already-ellipsized width and keep cutting titles
-     early even when the pane has much more horizontal space available.
+     CDXC:NativeTerminals 2026-05-01-02:18
+     AppKit truncating text fields need a frame as wide as the title's usable
+     area. Measuring the raw title is only for placing the activity dot; the
+     label itself must span maxTitleWidth so native text drawing does not
+     ellipsize against a stale or too-small intrinsic width.
      */
     let measuredTitleWidth = ceil(
       (titleLabel.stringValue as NSString).size(withAttributes: [
         .font: titleLabel.font ?? NSFont.systemFont(ofSize: 12, weight: .bold)
       ]).width
     )
-    let titleWidth = min(measuredTitleWidth, maxTitleWidth)
     titleLabel.frame = CGRect(
       x: insetX,
       y: floor((bounds.height - 16) / 2),
-      width: titleWidth,
+      width: maxTitleWidth,
       height: 16
     )
+    let visibleTitleWidth = min(measuredTitleWidth, maxTitleWidth)
     activityIndicatorView.frame = CGRect(
-      x: titleLabel.frame.maxX + indicatorGap,
+      x: titleLabel.frame.minX + visibleTitleWidth + indicatorGap,
       y: floor((bounds.height - indicatorSize) / 2),
       width: indicatorSize,
       height: indicatorSize

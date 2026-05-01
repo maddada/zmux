@@ -20,15 +20,21 @@ const MANAGED_T3_PROVIDER_CONFIG: Record<
     repoRootSetting?: string;
   }
 > = {
+  /**
+   * CDXC:T3Code 2026-05-01-07:04
+   * The managed T3 Code provider uses the same repo-root override contract as
+   * the reference project so a shared `t3code-embed` checkout can be selected
+   * consistently across the embedded runtime and any extension-side tooling.
+   */
   t3code: {
     sourceEntrypointSegments: ["apps", "server", "src", "bin.ts"],
     windowsEntrypointSegments: ["apps", "server", "dist", "bin.mjs"],
     bundledServerDirectoryName: "t3code-server",
     bundledWebDirectoryName: "t3code-embed",
     displayName: "T3 Code",
-    envVarName: "zmux_T3CODE_REPO_ROOT",
+    envVarName: "VSMUX_T3CODE_REPO_ROOT",
     repoDirectoryName: "t3code-embed",
-    repoRootSetting: "zmux.t3codeRepoRoot",
+    repoRootSetting: "VSmux.t3codeRepoRoot",
   },
 };
 

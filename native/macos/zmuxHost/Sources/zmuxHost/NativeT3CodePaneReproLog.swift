@@ -143,6 +143,13 @@ struct NativeT3RuntimeLaunch {
   let process: Process
 }
 
+private struct NativeT3RuntimeCommand {
+  let command: String
+  let entrypoint: String
+  let kind: String
+  let runtime: String
+}
+
 enum NativeT3RuntimeLauncher {
   static let host = "127.0.0.1"
   static let port = 3774
@@ -167,7 +174,7 @@ enum NativeT3RuntimeLauncher {
     }
 
     for listener in listeners {
-      guard isManagedT3RuntimeCommand(listener.command) else {
+      guard isAnyT3RuntimeCommand(listener.command) else {
         NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.port.occupiedByForeignProcess", [
           "command": listener.command,
           "pid": listener.pid,
@@ -178,33 +185,36 @@ enum NativeT3RuntimeLauncher {
 
       NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.staleProcess.terminate", [
         "command": listener.command,
+        "parentCommand": listener.parentCommand,
+        "parentPid": listener.parentPid,
         "pid": listener.pid,
         "port": port,
       ])
+      if isT3RuntimeSupervisorCommand(listener.parentCommand) {
+        terminate(pid: listener.parentPid)
+      }
       terminate(pid: listener.pid)
       waitForPortToClear(port)
     }
   }
 
   static func hasManagedRuntimeListener() -> Bool {
-    listeningProcesses(onPort: port).contains { isManagedT3RuntimeCommand($0.command) }
+    listeningProcesses(onPort: port).contains { isOwnedT3RuntimeProcess($0) }
   }
 
   /**
-   CDXC:T3Code 2026-04-30-03:39
-   The reference T3 pane starts the provider with a desktop bootstrap credential
-   on fd 3. Plain `npx --yes t3 --mode desktop` reaches the pairing route, so
-   native zmux must provide the same bootstrap envelope at launch time instead
-   of relying on an unauthenticated browser flow. Use npx only to resolve the
-   cached T3 executable, then exec that bin directly because npm/npx does not
-   preserve fd 3 reliably for the provider process.
+   CDXC:T3Code 2026-05-01-07:04
+   Native T3 panes must use the same managed t3code-embed runtime shape as the
+   reference project: bundled assets run through Node from `dist/bin.mjs`, while
+   the sibling/custom checkout runs through Bun from `apps/server/src/bin.ts`.
+   zmux still supplies the desktop bootstrap envelope on fd 3 so the WKWebView
+   renders the authenticated provider without opening a browser.
    */
   static func createLaunch(cwd: String) throws -> NativeT3RuntimeLaunch {
     let bootstrap = try writeBootstrapJsonFile()
     rememberBootstrapCredential(bootstrap.credential)
     let bootstrapPath = shellQuote(bootstrap.url.path)
-    let t3ExecutablePath = try resolveT3ExecutablePath()
-    let t3Executable = shellQuote(t3ExecutablePath)
+    let runtimeCommand = try resolveManagedT3RuntimeCommand()
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/zsh")
     process.arguments = [
@@ -212,7 +222,7 @@ enum NativeT3RuntimeLauncher {
       [
         "exec 3< \(bootstrapPath)",
         "rm -f \(bootstrapPath)",
-        "exec \(t3Executable) --mode desktop --host \(host) --port \(port) --no-browser --bootstrap-fd 3",
+        "exec \(runtimeCommand.command) --mode desktop --host \(host) --port \(port) --no-browser --bootstrap-fd 3",
       ].joined(separator: "\n"),
     ]
     process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
@@ -279,56 +289,123 @@ enum NativeT3RuntimeLauncher {
     ])
   }
 
-  private static func resolveT3ExecutablePath() throws -> String {
-    if let localPath = resolveCommand(["/bin/zsh", "-lc", "command -v t3"]),
-      FileManager.default.isExecutableFile(atPath: localPath)
-    {
+  private static func resolveManagedT3RuntimeCommand() throws -> NativeT3RuntimeCommand {
+    if let bundledEntrypoint = bundledRuntimeEntrypointPath() {
+      let nodePath = try resolveCommandPath("node")
       NativeT3CodePaneReproLog.append("nativeT3Runtime.executable.resolved", [
-        "path": localPath,
-        "source": "path",
+        "entrypoint": bundledEntrypoint,
+        "kind": "bundled",
+        "runtime": nodePath,
       ])
-      return localPath
+      return NativeT3RuntimeCommand(
+        command: "\(shellQuote(nodePath)) \(shellQuote(bundledEntrypoint))",
+        entrypoint: bundledEntrypoint,
+        kind: "bundled",
+        runtime: nodePath)
     }
 
-    if let npxPath = resolveCommand([
-      "/usr/bin/env", "npx", "--yes", "--package", "t3", "sh", "-c", "command -v t3",
-    ]), FileManager.default.isExecutableFile(atPath: npxPath) {
-      NativeT3CodePaneReproLog.append("nativeT3Runtime.executable.resolved", [
-        "path": npxPath,
-        "source": "npx-package-cache",
-      ])
-      return npxPath
+    let repoRoot = try resolveManagedT3RepoRoot()
+    let entrypoint = repoRoot.appendingPathComponent("apps/server/src/bin.ts").path
+    guard FileManager.default.fileExists(atPath: entrypoint) else {
+      throw NSError(
+        domain: "NativeT3RuntimeLauncher",
+        code: 1,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "The managed T3 Code runtime source is missing. Expected: \(entrypoint)."
+        ])
     }
-
-    throw NSError(
-      domain: "NativeT3RuntimeLauncher",
-      code: 1,
-      userInfo: [NSLocalizedDescriptionKey: "Unable to resolve the T3 Code executable."])
+    let nodeModulesPath = repoRoot.appendingPathComponent("node_modules").path
+    guard FileManager.default.fileExists(atPath: nodeModulesPath) else {
+      throw NSError(
+        domain: "NativeT3RuntimeLauncher",
+        code: 2,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "Managed T3 Code dependencies are missing. Expected: \(nodeModulesPath). Run 'bun install' in \(repoRoot.path)."
+        ])
+    }
+    let bunPath = try resolveCommandPath("bun")
+    NativeT3CodePaneReproLog.append("nativeT3Runtime.executable.resolved", [
+      "entrypoint": entrypoint,
+      "kind": "external",
+      "repoRoot": repoRoot.path,
+      "runtime": bunPath,
+    ])
+    return NativeT3RuntimeCommand(
+      command: "\(shellQuote(bunPath)) \(shellQuote(entrypoint))",
+      entrypoint: entrypoint,
+      kind: "external",
+      runtime: bunPath)
   }
 
-  private static func resolveCommand(_ command: [String]) -> String? {
-    guard let executable = command.first else {
-      return nil
+  private static func resolveManagedT3RepoRoot() throws -> URL {
+    let environment = ProcessInfo.processInfo.environment
+    let configuredRoot =
+      environment["VSMUX_T3CODE_REPO_ROOT"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+      ?? environment["zmux_T3CODE_REPO_ROOT"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let candidates =
+      configuredRoot?.isEmpty == false
+      ? [configuredRoot!]
+      : [
+        FileManager.default.homeDirectoryForCurrentUser
+          .appendingPathComponent("dev/_active/t3code-embed", isDirectory: true).path
+      ]
+    for candidate in candidates {
+      let repoRoot = URL(fileURLWithPath: candidate, isDirectory: true)
+      if FileManager.default.fileExists(
+        atPath: repoRoot.appendingPathComponent("apps/server/src/bin.ts").path)
+      {
+        return repoRoot
+      }
     }
+    throw NSError(
+      domain: "NativeT3RuntimeLauncher",
+      code: 3,
+      userInfo: [
+        NSLocalizedDescriptionKey:
+          "Unable to resolve the managed t3code-embed checkout. Set VSMUX_T3CODE_REPO_ROOT or place it at ~/dev/_active/t3code-embed."
+      ])
+  }
+
+  private static func bundledRuntimeEntrypointPath() -> String? {
+    let bundledDirectoryName = "t3code-server"
+    var candidates: [URL] = []
+    if let resourceURL = Bundle.main.resourceURL {
+      candidates.append(
+        resourceURL.appendingPathComponent("out/\(bundledDirectoryName)/dist/bin.mjs"))
+      candidates.append(resourceURL.appendingPathComponent("\(bundledDirectoryName)/dist/bin.mjs"))
+    }
+    candidates.append(
+      URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent("out/\(bundledDirectoryName)/dist/bin.mjs"))
+    candidates.append(
+      URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent("\(bundledDirectoryName)/dist/bin.mjs"))
+    return candidates.first { FileManager.default.fileExists(atPath: $0.path) }?.path
+  }
+
+  private static func resolveCommandPath(_ command: String) throws -> String {
     let process = Process()
-    let stdout = Pipe()
-    process.executableURL = URL(fileURLWithPath: executable)
-    process.arguments = Array(command.dropFirst())
-    process.standardOutput = stdout
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    process.arguments = ["-lc", "command -v \(shellQuote(command))"]
+    process.standardOutput = pipe
     process.standardError = FileHandle.nullDevice
-    do {
-      try process.run()
-      process.waitUntilExit()
-    } catch {
-      return nil
-    }
-    guard process.terminationStatus == 0 else {
-      return nil
-    }
-    return String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-      .split(separator: "\n", omittingEmptySubsequences: true)
+    try process.run()
+    process.waitUntilExit()
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    let resolved = String(data: data, encoding: .utf8)?
+      .split(whereSeparator: \.isNewline)
       .first
-      .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+      .map(String.init)
+    if process.terminationStatus == 0, let resolved, !resolved.isEmpty {
+      return resolved
+    }
+    throw NSError(
+      domain: "NativeT3RuntimeLauncher",
+      code: 4,
+      userInfo: [NSLocalizedDescriptionKey: "Unable to resolve required runtime command: \(command)."])
   }
 
   private static func t3HomeDirectory() -> URL {
@@ -356,8 +433,16 @@ enum NativeT3RuntimeLauncher {
     }
     return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
       .split(separator: "\n", omittingEmptySubsequences: true)
-      .compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-      .map { NativeT3ListeningProcess(command: processCommand(pid: $0), pid: $0) } ?? []
+      .compactMap { Int(String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
+      .map {
+        let parentPid = processParentPid(pid: $0)
+        return NativeT3ListeningProcess(
+          command: processCommand(pid: $0),
+          parentCommand: parentPid.map { processCommand(pid: $0) } ?? "",
+          parentPid: parentPid ?? 0,
+          pid: $0
+        )
+      } ?? []
   }
 
   private static func processCommand(pid: Int) -> String {
@@ -377,11 +462,65 @@ enum NativeT3RuntimeLauncher {
       .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
   }
 
-  private static func isManagedT3RuntimeCommand(_ command: String) -> Bool {
+  private static func processParentPid(pid: Int) -> Int? {
+    let process = Process()
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/ps")
+    process.arguments = ["-p", String(pid), "-o", "ppid="]
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      return nil
+    }
+    let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return Int(raw)
+  }
+
+  private static func isAnyT3RuntimeCommand(_ command: String) -> Bool {
     let normalized = command.lowercased()
     return normalized.contains("t3")
       && normalized.contains("--mode desktop")
       && normalized.contains("--port \(port)")
+  }
+
+  /**
+   CDXC:T3Code 2026-05-01-12:59
+   Attached zmux windows may share the T3 provider launched by the VS Code
+   extension supervisor. Reuse that supervised provider instead of killing it;
+   the native WKWebView authenticates through an owner-issued browser pairing
+   credential. For unsupervised listeners, only reuse runtimes from this app's
+   managed home, bundled resources, or the local t3code-embed checkout.
+   */
+  private static func isOwnedT3RuntimeProcess(_ process: NativeT3ListeningProcess) -> Bool {
+    guard isAnyT3RuntimeCommand(process.command) else {
+      return false
+    }
+
+    if isT3RuntimeSupervisorCommand(process.parentCommand) {
+      return true
+    }
+
+    let normalized = process.command.lowercased()
+    var ownedMarkers = [
+      t3HomeDirectory().path,
+      FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("dev/_active/t3code-embed/apps/server/src/bin.ts").path,
+    ].map { $0.lowercased() }
+    if let resourcePath = Bundle.main.resourceURL?.path {
+      ownedMarkers.append(resourcePath.lowercased())
+    }
+    ownedMarkers.append(Bundle.main.bundleURL.path.lowercased())
+    return ownedMarkers.contains { normalized.contains($0) }
+  }
+
+  private static func isT3RuntimeSupervisorCommand(_ command: String) -> Bool {
+    let normalized = command.lowercased()
+    return normalized.contains("t3-runtime-supervisor.js")
+      && normalized.contains(".vscode/extensions/maddada.vsmux")
   }
 
   private static func terminate(pid: Int) {
@@ -620,6 +759,17 @@ enum NativeT3RuntimeSessionBootstrap {
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.httpMethod = method
     request.timeoutInterval = 30
+    /**
+     CDXC:T3Code 2026-05-01-13:13
+     T3 orchestration APIs are owner-only management endpoints. Native panes
+     still bootstrap the browser with a paired client cookie, but project and
+     thread creation must use the VS Code owner bearer directly and avoid
+     automatic cookies so the paired browser role does not shadow ownership.
+     */
+    if let ownerBearerToken = NativeT3RuntimeBrowserAuth.readVSmuxOwnerBearerToken() {
+      request.httpShouldHandleCookies = false
+      request.setValue("Bearer \(ownerBearerToken)", forHTTPHeaderField: "authorization")
+    }
     if let body {
       request.httpBody = body
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -774,9 +924,29 @@ enum NativeT3RuntimeBrowserAuth {
 
   private static func exchangeBootstrapCredential(origin: URL, attemptsRemaining: Int) {
     guard let credential = NativeT3RuntimeLauncher.currentBootstrapCredential() else {
-      retryAuth(origin: origin, reason: "missingCredential", attemptsRemaining: attemptsRemaining)
+      exchangeExtensionPairingCredential(
+        origin: origin,
+        attemptsRemaining: attemptsRemaining,
+        originalReason: "missingCredential"
+      )
       return
     }
+    exchangeBrowserCredential(
+      origin: origin,
+      credential: credential,
+      credentialSource: "nativeDesktopBootstrap",
+      clearStoredCredentialOnSuccess: true,
+      attemptsRemaining: attemptsRemaining
+    )
+  }
+
+  private static func exchangeBrowserCredential(
+    origin: URL,
+    credential: String,
+    credentialSource: String,
+    clearStoredCredentialOnSuccess: Bool,
+    attemptsRemaining: Int
+  ) {
     guard let bootstrapURL = endpointURL(origin: origin, path: "/api/auth/bootstrap") else {
       finishPending(reason: "invalidBootstrapUrl")
       return
@@ -790,6 +960,7 @@ enum NativeT3RuntimeBrowserAuth {
     request.httpBody = try? JSONSerialization.data(withJSONObject: ["credential": credential])
     NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.bootstrap.start", [
       "credentialPresent": true,
+      "credentialSource": credentialSource,
       "url": bootstrapURL.absoluteString,
     ])
     URLSession.shared.dataTask(with: request) { data, response, error in
@@ -811,12 +982,21 @@ enum NativeT3RuntimeBrowserAuth {
       NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.bootstrap.response", [
         "authenticated": parseAuthenticated(data) ?? NSNull(),
         "cookieCount": cookies.count,
+        "credentialSource": credentialSource,
         "error": error?.localizedDescription ?? NSNull(),
         "statusCode": httpResponse.statusCode,
         "url": bootstrapURL.absoluteString,
       ])
 
       guard httpResponse.statusCode == 200 else {
+        if credentialSource == "nativeDesktopBootstrap", httpResponse.statusCode == 401 {
+          exchangeExtensionPairingCredential(
+            origin: origin,
+            attemptsRemaining: attemptsRemaining,
+            originalReason: "bootstrapStatus401"
+          )
+          return
+        }
         retryAuth(
           origin: origin,
           reason: "bootstrapStatus\(httpResponse.statusCode)",
@@ -824,8 +1004,89 @@ enum NativeT3RuntimeBrowserAuth {
         )
         return
       }
-      NativeT3RuntimeLauncher.clearBootstrapCredential(credential)
+      if clearStoredCredentialOnSuccess {
+        NativeT3RuntimeLauncher.clearBootstrapCredential(credential)
+      }
       setCookies(cookies, reason: "bootstrapComplete")
+    }.resume()
+  }
+
+  /**
+   CDXC:T3Code 2026-05-01-12:59
+   When zmux is attached to VS Code, the extension may already own the desktop
+   T3 provider and consume the single-use desktop bootstrap through the bearer
+   endpoint. Native WKWebView panes must then mint a browser pairing credential
+   from the extension-owned owner bearer and exchange that one-time credential
+   for cookies, instead of retrying the stale desktop token until the pane
+   falls through to the gray/500 error surface.
+   */
+  private static func exchangeExtensionPairingCredential(
+    origin: URL,
+    attemptsRemaining: Int,
+    originalReason: String
+  ) {
+    guard let ownerBearerToken = readVSmuxOwnerBearerToken() else {
+      retryAuth(origin: origin, reason: originalReason, attemptsRemaining: attemptsRemaining)
+      return
+    }
+    guard let pairingURL = endpointURL(origin: origin, path: "/api/auth/pairing-token") else {
+      finishPending(reason: "invalidPairingUrl")
+      return
+    }
+
+    var request = URLRequest(url: pairingURL)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.httpMethod = "POST"
+    request.timeoutInterval = authRequestTimeout
+    /**
+     CDXC:T3Code 2026-05-01-13:08
+     T3 authenticates cookies before bearer headers. Native pairing requests
+     must not inherit stale URLSession cookies, otherwise the server rejects
+     the old cookie and never evaluates the valid VS Code owner bearer.
+     */
+    request.httpShouldHandleCookies = false
+    request.httpBody = Data()
+    request.setValue("0", forHTTPHeaderField: "Content-Length")
+    request.setValue("Bearer \(ownerBearerToken)", forHTTPHeaderField: "authorization")
+    NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.pairing.start", [
+      "ownerBearerLength": ownerBearerToken.count,
+      "originalReason": originalReason,
+      "url": pairingURL.absoluteString,
+    ])
+    URLSession.shared.dataTask(with: request) { data, response, error in
+      guard let httpResponse = response as? HTTPURLResponse else {
+        NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.pairing.noResponse", [
+          "error": error?.localizedDescription ?? NSNull(),
+          "originalReason": originalReason,
+          "url": pairingURL.absoluteString,
+        ])
+        retryAuth(origin: origin, reason: originalReason, attemptsRemaining: attemptsRemaining)
+        return
+      }
+
+      let credential = parseCredential(data)
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.pairing.response", [
+        "credentialPresent": credential != nil,
+        "error": error?.localizedDescription ?? NSNull(),
+        "originalReason": originalReason,
+        "statusCode": httpResponse.statusCode,
+        "url": pairingURL.absoluteString,
+      ])
+      guard httpResponse.statusCode == 200, let credential else {
+        retryAuth(
+          origin: origin,
+          reason: "pairingStatus\(httpResponse.statusCode)",
+          attemptsRemaining: attemptsRemaining
+        )
+        return
+      }
+      exchangeBrowserCredential(
+        origin: origin,
+        credential: credential,
+        credentialSource: "extensionOwnerPairing",
+        clearStoredCredentialOnSuccess: false,
+        attemptsRemaining: attemptsRemaining
+      )
     }.resume()
   }
 
@@ -910,9 +1171,53 @@ enum NativeT3RuntimeBrowserAuth {
     }
     return authenticated
   }
+
+  private static func parseCredential(_ data: Data?) -> String? {
+    guard let data,
+      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let credential = payload["credential"] as? String,
+      !credential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      return nil
+    }
+    return credential
+  }
+
+  fileprivate static func readVSmuxOwnerBearerToken() -> String? {
+    let authStateURL = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(
+        "Library/Application Support/Code/User/globalStorage/maddada.vsmux/t3-runtime/auth-state.json"
+      )
+    let authStateMtime = (try? FileManager.default.attributesOfItem(atPath: authStateURL.path)[.modificationDate])
+      as? Date
+    guard let data = try? Data(contentsOf: authStateURL),
+      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let ownerBearerToken = payload["ownerBearerToken"] as? String,
+      !ownerBearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.pairing.authStateMissing", [
+        "path": authStateURL.path
+      ])
+      return nil
+    }
+    /**
+     CDXC:T3Code 2026-05-01-13:10
+     Owner-bearer pairing is the native/VS Code handoff for attached zmux
+     windows. Log only non-secret auth-state metadata so a 401 can be
+     distinguished between stale file reads and rejected HTTP credentials.
+     */
+    NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.pairing.authStateRead", [
+      "ownerBearerLength": ownerBearerToken.count,
+      "path": authStateURL.path,
+      "mtime": authStateMtime.map { ISO8601DateFormatter().string(from: $0) } ?? NSNull(),
+    ])
+    return ownerBearerToken
+  }
 }
 
 private struct NativeT3ListeningProcess {
   let command: String
+  let parentCommand: String
+  let parentPid: Int
   let pid: Int
 }
