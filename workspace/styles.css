@@ -635,6 +635,35 @@ body {
     0 18px 32px rgba(0, 0, 0, 0.28);
 }
 
+.workspace-pane-resize-handle {
+  appearance: none;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  justify-self: stretch;
+  margin: 0;
+  opacity: 0;
+  padding: 0;
+  position: relative;
+  touch-action: none;
+  user-select: none;
+  z-index: 8;
+}
+
+.workspace-pane-resize-handle-vertical {
+  cursor: col-resize;
+  justify-self: start;
+  margin-left: calc(-1 * var(--workspace-pane-resize-handle-offset, 2px));
+  width: 4px;
+}
+
+.workspace-pane-resize-handle-horizontal {
+  align-self: start;
+  cursor: row-resize;
+  height: 4px;
+  margin-top: calc(-1 * var(--workspace-pane-resize-handle-offset, 2px));
+}
+
 @keyframes workspace-pane-completion-flash-a {
   0%,
   100% {
