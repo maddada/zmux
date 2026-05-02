@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.2 - 2026-05-02
+
+<!-- CDXC:Distribution 2026-05-02-11:33: Release notes for 1.4.2 must call
+out the Sparkle build-number fix because installed apps compare
+CFBundleVersion when deciding whether a feed item is newer. -->
+
+- Fixed Sparkle update detection by publishing releases with a monotonic `CFBundleVersion` build number.
+- Kept the native AppKit pane resizing changes from 1.4.1 available in the update feed.
+
 ## 1.4.1 - 2026-05-02
 
 <!-- CDXC:Distribution 2026-05-02-11:16: Release notes for 1.4.1 must include
