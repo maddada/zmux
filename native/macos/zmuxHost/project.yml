@@ -19,10 +19,10 @@ settings:
       - "$(inherited)"
       - "@executable_path/../Frameworks"
     MACOSX_DEPLOYMENT_TARGET: "13.0"
-    # CDXC:Distribution 2026-04-30-03:39: Homebrew cask release v1.3.0 must
+    # CDXC:Distribution 2026-05-02-08:38: Homebrew and Sparkle release v1.4.0 must
     # publish a notarized Developer ID app whose bundle metadata matches the
-    # GitHub release and brew artifact version.
-    MARKETING_VERSION: "1.3.0"
+    # GitHub release, Sparkle appcast, and brew artifact version.
+    MARKETING_VERSION: "1.4.0"
     SDKROOT: macosx
     SWIFT_VERSION: "5.0"
     SWIFT_OBJC_BRIDGING_HEADER: ${GHOSTTY_ROOT}/macos/Sources/App/macOS/ghostty-bridging-header.h
