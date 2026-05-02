@@ -1,6 +1,8 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
---><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+-->
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>zmux Updates</title>
         <link>https://github.com/maddada/zmux/releases</link>
@@ -9,18 +11,19 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
          like DockDoor. Release automation should add signed release items here
          before publishing app updates so installed apps can discover them. -->
         <item>
-            <title>1.4.0</title>
-            <pubDate>Sat, 02 May 2026 08:39:25 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/zmux/releases/tag/v1.4.0</sparkle:fullReleaseNotesLink>
+            <title>1.4.1</title>
+            <pubDate>Sat, 02 May 2026 11:18:41 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/zmux/releases/tag/v1.4.1</sparkle:fullReleaseNotesLink>
             <sparkle:version>1</sparkle:version>
-            <sparkle:shortVersionString>1.4.0</sparkle:shortVersionString>
+            <sparkle:shortVersionString>1.4.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <sparkle:releaseNotesLink>https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.0.md</sparkle:releaseNotesLink>
-            <enclosure url="https://github.com/maddada/zmux/releases/download/v1.4.0/zmux-1.4.0.dmg" length="23940985" type="application/octet-stream" sparkle:edSignature="Olb4nz4gd/KNXF5iU2iCplbJNeox+tCFwk+VuhrAQ+HPVd2cABQT4L4VTpV9HpImgl52qVl+o+E6kbMOc2QLAw=="></enclosure>
+            <sparkle:releaseNotesLink sparkle:edSignature="7Ap8Z+0nA8kxXZ0mr0ojxYKzMnqCj+PYeB6rolquDxGJscAIJH0HKLIUO7ZTdWSe4FhgMDAWFsEG+Gl0pehUBg==" sparkle:length="762">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.1.md</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/maddada/zmux/releases/download/v1.4.1/zmux-1.4.1.dmg" length="23926654" type="application/octet-stream" sparkle:edSignature="8+KTcrIEvke0MyRCXdwRPOcDAQyKYNeCoIKDQQCG7SSKtIY3sZ/n6dZvrSVWrQkChssxW2mNjJnuANeHrgIUAw=="/>
         </item>
     </channel>
-</rss><!-- sparkle-signatures:
-edSignature: k+5Z/FtgX6y9E5m3cW/nouDTU3hQ1jxoxfisCNu1i9dXf78tuR/Kx89/1etO3wM3pyYBGx1BlTsagniIAS9fBQ==
-length: 1768
+</rss>
+<!-- sparkle-signatures:
+edSignature: KPTQSNvkQC3YKIGqm1xM179GxTk3SfH9CLrwjvq5SIyq9IsCaOaDBPfp1GF1nkIJN6V+MYmz30pzA5r9bOANBg==
+length: 1892
 -->
