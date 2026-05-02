@@ -18,9 +18,17 @@
 	<string>${MARKETING_VERSION}</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>SUEnableDownloaderService</key>
+	<true/>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>${ZMUX_SPARKLE_FEED_URL}</string>
+	<key>SUPublicEDKey</key>
+	<string>${ZMUX_SPARKLE_PUBLIC_ED_KEY}</string>
 	<key>ZMUXHomeDirectoryName</key>
-	<string>.zmux</string>
+	<string>${ZMUX_HOME_DIRECTORY_NAME}</string>
 	<key>ZMUXSharedHomeDirectoryName</key>
-	<string>.zmux</string>
+	<string>${ZMUX_SHARED_HOME_DIRECTORY_NAME}</string>
 </dict>
 </plist>

@@ -26,6 +26,10 @@ settings:
     SDKROOT: macosx
     SWIFT_VERSION: "5.0"
     SWIFT_OBJC_BRIDGING_HEADER: ${GHOSTTY_ROOT}/macos/Sources/App/macOS/ghostty-bridging-header.h
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.6.3
 targets:
   zmux:
     type: application
@@ -42,6 +46,15 @@ targets:
         # as shell-launched builds from concrete bundle metadata.
         ZMUXHomeDirectoryName: ${ZMUX_HOME_DIRECTORY_NAME}
         ZMUXSharedHomeDirectoryName: ${ZMUX_SHARED_HOME_DIRECTORY_NAME}
+        # CDXC:AutoUpdate 2026-05-02-06:51: Release builds use Sparkle's
+        # appcast updater, matching DockDoor's native macOS update model.
+        # Keep the feed and EdDSA public key in build variables so release
+        # automation can provide the real signing material without committing
+        # private keys or environment-specific values.
+        SUEnableDownloaderService: true
+        SUEnableInstallerLauncherService: true
+        SUFeedURL: ${ZMUX_SPARKLE_FEED_URL}
+        SUPublicEDKey: ${ZMUX_SPARKLE_PUBLIC_ED_KEY}
     sources:
       - path: Sources/Shared
       - path: Sources/zmuxHost
@@ -82,6 +95,8 @@ targets:
     dependencies:
       - framework: ${GHOSTTY_ROOT}/macos/GhosttyKit.xcframework
         embed: false
+      - package: Sparkle
+        product: Sparkle
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: ""

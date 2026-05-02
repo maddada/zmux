@@ -18,13 +18,24 @@ if [[ "$ZMUX_APP_VARIANT" == "dev" ]]; then
 	ZMUX_BUNDLE_ID="${ZMUX_BUNDLE_ID:-com.madda.zmux-dev.host}"
 	ZMUX_HOME_DIRECTORY_NAME="${ZMUX_HOME_DIRECTORY_NAME:-.zmux-dev}"
 	ZMUX_SHARED_HOME_DIRECTORY_NAME="${ZMUX_SHARED_HOME_DIRECTORY_NAME:-.zmux}"
+	ZMUX_SPARKLE_FEED_URL="${ZMUX_SPARKLE_FEED_URL:-https://raw.githubusercontent.com/maddada/zmux/main/appcast.xml}"
+	ZMUX_SPARKLE_PUBLIC_ED_KEY="${ZMUX_SPARKLE_PUBLIC_ED_KEY:-AGWDPeMqfhmbjt8Pbk+VTC9fDfXAYq+cZoLGCYuGn70=}"
 else
 	ZMUX_APP_NAME="${ZMUX_APP_NAME:-zmux}"
 	ZMUX_APP_DISPLAY_NAME="${ZMUX_APP_DISPLAY_NAME:-zmux}"
 	ZMUX_BUNDLE_ID="${ZMUX_BUNDLE_ID:-com.madda.zmux.host}"
 	ZMUX_HOME_DIRECTORY_NAME="${ZMUX_HOME_DIRECTORY_NAME:-.zmux}"
 	ZMUX_SHARED_HOME_DIRECTORY_NAME="${ZMUX_SHARED_HOME_DIRECTORY_NAME:-.zmux}"
+	ZMUX_SPARKLE_FEED_URL="${ZMUX_SPARKLE_FEED_URL:-https://raw.githubusercontent.com/maddada/zmux/main/appcast.xml}"
+	ZMUX_SPARKLE_PUBLIC_ED_KEY="${ZMUX_SPARKLE_PUBLIC_ED_KEY:-AGWDPeMqfhmbjt8Pbk+VTC9fDfXAYq+cZoLGCYuGn70=}"
 fi
+
+# CDXC:AutoUpdate 2026-05-02-06:51: Sparkle update checks need an appcast URL
+# and EdDSA public key in Info.plist. The default public key is read from the
+# user's Sparkle keychain account, and release automation can still override
+# either value if the appcast host or signing account changes.
+export ZMUX_SPARKLE_FEED_URL
+export ZMUX_SPARKLE_PUBLIC_ED_KEY
 
 if [[ -z "$GHOSTTY_ROOT" ]]; then
 	# CDXC:NativeHost 2026-04-27-06:06: Local start/build commands should
