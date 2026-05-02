@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.1 - 2026-05-02
+
+<!-- CDXC:Distribution 2026-05-02-11:16: Release notes for 1.4.1 must include
+all commits after v1.4.0 so README, GitHub, Sparkle, and Homebrew release
+metadata describe the same shipped behavior. -->
+
+- Moved split pane resizing into the native AppKit terminal workspace so Ghostty and WKWebView panes resize from the same layout owner.
+- Removed the React workspace resize overlay and tests that no longer apply to native pane sizing.
+- Removed whole-cell terminal body stepping so pane chrome and terminal renderer widths stay aligned during native resize.
+
 ## 1.4.0 - 2026-05-02
 
 <!-- CDXC:Distribution 2026-05-02-08:37: Release notes for 1.4.0 must include

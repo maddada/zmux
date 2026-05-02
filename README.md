@@ -30,7 +30,7 @@ brew install --cask maddada/tap/zmux
 
 - Native Sparkle updates for macOS releases.
 - Native T3 Code panes with managed runtime bootstrap, authenticated thread routing, and remote/browser access links.
-- Draggable workspace pane resizing for rows and columns.
+- Native draggable workspace pane resizing for Ghostty and web panes.
 - Native IDE attachment controls with an optional hidden title-bar attach button.
 - Standard macOS app menu with Settings and Check for Updates.
 - Workspace dock highlights the active project and dims inactive project icons.
