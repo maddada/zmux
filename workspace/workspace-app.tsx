@@ -66,37 +66,7 @@ type WorkspaceShellStyle = CSSProperties & {
   "--workspace-active-pane-border-color"?: string;
   "--workspace-background-color"?: string;
   "--workspace-pane-gap": string;
-  "--workspace-pane-resize-handle-offset": string;
   paddingTop?: string;
-};
-
-type WorkspacePaneResizeOrientation = "horizontal" | "vertical";
-
-type WorkspacePaneResizeRatios = {
-  columnRatios: number[];
-  layoutKey: string;
-  rowRatios: number[];
-};
-
-type WorkspacePaneResizeDragState = {
-  boundaryIndex: number;
-  contentSizePx: number;
-  minimumAfterPx: number;
-  minimumBeforePx: number;
-  orientation: WorkspacePaneResizeOrientation;
-  pointerId: number;
-  startCoordinate: number;
-  startRatios: WorkspacePaneResizeRatios;
-};
-
-type WorkspacePaneResizeHandle = {
-  boundaryIndex: number;
-  gridColumn: string;
-  gridRow: string;
-  id: string;
-  minimumAfterPx: number;
-  minimumBeforePx: number;
-  orientation: WorkspacePaneResizeOrientation;
 };
 
 type WorkspacePaneMeasuredBounds = {
@@ -143,10 +113,6 @@ let nextWorkspacePortalTargetId = 0;
 const DEFAULT_WORKSPACE_PANE_GAP_PX = 12;
 const SINGLE_PANE_WORKSPACE_INSET_PX = 1;
 const SINGLE_PANE_WORKSPACE_TOP_PADDING_EXTRA_PX = 2;
-const WORKSPACE_PANE_RESIZE_HANDLE_WIDTH_PX = 4;
-const WORKSPACE_PANE_RESIZE_MIN_HEIGHT_PX = 160;
-const WORKSPACE_PANE_RESIZE_MIN_WIDTH_PX = 220;
-const WORKSPACE_GRID_TRACK_COUNT = 6;
 const DEBUG_BUILD_STAMP_STYLE: CSSProperties = {
   position: "fixed",
   right: "10px",
@@ -215,198 +181,6 @@ export function getWorkspaceShellPaddingTopPx(
   }
 
   return paneGapPx + SINGLE_PANE_WORKSPACE_TOP_PADDING_EXTRA_PX;
-}
-
-/**
- * CDXC:WorkspacePaneResize 2026-05-01-13:59
- * Users can drag invisible 4px divider hit targets between visible panes. The
- * divider changes only its own axis, clamps panes to usable terminal sizes, and
- * double-clicking a divider equalizes only that divider orientation.
- */
-export function createWorkspacePaneResizeRatios(
-  layoutKey: string,
-  rowCount: number,
-  columnCount: number,
-): WorkspacePaneResizeRatios {
-  return {
-    columnRatios: createEqualWorkspacePaneResizeRatios(columnCount),
-    layoutKey,
-    rowRatios: createEqualWorkspacePaneResizeRatios(rowCount),
-  };
-}
-
-export function normalizeWorkspacePaneResizeRatios(
-  currentRatios: WorkspacePaneResizeRatios | undefined,
-  layoutKey: string,
-  rowCount: number,
-  columnCount: number,
-): WorkspacePaneResizeRatios {
-  if (
-    !currentRatios ||
-    currentRatios.layoutKey !== layoutKey ||
-    currentRatios.rowRatios.length !== rowCount ||
-    currentRatios.columnRatios.length !== columnCount
-  ) {
-    return createWorkspacePaneResizeRatios(layoutKey, rowCount, columnCount);
-  }
-
-  return currentRatios;
-}
-
-export function resetWorkspacePaneResizeOrientation(
-  ratios: WorkspacePaneResizeRatios,
-  orientation: WorkspacePaneResizeOrientation,
-): WorkspacePaneResizeRatios {
-  if (orientation === "horizontal") {
-    return {
-      ...ratios,
-      rowRatios: createEqualWorkspacePaneResizeRatios(ratios.rowRatios.length),
-    };
-  }
-
-  return {
-    ...ratios,
-    columnRatios: createEqualWorkspacePaneResizeRatios(ratios.columnRatios.length),
-  };
-}
-
-export function resizeWorkspacePaneRatioBoundary(
-  ratios: number[],
-  boundaryIndex: number,
-  deltaPx: number,
-  contentSizePx: number,
-  minimumBeforePx: number,
-  minimumAfterPx: number,
-): number[] {
-  const ratioTotal = ratios.reduce((total, ratio) => total + ratio, 0);
-  if (
-    ratios.length < 2 ||
-    boundaryIndex <= 0 ||
-    boundaryIndex >= ratios.length ||
-    ratioTotal <= 0 ||
-    contentSizePx <= minimumBeforePx + minimumAfterPx
-  ) {
-    return ratios;
-  }
-
-  const beforeRatioTotal = ratios
-    .slice(0, boundaryIndex)
-    .reduce((total, ratio) => total + ratio, 0);
-  const afterRatioTotal = ratioTotal - beforeRatioTotal;
-  if (beforeRatioTotal <= 0 || afterRatioTotal <= 0) {
-    return ratios;
-  }
-
-  const beforePx = (beforeRatioTotal / ratioTotal) * contentSizePx;
-  const nextBeforePx = clampNumber(
-    beforePx + deltaPx,
-    minimumBeforePx,
-    contentSizePx - minimumAfterPx,
-  );
-  const nextBeforeRatioTotal = (nextBeforePx / contentSizePx) * ratioTotal;
-  const nextAfterRatioTotal = ratioTotal - nextBeforeRatioTotal;
-  const beforeScale = nextBeforeRatioTotal / beforeRatioTotal;
-  const afterScale = nextAfterRatioTotal / afterRatioTotal;
-
-  return ratios.map((ratio, index) => ratio * (index < boundaryIndex ? beforeScale : afterScale));
-}
-
-function createEqualWorkspacePaneResizeRatios(count: number): number[] {
-  return Array.from({ length: Math.max(1, count) }, () => 1);
-}
-
-function clampNumber(value: number, minimum: number, maximum: number): number {
-  return Math.min(maximum, Math.max(minimum, value));
-}
-
-function getWorkspaceResizeColumnCount(
-  viewMode: WorkspacePanelHydrateMessage["viewMode"],
-  visiblePaneCount: number,
-): number {
-  if (viewMode === "horizontal") {
-    return 1;
-  }
-
-  if (viewMode === "vertical") {
-    return Math.max(1, visiblePaneCount);
-  }
-
-  return WORKSPACE_GRID_TRACK_COUNT;
-}
-
-function getWorkspaceResizeRowCount(
-  viewMode: WorkspacePanelHydrateMessage["viewMode"],
-  rowLengths: readonly number[],
-): number {
-  if (viewMode === "vertical") {
-    return 1;
-  }
-
-  return Math.max(1, rowLengths.length);
-}
-
-function formatWorkspacePaneResizeTracks(ratios: readonly number[], minimumPx: number): string {
-  return ratios.map((ratio) => `minmax(${String(minimumPx)}px, ${String(ratio)}fr)`).join(" ");
-}
-
-function createWorkspacePaneResizeHandles(
-  viewMode: WorkspacePanelHydrateMessage["viewMode"],
-  rowLengths: readonly number[],
-  visiblePaneCount: number,
-): WorkspacePaneResizeHandle[] {
-  const handles: WorkspacePaneResizeHandle[] = [];
-
-  if (viewMode !== "vertical") {
-    for (let rowIndex = 1; rowIndex < rowLengths.length; rowIndex += 1) {
-      handles.push({
-        boundaryIndex: rowIndex,
-        gridColumn: "1 / -1",
-        gridRow: `${String(rowIndex + 1)} / span 1`,
-        id: `horizontal:${String(rowIndex)}`,
-        minimumAfterPx: WORKSPACE_PANE_RESIZE_MIN_HEIGHT_PX * (rowLengths.length - rowIndex),
-        minimumBeforePx: WORKSPACE_PANE_RESIZE_MIN_HEIGHT_PX * rowIndex,
-        orientation: "horizontal",
-      });
-    }
-  }
-
-  if (viewMode === "horizontal") {
-    return handles;
-  }
-
-  if (viewMode === "vertical") {
-    for (let boundaryIndex = 1; boundaryIndex < visiblePaneCount; boundaryIndex += 1) {
-      handles.push({
-        boundaryIndex,
-        gridColumn: `${String(boundaryIndex + 1)} / span 1`,
-        gridRow: "1 / span 1",
-        id: `vertical:${String(boundaryIndex)}`,
-        minimumAfterPx: WORKSPACE_PANE_RESIZE_MIN_WIDTH_PX * (visiblePaneCount - boundaryIndex),
-        minimumBeforePx: WORKSPACE_PANE_RESIZE_MIN_WIDTH_PX * boundaryIndex,
-        orientation: "vertical",
-      });
-    }
-    return handles;
-  }
-
-  for (let rowIndex = 0; rowIndex < rowLengths.length; rowIndex += 1) {
-    const rowLength = rowLengths[rowIndex] ?? 1;
-    const span = rowLength === 1 ? WORKSPACE_GRID_TRACK_COUNT : rowLength === 2 ? 3 : 2;
-    for (let columnIndex = 1; columnIndex < rowLength; columnIndex += 1) {
-      const boundaryIndex = columnIndex * span;
-      handles.push({
-        boundaryIndex,
-        gridColumn: `${String(boundaryIndex + 1)} / span 1`,
-        gridRow: `${String(rowIndex + 1)} / span 1`,
-        id: `vertical:${String(rowIndex)}:${String(boundaryIndex)}`,
-        minimumAfterPx: WORKSPACE_PANE_RESIZE_MIN_WIDTH_PX * (rowLength - columnIndex),
-        minimumBeforePx: WORKSPACE_PANE_RESIZE_MIN_WIDTH_PX * columnIndex,
-        orientation: "vertical",
-      });
-    }
-  }
-
-  return handles;
 }
 
 const summarizeWorkspacePaneState = (panes: WorkspacePanelPane[]) =>
@@ -514,13 +288,10 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
   const [codexSettingConfirmation, setCodexSettingConfirmation] = useState<
     WorkspaceCodexSettingConfirmationState | undefined
   >();
-  const [paneResizeRatios, setPaneResizeRatios] = useState<WorkspacePaneResizeRatios>();
   const debuggingModeRef = useRef<boolean | undefined>(undefined);
   const lagAutoReloadRequestedRef = useRef(false);
   const autoFocusGuardRef = useRef<WorkspaceAutoFocusGuard | undefined>(undefined);
   const pointerDragStateRef = useRef<WorkspacePanePointerDragState | undefined>(undefined);
-  const paneResizeDragStateRef = useRef<WorkspacePaneResizeDragState | undefined>(undefined);
-  const shellRef = useRef<HTMLElement | null>(null);
   const workspaceStateRef = useRef<WorkspaceStateMessage | undefined>(undefined);
   const presentedFocusedSessionIdRef = useRef<string | undefined>(undefined);
   const t3TerminalFocusGuardUntilRef = useRef(0);
@@ -1139,18 +910,17 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       ? sortPanesBySessionIds(nextVisiblePanes, localPaneOrder)
       : sortVisiblePanesBySlotIndex(nextVisiblePanes);
   }, [localPaneOrder, orderedPanes]);
-  const resolvedViewMode = workspaceState?.viewMode ?? "grid";
-  const visiblePaneRowLengths = useMemo(
-    () => createEditorLayoutPlan(Math.max(1, visiblePanes.length), resolvedViewMode).rowLengths,
-    [resolvedViewMode, visiblePanes.length],
-  );
   const visiblePaneLayoutBySessionId = useMemo(() => {
     const resolvedViewMode = workspaceState?.viewMode ?? "grid";
+    const rowLengths = createEditorLayoutPlan(
+      Math.max(1, visiblePanes.length),
+      resolvedViewMode,
+    ).rowLengths;
     const nextLayoutBySessionId = new Map<string, { gridColumn: string; gridRow: string }>();
     let nextPaneIndex = 0;
     let rowNumber = 1;
 
-    for (const rowLength of visiblePaneRowLengths) {
+    for (const rowLength of rowLengths) {
       const row = visiblePanes.slice(nextPaneIndex, nextPaneIndex + rowLength);
       let columnNumber = 1;
 
@@ -1173,7 +943,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     }
 
     return nextLayoutBySessionId;
-  }, [visiblePaneRowLengths, visiblePanes, workspaceState?.viewMode]);
+  }, [visiblePanes, workspaceState?.viewMode]);
   const presentedFocusedSessionId = workspaceState?.focusedSessionId;
   presentedFocusedSessionIdRef.current = presentedFocusedSessionId;
   const visiblePaneIds = useMemo(() => visiblePanes.map((pane) => pane.sessionId), [visiblePanes]);
@@ -1187,29 +957,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
       ].join("::"),
     [visiblePaneIdsKey, workspaceState?.activeGroupId, workspaceState?.viewMode],
   );
-  const paneResizeColumnCount = getWorkspaceResizeColumnCount(resolvedViewMode, visiblePanes.length);
-  const paneResizeRowCount = getWorkspaceResizeRowCount(resolvedViewMode, visiblePaneRowLengths);
-  const normalizedPaneResizeRatios = normalizeWorkspacePaneResizeRatios(
-    paneResizeRatios,
-    activeGroupLayoutKey,
-    paneResizeRowCount,
-    paneResizeColumnCount,
-  );
-  const paneResizeHandles = useMemo(
-    () =>
-      createWorkspacePaneResizeHandles(resolvedViewMode, visiblePaneRowLengths, visiblePanes.length),
-    [resolvedViewMode, visiblePaneRowLengths, visiblePanes.length],
-  );
-  useEffect(() => {
-    setPaneResizeRatios((currentRatios) =>
-      normalizeWorkspacePaneResizeRatios(
-        currentRatios,
-        activeGroupLayoutKey,
-        paneResizeRowCount,
-        paneResizeColumnCount,
-      ),
-    );
-  }, [activeGroupLayoutKey, paneResizeColumnCount, paneResizeRowCount]);
   useEffect(() => {
     for (const [sessionId, layout] of visiblePaneLayoutBySessionId.entries()) {
       if (!activeGroupSessionIdSet.has(sessionId)) {
@@ -1248,9 +995,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         workspaceState?.layoutAppearance.activePaneBorderColor,
       "--workspace-background-color": workspaceState?.layoutAppearance.backgroundColor,
       "--workspace-pane-gap": `${String(workspaceShellPaneGapPx)}px`,
-      "--workspace-pane-resize-handle-offset": `${String(
-        workspaceShellPaneGapPx / 2 + WORKSPACE_PANE_RESIZE_HANDLE_WIDTH_PX / 2,
-      )}px`,
     };
 
     if (workspaceShellPaddingTopPx !== workspaceShellPaneGapPx) {
@@ -1258,22 +1002,17 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     }
 
     if (visiblePanes.length > 0) {
-      nextStyle.gridTemplateColumns = formatWorkspacePaneResizeTracks(
-        normalizedPaneResizeRatios.columnRatios,
-        0,
-      );
-      nextStyle.gridTemplateRows = formatWorkspacePaneResizeTracks(
-        normalizedPaneResizeRatios.rowRatios,
-        0,
+      nextStyle.gridTemplateColumns = getWorkspaceGridTemplateColumns(
+        workspaceState?.viewMode ?? "grid",
+        visiblePanes.length,
       );
     }
 
     return nextStyle;
   }, [
-    normalizedPaneResizeRatios.columnRatios,
-    normalizedPaneResizeRatios.rowRatios,
     workspaceState?.layoutAppearance.activePaneBorderColor,
     workspaceState?.layoutAppearance.backgroundColor,
+    workspaceState?.viewMode,
     workspaceShellPaneGapPx,
     workspaceShellPaddingTopPx,
     visiblePanes.length,
@@ -1890,89 +1629,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     });
   };
 
-  const measurePaneResizeContentSize = (
-    orientation: WorkspacePaneResizeOrientation,
-    trackCount: number,
-  ): number => {
-    const shell = shellRef.current;
-    if (!shell) {
-      return 0;
-    }
-
-    const bounds = shell.getBoundingClientRect();
-    const styles = window.getComputedStyle(shell);
-    const gapPx = Number.parseFloat(
-      orientation === "vertical" ? styles.columnGap : styles.rowGap,
-    );
-    const beforePaddingPx = Number.parseFloat(
-      orientation === "vertical" ? styles.paddingLeft : styles.paddingTop,
-    );
-    const afterPaddingPx = Number.parseFloat(
-      orientation === "vertical" ? styles.paddingRight : styles.paddingBottom,
-    );
-    const totalSizePx = orientation === "vertical" ? bounds.width : bounds.height;
-    const totalGapPx = Math.max(0, trackCount - 1) * (Number.isFinite(gapPx) ? gapPx : 0);
-
-    return Math.max(
-      0,
-      totalSizePx -
-        (Number.isFinite(beforePaddingPx) ? beforePaddingPx : 0) -
-        (Number.isFinite(afterPaddingPx) ? afterPaddingPx : 0) -
-        totalGapPx,
-    );
-  };
-
-  const startPaneResizeDrag = (
-    event: ReactPointerEvent<HTMLButtonElement>,
-    handle: WorkspacePaneResizeHandle,
-  ) => {
-    if (event.button !== 0) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const trackCount =
-      handle.orientation === "vertical"
-        ? normalizedPaneResizeRatios.columnRatios.length
-        : normalizedPaneResizeRatios.rowRatios.length;
-    const contentSizePx = measurePaneResizeContentSize(handle.orientation, trackCount);
-    paneResizeDragStateRef.current = {
-      boundaryIndex: handle.boundaryIndex,
-      contentSizePx,
-      minimumAfterPx: handle.minimumAfterPx,
-      minimumBeforePx: handle.minimumBeforePx,
-      orientation: handle.orientation,
-      pointerId: event.pointerId,
-      startCoordinate: handle.orientation === "vertical" ? event.clientX : event.clientY,
-      startRatios: normalizedPaneResizeRatios,
-    };
-    postWorkspaceDebugLog(workspaceState?.debuggingMode, "workspace.paneResize.pointerDown", {
-      boundaryIndex: handle.boundaryIndex,
-      contentSizePx: Math.round(contentSizePx),
-      orientation: handle.orientation,
-      pointerId: event.pointerId,
-    });
-  };
-
-  const resetPaneResizeOrientation = (orientation: WorkspacePaneResizeOrientation) => {
-    setPaneResizeRatios((currentRatios) =>
-      resetWorkspacePaneResizeOrientation(
-        normalizeWorkspacePaneResizeRatios(
-          currentRatios,
-          activeGroupLayoutKey,
-          paneResizeRowCount,
-          paneResizeColumnCount,
-        ),
-        orientation,
-      ),
-    );
-    postWorkspaceDebugLog(workspaceState?.debuggingMode, "workspace.paneResize.equalized", {
-      orientation,
-    });
-  };
-
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
       const pointerDragState = pointerDragStateRef.current;
@@ -2065,70 +1721,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
     };
   }, []);
 
-  useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
-      const resizeDragState = paneResizeDragStateRef.current;
-      if (!resizeDragState || event.pointerId !== resizeDragState.pointerId) {
-        return;
-      }
-
-      event.preventDefault();
-      const deltaPx =
-        (resizeDragState.orientation === "vertical" ? event.clientX : event.clientY) -
-        resizeDragState.startCoordinate;
-      const startRatios = resizeDragState.startRatios;
-      const nextRatios =
-        resizeDragState.orientation === "vertical"
-          ? {
-              ...startRatios,
-              columnRatios: resizeWorkspacePaneRatioBoundary(
-                startRatios.columnRatios,
-                resizeDragState.boundaryIndex,
-                deltaPx,
-                resizeDragState.contentSizePx,
-                resizeDragState.minimumBeforePx,
-                resizeDragState.minimumAfterPx,
-              ),
-            }
-          : {
-              ...startRatios,
-              rowRatios: resizeWorkspacePaneRatioBoundary(
-                startRatios.rowRatios,
-                resizeDragState.boundaryIndex,
-                deltaPx,
-                resizeDragState.contentSizePx,
-                resizeDragState.minimumBeforePx,
-                resizeDragState.minimumAfterPx,
-              ),
-            };
-
-      setPaneResizeRatios(nextRatios);
-    };
-
-    const handlePointerFinish = (event: PointerEvent) => {
-      const resizeDragState = paneResizeDragStateRef.current;
-      if (!resizeDragState || event.pointerId !== resizeDragState.pointerId) {
-        return;
-      }
-
-      postWorkspaceDebugLog(debuggingModeRef.current, "workspace.paneResize.pointerFinish", {
-        boundaryIndex: resizeDragState.boundaryIndex,
-        orientation: resizeDragState.orientation,
-      });
-      paneResizeDragStateRef.current = undefined;
-    };
-
-    window.addEventListener("pointermove", handlePointerMove, true);
-    window.addEventListener("pointerup", handlePointerFinish, true);
-    window.addEventListener("pointercancel", handlePointerFinish, true);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove, true);
-      window.removeEventListener("pointerup", handlePointerFinish, true);
-      window.removeEventListener("pointercancel", handlePointerFinish, true);
-    };
-  }, []);
-
   if (!workspaceState) {
     return <main className="workspace-shell workspace-shell-empty" />;
   }
@@ -2139,7 +1731,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
         className={
           visiblePanes.length === 0 ? "workspace-shell workspace-shell-empty" : "workspace-shell"
         }
-        ref={shellRef}
         style={workspaceShellStyle}
       >
         {workspaceToast ? (
@@ -2328,35 +1919,6 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ messageSource = wind
             }}
           />
         ))}
-        {visiblePanes.length > 1
-          ? paneResizeHandles.map((handle) => (
-              <button
-                aria-label={
-                  handle.orientation === "vertical"
-                    ? "Resize pane widths"
-                    : "Resize pane heights"
-                }
-                className={`workspace-pane-resize-handle workspace-pane-resize-handle-${handle.orientation}`}
-                key={handle.id}
-                onDoubleClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  resetPaneResizeOrientation(handle.orientation);
-                }}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                onPointerDown={(event) => startPaneResizeDrag(event, handle)}
-                style={{
-                  gridColumn: handle.gridColumn,
-                  gridRow: handle.gridRow,
-                }}
-                tabIndex={-1}
-                type="button"
-              />
-            ))
-          : null}
         {terminalPanes.map((pane) => {
           const target = terminalPortalTargetsRef.current.get(pane.sessionId);
           if (!target) {
@@ -2789,6 +2351,21 @@ function postFocusComposerToT3Source(
     void sessionId;
     (source as Window).postMessage({ type: "focusComposer" }, "*");
   });
+}
+
+function getWorkspaceGridTemplateColumns(
+  viewMode: WorkspacePanelHydrateMessage["viewMode"],
+  visiblePaneCount: number,
+): string {
+  if (viewMode === "horizontal") {
+    return "minmax(0, 1fr)";
+  }
+
+  if (viewMode === "vertical") {
+    return `repeat(${String(Math.max(1, visiblePaneCount))}, minmax(0, 1fr))`;
+  }
+
+  return "repeat(6, minmax(0, 1fr))";
 }
 
 function getWorkspacePaneGridPlacement(

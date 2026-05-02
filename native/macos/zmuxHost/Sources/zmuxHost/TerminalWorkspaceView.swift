@@ -31,9 +31,32 @@ final class TerminalWorkspaceView: NSView {
     let borderView: TerminalPaneBorderView
   }
 
+  private struct PaneResizeHit {
+    let availableLength: CGFloat
+    let boundaryIndex: Int
+    let direction: NativeTerminalLayout.SplitDirection
+    let path: String
+    let rect: CGRect
+    let trackCount: Int
+  }
+
+  private struct PaneResizeDrag {
+    let availableLength: CGFloat
+    let boundaryIndex: Int
+    let direction: NativeTerminalLayout.SplitDirection
+    let minimumAfter: CGFloat
+    let minimumBefore: CGFloat
+    let path: String
+    let startCoordinate: CGFloat
+    let startRatios: [CGFloat]
+  }
+
   private static let terminalTitleBarHeight: CGFloat = 33
   private static let defaultPaneGap: CGFloat = 12
   private static let singlePaneInset: CGFloat = 1
+  private static let paneResizeHitSize: CGFloat = 4
+  private static let paneResizeMinimumHeight: CGFloat = 160
+  private static let paneResizeMinimumWidth: CGFloat = 220
   private static let defaultWorkspaceBackgroundColor = NSColor(
     calibratedRed: 0.071, green: 0.071, blue: 0.071, alpha: 1)
   private let ghostty: Ghostty.App
@@ -52,6 +75,9 @@ final class TerminalWorkspaceView: NSView {
   private var paneGap = TerminalWorkspaceView.defaultPaneGap
   private var programmaticFocusDepth = 0
   private var terminalLayout: NativeTerminalLayout?
+  private var paneResizeHits: [PaneResizeHit] = []
+  private var paneResizeRatiosByPath: [String: [CGFloat]] = [:]
+  private var paneResizeDrag: PaneResizeDrag?
   private var resizeLogSignatureBySessionId = [String: String]()
   private var exitPollTimer: Timer?
 
@@ -546,6 +572,8 @@ final class TerminalWorkspaceView: NSView {
         "visibleSessionIds": orderedVisibleSessionIds(),
       ])
     terminalLayout = nextLayout
+    paneResizeRatiosByPath.removeAll()
+    paneResizeDrag = nil
     needsLayout = true
   }
 
@@ -675,15 +703,18 @@ final class TerminalWorkspaceView: NSView {
 
   override func layout() {
     super.layout()
+    paneResizeHits.removeAll()
     let visibleSessionIds = orderedVisibleSessionIds()
     guard !visibleSessionIds.isEmpty else {
+      discardCursorRects()
       return
     }
     if let terminalLayout {
-      layoutTree(terminalLayout, in: layoutBounds(forVisibleCount: visibleSessionIds.count))
+      layoutTree(terminalLayout, in: layoutBounds(forVisibleCount: visibleSessionIds.count), path: "root")
     } else {
       layoutGrid(visibleSessionIds, in: layoutBounds(forVisibleCount: visibleSessionIds.count))
     }
+    window?.invalidateCursorRects(for: self)
   }
 
   private func layoutBounds(forVisibleCount visibleCount: Int) -> CGRect {
@@ -697,7 +728,7 @@ final class TerminalWorkspaceView: NSView {
     return fromLayout.filter { activeSessionIds.contains($0) }
   }
 
-  private func layoutTree(_ node: NativeTerminalLayout, in rect: CGRect) {
+  private func layoutTree(_ node: NativeTerminalLayout, in rect: CGRect, path: String) {
     switch node {
     case .leaf(let sessionId):
       setFrame(rect, for: sessionId)
@@ -707,7 +738,7 @@ final class TerminalWorkspaceView: NSView {
       }
       guard !visibleChildren.isEmpty else { return }
       if visibleChildren.count == 1 {
-        layoutTree(visibleChildren[0], in: rect)
+        layoutTree(visibleChildren[0], in: rect, path: "\(path).0")
         return
       }
       /**
@@ -717,13 +748,18 @@ final class TerminalWorkspaceView: NSView {
        siblings instead of hardcoded 1px child insets.
        */
       let gap = splitGap(forChildCount: visibleChildren.count)
-      let firstRatio = CGFloat(ratio ?? (1.0 / Double(visibleChildren.count)))
+      let defaultRatios = defaultPaneResizeRatios(
+        childCount: visibleChildren.count,
+        firstRatio: ratio.map { CGFloat($0) })
+      let ratios = normalizedPaneResizeRatios(for: path, defaultRatios: defaultRatios)
       var nextOrigin = direction == .horizontal ? rect.minX : rect.maxY
       let availableLength = max(
         (direction == .horizontal ? rect.width : rect.height)
           - gap * CGFloat(max(visibleChildren.count - 1, 0)),
         CGFloat(visibleChildren.count)
       )
+      let ratioTotal = max(ratios.reduce(0, +), 1)
+      var childRects: [CGRect] = []
       for (index, child) in visibleChildren.enumerated() {
         let isLast = index == visibleChildren.count - 1
         let childLength: CGFloat
@@ -733,7 +769,7 @@ final class TerminalWorkspaceView: NSView {
             ? max(rect.maxX - nextOrigin, 1)
             : max(nextOrigin - rect.minY, 1)
         } else {
-          childLength = max(floor(availableLength * firstRatio), 1)
+          childLength = max(floor(availableLength * (ratios[index] / ratioTotal)), 1)
         }
         let childRect: CGRect
         if direction == .horizontal {
@@ -745,7 +781,17 @@ final class TerminalWorkspaceView: NSView {
             x: rect.minX, y: nextOrigin - childLength, width: rect.width, height: childLength)
           nextOrigin -= childLength + gap
         }
-        layoutTree(child, in: childRect)
+        childRects.append(childRect)
+        layoutTree(child, in: childRect, path: "\(path).\(index)")
+      }
+      recordPaneResizeHits(
+        childRects: childRects,
+        direction: direction,
+        path: path,
+        rect: rect
+      )
+      if paneResizeRatiosByPath[path]?.count != visibleChildren.count {
+        paneResizeRatiosByPath[path] = ratios
       }
     }
   }
@@ -771,6 +817,231 @@ final class TerminalWorkspaceView: NSView {
 
   private func splitGap(forChildCount childCount: Int) -> CGFloat {
     childCount <= 1 ? 0 : paneGap
+  }
+
+  /**
+   CDXC:NativePaneResize 2026-05-02-16:44
+   Native Ghostty and WKWebView panes sit above the React workspace DOM, so
+   split resizing must be owned by AppKit. The workspace view records 4px
+   cursor/mouse bands in real pane gaps, clamps panes to terminal-usable
+   dimensions, and double-click equalizes only split groups matching the
+   clicked orientation.
+   */
+  private func defaultPaneResizeRatios(childCount: Int, firstRatio: CGFloat?) -> [CGFloat] {
+    guard childCount > 0 else { return [] }
+    guard childCount > 1, let firstRatio else {
+      return Array(repeating: 1, count: childCount)
+    }
+    let first = min(max(firstRatio, 0.05), 0.95)
+    let remaining = max(1 - first, 0.05)
+    let trailing = remaining / CGFloat(childCount - 1)
+    return [first] + Array(repeating: trailing, count: childCount - 1)
+  }
+
+  private func normalizedPaneResizeRatios(for path: String, defaultRatios: [CGFloat]) -> [CGFloat] {
+    guard let current = paneResizeRatiosByPath[path], current.count == defaultRatios.count,
+      current.allSatisfy({ $0 > 0 })
+    else {
+      return defaultRatios
+    }
+    return current
+  }
+
+  private func recordPaneResizeHits(
+    childRects: [CGRect],
+    direction: NativeTerminalLayout.SplitDirection,
+    path: String,
+    rect: CGRect
+  ) {
+    guard childRects.count > 1 else { return }
+    for boundaryIndex in 1..<childRects.count {
+      let previous = childRects[boundaryIndex - 1]
+      let next = childRects[boundaryIndex]
+      let hitRect: CGRect
+      switch direction {
+      case .horizontal:
+        let centerX = (previous.maxX + next.minX) / 2
+        hitRect = CGRect(
+          x: centerX - Self.paneResizeHitSize / 2,
+          y: max(previous.minY, next.minY),
+          width: Self.paneResizeHitSize,
+          height: min(previous.maxY, next.maxY) - max(previous.minY, next.minY)
+        )
+      case .vertical:
+        let centerY = (previous.minY + next.maxY) / 2
+        hitRect = CGRect(
+          x: rect.minX,
+          y: centerY - Self.paneResizeHitSize / 2,
+          width: rect.width,
+          height: Self.paneResizeHitSize
+        )
+      }
+      if hitRect.width > 0, hitRect.height > 0 {
+        paneResizeHits.append(
+          PaneResizeHit(
+            availableLength: max(
+              (direction == .horizontal ? rect.width : rect.height)
+                - splitGap(forChildCount: childRects.count)
+                  * CGFloat(max(childRects.count - 1, 0)),
+              CGFloat(childRects.count)
+            ),
+            boundaryIndex: boundaryIndex,
+            direction: direction,
+            path: path,
+            rect: hitRect,
+            trackCount: childRects.count
+          ))
+      }
+    }
+  }
+
+  override func resetCursorRects() {
+    super.resetCursorRects()
+    for hit in paneResizeHits {
+      addCursorRect(
+        hit.rect,
+        cursor: hit.direction == .horizontal ? .resizeLeftRight : .resizeUpDown)
+    }
+  }
+
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    true
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    guard let hit = paneResizeHit(at: point) else {
+      super.mouseDown(with: event)
+      return
+    }
+
+    if event.clickCount >= 2 {
+      equalizePaneResizeRatios(matching: hit.direction)
+      return
+    }
+
+    let currentRatios =
+      paneResizeRatiosByPath[hit.path]
+      ?? Array(repeating: 1, count: hit.trackCount)
+    paneResizeDrag = PaneResizeDrag(
+      availableLength: hit.availableLength,
+      boundaryIndex: hit.boundaryIndex,
+      direction: hit.direction,
+      minimumAfter: paneResizeMinimumLength(direction: hit.direction)
+        * CGFloat(hit.trackCount - hit.boundaryIndex),
+      minimumBefore: paneResizeMinimumLength(direction: hit.direction) * CGFloat(hit.boundaryIndex),
+      path: hit.path,
+      startCoordinate: hit.direction == .horizontal ? point.x : point.y,
+      startRatios: currentRatios
+    )
+  }
+
+  override func mouseDragged(with event: NSEvent) {
+    guard let drag = paneResizeDrag else {
+      super.mouseDragged(with: event)
+      return
+    }
+
+    let point = convert(event.locationInWindow, from: nil)
+    let coordinate = drag.direction == .horizontal ? point.x : point.y
+    let delta = drag.direction == .horizontal
+      ? coordinate - drag.startCoordinate
+      : drag.startCoordinate - coordinate
+    paneResizeRatiosByPath[drag.path] = resizePaneRatios(
+      drag.startRatios,
+      boundaryIndex: drag.boundaryIndex,
+      delta: delta,
+      availableLength: drag.availableLength,
+      minimumBefore: drag.minimumBefore,
+      minimumAfter: drag.minimumAfter)
+    needsLayout = true
+    layoutSubtreeIfNeeded()
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    if paneResizeDrag != nil {
+      paneResizeDrag = nil
+      return
+    }
+    super.mouseUp(with: event)
+  }
+
+  private func paneResizeHit(at point: CGPoint) -> PaneResizeHit? {
+    paneResizeHits
+      .filter { $0.rect.contains(point) }
+      .min { left, right in
+        let leftDistance = paneResizeDistance(from: point, to: left)
+        let rightDistance = paneResizeDistance(from: point, to: right)
+        return leftDistance < rightDistance
+      }
+  }
+
+  private func paneResizeDistance(from point: CGPoint, to hit: PaneResizeHit) -> CGFloat {
+    switch hit.direction {
+    case .horizontal:
+      abs(point.x - hit.rect.midX)
+    case .vertical:
+      abs(point.y - hit.rect.midY)
+    }
+  }
+
+  private func paneResizeMinimumLength(direction: NativeTerminalLayout.SplitDirection) -> CGFloat {
+    direction == .horizontal ? Self.paneResizeMinimumWidth : Self.paneResizeMinimumHeight
+  }
+
+  private func resizePaneRatios(
+    _ ratios: [CGFloat],
+    boundaryIndex: Int,
+    delta: CGFloat,
+    availableLength: CGFloat,
+    minimumBefore: CGFloat,
+    minimumAfter: CGFloat
+  ) -> [CGFloat] {
+    let ratioTotal = ratios.reduce(0, +)
+    guard ratios.count > 1, boundaryIndex > 0, boundaryIndex < ratios.count, ratioTotal > 0,
+      availableLength > minimumBefore + minimumAfter
+    else {
+      return ratios
+    }
+    let beforeRatio = ratios.prefix(boundaryIndex).reduce(0, +)
+    let afterRatio = ratioTotal - beforeRatio
+    guard beforeRatio > 0, afterRatio > 0 else { return ratios }
+    let beforeLength = beforeRatio / ratioTotal * availableLength
+    let nextBeforeLength = min(
+      max(beforeLength + delta, minimumBefore),
+      availableLength - minimumAfter)
+    let nextBeforeRatio = nextBeforeLength / availableLength * ratioTotal
+    let nextAfterRatio = ratioTotal - nextBeforeRatio
+    let beforeScale = nextBeforeRatio / beforeRatio
+    let afterScale = nextAfterRatio / afterRatio
+    return ratios.enumerated().map { index, ratio in
+      ratio * (index < boundaryIndex ? beforeScale : afterScale)
+    }
+  }
+
+  private func equalizePaneResizeRatios(matching direction: NativeTerminalLayout.SplitDirection) {
+    equalizePaneResizeRatios(in: terminalLayout, path: "root", matching: direction)
+    needsLayout = true
+    layoutSubtreeIfNeeded()
+  }
+
+  private func equalizePaneResizeRatios(
+    in node: NativeTerminalLayout?,
+    path: String,
+    matching direction: NativeTerminalLayout.SplitDirection
+  ) {
+    guard let node else { return }
+    switch node {
+    case .leaf:
+      return
+    case .split(let splitDirection, _, let children):
+      if splitDirection == direction {
+        paneResizeRatiosByPath[path] = Array(repeating: 1, count: children.count)
+      }
+      for (index, child) in children.enumerated() {
+        equalizePaneResizeRatios(in: child, path: "\(path).\(index)", matching: direction)
+      }
+    }
   }
 
   private func setFrame(_ rect: CGRect, for sessionId: String) {
@@ -801,11 +1072,17 @@ final class TerminalWorkspaceView: NSView {
       width: rect.width,
       height: max(rect.height - titleBarHeight, 1)
     )
-    let terminalRect = steppedTerminalRect(availableTerminalRect, for: session.view)
+    /**
+     CDXC:NativeTerminalResize 2026-05-02-17:19
+     Pane chrome and the terminal renderer must share the same body width.
+     Remove the previous whole-cell stepping here because it created visible
+     chrome/body width drift and did not resolve the prior terminal resize bug.
+     */
+    let terminalRect = availableTerminalRect
     session.titleBarView.frame = titleBarRect
     session.titleBarView.needsLayout = true
     session.titleBarView.layoutSubtreeIfNeeded()
-    session.scrollView.frame = terminalRect
+    session.scrollView.frame = availableTerminalRect
     session.scrollView.needsLayout = true
     session.scrollView.layoutSubtreeIfNeeded()
     session.searchBarView.frame = searchBarFrame(in: terminalRect)
@@ -1439,49 +1716,6 @@ final class TerminalWorkspaceView: NSView {
       post({ type: "diagnostics-ready" });
     })();
     """
-
-  private func steppedTerminalRect(_ rect: CGRect, for surfaceView: Ghostty.SurfaceView) -> CGRect {
-    /**
-     CDXC:NativeTerminalResize 2026-04-29-08:00
-     Embedded Ghostty panes should resize like Ghostty windows with
-     `window-step-resize`: terminal content advances in whole character-cell
-     increments, but Ghostty subtracts effective terminal padding before
-     computing PTY rows and columns. Step the whole surface to
-     `padding + N * cellSize` so TUIs such as Claude Code receive the same
-     grid size that a real Ghostty window would report during resize.
-     */
-    let cellSize = surfaceView.cellSize
-    guard cellSize.width > 0, cellSize.height > 0, let surface = surfaceView.surface else {
-      return rect
-    }
-    let padding = ghostty_surface_padding(surface)
-    let totalPadding = surfaceView.convertFromBacking(
-      NSSize(
-        width: Double(padding.left_px + padding.right_px),
-        height: Double(padding.top_px + padding.bottom_px)))
-    let steppedWidth = steppedTerminalLength(
-      available: rect.width,
-      cell: cellSize.width,
-      padding: totalPadding.width)
-    let steppedHeight = steppedTerminalLength(
-      available: rect.height,
-      cell: cellSize.height,
-      padding: totalPadding.height)
-    return CGRect(
-      x: rect.minX,
-      y: rect.maxY - steppedHeight,
-      width: min(steppedWidth, rect.width),
-      height: min(steppedHeight, rect.height)
-    )
-  }
-
-  private func steppedTerminalLength(available: CGFloat, cell: CGFloat, padding: CGFloat) -> CGFloat {
-    guard available > 1, cell > 0, padding >= 0, available > padding else {
-      return max(available, 1)
-    }
-    let cells = max(floor((available - padding) / cell), 1)
-    return max(min(padding + cells * cell, available), 1)
-  }
 
   private func searchBarFrame(in terminalRect: CGRect) -> CGRect {
     let width = min(CGFloat(300), max(terminalRect.width - 16, 180))
