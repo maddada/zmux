@@ -10,6 +10,7 @@ release/*.zip
 .DS_Store
 .vscode/
 AGENTS.md
+.agents/skills/zmux-release-to-brew/SKILL.md
 storybook-static/
 native/macos/zmuxHost/Web/
 native/macos/zmuxHost/zmuxHost.xcodeproj/
@@ -21,3 +22,6 @@ native/macos/zmuxHost/zmux.xcodeproj/
 # CDXC:Distribution 2026-04-28-04:19: Release DMG/ZIP artifacts are uploaded to
 # GitHub Releases and referenced by Homebrew casks, so git should track source
 # and metadata only instead of committing binary distribution outputs.
+# CDXC:RepoSafety 2026-05-02-00:11: The zmux release-to-brew skill is local
+# agent workflow documentation and must remain available on this machine without
+# appearing in the public GitHub repository tree.
