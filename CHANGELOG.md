@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.4.0 - 2026-05-02
+
+<!-- CDXC:Distribution 2026-05-02-08:37: Release notes for 1.4.0 must include
+all commits after v1.3.0 so README, GitHub, Sparkle, and Homebrew release
+metadata describe the same shipped behavior. -->
+
+- Added Sparkle appcast update support with signed appcast metadata for native macOS updates.
+- Added native T3 Code panes with managed runtime bootstrap, authentication, thread routing, and runtime diagnostics.
+- Added T3 remote/browser access links for native panes, including local-network and Tailscale-friendly pairing URLs.
+- Added draggable workspace pane resizing with double-click equalize behavior for pane rows and columns.
+- Added a standard native macOS app menu with About, Check for Updates, Settings, Services, Hide, and Quit.
+- Added a setting to hide the native IDE title-bar attach button without disabling IDE attachment.
+- Improved IDE attachment behavior so the floating Show IDE button raises or launches the configured IDE for the current workspace.
+- Improved T3 runtime startup by rebuilding the local t3code-embed checkout only when source fingerprints or build output require it.
+- Improved workspace dock clarity by dimming inactive project icons.
+- Kept the local release workflow skill available on this machine while removing it from the public repository tree.
+
 ## 1.3.0 - 2026-04-30
 
 <!-- CDXC:Distribution 2026-04-30-03:37: Release notes for 1.3.0 must include
