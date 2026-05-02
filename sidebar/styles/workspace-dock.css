@@ -79,6 +79,11 @@ body.native-sidebar-body .stack {
   letter-spacing: 0;
   padding: 0;
   position: relative;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    opacity 120ms ease,
+    transform 120ms ease;
   width: 40px;
 }
 
@@ -147,8 +152,20 @@ body.native-sidebar-body .stack {
 
 .workspace-dock-button[data-active="true"] {
   border-color: var(--workspace-dock-button-border, #5b8df6);
+  opacity: 1;
   box-shadow: 0 0 0 2px
     color-mix(in srgb, var(--workspace-dock-button-border, #5b8df6) 28%, transparent);
+}
+
+/* CDXC:WorkspaceDock 2026-05-02-03:01: Inactive project icons in the left
+   workspace rail must be lower opacity so the current project remains the
+   primary navigation target. */
+.workspace-dock-button[data-active="false"] {
+  opacity: 0.52;
+}
+
+.workspace-dock-button[data-active="false"]:is(:hover, :focus-visible) {
+  opacity: 0.82;
 }
 
 .workspace-dock-button[data-dragging="true"] {
