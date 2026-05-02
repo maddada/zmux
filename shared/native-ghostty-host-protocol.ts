@@ -23,7 +23,9 @@ export type NativeGhosttyHostCommand =
     }
   | {
       cwd?: string;
+      projectId?: string;
       sessionId: string;
+      threadId?: string;
       title: string;
       type: "createWebPane";
       url: string;
@@ -100,6 +102,14 @@ export type NativeGhosttyHostEvent =
       message: string;
       sessionId: string;
       type: "terminalError";
+    }
+  | {
+      projectId: string;
+      serverOrigin: string;
+      sessionId: string;
+      threadId: string;
+      type: "t3ThreadReady";
+      workspaceRoot: string;
     }
   | {
       protocolVersion: typeof NATIVE_GHOSTTY_HOST_PROTOCOL_VERSION;

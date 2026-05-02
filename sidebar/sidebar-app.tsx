@@ -7,6 +7,7 @@ import {
   IconBellOff,
   IconArrowsSort,
   IconBookmark,
+  IconDeviceMobile,
   IconEye,
   IconHelpCircle,
   IconHistory,
@@ -41,7 +42,6 @@ import { AgentsPanel } from "./agents-panel";
 import { CommandsPanel } from "./commands-panel";
 import { GitCommitModal } from "./git-commit-modal";
 import { SidebarProjectHeader } from "./project-header";
-import { T3BrowserAccessModal } from "./t3-browser-access-modal";
 import {
   SidebarPreviousSessionsSearchGroup,
   SidebarSessionSearchField,
@@ -162,8 +162,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   const [isScratchPadOpen, setIsScratchPadOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
-  const [t3BrowserAccess, setT3BrowserAccess] =
-    useState<Extract<ExtensionToSidebarMessage, { type: "showT3BrowserAccess" }>>();
   const [completionFlashNonceBySessionId, setCompletionFlashNonceBySessionId] = useState<
     Record<string, number>
   >({});
@@ -451,7 +449,17 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     }
 
     if (event.data.type === "showT3BrowserAccess") {
-      setT3BrowserAccess(event.data);
+      /**
+       * CDXC:T3RemoteAccess 2026-05-02-00:57
+       * Remote Access is launched from sidebar session actions, but the QR
+       * modal must render in the app-level host so it is centered over the
+       * whole workspace instead of being constrained to the sidebar.
+       */
+      openAppModal({
+        access: event.data,
+        modal: "t3BrowserAccess",
+        type: "open",
+      });
       return;
     }
 
@@ -1552,6 +1560,16 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     vscode.postMessage({ type: "openWorkspaceWelcome" });
   };
 
+  const browserAccessSessionId = useMemo(() => {
+    const orderedSessionIds = groupOrder.flatMap(
+      (groupId) => authoritativeSessionIdsByGroup[groupId] ?? [],
+    );
+    const focusedSessionId = orderedSessionIds.find(
+      (sessionId) => sessionsById[sessionId]?.isFocused,
+    );
+    return focusedSessionId ?? orderedSessionIds[0];
+  }, [authoritativeSessionIdsByGroup, groupOrder, sessionsById]);
+
   const togglePinnedPrompts = () => {
     setIsOverflowMenuOpen(false);
     setIsDaemonSessionsOpen(false);
@@ -1564,6 +1582,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   };
 
   const topControlOptions = {
+    browserAccessSessionId,
     completionBellEnabled,
     isManualActiveSessionsSort,
     isOverflowMenuOpen,
@@ -1571,6 +1590,13 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     isScratchPadOpen,
     isSessionSearchOpen,
     onMoveSidebar: moveSidebar,
+    onAccessT3FromBrowser: (sessionId: string) => {
+      setIsOverflowMenuOpen(false);
+      vscode.postMessage({
+        sessionId,
+        type: "requestT3SessionBrowserAccess",
+      });
+    },
     onOpenHelp: openWorkspaceWelcome,
     onOpenHotkeys: openHotkeys,
     onOpenSettings: openSidebarSettings,
@@ -1815,17 +1841,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
             />
           </div>
         </section>
-        <T3BrowserAccessModal
-          access={t3BrowserAccess}
-          isOpen={t3BrowserAccess !== undefined}
-          onClose={() => setT3BrowserAccess(undefined)}
-          onOpenLink={(url) => {
-            vscode.postMessage({
-              type: "openT3SessionBrowserAccessLink",
-              url,
-            });
-          }}
-        />
         <GitCommitModal
           draft={
             gitCommitDraft ?? {
@@ -2005,12 +2020,14 @@ function getSessionCardTimeToggleLabel(showLastInteractionTimeOnSessionCards: bo
 }
 
 type RenderSidebarTopControlsOptions = {
+  browserAccessSessionId?: string;
   completionBellEnabled: boolean;
   isManualActiveSessionsSort: boolean;
   isOverflowMenuOpen: boolean;
   isPreviousSessionsOpen: boolean;
   isScratchPadOpen: boolean;
   isSessionSearchOpen: boolean;
+  onAccessT3FromBrowser: (sessionId: string) => void;
   onMoveSidebar: () => void;
   onOpenHelp: () => void;
   onOpenHotkeys: () => void;
@@ -2192,9 +2209,11 @@ function renderPreviousSessionsToolbarButton({
 }
 
 function renderFloatingOverflowMenu({
+  browserAccessSessionId,
   isManualActiveSessionsSort,
   isOverflowMenuOpen,
   isScratchPadOpen,
+  onAccessT3FromBrowser,
   onMoveSidebar: _onMoveSidebar,
   onOpenHelp,
   onOpenHotkeys,
@@ -2259,11 +2278,22 @@ function renderFloatingOverflowMenu({
               </div>
               <div className="session-context-menu-divider" role="separator" />
               <div className="session-context-menu-group">
-                {/*
-                 * CDXC:SidebarOverflow 2026-04-28-05:48
-                 * Remote Access is hidden from the sidebar overflow menu while
-                 * the underlying modal/message path remains available.
-                 */}
+                {browserAccessSessionId ? (
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => onAccessT3FromBrowser(browserAccessSessionId)}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconDeviceMobile
+                      aria-hidden="true"
+                      className="session-context-menu-icon"
+                      size={14}
+                      stroke={1.8}
+                    />
+                    Remote Access
+                  </button>
+                ) : null}
                 <button
                   className="session-context-menu-item"
                   onClick={onToggleActiveSessionsSortMode}

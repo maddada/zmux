@@ -1,5 +1,6 @@
 import {
   IconCopy,
+  IconDeviceMobile,
   IconGitFork,
   IconMessageCircle,
   IconMoon,
@@ -540,6 +541,23 @@ export function SortableSessionCard({
     });
   };
 
+  const requestT3BrowserAccess = () => {
+    if (!isT3Session) {
+      return;
+    }
+
+    setContextMenuPosition(undefined);
+    /**
+     * CDXC:T3RemoteAccess 2026-05-02-00:57
+     * T3 session cards expose Remote Access directly; the controller resolves
+     * the share URL and the app modal host owns the centered QR dialog.
+     */
+    vscode.postMessage({
+      sessionId: session.sessionId,
+      type: "requestT3SessionBrowserAccess",
+    });
+  };
+
   const requestGenerateSessionName = () => {
     setContextMenuPosition(undefined);
     /**
@@ -667,11 +685,21 @@ export function SortableSessionCard({
       onClick: requestViewFirstUserMessage,
     });
   }
-  /**
-   * CDXC:SidebarSessions 2026-04-28-05:48
-   * Remote Access is intentionally hidden from T3 session overflow menus while
-   * the underlying browser-access handler remains available to non-UI callers.
-   */
+  if (isT3Session) {
+    sessionActions.push({
+      icon: (
+        <IconDeviceMobile
+          aria-hidden="true"
+          className="session-context-menu-icon"
+          size={16}
+          stroke={1.8}
+        />
+      ),
+      key: "browser-access",
+      label: "Remote Access",
+      onClick: requestT3BrowserAccess,
+    });
+  }
   if (canCopyResumeCommand) {
     sessionActions.push({
       icon: (

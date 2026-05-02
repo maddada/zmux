@@ -67,6 +67,7 @@ export type zmuxSettings = {
   workspacePaneGap: number;
   syncOpenProjectWithZed: boolean;
   zedOverlayEnabled: boolean;
+  zedOverlayHideTitlebarButton: boolean;
   zedOverlayTargetApp: ZedOverlayTargetApp;
 };
 
@@ -75,6 +76,10 @@ export type zmuxSettings = {
  * Users can attach zmux to the IDE selected in settings. Keep the existing
  * persisted Zed overlay keys for compatibility while widening the target list
  * to include VS Code and VS Code Insiders.
+ *
+ * CDXC:IDEAttachment 2026-05-01-13:52
+ * The native title-bar Attach/Detach IDE button remains visible by default,
+ * but users can hide it from Settings without disabling IDE attachment.
  */
 export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   actionCompletionSound: "shamisenreverb",
@@ -107,6 +112,7 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   workspacePaneGap: 12,
   syncOpenProjectWithZed: true,
   zedOverlayEnabled: false,
+  zedOverlayHideTitlebarButton: false,
   zedOverlayTargetApp: "zed-preview",
 };
 
@@ -323,6 +329,11 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
       source,
       "zedOverlayEnabled",
       DEFAULT_zmux_SETTINGS.zedOverlayEnabled,
+    ),
+    zedOverlayHideTitlebarButton: readBoolean(
+      source,
+      "zedOverlayHideTitlebarButton",
+      DEFAULT_zmux_SETTINGS.zedOverlayHideTitlebarButton,
     ),
     zedOverlayTargetApp: normalizeZedOverlayTargetApp(
       readString(source, "zedOverlayTargetApp", DEFAULT_zmux_SETTINGS.zedOverlayTargetApp),

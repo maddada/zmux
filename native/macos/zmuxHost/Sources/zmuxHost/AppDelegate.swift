@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import GhosttyKit
 import OSLog
+import Sparkle
 import UniformTypeIdentifiers
 import WebKit
 
@@ -31,9 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   private var browserOverlayController: BrowserOverlayController?
   private var hasPresentedAccessibilityPermissionDialog = false
   private var pendingZedOverlayConfiguration: ConfigureZedOverlay?
+  private var hasUserDetachedZedOverlay = false
   private var pendingGhosttyConfigReloadTimer: Timer?
+  private var t3RuntimeHeartbeatTimer: Timer?
   private weak var attachToIdeTitlebarButton: NSButton?
   private let nativeSettingsStore = NativeSettingsStore()
+  private let updaterController: SPUStandardUpdaterController
   private var t3CodeRuntimeProcess: Process?
 
   override init() {
@@ -46,6 +50,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      */
     ghosttyConfigSelection = configSelection
     ghostty = Ghostty.App(configPath: configSelection.path)
+    /**
+     CDXC:AutoUpdate 2026-05-02-06:51
+     The native app should use Sparkle for the macOS appcast update flow, like
+     DockDoor. Start the updater controller during app initialization so the
+     menu item and background checks share Sparkle's standard state machine.
+     */
+    updaterController = SPUStandardUpdaterController(
+      startingUpdater: true,
+      updaterDelegate: nil,
+      userDriverDelegate: nil)
     super.init()
     ghostty.delegate = self
     logGhosttyConfigStartup()
@@ -57,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       "applicationDidFinishLaunching pid=\(ProcessInfo.processInfo.processIdentifier) workspacePath=\(workspacePath)"
     )
     MainActor.assumeIsolated {
+      installMainMenu()
       /**
        CDXC:NativeTerminals 2026-04-28-12:06
        Persistent helper mode was removed by request. Native terminals now
@@ -65,6 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
        */
       makeWindow()
       startBridge()
+      startT3RuntimeAppHeartbeat()
+      startSparkleBackgroundUpdateCheck()
       presentAccessibilityPermissionDialogIfNeeded()
     }
     tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
@@ -76,6 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     Self.appendNativeHostLifecycleLog(
       "applicationWillTerminate pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false)"
     )
+    NativeT3RuntimeLauncher.touchAppHeartbeat(reason: "applicationWillTerminate")
+    t3RuntimeHeartbeatTimer?.invalidate()
+    t3RuntimeHeartbeatTimer = nil
   }
 
   func applicationWillBecomeActive(_ notification: Notification) {
@@ -414,7 +434,189 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
   }
 
-  @IBAction nonisolated func checkForUpdates(_ sender: Any?) {}
+  @MainActor
+  private func installMainMenu() {
+    /**
+     CDXC:MacMenuBar 2026-05-02-06:36
+     The native zmux app should expose a standard macOS application menu like
+     other desktop apps: About, Check for Updates, Settings, Services, Hide,
+     Hide Others, and Quit. Build the menu explicitly because this AppKit host
+     runs without a storyboard or nib-provided main menu.
+     */
+    let appName = Self.appMenuName()
+    let mainMenu = NSMenu(title: "Main Menu")
+
+    let appMenuItem = NSMenuItem()
+    let appMenu = NSMenu(title: appName)
+    appMenu.addItem(
+      withTitle: "About \(appName)",
+      action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+      keyEquivalent: "")
+    appMenu.addItem(
+      withTitle: "Check for Updates",
+      action: #selector(checkForUpdates(_:)),
+      keyEquivalent: "")
+    appMenu.addItem(NSMenuItem.separator())
+    appMenu.addItem(
+      withTitle: "Settings...",
+      action: #selector(openSettingsFromMainMenu(_:)),
+      keyEquivalent: ",")
+    appMenu.addItem(NSMenuItem.separator())
+
+    let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+    let servicesMenu = NSMenu(title: "Services")
+    servicesItem.submenu = servicesMenu
+    appMenu.addItem(servicesItem)
+    NSApp.servicesMenu = servicesMenu
+
+    appMenu.addItem(NSMenuItem.separator())
+    appMenu.addItem(
+      withTitle: "Hide \(appName)",
+      action: #selector(NSApplication.hide(_:)),
+      keyEquivalent: "h")
+    let hideOthersItem = appMenu.addItem(
+      withTitle: "Hide Others",
+      action: #selector(NSApplication.hideOtherApplications(_:)),
+      keyEquivalent: "h")
+    hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+    appMenu.addItem(NSMenuItem.separator())
+    appMenu.addItem(
+      withTitle: "Quit \(appName)",
+      action: #selector(NSApplication.terminate(_:)),
+      keyEquivalent: "q")
+    appMenuItem.submenu = appMenu
+    mainMenu.addItem(appMenuItem)
+
+    mainMenu.addItem(Self.makeFileMenu())
+    mainMenu.addItem(Self.makeEditMenu())
+    mainMenu.addItem(Self.makeViewMenu())
+    mainMenu.addItem(Self.makeWindowMenu())
+    mainMenu.addItem(Self.makeHelpMenu())
+    NSApp.mainMenu = mainMenu
+  }
+
+  @MainActor
+  private static func appMenuName() -> String {
+    let bundle = Bundle.main
+    let name =
+      bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+      ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
+      ?? ProcessInfo.processInfo.processName
+    return name.isEmpty ? "zmux" : name
+  }
+
+  @MainActor
+  private static func makeFileMenu() -> NSMenuItem {
+    let menuItem = NSMenuItem()
+    let menu = NSMenu(title: "File")
+    menu.addItem(
+      withTitle: "Close Window",
+      action: #selector(NSWindow.performClose(_:)),
+      keyEquivalent: "w")
+    menuItem.submenu = menu
+    return menuItem
+  }
+
+  @MainActor
+  private static func makeEditMenu() -> NSMenuItem {
+    let menuItem = NSMenuItem()
+    let menu = NSMenu(title: "Edit")
+    menu.addItem(
+      withTitle: "Undo",
+      action: Selector(("undo:")),
+      keyEquivalent: "z")
+    menu.addItem(
+      withTitle: "Redo",
+      action: Selector(("redo:")),
+      keyEquivalent: "Z")
+    menu.addItem(NSMenuItem.separator())
+    menu.addItem(
+      withTitle: "Cut",
+      action: #selector(NSText.cut(_:)),
+      keyEquivalent: "x")
+    menu.addItem(
+      withTitle: "Copy",
+      action: #selector(NSText.copy(_:)),
+      keyEquivalent: "c")
+    menu.addItem(
+      withTitle: "Paste",
+      action: #selector(NSText.paste(_:)),
+      keyEquivalent: "v")
+    menu.addItem(
+      withTitle: "Select All",
+      action: #selector(NSText.selectAll(_:)),
+      keyEquivalent: "a")
+    menuItem.submenu = menu
+    return menuItem
+  }
+
+  @MainActor
+  private static func makeViewMenu() -> NSMenuItem {
+    let menuItem = NSMenuItem()
+    menuItem.submenu = NSMenu(title: "View")
+    return menuItem
+  }
+
+  @MainActor
+  private static func makeWindowMenu() -> NSMenuItem {
+    let menuItem = NSMenuItem()
+    let menu = NSMenu(title: "Window")
+    menu.addItem(
+      withTitle: "Minimize",
+      action: #selector(NSWindow.performMiniaturize(_:)),
+      keyEquivalent: "m")
+    menu.addItem(
+      withTitle: "Zoom",
+      action: #selector(NSWindow.performZoom(_:)),
+      keyEquivalent: "")
+    menu.addItem(NSMenuItem.separator())
+    menu.addItem(
+      withTitle: "Bring All to Front",
+      action: #selector(NSApplication.arrangeInFront(_:)),
+      keyEquivalent: "")
+    NSApp.windowsMenu = menu
+    menuItem.submenu = menu
+    return menuItem
+  }
+
+  @MainActor
+  private static func makeHelpMenu() -> NSMenuItem {
+    let menuItem = NSMenuItem()
+    menuItem.submenu = NSMenu(title: "Help")
+    return menuItem
+  }
+
+  @objc @MainActor private func openSettingsFromMainMenu(_ sender: Any?) {
+    guard let root = window?.contentView as? zmuxRootView else {
+      return
+    }
+    NSApp.activate(ignoringOtherApps: true)
+    /**
+     CDXC:MacMenuBar 2026-05-02-06:36
+     The Settings menu item must open the existing React settings modal rather
+     than maintaining a separate AppKit settings surface. Dispatch the typed
+     native hotkey event so menu selection, configured shortcuts, and sidebar
+     actions share one implementation path.
+     */
+    root.postHostEvent(.nativeHotkey(actionId: "openSettings"))
+  }
+
+  @MainActor
+  private func startSparkleBackgroundUpdateCheck() {
+    /**
+     CDXC:AutoUpdate 2026-05-02-06:51
+     Automatic update checks should honor Sparkle's persisted user preference.
+     When enabled, ask Sparkle to check in the background at launch instead of
+     implementing a parallel polling path in zmux.
+     */
+    if updaterController.updater.automaticallyChecksForUpdates {
+      updaterController.updater.checkForUpdatesInBackground()
+    }
+  }
+
+  @IBAction func checkForUpdates(_ sender: Any?) {
+    updaterController.updater.checkForUpdates()
+  }
 
   @IBAction nonisolated func closeAllWindows(_ sender: Any?) {}
 
@@ -520,6 +722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       zedOverlayController.configure(pendingZedOverlayConfiguration)
       updateAttachToIdeTitlebarButton(
         enabled: pendingZedOverlayConfiguration.enabled,
+        hideTitlebarButton: pendingZedOverlayConfiguration.hideTitlebarButton ?? false,
         targetApp: pendingZedOverlayConfiguration.targetApp
       )
       self.pendingZedOverlayConfiguration = nil
@@ -527,6 +730,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       zedOverlayController.configure(initialZedOverlayConfiguration)
       updateAttachToIdeTitlebarButton(
         enabled: initialZedOverlayConfiguration.enabled,
+        hideTitlebarButton: initialZedOverlayConfiguration.hideTitlebarButton ?? false,
         targetApp: initialZedOverlayConfiguration.targetApp
       )
     }
@@ -574,6 +778,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       target: self,
       action: #selector(handleAttachToIdeTitlebarButton)
     )
+    button.isHidden = stored.hideTitlebarButton ?? false
     button.bezelStyle = .rounded
     button.controlSize = .small
     button.font = .systemFont(ofSize: 12, weight: .semibold)
@@ -602,6 +807,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     let nextEnabled = !(stored.enabled ?? false)
     let command = ConfigureZedOverlay(
       enabled: nextEnabled,
+      hideTitlebarButton: stored.hideTitlebarButton,
+      reason: nil,
       targetApp: targetApp,
       workspacePath: workspacePath
     )
@@ -615,12 +822,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
 
   @MainActor private func updateAttachToIdeTitlebarButton(
     enabled: Bool,
+    hideTitlebarButton: Bool,
     targetApp: ZedOverlayTargetApp
   ) {
     attachToIdeTitlebarButton?.title = attachToIdeTitlebarButtonTitle(
       enabled: enabled,
       targetApp: targetApp
     )
+    /**
+     CDXC:IDEAttachment 2026-05-01-13:52
+     Settings can hide the native title-bar Attach/Detach IDE button without
+     changing whether zmux is attached. Keep the button object installed so the
+     setting can show it again immediately without rebuilding title-bar chrome.
+     */
+    attachToIdeTitlebarButton?.isHidden = hideTitlebarButton
   }
 
   private func attachToIdeTitlebarButtonTitle(
@@ -733,7 +948,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       if let workspacePath = command.workspacePath {
         self.workspacePath = workspacePath
       }
-      updateAttachToIdeTitlebarButton(enabled: command.enabled, targetApp: command.targetApp)
+      if command.enabled, hasUserDetachedZedOverlay, command.reason == "workspace-focus" {
+        /**
+         CDXC:IDEAttachment 2026-05-01-13:32
+         Workspace selection must not undo an explicit IDE detach. The sidebar
+         posts configureZedOverlay during focus changes to sync the selected
+         workspace path; if its in-memory settings are stale, reject only that
+         workspace-focus reattach while preserving explicit Settings/titlebar
+         attach commands.
+         */
+        BrowserOverlayRestoreReproLog.append(
+          "appDelegate.configureZedOverlay.skippedWorkspaceReattach",
+          [
+            "reason": command.reason as Any,
+            "targetApp": command.targetApp.rawValue,
+            "workspacePath": command.workspacePath as Any,
+          ])
+        return
+      }
+      if command.enabled {
+        hasUserDetachedZedOverlay = false
+      } else {
+        hasUserDetachedZedOverlay = true
+      }
+      updateAttachToIdeTitlebarButton(
+        enabled: command.enabled,
+        hideTitlebarButton: command.hideTitlebarButton ?? false,
+        targetApp: command.targetApp
+      )
       nativeSettingsStore.persistZedOverlay(command)
       guard let zedOverlayController else {
         /**
@@ -747,6 +989,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       }
       zedOverlayController.configure(command)
     case .openZedWorkspace(let command):
+      guard !hasUserDetachedZedOverlay else {
+        BrowserOverlayRestoreReproLog.append(
+          "appDelegate.openZedWorkspace.skippedDetached",
+          [
+            "targetApp": command.targetApp.rawValue,
+            "workspacePath": command.workspacePath,
+          ])
+        return
+      }
       self.workspacePath = command.workspacePath
       zedOverlayController?.openWorkspace(
         targetApp: command.targetApp, workspacePath: command.workspacePath)
@@ -764,6 +1015,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   @MainActor
   private func startT3CodeRuntime(_ command: StartT3CodeRuntime) {
     if let process = t3CodeRuntimeProcess, process.isRunning {
+      /**
+       CDXC:T3Code 2026-05-02-00:48
+       A retained Process handle does not prove the T3 server is usable. A Bun
+       runtime can keep running at high CPU while `/api/auth/session` and bearer
+       bootstrap requests time out, leaving the pane as a white WKWebView. Reuse
+       the handle only after the same health probe used for listener adoption.
+       */
+      guard NativeT3RuntimeLauncher.hasResponsiveManagedRuntimeListener() else {
+        NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.runningUnhealthy", [
+          "cwd": command.cwd,
+          "pid": process.processIdentifier,
+        ])
+        process.terminate()
+        t3CodeRuntimeProcess = nil
+        NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "nativeHost")
+        return startT3CodeRuntime(command)
+      }
       NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.reused", [
         "cwd": command.cwd,
         "pid": process.processIdentifier,
@@ -777,7 +1045,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      provider. Adopt that listener instead of killing it as stale, because T3
      pane restore may already be creating a thread route against the provider.
      */
-    if NativeT3RuntimeLauncher.hasManagedRuntimeListener() {
+    if NativeT3RuntimeLauncher.hasResponsiveManagedRuntimeListener() {
       NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.adoptedExisting", [
         "cwd": command.cwd,
         "port": NativeT3RuntimeLauncher.port,
@@ -836,6 +1104,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       t3CodeRuntimeProcess = nil
     }
     NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "\(logPrefix).stop")
+  }
+
+  /**
+   CDXC:T3Code 2026-05-02-02:31
+   Closing zmux should not kill T3 Code immediately because quick app restarts
+   should reuse the warm runtime. Keep a native-app heartbeat while zmux is
+   open; the managed T3 wrapper shuts itself down after five minutes without a
+   fresh heartbeat.
+   */
+  @MainActor
+  private func startT3RuntimeAppHeartbeat() {
+    NativeT3RuntimeLauncher.touchAppHeartbeat(reason: "applicationDidFinishLaunching")
+    t3RuntimeHeartbeatTimer?.invalidate()
+    t3RuntimeHeartbeatTimer = Timer.scheduledTimer(
+      withTimeInterval: NativeT3RuntimeLauncher.appHeartbeatInterval,
+      repeats: true
+    ) { _ in
+      NativeT3RuntimeLauncher.touchAppHeartbeat(reason: "timer")
+    }
   }
 
   @MainActor private func activateAppWindow() {
@@ -982,6 +1269,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
      */
     let command = ConfigureZedOverlay(
       enabled: false,
+      hideTitlebarButton: nativeSettingsStore.readZedOverlay().hideTitlebarButton,
+      reason: nil,
       targetApp: targetApp,
       workspacePath: workspacePath
     )
@@ -1006,6 +1295,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       ?? .zedPreview
     return ConfigureZedOverlay(
       enabled: enabledValue,
+      hideTitlebarButton: stored.hideTitlebarButton,
+      reason: nil,
       targetApp: targetApp,
       workspacePath: workspacePath
     )
@@ -1311,6 +1602,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
 
 private struct NativeZedOverlaySettings {
   let enabled: Bool?
+  let hideTitlebarButton: Bool?
   let targetApp: ZedOverlayTargetApp?
 }
 
@@ -1365,10 +1657,11 @@ private final class NativeSettingsStore {
    */
   func readZedOverlay() -> NativeZedOverlaySettings {
     guard let settings = readSettingsDictionary() else {
-      return NativeZedOverlaySettings(enabled: nil, targetApp: nil)
+      return NativeZedOverlaySettings(enabled: nil, hideTitlebarButton: nil, targetApp: nil)
     }
     return NativeZedOverlaySettings(
       enabled: settings["zedOverlayEnabled"] as? Bool,
+      hideTitlebarButton: settings["zedOverlayHideTitlebarButton"] as? Bool,
       targetApp: (settings["zedOverlayTargetApp"] as? String).flatMap(
         ZedOverlayTargetApp.init(rawValue:))
     )
@@ -1379,6 +1672,9 @@ private final class NativeSettingsStore {
       let url = settingsURL()
       var settings = readSettingsDictionary() ?? [:]
       settings["zedOverlayEnabled"] = command.enabled
+      if let hideTitlebarButton = command.hideTitlebarButton {
+        settings["zedOverlayHideTitlebarButton"] = hideTitlebarButton
+      }
       settings["zedOverlayTargetApp"] = command.targetApp.rawValue
       let data = try JSONSerialization.data(
         withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
@@ -1648,6 +1944,9 @@ final class zmuxRootView: NSView {
     if let targetApp = storedZedOverlay.targetApp {
       bootstrap["zedOverlayTargetApp"] = targetApp.rawValue
     }
+    if let hideTitlebarButton = storedZedOverlay.hideTitlebarButton {
+      bootstrap["zedOverlayHideTitlebarButton"] = hideTitlebarButton
+    }
     if let zedOverlayEnabled = ProcessInfo.processInfo.environment["zmux_ZED_OVERLAY_ENABLED"] {
       bootstrap["zedOverlayEnabled"] =
         zedOverlayEnabled == "1" || zedOverlayEnabled.lowercased() == "true"
@@ -1891,6 +2190,23 @@ final class zmuxRootView: NSView {
    */
   private func startT3CodeRuntime(_ command: StartT3CodeRuntime) {
     if let process = t3CodeRuntimeProcess, process.isRunning {
+      /**
+       CDXC:T3Code 2026-05-02-00:48
+       Native sidebar T3 cards can restore while a previously retained Bun
+       server is wedged but still running. Verify auth/session responsiveness
+       before reusing the process so the pane does not stay on a white unloaded
+       WKWebView.
+       */
+      guard NativeT3RuntimeLauncher.hasResponsiveManagedRuntimeListener() else {
+        NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.runningUnhealthy", [
+          "cwd": command.cwd,
+          "pid": process.processIdentifier,
+        ])
+        process.terminate()
+        t3CodeRuntimeProcess = nil
+        NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "nativeSidebar")
+        return startT3CodeRuntime(command)
+      }
       NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.reused", [
         "cwd": command.cwd,
         "pid": process.processIdentifier,
@@ -1904,7 +2220,7 @@ final class zmuxRootView: NSView {
      provider still owns port 3774. Reuse that provider rather than killing it
      after a pane has already created a valid thread route.
      */
-    if NativeT3RuntimeLauncher.hasManagedRuntimeListener() {
+    if NativeT3RuntimeLauncher.hasResponsiveManagedRuntimeListener() {
       NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.adoptedExisting", [
         "cwd": command.cwd,
         "port": NativeT3RuntimeLauncher.port,

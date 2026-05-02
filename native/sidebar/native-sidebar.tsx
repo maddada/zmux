@@ -91,6 +91,7 @@ import {
   setSessionFavoriteInSimpleWorkspace,
   setSessionSleepingInSimpleWorkspace,
   setSessionTitleInSimpleWorkspace,
+  setT3SessionMetadataInSimpleWorkspace,
   setTerminalSessionAgentNameInSimpleWorkspace,
   setViewModeInSimpleWorkspace,
   setVisibleCountInSimpleWorkspace,
@@ -166,7 +167,9 @@ type NativeHostCommand =
     }
   | {
       cwd?: string;
+      projectId?: string;
       sessionId: string;
+      threadId?: string;
       title: string;
       type: "createWebPane";
       url: string;
@@ -240,6 +243,8 @@ type NativeHostCommand =
   | { side: "left" | "right"; type: "setSidebarSide" }
   | {
       enabled: boolean;
+      hideTitlebarButton: boolean;
+      reason?: "settings-save" | "startup" | "workspace-focus";
       targetApp: ZedOverlayTargetApp;
       type: "configureZedOverlay";
       workspacePath: string;
@@ -300,6 +305,14 @@ type NativeHostEvent =
   | { sessionId: string; type: "terminalFocused" }
   | { sessionId: string; type: "terminalBell" }
   | { message: string; sessionId: string; type: "terminalError" }
+  | {
+      projectId: string;
+      serverOrigin: string;
+      sessionId: string;
+      threadId: string;
+      type: "t3ThreadReady";
+      workspaceRoot: string;
+    }
   | { exitCode: number; requestId: string; stderr: string; stdout: string; type: "processResult" }
   | { actionId: zmuxHotkeyActionId; type: "nativeHotkey" }
   | { protocolVersion: 1; type: "hostReady" };
@@ -318,6 +331,7 @@ type NativeBootstrap = {
   zmuxHomeDir?: string;
   workspaceName?: string;
   zedOverlayEnabled?: boolean;
+  zedOverlayHideTitlebarButton?: boolean;
   zedOverlayTargetApp?: ZedOverlayTargetApp;
 };
 
@@ -410,6 +424,9 @@ const CHROME_CANARY_PROCESS_NAME = "Google Chrome Canary";
 const CHROME_CANARY_RUNNING_POLL_MS = 2_000;
 const CHROME_CANARY_BROWSER_GROUP_ID = "browser-chrome-canary";
 const CHROME_CANARY_BROWSER_SESSION_ID = "browser-chrome-canary-window";
+const NATIVE_T3_REMOTE_ACCESS_ORIGIN = "http://127.0.0.1:3774";
+const NATIVE_T3_REMOTE_ACCESS_AUTH_ATTEMPTS = 30;
+const NATIVE_T3_REMOTE_ACCESS_AUTH_RETRY_MS = 500;
 const FIRST_PROMPT_AUTO_RENAME_POLL_MS = 2_000;
 const SYNC_OPEN_PROJECT_WITH_ZED_DEBOUNCE_MS = 2_000;
 /**
@@ -1102,6 +1119,9 @@ function readStoredSettings(): zmuxSettings {
       ...(bootstrap?.zedOverlayTargetApp === undefined
         ? {}
         : { zedOverlayTargetApp: bootstrap.zedOverlayTargetApp }),
+      ...(bootstrap?.zedOverlayHideTitlebarButton === undefined
+        ? {}
+        : { zedOverlayHideTitlebarButton: bootstrap.zedOverlayHideTitlebarButton }),
     });
   } catch {
     return DEFAULT_zmux_SETTINGS;
@@ -2009,15 +2029,22 @@ storedCommandOrder = readStoredCommandOrder();
 deletedDefaultCommandIds = readDeletedDefaultCommandIds();
 refreshCommands();
 
-function postZedOverlaySettings(): void {
+function postZedOverlaySettings(reason: "settings-save" | "startup" | "workspace-focus" = "settings-save"): void {
   /**
    * CDXC:IDEAttachment 2026-04-26-22:38
    * Attach commands always use the IDE selected in settings. VS Code targets
    * are posted through the existing native overlay channel so the native host
    * can resolve their process names and `code`/`code-insiders` commands.
+   *
+   * CDXC:IDEAttachment 2026-05-01-13:32
+   * Workspace selection is only a settings sync, not a user request to attach.
+   * Include the reason so native detach can reject stale workspace-focus
+   * `enabled: true` messages while still allowing explicit Settings attach.
    */
   postNative({
     enabled: settings.zedOverlayEnabled,
+    hideTitlebarButton: settings.zedOverlayHideTitlebarButton,
+    reason,
     targetApp: settings.zedOverlayTargetApp,
     type: "configureZedOverlay",
     workspacePath: activeProject().path,
@@ -3376,7 +3403,9 @@ function createNativeT3Session(groupId?: string): T3SessionRecord | undefined {
   postNative({ cwd: project.path, type: "startT3CodeRuntime" });
   postNative({
     cwd: project.path,
+    projectId: session.t3.projectId,
     sessionId: nativeSessionId,
+    threadId: session.t3.threadId,
     title: "T3 Code",
     type: "createWebPane",
     url: "http://127.0.0.1:3774",
@@ -3406,7 +3435,9 @@ function restoreNativeT3Session(
   postNative({ cwd: workspaceRoot, type: "startT3CodeRuntime" });
   postNative({
     cwd: workspaceRoot,
+    projectId: session.t3.projectId,
     sessionId: nativeSessionId,
+    threadId: session.t3.threadId,
     title: session.title || "T3 Code",
     type: "createWebPane",
     url: serverOrigin,
@@ -5202,6 +5233,276 @@ function copyResumeCommand(sessionId: string): void {
   void navigator.clipboard?.writeText(text).catch(() => undefined);
 }
 
+function resolveNativeBrowserAccessT3Session(preferredSessionId?: string): T3SessionRecord | undefined {
+  const candidateSessionIds = new Set<string>();
+  if (preferredSessionId) {
+    candidateSessionIds.add(preferredSessionId);
+  }
+
+  for (const group of activeProject().workspace.groups) {
+    if (group.snapshot.focusedSessionId) {
+      candidateSessionIds.add(group.snapshot.focusedSessionId);
+    }
+  }
+
+  for (const sessionId of candidateSessionIds) {
+    const sessionRecord = findSessionRecord(sessionId);
+    if (sessionRecord?.kind === "t3") {
+      return sessionRecord;
+    }
+  }
+
+  for (const group of activeProject().workspace.groups) {
+    const sessionRecord = group.snapshot.sessions.find(
+      (candidate): candidate is T3SessionRecord => candidate.kind === "t3",
+    );
+    if (sessionRecord) {
+      return sessionRecord;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveOrCreateNativeBrowserAccessT3Session(
+  preferredSessionId?: string,
+): T3SessionRecord | undefined {
+  const existingSession = resolveNativeBrowserAccessT3Session(preferredSessionId);
+  if (existingSession) {
+    return existingSession;
+  }
+
+  return createNativeT3Session();
+}
+
+async function requestNativeT3SessionBrowserAccess(preferredSessionId?: string): Promise<void> {
+  /**
+   * CDXC:T3RemoteAccess 2026-05-02-01:18
+   * Native zmux cannot delegate Remote Access to the extension controller. It
+   * must reuse the managed desktop T3 runtime, issue a one-time pairing link,
+   * and send the QR payload through the shared sidebar modal contract.
+   */
+  const sessionRecord = resolveOrCreateNativeBrowserAccessT3Session(preferredSessionId);
+  if (!sessionRecord) {
+    showNativeMessage("error", "Could not start T3 Code for remote access.");
+    return;
+  }
+
+  postNative({ cwd: sessionRecord.t3.workspaceRoot, type: "startT3CodeRuntime" });
+
+  try {
+    const ownerBearerToken = await waitForNativeT3OwnerBearerToken();
+    const credential = await issueNativeT3PairingCredential(ownerBearerToken);
+    const localPairingUrl = buildT3PairingUrl(NATIVE_T3_REMOTE_ACCESS_ORIGIN, credential);
+    const accessLink = await resolveNativeT3BrowserAccessLink(localPairingUrl);
+    sidebarBus.post({
+      endpointUrl: accessLink.endpointUrl,
+      localUrl: accessLink.localUrl,
+      mode: accessLink.mode,
+      note: accessLink.note,
+      sessionId: sessionRecord.sessionId,
+      sessionTitle: sessionRecord.title,
+      tailscaleEnabled: accessLink.tailscaleEnabled,
+      type: "showT3BrowserAccess",
+    });
+  } catch (error) {
+    appendAgentDetectionDebugLog("nativeSidebar.t3BrowserAccess.failed", {
+      error: error instanceof Error ? error.message : String(error),
+      sessionId: sessionRecord.sessionId,
+    });
+    showNativeMessage(
+      "error",
+      error instanceof Error ? error.message : "Could not create the T3 remote access link.",
+    );
+  }
+}
+
+async function waitForNativeT3OwnerBearerToken(): Promise<string> {
+  for (let attempt = 0; attempt < NATIVE_T3_REMOTE_ACCESS_AUTH_ATTEMPTS; attempt += 1) {
+    const token = await readNativeT3OwnerBearerToken();
+    if (token) {
+      return token;
+    }
+    await delay(NATIVE_T3_REMOTE_ACCESS_AUTH_RETRY_MS);
+  }
+
+  throw new Error("T3 Code is still starting. Try Remote Access again in a moment.");
+}
+
+async function readNativeT3OwnerBearerToken(): Promise<string | undefined> {
+  const zmuxHomeDir = window.__zmux_NATIVE_HOST__?.zmuxHomeDir;
+  if (!zmuxHomeDir) {
+    return undefined;
+  }
+
+  const authStatePath = `${zmuxHomeDir.replace(/\/+$/, "")}/t3-runtime/auth-state.json`;
+  const result = await runNativeProcess("/bin/cat", [authStatePath]);
+  if (result.exitCode !== 0) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout) as { ownerBearerToken?: unknown; provider?: unknown };
+    return parsed.provider === "t3code" && typeof parsed.ownerBearerToken === "string"
+      ? parsed.ownerBearerToken.trim() || undefined
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function issueNativeT3PairingCredential(ownerBearerToken: string): Promise<string> {
+  const requestBody = JSON.stringify({ label: "zmux Remote Access" });
+  const result = await runNativeProcess(
+    "/bin/sh",
+    [
+      "-lc",
+      [
+        "/usr/bin/curl",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "5",
+        "-X",
+        "POST",
+        `${NATIVE_T3_REMOTE_ACCESS_ORIGIN}/api/auth/pairing-token`,
+        "-H",
+        '"authorization: Bearer $T3_OWNER_BEARER"',
+        "-H",
+        '"content-type: application/json"',
+        "--data",
+        '"$T3_PAIRING_BODY"',
+      ].join(" "),
+    ],
+    {
+      env: {
+        T3_OWNER_BEARER: ownerBearerToken,
+        T3_PAIRING_BODY: requestBody,
+      },
+    },
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(`Could not create the T3 pairing link: ${result.stderr || result.stdout}`);
+  }
+
+  const parsed = JSON.parse(result.stdout) as { credential?: unknown };
+  if (typeof parsed.credential !== "string" || !parsed.credential.trim()) {
+    throw new Error("T3 pairing link response did not include a credential.");
+  }
+  return parsed.credential.trim();
+}
+
+async function resolveNativeT3BrowserAccessLink(localUrl: string): Promise<{
+  endpointUrl: string;
+  localUrl: string;
+  mode: "external" | "local-network" | "local-only" | "tailscale";
+  note: string;
+  tailscaleEnabled: boolean;
+}> {
+  const parsedLocalUrl = new URL(localUrl);
+  const [tailscaleHost, localNetworkHost] = await Promise.all([
+    detectNativeTailscaleIpv4(),
+    detectNativeLocalNetworkIpv4(),
+  ]);
+  const localNetworkUrl = localNetworkHost
+    ? replaceT3AccessUrlHost(parsedLocalUrl, localNetworkHost)
+    : undefined;
+
+  if (tailscaleHost) {
+    return {
+      endpointUrl: replaceT3AccessUrlHost(parsedLocalUrl, tailscaleHost),
+      localUrl: localNetworkUrl ?? localUrl,
+      mode: "tailscale",
+      note: localNetworkUrl
+        ? "QR code and Copy link use your machine's Tailscale address. Open link uses your machine's local network address."
+        : "QR code and Copy link use your machine's Tailscale address. No local network address was detected, so Open link falls back to this machine only.",
+      tailscaleEnabled: true,
+    };
+  }
+
+  if (localNetworkHost) {
+    const resolvedLocalNetworkUrl = replaceT3AccessUrlHost(parsedLocalUrl, localNetworkHost);
+    return {
+      endpointUrl: resolvedLocalNetworkUrl,
+      localUrl: resolvedLocalNetworkUrl,
+      mode: "local-network",
+      note: "Tailscale is not connected, so QR code, Copy link, and Open link all use your machine's local network address.",
+      tailscaleEnabled: false,
+    };
+  }
+
+  return {
+    endpointUrl: localUrl,
+    localUrl,
+    mode: "local-only",
+    note: "No Tailscale or local network address was detected, so QR code, Copy link, and Open link only work on this machine for now.",
+    tailscaleEnabled: false,
+  };
+}
+
+async function detectNativeTailscaleIpv4(): Promise<string | undefined> {
+  const result = await runNativeProcess("/usr/bin/env", ["tailscale", "ip", "-4"]);
+  if (result.exitCode !== 0) {
+    return undefined;
+  }
+  return result.stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find(isIpv4Host);
+}
+
+async function detectNativeLocalNetworkIpv4(): Promise<string | undefined> {
+  const result = await runNativeProcess("/bin/sh", [
+    "-lc",
+    [
+      'iface="$(/sbin/route get default 2>/dev/null | /usr/bin/awk \'/interface:/{print $2; exit}\')"',
+      'if [ -n "$iface" ]; then /usr/sbin/ipconfig getifaddr "$iface" 2>/dev/null && exit 0; fi',
+      "for fallback in en0 en1; do /usr/sbin/ipconfig getifaddr \"$fallback\" 2>/dev/null && exit 0; done",
+      "exit 1",
+    ].join("; "),
+  ]);
+  if (result.exitCode !== 0) {
+    return undefined;
+  }
+  return result.stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find(isIpv4Host);
+}
+
+function buildT3PairingUrl(origin: string, credential: string): string {
+  const url = new URL("/pair", origin);
+  url.hash = `token=${encodeURIComponent(credential)}`;
+  return url.toString();
+}
+
+function replaceT3AccessUrlHost(url: URL, host: string): string {
+  const nextUrl = new URL(url.toString());
+  nextUrl.hostname = host;
+  return nextUrl.toString();
+}
+
+function isIpv4Host(value: string): boolean {
+  const parts = value.split(".");
+  if (parts.length !== 4) {
+    return false;
+  }
+  return parts.every((part) => {
+    if (!/^\d{1,3}$/u.test(part)) {
+      return false;
+    }
+    const value = Number(part);
+    return Number.isInteger(value) && value >= 0 && value <= 255;
+  });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 function refreshDaemonSessionsState(): void {
   const now = new Date().toISOString();
   const sessions: SidebarDaemonSessionItem[] = [];
@@ -5364,7 +5665,7 @@ function removeProject(projectId: string): void {
     activeProjectId =
       nextProjects[Math.min(projectIndex, nextProjects.length - 1)]?.projectId ??
       nextProjects[0]!.projectId;
-    postZedOverlaySettings();
+    postZedOverlaySettings("workspace-focus");
     scheduleSyncOpenProjectWithZed("removeProject");
     void refreshGitState();
   }
@@ -5440,7 +5741,7 @@ function focusProject(projectId: string): void {
   const didSwitchProject = activeProjectId !== projectId;
   activeProjectId = projectId;
   writeStoredProjects("focusProject");
-  postZedOverlaySettings();
+  postZedOverlaySettings("workspace-focus");
   if (didSwitchProject) {
     scheduleSyncOpenProjectWithZed("focusProject");
   }
@@ -5850,10 +6151,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       copyResumeCommand(message.sessionId);
       return;
     case "requestT3SessionBrowserAccess":
-      showNativeMessage(
-        "info",
-        "This native workspace does not have a T3 browser session to expose.",
-      );
+      void requestNativeT3SessionBrowserAccess(message.sessionId);
       return;
     case "closeGroup": {
       const project = activeProject();
@@ -6198,6 +6496,28 @@ window.addEventListener("zmux-native-host-event", (event) => {
     return;
   }
   const sidebarSessionId = sidebarSessionIdForNativeSession(hostEvent.sessionId);
+  if (hostEvent.type === "t3ThreadReady") {
+    /**
+     * CDXC:T3Code 2026-05-01-13:31
+     * Native T3 panes must persist the resolved project/thread metadata that
+     * Swift ensured from the T3 orchestration API. This mirrors the reference
+     * controller's `ensureThreadSession` path so restoring a T3 card reopens
+     * its bound thread and only creates a replacement thread when that bound
+     * thread no longer exists.
+     */
+    updateActiveProjectWorkspace(
+      (workspace) =>
+        setT3SessionMetadataInSimpleWorkspace(workspace, sidebarSessionId, {
+          boundThreadId: hostEvent.threadId,
+          projectId: hostEvent.projectId,
+          serverOrigin: hostEvent.serverOrigin,
+          threadId: hostEvent.threadId,
+          workspaceRoot: hostEvent.workspaceRoot,
+        }).snapshot,
+    );
+    publish();
+    return;
+  }
   const terminalState = terminalStateById.get(sidebarSessionId);
   if (!terminalState) {
     appendSessionTitleDebugLog("nativeSidebar.nativeEventIgnored", {
@@ -6982,7 +7302,7 @@ if (rootElement && !isStorybookPreview) {
   createRoot(rootElement).render(<NativeSidebarRoot />);
   queueMicrotask(() => {
     postNative({ side: sidebarSide, type: "setSidebarSide" });
-    postZedOverlaySettings();
+    postZedOverlaySettings("startup");
     startChromeCanaryRunningMonitor();
     startFirstPromptAutoRenameMonitor();
     void refreshGitState();

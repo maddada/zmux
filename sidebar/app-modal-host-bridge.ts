@@ -2,7 +2,10 @@ import type { AgentConfigDraft } from "./agent-config-modal";
 import { logAppModalError } from "./app-modal-error-log";
 import type { CommandConfigDraft } from "./command-config-modal";
 import type { SidebarActionType } from "../shared/sidebar-commands";
+import type { ExtensionToSidebarMessage } from "../shared/session-grid-contract";
 import type { WorkspaceProjectConfigDraft } from "../shared/workspace-dock-icons";
+
+type T3BrowserAccessMessage = Extract<ExtensionToSidebarMessage, { type: "showT3BrowserAccess" }>;
 
 export type AppModalKind =
   | "agentConfig"
@@ -16,6 +19,7 @@ export type AppModalKind =
   | "renameSession"
   | "scratchPad"
   | "settings"
+  | "t3BrowserAccess"
   | "t3ThreadId"
   | "workspaceConfig";
 
@@ -28,12 +32,14 @@ export type OpenAppModalMessage =
         | "firstUserMessage"
         | "findPreviousSession"
         | "renameSession"
+        | "t3BrowserAccess"
         | "t3ThreadId"
         | "workspaceConfig"
       >;
       type: "open";
     }
   | { initialQuery?: string; modal: "findPreviousSession"; type: "open" }
+  | { access: T3BrowserAccessMessage; modal: "t3BrowserAccess"; type: "open" }
   | { modal: "t3ThreadId"; sessionId: string; threadId: string; type: "open" }
   | { agentDraft: AgentConfigDraft; modal: "agentConfig"; type: "open" }
   | {

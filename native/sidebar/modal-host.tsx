@@ -11,12 +11,14 @@ import { PreviousSessionsModal } from "../../sidebar/previous-sessions-modal";
 import { ScratchPadModal } from "../../sidebar/scratch-pad-modal";
 import { SettingsModal } from "../../sidebar/settings-modal";
 import { SessionRenameModal } from "../../sidebar/session-rename-modal";
+import { T3BrowserAccessModal } from "../../sidebar/t3-browser-access-modal";
 import { T3ThreadIdModal } from "../../sidebar/t3-thread-id-modal";
 import {
   WorkspaceConfigModal,
   type WorkspaceConfigModalProps,
 } from "../../sidebar/workspace-config-modal";
 import type { SidebarActionType } from "../../shared/sidebar-commands";
+import type { ExtensionToSidebarMessage } from "../../shared/session-grid-contract";
 import type { WorkspaceProjectConfigDraft } from "../../shared/workspace-dock-icons";
 import {
   installAppModalGlobalErrorLogging,
@@ -39,12 +41,16 @@ type AppModalKind =
   | "renameSession"
   | "scratchPad"
   | "settings"
+  | "t3BrowserAccess"
   | "t3ThreadId"
   | "workspaceConfig";
+
+type T3BrowserAccessMessage = Extract<ExtensionToSidebarMessage, { type: "showT3BrowserAccess" }>;
 
 type AppModalHostMessage =
   | {
       agentDraft?: AgentConfigDraft;
+      access?: T3BrowserAccessMessage;
       commandDraft?: CommandConfigDraft;
       initialTitle?: string;
       initialQuery?: string;
@@ -132,8 +138,15 @@ function closeModal() {
 }
 
 function AppModalHost() {
-  const { activeModal, config, findPreviousSession, firstUserMessage, renameSession, t3ThreadId } =
-    useModalStateFromNative();
+  const {
+    activeModal,
+    config,
+    findPreviousSession,
+    firstUserMessage,
+    renameSession,
+    t3BrowserAccess,
+    t3ThreadId,
+  } = useModalStateFromNative();
   const settings = useSidebarStore((state) => state.hud.settings);
 
   return (
@@ -240,6 +253,17 @@ function AppModalHost() {
           closeModal();
         }}
       />
+      <T3BrowserAccessModal
+        access={t3BrowserAccess}
+        isOpen={activeModal === "t3BrowserAccess" && t3BrowserAccess !== undefined}
+        onClose={closeModal}
+        onOpenLink={(url) => {
+          vscode.postMessage({
+            type: "openT3SessionBrowserAccessLink",
+            url,
+          });
+        }}
+      />
       <SessionRenameModal
         initialTitle={renameSession?.initialTitle ?? ""}
         isOpen={activeModal === "renameSession" && renameSession !== undefined}
@@ -325,6 +349,7 @@ function useModalStateFromNative() {
   const [findPreviousSession, setFindPreviousSession] = useState<FindPreviousSessionModalState>();
   const [firstUserMessage, setFirstUserMessage] = useState<FirstUserMessageModalState>();
   const [renameSession, setRenameSession] = useState<RenameSessionModalState>();
+  const [t3BrowserAccess, setT3BrowserAccess] = useState<T3BrowserAccessMessage>();
   const [t3ThreadId, setT3ThreadId] = useState<T3ThreadIdModalState>();
 
   useEffect(() => {
@@ -347,6 +372,7 @@ function useModalStateFromNative() {
             setConfig({});
             setFindPreviousSession(undefined);
             setFirstUserMessage(undefined);
+            setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
           } else if (message.modal === "firstUserMessage") {
             if (typeof message.message !== "string" || !message.message.trim()) {
@@ -359,6 +385,7 @@ function useModalStateFromNative() {
             setConfig({});
             setFindPreviousSession(undefined);
             setRenameSession(undefined);
+            setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
           } else if (message.modal === "findPreviousSession") {
             setFindPreviousSession({
@@ -366,6 +393,23 @@ function useModalStateFromNative() {
                 typeof message.initialQuery === "string" ? message.initialQuery : undefined,
             });
             setConfig({});
+            setFirstUserMessage(undefined);
+            setRenameSession(undefined);
+            setT3BrowserAccess(undefined);
+            setT3ThreadId(undefined);
+          } else if (message.modal === "t3BrowserAccess") {
+            if (!message.access) {
+              throw new Error("T3 browser access modal request is missing access details.");
+            }
+            /**
+             * CDXC:T3RemoteAccess 2026-05-02-00:57
+             * The Remote Access QR dialog must be owned by the full-window app
+             * modal host so the QR code centers over zmux instead of rendering
+             * inside the narrow sidebar webview.
+             */
+            setT3BrowserAccess(message.access);
+            setConfig({});
+            setFindPreviousSession(undefined);
             setFirstUserMessage(undefined);
             setRenameSession(undefined);
             setT3ThreadId(undefined);
@@ -381,6 +425,7 @@ function useModalStateFromNative() {
             setFindPreviousSession(undefined);
             setFirstUserMessage(undefined);
             setRenameSession(undefined);
+            setT3BrowserAccess(undefined);
           } else if (message.modal === "commandConfig") {
             if (!message.commandDraft) {
               throw new Error("Command config modal request is missing commandDraft.");
@@ -392,6 +437,7 @@ function useModalStateFromNative() {
             setFirstUserMessage(undefined);
             setFindPreviousSession(undefined);
             setRenameSession(undefined);
+            setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
           } else if (message.modal === "agentConfig") {
             if (!message.agentDraft) {
@@ -401,6 +447,7 @@ function useModalStateFromNative() {
             setFirstUserMessage(undefined);
             setFindPreviousSession(undefined);
             setRenameSession(undefined);
+            setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
           } else if (message.modal === "workspaceConfig") {
             if (!message.projectConfigDraft) {
@@ -410,12 +457,14 @@ function useModalStateFromNative() {
             setFirstUserMessage(undefined);
             setFindPreviousSession(undefined);
             setRenameSession(undefined);
+            setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
           } else {
             setConfig({});
             setFindPreviousSession(undefined);
             setFirstUserMessage(undefined);
             setRenameSession(undefined);
+            setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
           }
           setActiveModal(message.modal);
@@ -428,6 +477,7 @@ function useModalStateFromNative() {
           setFindPreviousSession(undefined);
           setFirstUserMessage(undefined);
           setRenameSession(undefined);
+          setT3BrowserAccess(undefined);
           setT3ThreadId(undefined);
           return;
         }
@@ -448,7 +498,15 @@ function useModalStateFromNative() {
     };
   }, []);
 
-  return { activeModal, config, findPreviousSession, firstUserMessage, renameSession, t3ThreadId };
+  return {
+    activeModal,
+    config,
+    findPreviousSession,
+    firstUserMessage,
+    renameSession,
+    t3BrowserAccess,
+    t3ThreadId,
+  };
 }
 
 function createEmptyCommandDraft(): CommandConfigDraft {

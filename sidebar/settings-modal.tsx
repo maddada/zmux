@@ -466,6 +466,12 @@ export function SettingsModal({
                 label="Attach zmux to IDE"
                 onChange={(checked) => updateDraft("zedOverlayEnabled", checked)}
               />
+              <ToggleField
+                checked={draft.zedOverlayHideTitlebarButton}
+                description="Hide the native Attach/Detach IDE button from the zmux title bar."
+                label="Hide title-bar attach button"
+                onChange={(checked) => updateDraft("zedOverlayHideTitlebarButton", checked)}
+              />
               <SelectField
                 description="Select which IDE should receive the overlay."
                 label="Target IDE"

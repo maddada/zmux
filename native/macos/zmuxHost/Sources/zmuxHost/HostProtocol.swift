@@ -167,7 +167,9 @@ struct CreateTerminal: Decodable {
 
 struct CreateWebPane: Decodable {
   let cwd: String?
+  let projectId: String?
   let sessionId: String
+  let threadId: String?
   let title: String
   let url: String
 }
@@ -305,6 +307,8 @@ enum SidebarSide: String, Decodable {
 
 struct ConfigureZedOverlay: Decodable {
   let enabled: Bool
+  let hideTitlebarButton: Bool?
+  let reason: String?
   let targetApp: ZedOverlayTargetApp
   let workspacePath: String?
 }
@@ -368,6 +372,8 @@ enum HostEvent: Encodable {
   case terminalFocused(sessionId: String)
   case terminalBell(sessionId: String)
   case terminalError(sessionId: String, message: String)
+  case t3ThreadReady(
+    sessionId: String, projectId: String, threadId: String, serverOrigin: String, workspaceRoot: String)
   case processResult(requestId: String, exitCode: Int32, stdout: String, stderr: String)
   case sidebarCliResult(requestId: String, ok: Bool, payloadJson: String)
 
@@ -383,8 +389,12 @@ enum HostEvent: Encodable {
     case stderr
     case stdout
     case title
+    case projectId
+    case serverOrigin
+    case threadId
     case ttyName
     case type
+    case workspaceRoot
     case requestId
     case ok
     case payloadJson
@@ -437,6 +447,13 @@ enum HostEvent: Encodable {
       try container.encode("terminalError", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)
       try container.encode(message, forKey: .message)
+    case .t3ThreadReady(let sessionId, let projectId, let threadId, let serverOrigin, let workspaceRoot):
+      try container.encode("t3ThreadReady", forKey: .type)
+      try container.encode(sessionId, forKey: .sessionId)
+      try container.encode(projectId, forKey: .projectId)
+      try container.encode(threadId, forKey: .threadId)
+      try container.encode(serverOrigin, forKey: .serverOrigin)
+      try container.encode(workspaceRoot, forKey: .workspaceRoot)
     case .processResult(let requestId, let exitCode, let stdout, let stderr):
       try container.encode("processResult", forKey: .type)
       try container.encode(requestId, forKey: .requestId)

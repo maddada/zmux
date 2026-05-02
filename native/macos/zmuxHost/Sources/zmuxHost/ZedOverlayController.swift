@@ -51,6 +51,7 @@ final class ZedOverlayController: NSObject {
   private var visibleWindowFrame: NSRect?
   private var attachedWindowWidth: CGFloat?
   private var attachedWindowHeight: CGFloat?
+  private var workspacePath: String?
   private var activationObserver: NSObjectProtocol?
   private var companionApplicationBundleIdentifiers: Set<String> = []
   private var hasRequestedAccessibilityPermission = false
@@ -115,6 +116,7 @@ final class ZedOverlayController: NSObject {
   func configure(_ command: ConfigureZedOverlay) {
     enabled = command.enabled
     targetApp = command.targetApp
+    workspacePath = command.workspacePath ?? workspacePath
     Self.logger.info(
       "Configured Zed overlay enabled=\(command.enabled) target=\(command.targetApp.rawValue, privacy: .public)"
     )
@@ -307,15 +309,59 @@ final class ZedOverlayController: NSObject {
 
     if isWindowVisibleInAttachment {
       /**
-       CDXC:ZedOverlayWorkspace 2026-04-28-05:18
-       The Show Zed button only switches visibility. Opening the active zmux
-       project in Zed is controlled by the sidebar's Sync Open Project with
-       Zed setting and its 2s project-switch debounce.
-       */
-      moveWindowOffscreen()
+       CDXC:IDEAttachment 2026-05-01-13:52
+       The floating Show IDE button must make the IDE visible, not merely hide
+       zmux. If the configured IDE is already running, raise/activate it before
+       tucking zmux. If it is not running, launch it for the current workspace
+       path so the same button can recover a missing IDE process.
+      */
+      showTargetApplicationFromButton()
+      if isWindowVisibleInAttachment {
+        moveWindowOffscreen()
+      }
     } else {
       showWindow()
     }
+  }
+
+  private func showTargetApplicationFromButton() {
+    let targetApplications = runningTargetApplications()
+    if let targetApplication = targetApplications.first {
+      let didRaiseTargetWindow = raiseTargetApplicationWindow(targetApplication)
+      let didActivateTarget = targetApplication.activate(options: [
+        .activateAllWindows, .activateIgnoringOtherApps,
+      ])
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.showTargetApplicationFromButton.activate",
+        [
+          "didActivateTarget": didActivateTarget,
+          "didRaiseTargetWindow": didRaiseTargetWindow,
+          "targetApplication": applicationSummary(targetApplication),
+          "windowState": windowStateSummary(),
+        ])
+      return
+    }
+
+    guard let workspacePath, !workspacePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      BrowserOverlayRestoreReproLog.append(
+        "zedOverlay.showTargetApplicationFromButton.skippedMissingWorkspace",
+        [
+          "targetApp": targetApp.rawValue,
+          "windowState": windowStateSummary(),
+        ])
+      return
+    }
+    suppressTargetActivationHideUntil = Date().addingTimeInterval(
+      Self.programmaticWorkspaceOpenActivationSuppressionSeconds)
+    runOpenWorkspaceProcess(targetApp: targetApp, workspacePath: workspacePath)
+    BrowserOverlayRestoreReproLog.append(
+      "zedOverlay.showTargetApplicationFromButton.launched",
+      [
+        "targetApp": targetApp.rawValue,
+        "workspacePath": workspacePath,
+        "windowState": windowStateSummary(),
+      ])
   }
 
   private func showWindow() {
@@ -850,14 +896,18 @@ final class ZedOverlayController: NSObject {
      CDXC:ZedOverlay 2026-04-26-10:46
      Attached zmux stays resizable, but its maximum attached size is inset
      40 points from every IDE edge so a border of the Zed window remains
-     visible behind the floating window. If the user has not established a
-     previous attached size yet, the first restore should use that maximum
-     allowed size instead of inheriting the standalone app window size.
+     visible behind the floating window.
+
+     CDXC:IDEAttachment 2026-05-01-13:35
+     Attaching to an IDE should preserve the current zmux size whenever that
+     size fits inside the IDE attachment bounds. Attachment is primarily a
+     positioning operation; only clamp width or height when the current size
+     would overflow the allowed inset area.
      */
     let maxWidth = max(520, frame.size.width - Self.attachedWindowInset * 2)
     let maxHeight = max(320, frame.size.height - Self.attachedWindowInset * 2)
-    let currentWidth = attachedWindowWidth ?? maxWidth
-    let currentHeight = attachedWindowHeight ?? maxHeight
+    let currentWidth = attachedWindowWidth ?? window?.frame.width ?? maxWidth
+    let currentHeight = attachedWindowHeight ?? window?.frame.height ?? maxHeight
     let width = max(520, min(currentWidth, maxWidth))
     let height = max(320, min(currentHeight, maxHeight))
     let topLeft = CGPoint(
@@ -1055,6 +1105,7 @@ final class ZedOverlayController: NSObject {
       return
     }
 
+    self.workspacePath = path
     suppressTargetActivationHideUntil = Date().addingTimeInterval(
       Self.programmaticWorkspaceOpenActivationSuppressionSeconds)
     runOpenWorkspaceProcess(targetApp: targetApp, workspacePath: path)

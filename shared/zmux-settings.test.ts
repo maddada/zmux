@@ -10,7 +10,20 @@ describe("normalizezmuxSettings", () => {
     expect(normalizezmuxSettings({})).toMatchObject({
       syncOpenProjectWithZed: DEFAULT_zmux_SETTINGS.syncOpenProjectWithZed,
       zedOverlayEnabled: DEFAULT_zmux_SETTINGS.zedOverlayEnabled,
+      zedOverlayHideTitlebarButton: DEFAULT_zmux_SETTINGS.zedOverlayHideTitlebarButton,
       zedOverlayTargetApp: DEFAULT_zmux_SETTINGS.zedOverlayTargetApp,
+    });
+  });
+
+  test("keeps the IDE title-bar button visible by default", () => {
+    /**
+     * CDXC:IDEAttachment 2026-05-01-13:52
+     * Hiding the native Attach/Detach IDE title-bar button is opt-in. The
+     * default must remain visible so existing users keep the current control.
+     */
+    expect(DEFAULT_zmux_SETTINGS.zedOverlayHideTitlebarButton).toBe(false);
+    expect(normalizezmuxSettings({ zedOverlayHideTitlebarButton: true })).toMatchObject({
+      zedOverlayHideTitlebarButton: true,
     });
   });
 

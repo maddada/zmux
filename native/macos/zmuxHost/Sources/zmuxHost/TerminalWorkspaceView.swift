@@ -20,7 +20,10 @@ final class TerminalWorkspaceView: NSView {
 
   private struct WebPaneSession {
     let diagnosticsBridge: T3CodePaneDiagnosticsBridge
+    let hostView: WebPaneHostView
+    let projectId: String?
     let sessionId: String
+    let threadId: String?
     let title: String
     let workspaceRoot: String?
     let webView: WKWebView
@@ -39,6 +42,7 @@ final class TerminalWorkspaceView: NSView {
   private var webPaneSessions: [String: WebPaneSession] = [:]
   private var completedWebPaneLoadSessionIds = Set<String>()
   private var pendingAuthenticatedWebPaneLoadSessionIds = Set<String>()
+  private var t3ThreadRouteRetryAttemptsBySessionId = [String: Int]()
   private var activeSessionIds = Set<String>()
   private var attentionSessionIds = Set<String>()
   private var sessionActivities = [String: NativeTerminalActivity]()
@@ -276,6 +280,8 @@ final class TerminalWorkspaceView: NSView {
     webView.wantsLayer = true
     webView.layer?.masksToBounds = true
     webView.underPageBackgroundColor = NSColor(calibratedRed: 0.086, green: 0.086, blue: 0.086, alpha: 1)
+    let hostView = WebPaneHostView(webView: webView)
+    hostView.translatesAutoresizingMaskIntoConstraints = false
 
     let titleBarView = TerminalSessionTitleBarView(
       title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId)
@@ -293,7 +299,10 @@ final class TerminalWorkspaceView: NSView {
 
     webPaneSessions[command.sessionId] = WebPaneSession(
       diagnosticsBridge: diagnosticsBridge,
+      hostView: hostView,
+      projectId: command.projectId,
       sessionId: command.sessionId,
+      threadId: command.threadId,
       title: command.title,
       workspaceRoot: command.cwd,
       webView: webView,
@@ -301,6 +310,7 @@ final class TerminalWorkspaceView: NSView {
       borderView: borderView
     )
     activeSessionIds.insert(command.sessionId)
+    addSubview(hostView)
     addSubview(titleBarView)
     addSubview(borderView)
     orderWebPaneViewsToFront(webPaneSessions[command.sessionId])
@@ -312,6 +322,13 @@ final class TerminalWorkspaceView: NSView {
         "url": url.absoluteString,
         "workspaceRoot": command.cwd ?? NSNull(),
       ])
+      loadWebPaneStatus(
+        sessionId: command.sessionId,
+        title: command.title,
+        message: "Loading T3 Code…",
+        caption: "Preparing the embedded workspace",
+        loading: true,
+        reason: "createWebPane")
       loadWebPane(sessionId: command.sessionId, url: url, reason: "initial")
     } else {
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.invalidUrl", [
@@ -321,6 +338,7 @@ final class TerminalWorkspaceView: NSView {
     }
 
     needsLayout = true
+    scheduleDeferredWebPaneLayout(sessionId: command.sessionId, reason: "createWebPaneNew")
     focusWebPane(sessionId: command.sessionId, reason: "createWebPaneNew")
   }
 
@@ -339,12 +357,13 @@ final class TerminalWorkspaceView: NSView {
     sessionActivities.removeValue(forKey: sessionId)
     completedWebPaneLoadSessionIds.remove(sessionId)
     pendingAuthenticatedWebPaneLoadSessionIds.remove(sessionId)
+    t3ThreadRouteRetryAttemptsBySessionId.removeValue(forKey: sessionId)
     session.webView.navigationDelegate = nil
     session.webView.configuration.userContentController.removeScriptMessageHandler(
       forName: T3CodePaneDiagnosticsBridge.messageHandlerName
     )
     session.webView.stopLoading()
-    session.webView.removeFromSuperview()
+    session.hostView.removeFromSuperview()
     session.titleBarView.removeFromSuperview()
     session.borderView.removeFromSuperview()
     terminalLayout = prunedLayout(removing: sessionId, from: terminalLayout)
@@ -602,17 +621,18 @@ final class TerminalWorkspaceView: NSView {
       }
     }
     for session in webPaneSessions.values {
-      session.webView.isHidden = false
+      session.hostView.isHidden = false
       session.titleBarView.isHidden = false
       session.borderView.isHidden = false
       if !activeSessionIds.contains(session.sessionId) {
-        moveOffscreen(session.webView)
+        moveOffscreen(session.hostView)
         moveOffscreen(session.titleBarView)
         moveOffscreen(session.borderView)
       }
     }
     needsLayout = true
     layoutSubtreeIfNeeded()
+    scheduleDeferredWebPaneLayout(sessionId: command.focusedSessionId, reason: "setActiveTerminalSet")
     updateAllTerminalBorders()
     TerminalFocusDebugLog.append(
       event: "nativeWorkspace.setActiveTerminalSet.applied",
@@ -800,53 +820,106 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func setWebPaneFrame(_ rect: CGRect, for session: WebPaneSession) {
-    let titleBarHeight = min(Self.terminalTitleBarHeight, max(rect.height, 0))
+    let resolvedRect: CGRect
+    if rect.width <= 1 || rect.height <= Self.terminalTitleBarHeight + 1 {
+      resolvedRect = layoutBounds(forVisibleCount: max(orderedVisibleSessionIds().count, 1))
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.layout.fallbackRect", [
+        "inputRect": describeFrame(rect),
+        "resolvedRect": describeFrame(resolvedRect),
+        "sessionId": session.sessionId,
+        "workspaceBounds": describeFrame(bounds),
+      ])
+    } else {
+      resolvedRect = rect
+    }
+    let titleBarHeight = min(Self.terminalTitleBarHeight, max(resolvedRect.height, 0))
     let titleBarRect = CGRect(
-      x: rect.minX,
-      y: rect.maxY - titleBarHeight,
-      width: rect.width,
+      x: resolvedRect.minX,
+      y: resolvedRect.maxY - titleBarHeight,
+      width: resolvedRect.width,
       height: titleBarHeight
     )
     let contentRect = CGRect(
-      x: rect.minX,
-      y: rect.minY,
-      width: rect.width,
-      height: max(rect.height - titleBarHeight, 1)
+      x: resolvedRect.minX,
+      y: resolvedRect.minY,
+      width: resolvedRect.width,
+      height: max(resolvedRect.height - titleBarHeight, 1)
     )
     session.titleBarView.frame = titleBarRect
     session.titleBarView.needsLayout = true
     session.titleBarView.layoutSubtreeIfNeeded()
-    session.webView.frame = webPaneContentFrameInHostingView(contentRect)
-    session.webView.needsDisplay = true
-    session.borderView.frame = rect
+    session.hostView.translatesAutoresizingMaskIntoConstraints = true
+    session.hostView.frame = contentRect
+    session.hostView.refreshHostedWebView(reason: "setWebPaneFrame")
+    session.borderView.frame = resolvedRect
     if focusedSessionId == session.sessionId {
       orderWebPaneViewsToFront(session)
     }
     updateTerminalBorder(for: session.sessionId)
   }
 
+  private func scheduleDeferredWebPaneLayout(sessionId: String?, reason: String) {
+    guard let sessionId, webPaneSessions[sessionId] != nil else {
+      return
+    }
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.webPaneSessions[sessionId] != nil else {
+        return
+      }
+      self.superview?.needsLayout = true
+      self.superview?.layoutSubtreeIfNeeded()
+      self.needsLayout = true
+      self.layoutSubtreeIfNeeded()
+      if let session = self.webPaneSessions[sessionId] {
+        /**
+         CDXC:T3Code 2026-05-01-14:10
+         WKWebView panes can be created before the native workspace receives
+         its final AppKit bounds. If split layout initially gives the web pane a
+         zero rect, pin the pane host to the resolved workspace pane during the
+         deferred layout pass so the web content is rendered as an inline pane,
+         not an accessibility-only webview hidden behind the workspace layer.
+         */
+        if session.hostView.frame.width <= 1 || session.hostView.frame.height <= 1,
+          self.bounds.width > 1, self.bounds.height > Self.terminalTitleBarHeight + 1
+        {
+          let rect = self.layoutBounds(
+            forVisibleCount: max(self.orderedVisibleSessionIds().count, 1))
+          NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.layout.deferredPin", [
+            "hostFrame": self.describeFrame(session.hostView.frame),
+            "reason": reason,
+            "resolvedRect": self.describeFrame(rect),
+            "sessionId": sessionId,
+            "workspaceBounds": self.describeFrame(self.bounds),
+          ])
+          self.setWebPaneFrame(rect, for: session)
+        }
+        NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.layout.deferred", [
+          "hostFrame": self.describeFrame(session.hostView.frame),
+          "reason": reason,
+          "sessionId": sessionId,
+          "workspaceBounds": self.describeFrame(self.bounds),
+        ])
+        session.hostView.refreshHostedWebView(reason: "\(reason).deferred")
+      }
+    }
+  }
+
   /**
    CDXC:T3Code 2026-04-30-19:17
    The T3 Code pane is a native WKWebView, not React DOM inside the sidebar.
-   Host the WebKit surface in the root content view instead of inside the
-   terminal workspace view: live nested WKWebView compositing can show only the
-   workspace background even when the page has finished loading.
-   Keep native title and border chrome in the workspace so split layout,
-   focus borders, and pane controls continue to follow terminal behavior.
+   Keep the WebKit surface inside the pane host so it participates in split
+   layout and z-order like a browser pane instead of floating over the app.
    */
   private func orderWebPaneViewsToFront(_ optionalSession: WebPaneSession?) {
     guard let session = optionalSession else {
       return
     }
-    if let webPaneHost = superview {
-      session.webView.removeFromSuperview()
-      webPaneHost.addSubview(session.webView)
-    } else {
-      session.webView.removeFromSuperview()
-      addSubview(session.webView)
+    if session.hostView.superview !== self {
+      session.hostView.removeFromSuperview()
+      addSubview(session.hostView)
     }
-    session.webView.alphaValue = 1
-    session.webView.layer?.zPosition = 100
+    session.hostView.alphaValue = 1
+    session.hostView.layer?.zPosition = 100
     if session.titleBarView.superview === self {
       session.titleBarView.removeFromSuperview()
     }
@@ -858,13 +931,6 @@ final class TerminalWorkspaceView: NSView {
     }
     addSubview(session.borderView)
     session.borderView.layer?.zPosition = 120
-  }
-
-  private func webPaneContentFrameInHostingView(_ contentRect: CGRect) -> CGRect {
-    guard let host = superview else {
-      return contentRect
-    }
-    return convert(contentRect, to: host)
   }
 
   private func scheduleWebPaneReload(sessionId: String, url: URL, remainingAttempts: Int) {
@@ -931,7 +997,9 @@ final class TerminalWorkspaceView: NSView {
       self.completedWebPaneLoadSessionIds.remove(sessionId)
       NativeT3RuntimeSessionBootstrap.prepareThreadRoute(
         origin: url,
+        projectId: session.projectId,
         sessionId: sessionId,
+        threadId: session.threadId,
         title: session.title,
         workspaceRoot: session.workspaceRoot
       ) { [weak self] result in
@@ -939,16 +1007,26 @@ final class TerminalWorkspaceView: NSView {
           return
         }
         switch result {
-        case .success(let routeURL):
+        case .success(let route):
+          self.t3ThreadRouteRetryAttemptsBySessionId.removeValue(forKey: sessionId)
+          self.sendEvent(
+            .t3ThreadReady(
+              sessionId: sessionId,
+              projectId: route.projectId,
+              threadId: route.threadId,
+              serverOrigin: "\(url.scheme ?? "http")://\(url.host ?? "127.0.0.1")\(url.port.map { ":\($0)" } ?? "")",
+              workspaceRoot: session.workspaceRoot ?? ""
+            )
+          )
           NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.start", [
             "reason": reason,
-            "routeUrl": routeURL.absoluteString,
+            "routeUrl": route.url.absoluteString,
             "sessionId": sessionId,
             "url": url.absoluteString,
             "workspaceRoot": session.workspaceRoot ?? NSNull(),
           ])
-          session.webView.load(URLRequest(url: routeURL))
-          self.scheduleWebPaneReload(sessionId: sessionId, url: routeURL, remainingAttempts: 16)
+          session.webView.load(URLRequest(url: route.url))
+          self.scheduleWebPaneReload(sessionId: sessionId, url: route.url, remainingAttempts: 16)
         case .failure(let error):
           NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.threadRouteFailed", [
             "error": error.localizedDescription,
@@ -957,17 +1035,183 @@ final class TerminalWorkspaceView: NSView {
             "url": url.absoluteString,
             "workspaceRoot": session.workspaceRoot ?? NSNull(),
           ])
+          if self.retryT3ThreadRouteIfStartupIsStillSettling(
+            sessionId: sessionId,
+            url: url,
+            error: error
+          ) {
+            return
+          }
           self.loadWebPaneError(session: session, message: error.localizedDescription)
         }
       }
     }
   }
 
+  private func retryT3ThreadRouteIfStartupIsStillSettling(
+    sessionId: String,
+    url: URL,
+    error: Error
+  ) -> Bool {
+    guard NativeT3RuntimeLauncher.isManagedRuntimeURL(url) else {
+      return false
+    }
+    let message = error.localizedDescription
+    guard Self.isTransientT3ThreadRouteError(message) else {
+      return false
+    }
+    let attempt = (t3ThreadRouteRetryAttemptsBySessionId[sessionId] ?? 0) + 1
+    guard attempt <= 80 else {
+      t3ThreadRouteRetryAttemptsBySessionId.removeValue(forKey: sessionId)
+      NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.threadRouteRetry.exhausted", [
+        "attempt": attempt,
+        "error": message,
+        "sessionId": sessionId,
+        "url": url.absoluteString,
+      ])
+      return false
+    }
+    t3ThreadRouteRetryAttemptsBySessionId[sessionId] = attempt
+    /**
+     CDXC:T3Code 2026-05-02-00:55
+     The native T3 pane must not paint a permanent error while the forked
+     desktop server is still warming its embed API surface. During startup the
+     listener can return 404 for auth/environment endpoints before the same
+     process becomes ready; retry route resolution so users see the T3 Code app
+     once the real APIs are available instead of a blank or white pane.
+     */
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.threadRouteRetry.scheduled", [
+      "attempt": attempt,
+      "error": message,
+      "sessionId": sessionId,
+      "url": url.absoluteString,
+    ])
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      guard self?.webPaneSessions[sessionId] != nil else {
+        return
+      }
+      self?.loadWebPane(sessionId: sessionId, url: url, reason: "threadRouteRetry")
+    }
+    return true
+  }
+
+  private static func isTransientT3ThreadRouteError(_ message: String) -> Bool {
+    message.contains("Could not connect to the server")
+      || message.contains("timed out")
+      || message.contains("returned 404")
+      || message.contains("returned 503")
+  }
+
+  private func loadWebPaneStatus(
+    sessionId: String,
+    title: String,
+    message: String,
+    caption: String?,
+    loading: Bool,
+    reason: String
+  ) {
+    guard let session = webPaneSessions[sessionId] else {
+      return
+    }
+    /**
+     CDXC:T3Code 2026-05-02-03:16
+     Native T3 panes spend startup time authenticating and resolving the
+     managed thread route before the real app URL can load. Show the same
+     embedded-workspace loading surface as the webview implementation so users
+     do not see an empty gray WKWebView while startup is still valid work.
+     */
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.status.load", [
+      "loading": loading,
+      "message": message,
+      "reason": reason,
+      "sessionId": sessionId,
+    ])
+    session.webView.loadHTMLString(
+      Self.t3WebPaneStatusHtml(title: title, message: message, caption: caption, loading: loading),
+      baseURL: nil
+    )
+  }
+
+  private static func t3WebPaneStatusHtml(
+    title: String,
+    message: String,
+    caption: String?,
+    loading: Bool
+  ) -> String {
+    let escapedTitle = escapeHtmlText(title.isEmpty ? "T3 Code" : title)
+    let escapedMessage = escapeHtmlText(message)
+    let escapedCaption = caption.map(escapeHtmlText)
+    let spinnerHtml = loading ? #"<div class="spinner" aria-hidden="true"></div>"# : ""
+    let captionHtml = escapedCaption.map { #"<div class="caption">\#($0)</div>"# } ?? ""
+
+    return """
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>\(escapedTitle)</title>
+          <style>
+            html, body {
+              background: #101722;
+              color: #d8e1ee;
+              font-family: ui-sans-serif, system-ui, sans-serif;
+              height: 100%;
+              margin: 0;
+            }
+
+            body {
+              align-items: center;
+              display: flex;
+              justify-content: center;
+              padding: 24px;
+            }
+
+            .status {
+              align-items: center;
+              color: #d8e1ee;
+              display: flex;
+              flex-direction: column;
+              font-size: 14px;
+              gap: 10px;
+              letter-spacing: 0.02em;
+              opacity: 0.86;
+              text-align: center;
+            }
+
+            .spinner {
+              animation: spin 0.9s linear infinite;
+              border: 2px solid rgba(216, 225, 238, 0.18);
+              border-radius: 999px;
+              border-top-color: rgba(216, 225, 238, 0.95);
+              height: 18px;
+              width: 18px;
+            }
+
+            .caption {
+              font-size: 12px;
+              opacity: 0.66;
+            }
+
+            @keyframes spin {
+              from { transform: rotate(0deg); }
+              to { transform: rotate(360deg); }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="status">
+            \(spinnerHtml)
+            <div>\(escapedMessage)</div>
+            \(captionHtml)
+          </div>
+        </body>
+      </html>
+      """
+  }
+
   private func loadWebPaneError(session: WebPaneSession, message: String) {
-    let escaped = message
-      .replacingOccurrences(of: "&", with: "&amp;")
-      .replacingOccurrences(of: "<", with: "&lt;")
-      .replacingOccurrences(of: ">", with: "&gt;")
+    let escaped = Self.escapeHtmlText(message)
     session.webView.loadHTMLString(
       """
       <!doctype html>
@@ -985,6 +1229,13 @@ final class TerminalWorkspaceView: NSView {
       """,
       baseURL: nil
     )
+  }
+
+  private static func escapeHtmlText(_ value: String) -> String {
+    value
+      .replacingOccurrences(of: "&", with: "&amp;")
+      .replacingOccurrences(of: "<", with: "&lt;")
+      .replacingOccurrences(of: ">", with: "&gt;")
   }
 
   private func sessionId(for webView: WKWebView) -> String? {
@@ -1456,7 +1707,7 @@ final class TerminalWorkspaceView: NSView {
   private func updateTerminalBorder(for sessionId: String) {
     if let session = webPaneSessions[sessionId] {
       let isActive = activeSessionIds.contains(sessionId)
-      session.webView.isHidden = !isActive
+      session.hostView.isHidden = !isActive
       session.titleBarView.isHidden = !isActive
       session.borderView.isHidden = !isActive
       session.titleBarView.setState(activity: sessionActivities[sessionId])
@@ -1509,6 +1760,13 @@ final class TerminalWorkspaceView: NSView {
     }
     for (sessionId, session) in sessions {
       if responderView === session.view || responderView.isDescendant(of: session.view) {
+        return sessionId
+      }
+    }
+    for (sessionId, session) in webPaneSessions {
+      if responderView === session.hostView || responderView.isDescendant(of: session.hostView)
+        || responderView === session.webView || responderView.isDescendant(of: session.webView)
+      {
         return sessionId
       }
     }
@@ -2420,6 +2678,72 @@ private final class TerminalSessionTitleBarView: NSView {
       button.font = NSFont.systemFont(ofSize: 11, weight: .bold)
     }
     return button
+  }
+}
+
+final class WebPaneHostView: NSView {
+  private let webView: WKWebView
+
+  init(webView: WKWebView) {
+    self.webView = webView
+    super.init(frame: .zero)
+    translatesAutoresizingMaskIntoConstraints = true
+    autoresizesSubviews = true
+    wantsLayer = true
+    layer?.backgroundColor = NSColor(calibratedRed: 0.086, green: 0.086, blue: 0.086, alpha: 1)
+      .cgColor
+    layer?.masksToBounds = true
+    webView.translatesAutoresizingMaskIntoConstraints = true
+    webView.autoresizingMask = [.width, .height]
+    webView.frame = bounds
+    addSubview(webView)
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
+  override func layout() {
+    super.layout()
+    if webView.superview !== self {
+      webView.removeFromSuperview()
+      addSubview(webView)
+    }
+    if webView.frame != bounds {
+      webView.frame = bounds
+    }
+  }
+
+  func refreshHostedWebView(reason: String) {
+    if webView.superview !== self {
+      webView.removeFromSuperview()
+      addSubview(webView)
+    }
+    webView.frame = bounds
+    needsLayout = true
+    needsDisplay = true
+    webView.needsLayout = true
+    webView.needsDisplay = true
+    layoutSubtreeIfNeeded()
+    webView.layoutSubtreeIfNeeded()
+    displayIfNeeded()
+    webView.displayIfNeeded()
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.host.refresh", [
+      "hostFrame": Self.describeFrame(frame),
+      "reason": reason,
+      "webFrame": Self.describeFrame(webView.frame),
+      "webUrl": webView.url?.absoluteString ?? NSNull(),
+      "windowNumber": window?.windowNumber ?? NSNull(),
+    ])
+  }
+
+  private static func describeFrame(_ frame: CGRect) -> [String: Double] {
+    [
+      "height": Double(frame.height),
+      "width": Double(frame.width),
+      "x": Double(frame.minX),
+      "y": Double(frame.minY),
+    ]
   }
 }
 

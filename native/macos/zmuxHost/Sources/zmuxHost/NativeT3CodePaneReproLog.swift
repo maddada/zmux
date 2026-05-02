@@ -152,10 +152,21 @@ private struct NativeT3RuntimeCommand {
 
 enum NativeT3RuntimeLauncher {
   static let host = "127.0.0.1"
+  /**
+   CDXC:T3RemoteAccess 2026-05-02-01:18
+   Native T3 Remote Access uses T3's one-time pairing URLs directly. The
+   runtime still renders in-app through 127.0.0.1, but the listener must bind
+   all interfaces so Tailscale/local-network QR links can reach the same
+   authenticated backend.
+   */
+  private static let listenHost = "0.0.0.0"
   static let port = 3774
+  static let appHeartbeatInterval: TimeInterval = 30.0
   private static let bootstrapCredentialLock = NSLock()
   private static var bootstrapCredential: String?
+  private static var ownerBearerToken: String?
   private static let staleRuntimeShutdownTimeout: TimeInterval = 2.0
+  private static let appClosedRuntimeShutdownTimeoutSeconds = 300
 
   /**
    CDXC:T3Code 2026-04-30-03:39
@@ -196,10 +207,122 @@ enum NativeT3RuntimeLauncher {
       terminate(pid: listener.pid)
       waitForPortToClear(port)
     }
+
+    /**
+     CDXC:T3Code 2026-05-02-02:11
+     A wedged managed Bun runtime can ignore graceful termination while still
+     owning port 3774. That leaves the T3 pane gray because zmux cannot start a
+     replacement runtime or resolve a thread URL. Escalate only still-listening
+     owned T3 runtime processes after the graceful timeout expires.
+     */
+    let remainingOwnedListeners = listeningProcesses(onPort: port).filter { isOwnedT3RuntimeProcess($0) }
+    for listener in remainingOwnedListeners {
+      NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.staleProcess.forceKill", [
+        "command": listener.command,
+        "parentCommand": listener.parentCommand,
+        "parentPid": listener.parentPid,
+        "pid": listener.pid,
+        "port": port,
+      ])
+      if isT3RuntimeSupervisorCommand(listener.parentCommand) {
+        forceTerminate(pid: listener.parentPid)
+      }
+      forceTerminate(pid: listener.pid)
+    }
+    if !remainingOwnedListeners.isEmpty {
+      waitForPortToClear(port)
+    }
   }
 
   static func hasManagedRuntimeListener() -> Bool {
     listeningProcesses(onPort: port).contains { isOwnedT3RuntimeProcess($0) }
+  }
+
+  /**
+   CDXC:T3Code 2026-05-01-14:44
+   A T3-looking listener on port 3774 is not enough to reuse it: a wedged Bun
+   process can keep the port open while auth endpoints time out, leaving native
+   panes on an empty white WKWebView before thread routing starts. Adopt
+   existing runtimes only when both the environment descriptor and auth session
+   endpoint answer quickly; otherwise treat the listener as stale and launch a
+   fresh managed server.
+   */
+  static func hasResponsiveManagedRuntimeListener() -> Bool {
+    let listeners = listeningProcesses(onPort: port).filter { isOwnedT3RuntimeProcess($0) }
+    guard !listeners.isEmpty else {
+      return false
+    }
+    guard
+      probeManagedRuntimeEndpoint(path: "/.well-known/t3/environment", expectedStatusCode: 200),
+      probeManagedRuntimeEndpoint(path: "/api/auth/session", expectedStatusCode: 200)
+    else {
+      return false
+    }
+
+    guard let url = URL(string: "http://\(host):\(port)/.well-known/t3/environment") else {
+      return false
+    }
+    if listeners.contains(where: { isT3RuntimeSupervisorCommand($0.parentCommand) }) {
+      return true
+    }
+    if currentOwnerBearerToken() != nil || readPersistedOwnerBearerToken() != nil {
+      return true
+    }
+    /**
+     CDXC:T3Code 2026-05-01-15:07
+     A live localhost T3 listener is not safely reusable unless zmux also has
+     the owner bearer signed by that runtime. A stale browser cookie can make
+     `/api/auth/session` report authenticated while owner-only snapshot calls
+     still fail with `Invalid session token signature`, so native-managed
+     listeners without native auth state must be relaunched instead of adopted.
+     */
+    NativeT3CodePaneReproLog.append("nativeT3Runtime.listener.health.missingNativeOwnerBearer", [
+      "listenerCount": listeners.count,
+      "port": port,
+      "pids": listeners.map(\.pid),
+      "url": url.absoluteString,
+    ])
+    return false
+  }
+
+  private static func probeManagedRuntimeEndpoint(
+    path: String,
+    expectedStatusCode: Int
+  ) -> Bool {
+    guard let url = URL(string: "http://\(host):\(port)\(path)") else {
+      return false
+    }
+    var request = URLRequest(url: url)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.timeoutInterval = 1.0
+
+    let semaphore = DispatchSemaphore(value: 0)
+    var isResponsive = false
+    URLSession.shared.dataTask(with: request) { data, response, error in
+      defer { semaphore.signal() }
+      let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+      isResponsive = error == nil && statusCode == expectedStatusCode && (data?.isEmpty == false)
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.listener.health", [
+        "bodyBytes": data?.count ?? 0,
+        "error": error?.localizedDescription ?? NSNull(),
+        "path": path,
+        "responsive": isResponsive,
+        "statusCode": statusCode,
+        "url": url.absoluteString,
+      ])
+    }.resume()
+
+    let result = semaphore.wait(timeout: .now() + 1.5)
+    if result == .timedOut {
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.listener.health.timeout", [
+        "url": url.absoluteString
+      ])
+      return false
+    }
+    guard isResponsive else {
+      return false
+    }
+    return true
   }
 
   /**
@@ -211,9 +334,12 @@ enum NativeT3RuntimeLauncher {
    renders the authenticated provider without opening a browser.
    */
   static func createLaunch(cwd: String) throws -> NativeT3RuntimeLaunch {
+    touchAppHeartbeat(reason: "createLaunch")
     let bootstrap = try writeBootstrapJsonFile()
     rememberBootstrapCredential(bootstrap.credential)
     let bootstrapPath = shellQuote(bootstrap.url.path)
+    let heartbeatPath = shellQuote(appHeartbeatURL().path)
+    let shutdownTimeout = String(appClosedRuntimeShutdownTimeoutSeconds)
     let runtimeCommand = try resolveManagedT3RuntimeCommand()
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/zsh")
@@ -222,7 +348,7 @@ enum NativeT3RuntimeLauncher {
       [
         "exec 3< \(bootstrapPath)",
         "rm -f \(bootstrapPath)",
-        "exec \(runtimeCommand.command) --mode desktop --host \(host) --port \(port) --no-browser --bootstrap-fd 3",
+        "(\n  runtime_pid=\"\"\n  \(runtimeCommand.command) --mode desktop --host \(listenHost) --port \(port) --no-browser --bootstrap-fd 3 &\n  runtime_pid=$!\n  (\n    while kill -0 \"$runtime_pid\" 2>/dev/null; do\n      now=$(date +%s)\n      last=$(cat \(heartbeatPath) 2>/dev/null || echo \"$now\")\n      if [ $((now - last)) -ge \(shutdownTimeout) ]; then\n        kill \"$runtime_pid\" 2>/dev/null\n        sleep 2\n        kill -9 \"$runtime_pid\" 2>/dev/null\n        exit 0\n      fi\n      sleep 15\n    done\n  ) &\n  monitor_pid=$!\n  wait \"$runtime_pid\"\n  runtime_status=$?\n  kill \"$monitor_pid\" 2>/dev/null\n  exit \"$runtime_status\"\n)",
       ].joined(separator: "\n"),
     ]
     process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
@@ -233,10 +359,37 @@ enum NativeT3RuntimeLauncher {
     return NativeT3RuntimeLaunch(outputCapture: outputCapture, process: process)
   }
 
+  /**
+   CDXC:T3Code 2026-05-02-02:31
+   T3 Code should survive quick zmux restarts, but it must not live forever
+   after the app is closed. The native app refreshes this heartbeat while it is
+   open and once during graceful termination; the T3 wrapper exits the managed
+   runtime if the heartbeat stays stale for five minutes.
+   */
+  static func touchAppHeartbeat(reason: String) {
+    do {
+      try FileManager.default.createDirectory(
+        at: t3HomeDirectory(), withIntermediateDirectories: true)
+      let timestamp = String(Int(Date().timeIntervalSince1970))
+      try timestamp.write(to: appHeartbeatURL(), atomically: true, encoding: .utf8)
+    } catch {
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.appHeartbeat.write.failed", [
+        "error": error.localizedDescription,
+        "reason": reason,
+      ])
+    }
+  }
+
   static func currentBootstrapCredential() -> String? {
     bootstrapCredentialLock.lock()
     defer { bootstrapCredentialLock.unlock() }
     return bootstrapCredential
+  }
+
+  static func currentOwnerBearerToken() -> String? {
+    bootstrapCredentialLock.lock()
+    defer { bootstrapCredentialLock.unlock() }
+    return ownerBearerToken
   }
 
   static func clearBootstrapCredential(_ credential: String) {
@@ -245,6 +398,21 @@ enum NativeT3RuntimeLauncher {
     if bootstrapCredential == credential {
       bootstrapCredential = nil
     }
+  }
+
+  static func rememberOwnerBearerToken(_ token: String) {
+    bootstrapCredentialLock.lock()
+    let currentBootstrapCredential = bootstrapCredential
+    ownerBearerToken = token
+    bootstrapCredentialLock.unlock()
+    try? writeAuthState([
+      "desktopBootstrapToken": currentBootstrapCredential ?? NSNull(),
+      "ownerBearerToken": token,
+      "provider": "t3code",
+    ])
+    NativeT3CodePaneReproLog.append("nativeT3Runtime.ownerBearer.remembered", [
+      "ownerBearerLength": token.count
+    ])
   }
 
   static func isManagedRuntimeURL(_ url: URL) -> Bool {
@@ -265,6 +433,10 @@ enum NativeT3RuntimeLauncher {
     try FileManager.default.createDirectory(
       at: t3HomeDirectory(), withIntermediateDirectories: true)
     let credential = UUID().uuidString
+    try writeAuthState([
+      "desktopBootstrapToken": credential,
+      "provider": "t3code",
+    ])
     let payload: [String: Any] = [
       "desktopBootstrapToken": credential,
       "host": host,
@@ -273,16 +445,29 @@ enum NativeT3RuntimeLauncher {
       "port": port,
       "t3Home": t3HomeDirectory().path,
     ]
-    let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+    var data = try JSONSerialization.data(withJSONObject: payload, options: [])
+    /**
+     CDXC:T3Code 2026-05-01-15:07
+     t3code's desktop bootstrap reader consumes fd 3 with a line reader. Match
+     the managed supervisor's pipe format by terminating the JSON envelope with
+     a newline, so the server receives the bootstrap deterministically before
+     the temporary file is removed.
+     */
+    data.append(0x0A)
     let bootstrapURL = t3HomeDirectory().appendingPathComponent(
       "bootstrap-\(UUID().uuidString).json")
     try data.write(to: bootstrapURL, options: [.atomic])
     return NativeT3BootstrapFile(credential: credential, url: bootstrapURL)
   }
 
+  private static func appHeartbeatURL() -> URL {
+    t3HomeDirectory().appendingPathComponent("zmux-app-heartbeat")
+  }
+
   private static func rememberBootstrapCredential(_ credential: String) {
     bootstrapCredentialLock.lock()
     bootstrapCredential = credential
+    ownerBearerToken = nil
     bootstrapCredentialLock.unlock()
     NativeT3CodePaneReproLog.append("nativeT3Runtime.bootstrapCredential.remembered", [
       "credentialPresent": true
@@ -414,6 +599,53 @@ enum NativeT3RuntimeLauncher {
       .appendingPathComponent("managed-home-t3code-0.0.0", isDirectory: true)
   }
 
+  private static func runtimeStorageDirectory() -> URL {
+    ZmuxAppStorage.sharedRootDirectory.appendingPathComponent("t3-runtime", isDirectory: true)
+  }
+
+  private static func authStateURL() -> URL {
+    runtimeStorageDirectory().appendingPathComponent("auth-state.json")
+  }
+
+  /**
+   CDXC:T3Code 2026-05-01-14:57
+   Native T3 runtime adoption must survive zmux host restarts. Persist the
+   same managed auth state used by the extension runtime manager so a freshly
+   launched native host can reuse an already-running localhost server and still
+   authorize owner-only snapshot/dispatch calls instead of rendering a blank or
+   unbound thread page.
+   */
+  private static func writeAuthState(_ state: [String: Any]) throws {
+    try FileManager.default.createDirectory(
+      at: runtimeStorageDirectory(), withIntermediateDirectories: true)
+    let normalized = state.filter { _, value in !(value is NSNull) }
+    let data = try JSONSerialization.data(withJSONObject: normalized, options: [.prettyPrinted])
+    try data.write(to: authStateURL(), options: [.atomic])
+  }
+
+  static func readPersistedOwnerBearerToken() -> String? {
+    let url = authStateURL()
+    let authStateMtime = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate])
+      as? Date
+    guard let data = try? Data(contentsOf: url),
+      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      (payload["provider"] as? String) == "t3code",
+      let ownerBearerToken = payload["ownerBearerToken"] as? String,
+      !ownerBearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.ownerBearer.persisted.missing", [
+        "path": url.path
+      ])
+      return nil
+    }
+    NativeT3CodePaneReproLog.append("nativeT3Runtime.ownerBearer.persisted.read", [
+      "ownerBearerLength": ownerBearerToken.count,
+      "path": url.path,
+      "mtime": authStateMtime.map { ISO8601DateFormatter().string(from: $0) } ?? NSNull(),
+    ])
+    return ownerBearerToken
+  }
+
   private static func listeningProcesses(onPort port: Int) -> [NativeT3ListeningProcess] {
     let process = Process()
     let pipe = Pipe()
@@ -527,6 +759,10 @@ enum NativeT3RuntimeLauncher {
     kill(pid_t(pid), SIGTERM)
   }
 
+  private static func forceTerminate(pid: Int) {
+    kill(pid_t(pid), SIGKILL)
+  }
+
   private static func shellQuote(_ value: String) -> String {
     "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
   }
@@ -548,6 +784,7 @@ private struct NativeT3BootstrapFile {
 }
 
 struct NativeT3ThreadRoute {
+  let environmentId: String
   let projectId: String
   let threadId: String
   let url: URL
@@ -562,19 +799,30 @@ enum NativeT3RuntimeSessionBootstrap {
   /**
    CDXC:T3Code 2026-04-30-09:23
    T3 Code's desktop root URL is only a boot shell. Native panes must create
-   the same project/thread records as the reference app, then load the concrete
-   `/{projectId}/{threadId}` route so WKWebView renders the T3 workspace page
-   instead of the blank gray splash surface.
+   the same project/thread records as the app runtime, then load the concrete
+   `/{environmentId}/{threadId}` route so WKWebView renders the T3 workspace
+   page instead of the blank gray splash surface.
+   CDXC:T3Code 2026-05-01-14:31
+   t3code-embed routes threads by execution environment, not projection
+   project. A native pane that navigates to `/{projectId}/{threadId}` can
+   authenticate and load React but cannot bind the active thread, leaving the
+   user on "No active thread"; always resolve the runtime environment
+   descriptor before building the route.
    */
   static func prepareThreadRoute(
     origin: URL,
+    projectId requestedProjectId: String?,
     sessionId: String,
+    threadId requestedThreadId: String?,
     title: String,
     workspaceRoot: String?,
-    completion: @escaping (Result<URL, Error>) -> Void
+    completion: @escaping (Result<NativeT3ThreadRoute, Error>) -> Void
   ) {
     guard NativeT3RuntimeLauncher.isManagedRuntimeURL(origin) else {
-      DispatchQueue.main.async { completion(.success(origin)) }
+      DispatchQueue.main.async {
+        completion(
+          .success(NativeT3ThreadRoute(environmentId: "", projectId: "", threadId: "", url: origin)))
+      }
       return
     }
     guard let workspaceRoot, !workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -585,17 +833,35 @@ enum NativeT3RuntimeSessionBootstrap {
       return
     }
 
-    getSnapshot(origin: origin, sessionId: sessionId) { result in
-      switch result {
-      case .success(let snapshot):
+    getEnvironmentDescriptor(origin: origin, sessionId: sessionId) { descriptorResult in
+      switch descriptorResult {
+      case .success(let environment):
+        guard let environmentId = environment["environmentId"] as? String,
+          !environmentId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+          DispatchQueue.main.async {
+            completion(.failure(error("T3 environment descriptor is missing an environment id.")))
+          }
+          return
+        }
+        getSnapshot(origin: origin, sessionId: sessionId) { result in
+          switch result {
+          case .success(let snapshot):
         createThreadRoute(
           origin: origin,
+          environmentId: environmentId,
           sessionId: sessionId,
           snapshot: snapshot,
+          requestedProjectId: requestedProjectId,
+          requestedThreadId: requestedThreadId,
           title: title,
           workspaceRoot: workspaceRoot,
           completion: completion
         )
+          case .failure(let error):
+            DispatchQueue.main.async { completion(.failure(error)) }
+          }
+        }
       case .failure(let error):
         DispatchQueue.main.async { completion(.failure(error)) }
       }
@@ -604,13 +870,28 @@ enum NativeT3RuntimeSessionBootstrap {
 
   private static func createThreadRoute(
     origin: URL,
+    environmentId: String,
     sessionId: String,
     snapshot: [String: Any],
+    requestedProjectId: String?,
+    requestedThreadId: String?,
     title: String,
     workspaceRoot: String,
-    completion: @escaping (Result<URL, Error>) -> Void
+    completion: @escaping (Result<NativeT3ThreadRoute, Error>) -> Void
   ) {
-    let project = findProject(in: snapshot, workspaceRoot: workspaceRoot)
+    /**
+     CDXC:T3Code 2026-05-01-13:28
+     Native T3 restore must follow the reference `ensureThreadSession` behavior:
+     reuse the stored bound thread when it still exists, choose its project,
+     and create a new thread only when the stored thread is pending or missing.
+     The resolved metadata is sent back to the sidebar so future opens target
+     the real thread instead of a blank pending route.
+     */
+    let existingThread = findThread(in: snapshot, threadId: requestedThreadId)
+    let project =
+      findProjectForThread(in: snapshot, thread: existingThread, workspaceRoot: workspaceRoot)
+      ?? findProject(in: snapshot, projectId: requestedProjectId, workspaceRoot: workspaceRoot)
+      ?? findProject(in: snapshot, workspaceRoot: workspaceRoot)
     let ensureProject: (@escaping (Result<[String: Any], Error>) -> Void) -> Void = { callback in
       if let project {
         callback(.success(project))
@@ -626,6 +907,34 @@ enum NativeT3RuntimeSessionBootstrap {
           DispatchQueue.main.async { completion(.failure(error("T3 project is missing an id."))) }
           return
         }
+        if let existingThread, let existingThreadId = existingThread["id"] as? String {
+          guard
+            let route = routeURL(
+              origin: origin, environmentId: environmentId, threadId: existingThreadId)
+          else {
+            DispatchQueue.main.async {
+              completion(.failure(error("Failed to build T3 thread route URL.")))
+            }
+            return
+          }
+          NativeT3CodePaneReproLog.append("nativeT3Runtime.threadRoute.reused", [
+            "projectId": projectId,
+            "routeUrl": route.absoluteString,
+            "sessionId": sessionId,
+            "threadId": existingThreadId,
+            "environmentId": environmentId,
+            "workspaceRoot": workspaceRoot,
+          ])
+          DispatchQueue.main.async {
+            completion(
+              .success(
+                NativeT3ThreadRoute(
+                  environmentId: environmentId, projectId: projectId, threadId: existingThreadId,
+                  url: route)))
+          }
+          return
+        }
+
         let threadId = UUID().uuidString
         let modelSelection = (project["defaultModelSelection"] as? [String: Any])
           ?? defaultModelSelection
@@ -645,7 +954,9 @@ enum NativeT3RuntimeSessionBootstrap {
         dispatchCommand(origin: origin, sessionId: sessionId, command: command) { dispatchResult in
           switch dispatchResult {
           case .success:
-            guard let route = routeURL(origin: origin, projectId: projectId, threadId: threadId) else {
+            guard
+              let route = routeURL(origin: origin, environmentId: environmentId, threadId: threadId)
+            else {
               DispatchQueue.main.async {
                 completion(.failure(error("Failed to build T3 thread route URL.")))
               }
@@ -653,12 +964,20 @@ enum NativeT3RuntimeSessionBootstrap {
             }
             NativeT3CodePaneReproLog.append("nativeT3Runtime.threadRoute.ready", [
               "projectId": projectId,
+              "requestedThreadId": requestedThreadId ?? NSNull(),
               "routeUrl": route.absoluteString,
               "sessionId": sessionId,
               "threadId": threadId,
+              "environmentId": environmentId,
               "workspaceRoot": workspaceRoot,
             ])
-            DispatchQueue.main.async { completion(.success(route)) }
+            DispatchQueue.main.async {
+              completion(
+                .success(
+                  NativeT3ThreadRoute(
+                    environmentId: environmentId, projectId: projectId, threadId: threadId,
+                    url: route)))
+            }
           case .failure(let error):
             DispatchQueue.main.async { completion(.failure(error)) }
           }
@@ -666,6 +985,27 @@ enum NativeT3RuntimeSessionBootstrap {
       case .failure(let error):
         DispatchQueue.main.async { completion(.failure(error)) }
       }
+    }
+  }
+
+  private static func getEnvironmentDescriptor(
+    origin: URL,
+    sessionId: String,
+    completion: @escaping (Result<[String: Any], Error>) -> Void
+  ) {
+    guard let url = endpointURL(origin: origin, path: "/.well-known/t3/environment") else {
+      completion(.failure(error("Invalid T3 environment descriptor URL.")))
+      return
+    }
+    requestJSON(url: url, sessionId: sessionId, method: "GET", body: nil) { result in
+      if case .success(let payload) = result {
+        NativeT3CodePaneReproLog.append("nativeT3Runtime.environment.loaded", [
+          "environmentId": payload["environmentId"] as? String ?? NSNull(),
+          "label": payload["label"] as? String ?? NSNull(),
+          "sessionId": sessionId,
+        ])
+      }
+      completion(result)
     }
   }
 
@@ -760,13 +1100,14 @@ enum NativeT3RuntimeSessionBootstrap {
     request.httpMethod = method
     request.timeoutInterval = 30
     /**
-     CDXC:T3Code 2026-05-01-13:13
-     T3 orchestration APIs are owner-only management endpoints. Native panes
-     still bootstrap the browser with a paired client cookie, but project and
-     thread creation must use the VS Code owner bearer directly and avoid
-     automatic cookies so the paired browser role does not shadow ownership.
+     CDXC:T3Code 2026-05-01-13:46
+     T3 orchestration APIs are owner-only management endpoints. For native-
+     spawned runtimes, use the owner bearer produced from that runtime's
+     desktop bootstrap before falling back to a VS Code-owned bearer. Bearer
+     tokens are signed by the runtime's local key, so a VS Code bearer cannot
+     manage a separately spawned native server.
      */
-    if let ownerBearerToken = NativeT3RuntimeBrowserAuth.readVSmuxOwnerBearerToken() {
+    if let ownerBearerToken = NativeT3RuntimeBrowserAuth.readOwnerBearerTokenForManagedRuntime() {
       request.httpShouldHandleCookies = false
       request.setValue("Bearer \(ownerBearerToken)", forHTTPHeaderField: "authorization")
     }
@@ -816,6 +1157,46 @@ enum NativeT3RuntimeSessionBootstrap {
     }
   }
 
+  private static func findProject(
+    in snapshot: [String: Any], projectId: String?, workspaceRoot: String
+  ) -> [String: Any]? {
+    guard let projectId, !projectId.hasPrefix("native-"),
+      let projects = snapshot["projects"] as? [[String: Any]]
+    else {
+      return nil
+    }
+    return projects.first { project in
+      let deletedAt = project["deletedAt"]
+      let isDeleted = !(deletedAt == nil || deletedAt is NSNull)
+      return !isDeleted && project["id"] as? String == projectId
+        && project["workspaceRoot"] as? String == workspaceRoot
+    }
+  }
+
+  private static func findProjectForThread(
+    in snapshot: [String: Any], thread: [String: Any]?, workspaceRoot: String
+  ) -> [String: Any]? {
+    guard let projectId = thread?["projectId"] as? String else {
+      return nil
+    }
+    return findProject(in: snapshot, projectId: projectId, workspaceRoot: workspaceRoot)
+  }
+
+  private static func findThread(in snapshot: [String: Any], threadId: String?) -> [String: Any]? {
+    guard let threadId = threadId?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !threadId.isEmpty,
+      !threadId.hasPrefix("pending-"),
+      let threads = snapshot["threads"] as? [[String: Any]]
+    else {
+      return nil
+    }
+    return threads.first { thread in
+      let deletedAt = thread["deletedAt"]
+      let isDeleted = !(deletedAt == nil || deletedAt is NSNull)
+      return !isDeleted && thread["id"] as? String == threadId
+    }
+  }
+
   private static func endpointURL(origin: URL, path: String) -> URL? {
     var components = URLComponents()
     components.scheme = origin.scheme ?? "http"
@@ -825,12 +1206,12 @@ enum NativeT3RuntimeSessionBootstrap {
     return components.url
   }
 
-  private static func routeURL(origin: URL, projectId: String, threadId: String) -> URL? {
+  private static func routeURL(origin: URL, environmentId: String, threadId: String) -> URL? {
     var components = URLComponents()
     components.scheme = origin.scheme ?? "http"
     components.host = origin.host
     components.port = origin.port
-    components.path = "/\(projectId)/\(threadId)"
+    components.path = "/\(environmentId)/\(threadId)"
     return components.url
   }
 
@@ -914,9 +1295,26 @@ enum NativeT3RuntimeBrowserAuth {
         "url": sessionURL.absoluteString,
       ])
 
-      if authenticated == true {
-        finishPending(reason: "alreadyAuthenticated")
+      if authenticated == true,
+        NativeT3RuntimeLauncher.currentOwnerBearerToken() != nil
+          || NativeT3RuntimeLauncher.readPersistedOwnerBearerToken() != nil
+      {
+        finishPending(reason: "alreadyAuthenticatedWithNativeOwnerBearer")
         return
+      }
+      if authenticated == true {
+        /**
+         CDXC:T3Code 2026-05-01-15:07
+         Browser auth alone is insufficient for native T3 panes because thread
+         routing performs owner-only orchestration HTTP calls outside WKWebView.
+         Continue through the desktop bootstrap exchange until zmux owns the
+         matching bearer for this runtime, rather than trusting a stale cookie.
+         */
+        NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.session.nativeOwnerMissing", [
+          "authenticated": true,
+          "statusCode": statusCode,
+          "url": sessionURL.absoluteString,
+        ])
       }
       exchangeBootstrapCredential(origin: origin, attemptsRemaining: attemptsRemaining)
     }.resume()
@@ -931,13 +1329,88 @@ enum NativeT3RuntimeBrowserAuth {
       )
       return
     }
-    exchangeBrowserCredential(
+    exchangeNativeBootstrapForOwnerBearer(
       origin: origin,
       credential: credential,
-      credentialSource: "nativeDesktopBootstrap",
-      clearStoredCredentialOnSuccess: true,
       attemptsRemaining: attemptsRemaining
     )
+  }
+
+  /**
+   CDXC:T3Code 2026-05-01-13:45
+   The native-spawned t3code server signs bearer sessions with its own local
+   key. Match the reference runtime manager by exchanging the desktop bootstrap
+   at `/api/auth/bootstrap/bearer` first, then deriving the browser session
+   from that owner bearer. Spending the bootstrap directly on a browser cookie
+   leaves orchestration calls using an unrelated VS Code bearer and produces
+   `Invalid session token signature` 500s instead of creating/restoring the
+   requested thread.
+   */
+  private static func exchangeNativeBootstrapForOwnerBearer(
+    origin: URL,
+    credential: String,
+    attemptsRemaining: Int
+  ) {
+    guard let bearerURL = endpointURL(origin: origin, path: "/api/auth/bootstrap/bearer") else {
+      finishPending(reason: "invalidBearerBootstrapUrl")
+      return
+    }
+
+    var request = URLRequest(url: bearerURL)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.httpMethod = "POST"
+    request.timeoutInterval = authRequestTimeout
+    request.httpShouldHandleCookies = false
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try? JSONSerialization.data(withJSONObject: ["credential": credential])
+    NativeT3CodePaneReproLog.append("nativeT3Runtime.ownerBearer.bootstrap.start", [
+      "credentialPresent": true,
+      "url": bearerURL.absoluteString,
+    ])
+    URLSession.shared.dataTask(with: request) { data, response, error in
+      guard let httpResponse = response as? HTTPURLResponse else {
+        NativeT3CodePaneReproLog.append("nativeT3Runtime.ownerBearer.bootstrap.noResponse", [
+          "error": error?.localizedDescription ?? NSNull(),
+          "url": bearerURL.absoluteString,
+        ])
+        retryAuth(origin: origin, reason: "bearerBootstrapNoResponse", attemptsRemaining: attemptsRemaining)
+        return
+      }
+
+      let ownerBearerToken = parseSessionToken(data)
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.ownerBearer.bootstrap.response", [
+        "error": error?.localizedDescription ?? NSNull(),
+        "ownerBearerPresent": ownerBearerToken != nil,
+        "statusCode": httpResponse.statusCode,
+        "url": bearerURL.absoluteString,
+      ])
+      guard httpResponse.statusCode == 200, let ownerBearerToken else {
+        if httpResponse.statusCode == 401 {
+          exchangeExtensionPairingCredential(
+            origin: origin,
+            attemptsRemaining: attemptsRemaining,
+            originalReason: "bearerBootstrapStatus401"
+          )
+          return
+        }
+        retryAuth(
+          origin: origin,
+          reason: "bearerBootstrapStatus\(httpResponse.statusCode)",
+          attemptsRemaining: attemptsRemaining
+        )
+        return
+      }
+
+      NativeT3RuntimeLauncher.clearBootstrapCredential(credential)
+      NativeT3RuntimeLauncher.rememberOwnerBearerToken(ownerBearerToken)
+      exchangePairingCredential(
+        origin: origin,
+        ownerBearerToken: ownerBearerToken,
+        ownerBearerSource: "nativeDesktopBootstrap",
+        attemptsRemaining: attemptsRemaining,
+        originalReason: "nativeOwnerBearerReady"
+      )
+    }.resume()
   }
 
   private static func exchangeBrowserCredential(
@@ -1029,6 +1502,22 @@ enum NativeT3RuntimeBrowserAuth {
       retryAuth(origin: origin, reason: originalReason, attemptsRemaining: attemptsRemaining)
       return
     }
+    exchangePairingCredential(
+      origin: origin,
+      ownerBearerToken: ownerBearerToken,
+      ownerBearerSource: "extensionOwnerBearer",
+      attemptsRemaining: attemptsRemaining,
+      originalReason: originalReason
+    )
+  }
+
+  private static func exchangePairingCredential(
+    origin: URL,
+    ownerBearerToken: String,
+    ownerBearerSource: String,
+    attemptsRemaining: Int,
+    originalReason: String
+  ) {
     guard let pairingURL = endpointURL(origin: origin, path: "/api/auth/pairing-token") else {
       finishPending(reason: "invalidPairingUrl")
       return
@@ -1050,6 +1539,7 @@ enum NativeT3RuntimeBrowserAuth {
     request.setValue("Bearer \(ownerBearerToken)", forHTTPHeaderField: "authorization")
     NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.pairing.start", [
       "ownerBearerLength": ownerBearerToken.count,
+      "ownerBearerSource": ownerBearerSource,
       "originalReason": originalReason,
       "url": pairingURL.absoluteString,
     ])
@@ -1068,6 +1558,7 @@ enum NativeT3RuntimeBrowserAuth {
       NativeT3CodePaneReproLog.append("nativeT3Runtime.browserAuth.pairing.response", [
         "credentialPresent": credential != nil,
         "error": error?.localizedDescription ?? NSNull(),
+        "ownerBearerSource": ownerBearerSource,
         "originalReason": originalReason,
         "statusCode": httpResponse.statusCode,
         "url": pairingURL.absoluteString,
@@ -1083,7 +1574,7 @@ enum NativeT3RuntimeBrowserAuth {
       exchangeBrowserCredential(
         origin: origin,
         credential: credential,
-        credentialSource: "extensionOwnerPairing",
+        credentialSource: "\(ownerBearerSource)Pairing",
         clearStoredCredentialOnSuccess: false,
         attemptsRemaining: attemptsRemaining
       )
@@ -1181,6 +1672,30 @@ enum NativeT3RuntimeBrowserAuth {
       return nil
     }
     return credential
+  }
+
+  private static func parseSessionToken(_ data: Data?) -> String? {
+    guard let data,
+      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let sessionToken = payload["sessionToken"] as? String,
+      !sessionToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      return nil
+    }
+    return sessionToken
+  }
+
+  fileprivate static func readOwnerBearerTokenForManagedRuntime() -> String? {
+    if let ownerBearerToken = NativeT3RuntimeLauncher.currentOwnerBearerToken() {
+      NativeT3CodePaneReproLog.append("nativeT3Runtime.ownerBearer.native.read", [
+        "ownerBearerLength": ownerBearerToken.count
+      ])
+      return ownerBearerToken
+    }
+    if let ownerBearerToken = NativeT3RuntimeLauncher.readPersistedOwnerBearerToken() {
+      return ownerBearerToken
+    }
+    return readVSmuxOwnerBearerToken()
   }
 
   fileprivate static func readVSmuxOwnerBearerToken() -> String? {
