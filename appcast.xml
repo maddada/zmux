@@ -11,6 +11,17 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
          like DockDoor. Release automation should add signed release items here
          before publishing app updates so installed apps can discover them. -->
         <item>
+            <title>1.4.3</title>
+            <pubDate>Sun, 03 May 2026 08:14:57 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/zmux/releases/tag/v1.4.3</sparkle:fullReleaseNotesLink>
+            <sparkle:version>10403</sparkle:version>
+            <sparkle:shortVersionString>1.4.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <sparkle:releaseNotesLink sparkle:edSignature="rf7OwZwRnuKfceJqd/mZIlhhNpD1sYoVZVVgFA0dSPuLrvWpXgJlbKtAWlqH7X5+S6xzF/maqgaxNMbXroh4BQ==" sparkle:length="865">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.3.md</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/maddada/zmux/releases/download/v1.4.3/zmux-1.4.3.dmg" length="24009650" type="application/octet-stream" sparkle:edSignature="C+xJtw8mfe0Ehgq5t6Am/5Es3z8186Jvs54fHQyizZnSwunPeGJHjOGiExZl7Bda2NjNrZt1iZn5VdzmAKNwAg=="/>
+        </item>
+        <item>
             <title>1.4.2</title>
             <pubDate>Sat, 02 May 2026 11:32:19 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/zmux/releases/tag/v1.4.2</sparkle:fullReleaseNotesLink>
@@ -35,6 +46,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: wVE5F0xgW7meY94YU4YAd4Rn8Be+VgOsnkR9vgYyB/fIfbxQyRHp4k4LHTtPHv9iTaQaETuJTyUdcg0iN69SCg==
-length: 2956
+edSignature: AIU1o2mg6F76uOdYzxGBVigsEyCkyYE/dgj8DHwtAWdN2BJWb0rvzSCrpQdh46tO1FOnHyTzCXnFMupKZuiHCw==
+length: 4020
 -->
