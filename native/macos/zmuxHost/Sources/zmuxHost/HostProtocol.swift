@@ -7,6 +7,7 @@ enum HostCommand: Decodable {
   case closeWebPane(SessionCommand)
   case focusTerminal(SessionCommand)
   case focusWebPane(SessionCommand)
+  case reloadWebPane(SessionCommand)
   case startT3CodeRuntime(StartT3CodeRuntime)
   case stopT3CodeRuntime
   case activateApp
@@ -32,6 +33,10 @@ enum HostCommand: Decodable {
   case openExternalUrl(OpenExternalUrl)
   case openBrowserWindow(OpenBrowserWindow)
   case showBrowserWindow
+  case openBrowserDevTools(SessionCommand)
+  case injectBrowserReactGrab(SessionCommand)
+  case showBrowserProfilePicker(SessionCommand)
+  case showBrowserImportSettings(SessionCommand)
   case setSidebarSide(SetSidebarSide)
   case configureZedOverlay(ConfigureZedOverlay)
   case openZedWorkspace(OpenZedWorkspace)
@@ -48,6 +53,7 @@ enum HostCommand: Decodable {
     case closeWebPane
     case focusTerminal
     case focusWebPane
+    case reloadWebPane
     case startT3CodeRuntime
     case stopT3CodeRuntime
     case activateApp
@@ -73,6 +79,10 @@ enum HostCommand: Decodable {
     case openExternalUrl
     case openBrowserWindow
     case showBrowserWindow
+    case openBrowserDevTools
+    case injectBrowserReactGrab
+    case showBrowserProfilePicker
+    case showBrowserImportSettings
     case setSidebarSide
     case configureZedOverlay
     case openZedWorkspace
@@ -94,6 +104,8 @@ enum HostCommand: Decodable {
       self = .focusTerminal(try SessionCommand(from: decoder))
     case .focusWebPane:
       self = .focusWebPane(try SessionCommand(from: decoder))
+    case .reloadWebPane:
+      self = .reloadWebPane(try SessionCommand(from: decoder))
     case .startT3CodeRuntime:
       self = .startT3CodeRuntime(try StartT3CodeRuntime(from: decoder))
     case .stopT3CodeRuntime:
@@ -145,6 +157,14 @@ enum HostCommand: Decodable {
       self = .openBrowserWindow(try OpenBrowserWindow(from: decoder))
     case .showBrowserWindow:
       self = .showBrowserWindow
+    case .openBrowserDevTools:
+      self = .openBrowserDevTools(try SessionCommand(from: decoder))
+    case .injectBrowserReactGrab:
+      self = .injectBrowserReactGrab(try SessionCommand(from: decoder))
+    case .showBrowserProfilePicker:
+      self = .showBrowserProfilePicker(try SessionCommand(from: decoder))
+    case .showBrowserImportSettings:
+      self = .showBrowserImportSettings(try SessionCommand(from: decoder))
     case .setSidebarSide:
       self = .setSidebarSide(try SetSidebarSide(from: decoder))
     case .configureZedOverlay:
@@ -194,6 +214,8 @@ struct SetActiveTerminalSet: Decodable {
   let focusedSessionId: String?
   let layout: NativeTerminalLayout?
   let paneGap: Double?
+  let sessionAgentIconColors: [String: String]?
+  let sessionAgentIconDataUrls: [String: String]?
   let sessionActivities: [String: NativeTerminalActivity]?
   let sessionTitles: [String: String]?
 }
@@ -366,7 +388,10 @@ enum HostEvent: Encodable {
   case nativeHotkey(actionId: String)
   case terminalReady(sessionId: String, ttyName: String?, foregroundPid: Int?)
   case terminalTitleChanged(sessionId: String, title: String)
+  case browserFaviconChanged(sessionId: String, faviconDataUrl: String?)
+  case browserUrlChanged(sessionId: String, url: String)
   case terminalTitleBarAction(sessionId: String, action: TerminalTitleBarAction)
+  case paneReorderRequested(sourceSessionId: String, targetSessionId: String)
   case terminalCwdChanged(sessionId: String, cwd: String)
   case terminalExited(sessionId: String, exitCode: Int?)
   case terminalFocused(sessionId: String)
@@ -389,6 +414,8 @@ enum HostEvent: Encodable {
     case stderr
     case stdout
     case title
+    case faviconDataUrl
+    case url
     case projectId
     case serverOrigin
     case threadId
@@ -398,6 +425,8 @@ enum HostEvent: Encodable {
     case requestId
     case ok
     case payloadJson
+    case sourceSessionId
+    case targetSessionId
   }
 
   func encode(to encoder: Encoder) throws {
@@ -425,10 +454,22 @@ enum HostEvent: Encodable {
       try container.encode("terminalTitleChanged", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)
       try container.encode(title, forKey: .title)
+    case .browserFaviconChanged(let sessionId, let faviconDataUrl):
+      try container.encode("browserFaviconChanged", forKey: .type)
+      try container.encode(sessionId, forKey: .sessionId)
+      try container.encodeIfPresent(faviconDataUrl, forKey: .faviconDataUrl)
+    case .browserUrlChanged(let sessionId, let url):
+      try container.encode("browserUrlChanged", forKey: .type)
+      try container.encode(sessionId, forKey: .sessionId)
+      try container.encode(url, forKey: .url)
     case .terminalTitleBarAction(let sessionId, let action):
       try container.encode("terminalTitleBarAction", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)
       try container.encode(action, forKey: .action)
+    case .paneReorderRequested(let sourceSessionId, let targetSessionId):
+      try container.encode("paneReorderRequested", forKey: .type)
+      try container.encode(sourceSessionId, forKey: .sourceSessionId)
+      try container.encode(targetSessionId, forKey: .targetSessionId)
     case .terminalCwdChanged(let sessionId, let cwd):
       try container.encode("terminalCwdChanged", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)

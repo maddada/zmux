@@ -81,6 +81,16 @@ export type NativeGhosttyHostEvent =
       type: "terminalTitleChanged";
     }
   | {
+      faviconDataUrl?: string;
+      sessionId: string;
+      type: "browserFaviconChanged";
+    }
+  | {
+      sessionId: string;
+      type: "browserUrlChanged";
+      url: string;
+    }
+  | {
       cwd: string;
       sessionId: string;
       type: "terminalCwdChanged";

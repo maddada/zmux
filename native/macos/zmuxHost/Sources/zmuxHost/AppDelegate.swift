@@ -890,6 +890,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       workspaceView?.focusTerminal(sessionId: command.sessionId)
     case .focusWebPane(let command):
       workspaceView?.focusWebPane(sessionId: command.sessionId)
+    case .reloadWebPane(let command):
+      workspaceView?.reloadWebPane(sessionId: command.sessionId)
     case .startT3CodeRuntime(let command):
       startT3CodeRuntime(command)
     case .stopT3CodeRuntime:
@@ -942,6 +944,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       browserOverlayController?.open(command)
     case .showBrowserWindow:
       browserOverlayController?.showRunningChromeCanary()
+    case .openBrowserDevTools(let command):
+      workspaceView?.openBrowserDevTools(sessionId: command.sessionId)
+    case .injectBrowserReactGrab(let command):
+      workspaceView?.injectBrowserReactGrab(sessionId: command.sessionId)
+    case .showBrowserProfilePicker(let command):
+      workspaceView?.showBrowserProfilePicker(sessionId: command.sessionId)
+    case .showBrowserImportSettings(let command):
+      workspaceView?.showBrowserImportSettings(sessionId: command.sessionId)
     case .setSidebarSide(let command):
       (window?.contentView as? zmuxRootView)?.setSidebarSide(command.side)
     case .configureZedOverlay(let command):
@@ -1213,16 +1223,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
         ))
       return
     }
+    /**
+     CDXC:BrowserPanes 2026-05-02-11:18
+     Browser-pane verification uses the real zmux app and sidebar CLI. WebKit's
+     evaluateJavaScript cannot serialize a Promise result, so CLI commands must
+     run through callAsyncJavaScript before returning JSON to the bridge.
+     */
     let script = """
-      (async () => {
-        const handler = window.__zmux_NATIVE_CLI__;
-        if (!handler || typeof handler.handleCommand !== 'function') {
-          return JSON.stringify({ ok: false, error: 'sidebar-cli-handler-missing' });
-        }
-        return JSON.stringify(await handler.handleCommand(\(actionJson), JSON.parse(\(payloadJson))));
-      })()
+      const handler = window.__zmux_NATIVE_CLI__;
+      if (!handler || typeof handler.handleCommand !== 'function') {
+        return JSON.stringify({ ok: false, error: 'sidebar-cli-handler-missing' });
+      }
+      return JSON.stringify(await handler.handleCommand(action, JSON.parse(payloadJson)));
       """
-    sidebarView.evaluateJavaScript(script) { [weak self] result, error in
+    let handleResult: (Any?, Error?) -> Void = { [weak self] result, error in
       let payloadJson: String
       let ok: Bool
       if let error {
@@ -1241,6 +1255,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
           ok: ok,
           payloadJson: payloadJson
         ))
+    }
+    if #available(macOS 11.0, *) {
+      sidebarView.callAsyncJavaScript(
+        script,
+        arguments: [
+          "action": command.action,
+          "payloadJson": command.payloadJson ?? "{}",
+        ],
+        in: nil,
+        in: .page
+      ) { result in
+        switch result {
+        case .success(let value):
+          handleResult(value, nil)
+        case .failure(let error):
+          handleResult(nil, error)
+        }
+      }
+      return
+    }
+    let fallbackScript = """
+      (async () => {
+        const action = \(actionJson);
+        const payloadJson = \(payloadJson);
+        \(script)
+      })()
+      """
+    sidebarView.evaluateJavaScript(fallbackScript) { result, error in
+      handleResult(result, error)
     }
   }
 
@@ -2083,6 +2126,8 @@ final class zmuxRootView: NSView {
       workspaceView.focusTerminal(sessionId: command.sessionId)
     case .focusWebPane(let command):
       workspaceView.focusWebPane(sessionId: command.sessionId)
+    case .reloadWebPane(let command):
+      workspaceView.reloadWebPane(sessionId: command.sessionId)
     case .startT3CodeRuntime(let command):
       startT3CodeRuntime(command)
     case .stopT3CodeRuntime:
@@ -2152,6 +2197,14 @@ final class zmuxRootView: NSView {
        native workarea placement without creating a new browser tab.
        */
       showBrowserWindow()
+    case .openBrowserDevTools(let command):
+      workspaceView.openBrowserDevTools(sessionId: command.sessionId)
+    case .injectBrowserReactGrab(let command):
+      workspaceView.injectBrowserReactGrab(sessionId: command.sessionId)
+    case .showBrowserProfilePicker(let command):
+      workspaceView.showBrowserProfilePicker(sessionId: command.sessionId)
+    case .showBrowserImportSettings(let command):
+      workspaceView.showBrowserImportSettings(sessionId: command.sessionId)
     case .setSidebarSide(let command):
       setSidebarSide(command.side)
     case .configureZedOverlay(let command):

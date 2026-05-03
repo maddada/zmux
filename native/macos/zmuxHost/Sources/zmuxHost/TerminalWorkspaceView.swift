@@ -4,6 +4,46 @@ import GhosttyKit
 import QuartzCore
 import WebKit
 
+private func nativePaneImage(fromDataUrl dataUrl: String?, isTemplate: Bool = false) -> NSImage? {
+  guard let dataUrl,
+    let commaIndex = dataUrl.firstIndex(of: ",")
+  else {
+    return nil
+  }
+  let metadata = dataUrl[..<commaIndex]
+  let payload = String(dataUrl[dataUrl.index(after: commaIndex)...])
+  let data: Data?
+  if metadata.contains(";base64") {
+    data = Data(base64Encoded: payload)
+  } else {
+    data = payload.removingPercentEncoding?.data(using: .utf8)
+  }
+  guard let data else {
+    return nil
+  }
+  guard let image = NSImage(data: data) else {
+    return nil
+  }
+  image.isTemplate = isTemplate
+  return image
+}
+
+private func nativePaneColor(fromHex hex: String?) -> NSColor? {
+  guard let hex else {
+    return nil
+  }
+  let value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+  guard value.count == 6, let rgb = UInt32(value, radix: 16) else {
+    return nil
+  }
+  return NSColor(
+    calibratedRed: CGFloat((rgb >> 16) & 0xff) / 255,
+    green: CGFloat((rgb >> 8) & 0xff) / 255,
+    blue: CGFloat(rgb & 0xff) / 255,
+    alpha: 1
+  )
+}
+
 @MainActor
 final class TerminalWorkspaceView: NSView {
   private struct TerminalSession {
@@ -19,13 +59,16 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private struct WebPaneSession {
+    let browserTitleObservation: NSKeyValueObservation?
     let diagnosticsBridge: T3CodePaneDiagnosticsBridge
     let hostView: WebPaneHostView
+    let isManagedT3Pane: Bool
     let projectId: String?
     let sessionId: String
     let threadId: String?
     let title: String
     let workspaceRoot: String?
+    let browserProfileID: UUID?
     let webView: WKWebView
     let titleBarView: TerminalSessionTitleBarView
     let borderView: TerminalPaneBorderView
@@ -51,23 +94,36 @@ final class TerminalWorkspaceView: NSView {
     let startRatios: [CGFloat]
   }
 
+  private struct PaneHeaderDrag {
+    var isDragging: Bool
+    let sourceSessionId: String
+    let startPoint: CGPoint
+    var targetSessionId: String?
+  }
+
   private static let terminalTitleBarHeight: CGFloat = 33
   private static let defaultPaneGap: CGFloat = 12
   private static let singlePaneInset: CGFloat = 1
   private static let paneResizeHitSize: CGFloat = 4
   private static let paneResizeMinimumHeight: CGFloat = 160
   private static let paneResizeMinimumWidth: CGFloat = 220
+  private static let paneHeaderDragThreshold: CGFloat = 6
+  private static let paneHeaderDragGhostMaxWidth: CGFloat = 230
+  private static let browserPaneApplicationNameForUserAgent = "Version/18.4 Safari/605.1.15"
   private static let defaultWorkspaceBackgroundColor = NSColor(
     calibratedRed: 0.071, green: 0.071, blue: 0.071, alpha: 1)
   private let ghostty: Ghostty.App
   private let sendEvent: (HostEvent) -> Void
   private var sessions: [String: TerminalSession] = [:]
   private var webPaneSessions: [String: WebPaneSession] = [:]
+  private var webPaneFaviconTasksBySessionId: [String: Task<Void, Never>] = [:]
   private var completedWebPaneLoadSessionIds = Set<String>()
   private var pendingAuthenticatedWebPaneLoadSessionIds = Set<String>()
   private var t3ThreadRouteRetryAttemptsBySessionId = [String: Int]()
   private var activeSessionIds = Set<String>()
   private var attentionSessionIds = Set<String>()
+  private var sessionAgentIconColors = [String: String]()
+  private var sessionAgentIconDataUrls = [String: String]()
   private var sessionActivities = [String: NativeTerminalActivity]()
   private var sessionTitles = [String: String]()
   private var focusedSessionId: String?
@@ -78,6 +134,11 @@ final class TerminalWorkspaceView: NSView {
   private var paneResizeHits: [PaneResizeHit] = []
   private var paneResizeRatiosByPath: [String: [CGFloat]] = [:]
   private var paneResizeDrag: PaneResizeDrag?
+  private var paneHeaderDrag: PaneHeaderDrag?
+  private var paneHeaderActionPress: (sessionId: String, action: TerminalTitleBarAction)?
+  private var paneHeaderEventMonitor: Any?
+  private var paneHeaderDragGhostView: TerminalPaneHeaderDragGhostView?
+  private var paneHeaderDragTargetView: TerminalPaneHeaderDragTargetView?
   private var resizeLogSignatureBySessionId = [String: String]()
   private var exitPollTimer: Timer?
 
@@ -97,6 +158,20 @@ final class TerminalWorkspaceView: NSView {
 
   required init?(coder: NSCoder) {
     fatalError("init(coder:) is not supported")
+  }
+
+  deinit {
+    if let paneHeaderEventMonitor {
+      NSEvent.removeMonitor(paneHeaderEventMonitor)
+    }
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    uninstallPaneHeaderEventMonitor()
+    if window != nil {
+      installPaneHeaderEventMonitor()
+    }
   }
 
   func createTerminal(_ command: CreateTerminal) {
@@ -135,8 +210,24 @@ final class TerminalWorkspaceView: NSView {
       title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId)
     )
     titleBarView.translatesAutoresizingMaskIntoConstraints = false
-    titleBarView.onMouseDown = { [weak self] in
-      self?.focusTerminal(sessionId: command.sessionId, reason: "nativeTitleBarMouseDown")
+    titleBarView.onMouseDown = { [weak self] event in
+      self?.handlePaneTitleBarMouseDown(
+        event,
+        sessionId: command.sessionId,
+        focusReason: "nativeTitleBarMouseDown")
+    }
+    titleBarView.onMouseDragged = { [weak self] event in
+      self?.handlePaneTitleBarMouseDragged(event, sessionId: command.sessionId)
+    }
+    titleBarView.onMouseUp = { [weak self] event in
+      self?.handlePaneTitleBarMouseUp(event, sessionId: command.sessionId)
+    }
+    titleBarView.resizeCursorForPoint = { [weak self, weak titleBarView] point in
+      guard let self, let titleBarView else {
+        return nil
+      }
+      let workspacePoint = self.convert(point, from: titleBarView)
+      return self.paneResizeCursor(at: workspacePoint)
     }
     titleBarView.onAction = { [weak self] action in
       self?.focusTerminal(sessionId: command.sessionId, reason: "nativeTitleBarAction")
@@ -226,6 +317,7 @@ final class TerminalWorkspaceView: NSView {
     }
     activeSessionIds.remove(sessionId)
     sessionActivities.removeValue(forKey: sessionId)
+    sessionAgentIconDataUrls.removeValue(forKey: sessionId)
     sessionTitles.removeValue(forKey: sessionId)
     resizeLogSignatureBySessionId.removeValue(forKey: sessionId)
     if let surface = session.view.surface {
@@ -256,6 +348,8 @@ final class TerminalWorkspaceView: NSView {
    the T3 button embeds the app instead of typing `npx --yes t3` into Ghostty.
    */
   func createWebPane(_ command: CreateWebPane) {
+    let initialUrl = URL(string: command.url)
+    let isManagedT3Pane = initialUrl.map(NativeT3RuntimeLauncher.isManagedRuntimeURL) ?? false
     if webPaneSessions[command.sessionId] != nil {
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.create.reused", [
         "sessionId": command.sessionId,
@@ -273,7 +367,21 @@ final class TerminalWorkspaceView: NSView {
     ])
     let configuration = WKWebViewConfiguration()
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
-    configuration.websiteDataStore = .default()
+    configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+    if !isManagedT3Pane {
+      /**
+       CDXC:BrowserPanes 2026-05-03-02:08
+       Public sites such as Google serve legacy/basic markup to WKWebView's
+       bare default user agent because it lacks Safari's Version/Safari product
+       token. Browser panes should identify as Safari-compatible WebKit so page
+       styling matches Safari while T3 panes keep their managed runtime path.
+       */
+      configuration.applicationNameForUserAgent = Self.browserPaneApplicationNameForUserAgent
+    }
+    let browserProfileID = isManagedT3Pane ? nil : NativeBrowserProfileStore.shared.effectiveLastUsedProfileID
+    configuration.websiteDataStore = browserProfileID.map {
+      NativeBrowserProfileStore.shared.websiteDataStore(for: $0)
+    } ?? .default()
     let diagnosticsBridge = T3CodePaneDiagnosticsBridge(sessionId: command.sessionId)
     configuration.userContentController.add(
       diagnosticsBridge,
@@ -285,17 +393,23 @@ final class TerminalWorkspaceView: NSView {
         injectionTime: .atDocumentStart,
         forMainFrameOnly: false
       ))
-    configuration.userContentController.addUserScript(
-      WKUserScript(
-        source: Self.t3WebPaneBridgeScript(
-          sessionId: command.sessionId, title: command.title, workspaceRoot: command.cwd),
-        injectionTime: .atDocumentStart,
-        forMainFrameOnly: true
-      ))
+    if isManagedT3Pane {
+      configuration.userContentController.addUserScript(
+        WKUserScript(
+          source: Self.t3WebPaneBridgeScript(
+            sessionId: command.sessionId, title: command.title, workspaceRoot: command.cwd),
+          injectionTime: .atDocumentStart,
+          forMainFrameOnly: true
+        ))
+    }
     let webView = WKWebView(frame: .zero, configuration: configuration)
+    if #available(macOS 13.3, *) {
+      webView.isInspectable = true
+    }
     webView.translatesAutoresizingMaskIntoConstraints = true
     webView.allowsBackForwardNavigationGestures = true
     webView.navigationDelegate = self
+    webView.uiDelegate = self
     /**
      CDXC:T3Code 2026-04-30-19:17
      Native T3 panes must use WKWebView's default opaque drawing path. The
@@ -306,15 +420,58 @@ final class TerminalWorkspaceView: NSView {
     webView.wantsLayer = true
     webView.layer?.masksToBounds = true
     webView.underPageBackgroundColor = NSColor(calibratedRed: 0.086, green: 0.086, blue: 0.086, alpha: 1)
-    let hostView = WebPaneHostView(webView: webView)
+    /**
+     CDXC:BrowserPanes 2026-05-02-16:58
+     Browser panes need in-pane navigation chrome like the embedded browser
+     reference: back/forward/reload, a URL field, and browser tooling buttons.
+     The chrome is owned by the native pane host, not an overlay, so the pane
+     still participates in the same splitter layout as T3 Code and terminals.
+     */
+    let hostView = WebPaneHostView(
+      webView: webView,
+      showsBrowserToolbar: !isManagedT3Pane,
+      initialAddress: command.url,
+      onFocus: { [weak self] in
+        self?.focusWebPane(sessionId: command.sessionId, reason: "browserToolbar")
+      },
+      onOpenDevTools: { [weak self] in
+        self?.openBrowserDevTools(sessionId: command.sessionId)
+      },
+      onInjectReactGrab: { [weak self] in
+        self?.injectBrowserReactGrab(sessionId: command.sessionId)
+      },
+      onShowProfilePicker: { [weak self] in
+        self?.showBrowserProfilePicker(sessionId: command.sessionId)
+      },
+      onShowImportSettings: { [weak self] in
+        self?.showBrowserImportSettings(sessionId: command.sessionId)
+      }
+    )
     hostView.translatesAutoresizingMaskIntoConstraints = false
 
     let titleBarView = TerminalSessionTitleBarView(
-      title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId)
+      title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId),
+      actions: isManagedT3Pane ? TerminalSessionTitleBarView.defaultActions : [.close]
     )
     titleBarView.translatesAutoresizingMaskIntoConstraints = false
-    titleBarView.onMouseDown = { [weak self] in
-      self?.focusWebPane(sessionId: command.sessionId, reason: "nativeWebTitleBarMouseDown")
+    titleBarView.onMouseDown = { [weak self] event in
+      self?.handlePaneTitleBarMouseDown(
+        event,
+        sessionId: command.sessionId,
+        focusReason: "nativeWebTitleBarMouseDown")
+    }
+    titleBarView.onMouseDragged = { [weak self] event in
+      self?.handlePaneTitleBarMouseDragged(event, sessionId: command.sessionId)
+    }
+    titleBarView.onMouseUp = { [weak self] event in
+      self?.handlePaneTitleBarMouseUp(event, sessionId: command.sessionId)
+    }
+    titleBarView.resizeCursorForPoint = { [weak self, weak titleBarView] point in
+      guard let self, let titleBarView else {
+        return nil
+      }
+      let workspacePoint = self.convert(point, from: titleBarView)
+      return self.paneResizeCursor(at: workspacePoint)
     }
     titleBarView.onAction = { [weak self] action in
       self?.focusWebPane(sessionId: command.sessionId, reason: "nativeWebTitleBarAction")
@@ -322,15 +479,34 @@ final class TerminalWorkspaceView: NSView {
     }
     let borderView = TerminalPaneBorderView()
     borderView.translatesAutoresizingMaskIntoConstraints = false
+    /**
+     CDXC:BrowserPanes 2026-05-03-01:58
+     Browser panes should name native chrome from the loaded page, not the
+     launch URL or localhost wrapper. Observe WKWebView title changes and feed
+     them through the existing session-title sync path so later layout syncs do
+     not overwrite the AppKit title bar with the initial browser card title.
+     */
+    let browserTitleObservation =
+      isManagedT3Pane
+      ? nil
+      : webView.observe(\.title, options: [.new]) { [weak self, weak webView] _, _ in
+        Task { @MainActor in
+          guard let webView else { return }
+          self?.updateWebPanePageMetadata(for: webView, reason: "titleObservation")
+        }
+      }
 
     webPaneSessions[command.sessionId] = WebPaneSession(
+      browserTitleObservation: browserTitleObservation,
       diagnosticsBridge: diagnosticsBridge,
       hostView: hostView,
+      isManagedT3Pane: isManagedT3Pane,
       projectId: command.projectId,
       sessionId: command.sessionId,
       threadId: command.threadId,
       title: command.title,
       workspaceRoot: command.cwd,
+      browserProfileID: browserProfileID,
       webView: webView,
       titleBarView: titleBarView,
       borderView: borderView
@@ -342,8 +518,9 @@ final class TerminalWorkspaceView: NSView {
     orderWebPaneViewsToFront(webPaneSessions[command.sessionId])
     terminalLayout = terminalLayout ?? .leaf(sessionId: command.sessionId)
 
-    if let url = URL(string: command.url) {
+    if let url = initialUrl {
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.requested", [
+        "isManagedT3Pane": isManagedT3Pane,
         "sessionId": command.sessionId,
         "url": url.absoluteString,
         "workspaceRoot": command.cwd ?? NSNull(),
@@ -351,8 +528,8 @@ final class TerminalWorkspaceView: NSView {
       loadWebPaneStatus(
         sessionId: command.sessionId,
         title: command.title,
-        message: "Loading T3 Code…",
-        caption: "Preparing the embedded workspace",
+        message: isManagedT3Pane ? "Loading T3 Code…" : "Loading Browser…",
+        caption: isManagedT3Pane ? "Preparing the embedded workspace" : url.absoluteString,
         loading: true,
         reason: "createWebPane")
       loadWebPane(sessionId: command.sessionId, url: url, reason: "initial")
@@ -381,10 +558,13 @@ final class TerminalWorkspaceView: NSView {
     ])
     activeSessionIds.remove(sessionId)
     sessionActivities.removeValue(forKey: sessionId)
+    sessionAgentIconDataUrls.removeValue(forKey: sessionId)
     completedWebPaneLoadSessionIds.remove(sessionId)
     pendingAuthenticatedWebPaneLoadSessionIds.remove(sessionId)
     t3ThreadRouteRetryAttemptsBySessionId.removeValue(forKey: sessionId)
+    webPaneFaviconTasksBySessionId.removeValue(forKey: sessionId)?.cancel()
     session.webView.navigationDelegate = nil
+    session.webView.uiDelegate = nil
     session.webView.configuration.userContentController.removeScriptMessageHandler(
       forName: T3CodePaneDiagnosticsBridge.messageHandlerName
     )
@@ -429,6 +609,63 @@ final class TerminalWorkspaceView: NSView {
       "sessionId": sessionId,
     ])
     sendEvent(.terminalFocused(sessionId: sessionId))
+  }
+
+  func openBrowserDevTools(sessionId: String) {
+    guard let session = webPaneSessions[sessionId] else {
+      return
+    }
+    focusWebPane(sessionId: sessionId, reason: "browserDevTools")
+    if !NativeBrowserDevTools.toggle(for: session.webView) {
+      NSSound.beep()
+    }
+  }
+
+  func injectBrowserReactGrab(sessionId: String) {
+    guard let session = webPaneSessions[sessionId] else {
+      return
+    }
+    focusWebPane(sessionId: sessionId, reason: "browserReactGrab")
+    Task { @MainActor in
+      await NativeBrowserReactGrabInjector.toggleOrInject(into: session.webView)
+    }
+  }
+
+  func showBrowserProfilePicker(sessionId: String) {
+    guard let session = webPaneSessions[sessionId] else {
+      return
+    }
+    focusWebPane(sessionId: sessionId, reason: "browserProfilePicker")
+    NativeBrowserProfileUI.showPicker(
+      parentWindow: window,
+      currentProfileID: session.browserProfileID
+    )
+  }
+
+  func showBrowserImportSettings(sessionId: String) {
+    guard webPaneSessions[sessionId] != nil else {
+      return
+    }
+    focusWebPane(sessionId: sessionId, reason: "browserImportSettings")
+    NativeBrowserProfileUI.showImportSettings(parentWindow: window)
+  }
+
+  func reloadWebPane(sessionId: String) {
+    guard let session = webPaneSessions[sessionId] else {
+      return
+    }
+    focusWebPane(sessionId: sessionId, reason: "browserPaneReload")
+    /**
+     CDXC:BrowserPanes 2026-05-02-17:39
+     Browser-pane title-bar reload must operate on the embedded WKWebView,
+     because browser panes are first-class AppKit panes and their title-bar
+     controls should not be terminal-only no-ops.
+     */
+    if session.webView.isLoading {
+      session.webView.stopLoading()
+    } else {
+      session.webView.reload()
+    }
   }
 
   func focusTerminal(sessionId: String, reason: String = "explicitFocusTerminalCommand") {
@@ -618,6 +855,8 @@ final class TerminalWorkspaceView: NSView {
     let responderBefore = responderSnapshot()
     activeSessionIds = Set(command.activeSessionIds)
     attentionSessionIds = Set(command.attentionSessionIds ?? [])
+    sessionAgentIconColors = command.sessionAgentIconColors ?? [:]
+    sessionAgentIconDataUrls = command.sessionAgentIconDataUrls ?? [:]
     sessionActivities = command.sessionActivities ?? [:]
     sessionTitles = command.sessionTitles ?? [:]
     focusedSessionId = command.focusedSessionId
@@ -641,6 +880,9 @@ final class TerminalWorkspaceView: NSView {
           normalizedTerminalSessionTitle(title, sessionId: session.sessionId)
         )
       }
+      session.titleBarView.setAgentIconDataUrl(
+        sessionAgentIconDataUrls[session.sessionId],
+        colorHex: sessionAgentIconColors[session.sessionId])
       if !activeSessionIds.contains(session.sessionId) {
         moveOffscreen(session.scrollView)
         moveOffscreen(session.searchBarView)
@@ -652,6 +894,9 @@ final class TerminalWorkspaceView: NSView {
       session.hostView.isHidden = false
       session.titleBarView.isHidden = false
       session.borderView.isHidden = false
+      session.titleBarView.setAgentIconDataUrl(
+        sessionAgentIconDataUrls[session.sessionId],
+        colorHex: sessionAgentIconColors[session.sessionId])
       if !activeSessionIds.contains(session.sessionId) {
         moveOffscreen(session.hostView)
         moveOffscreen(session.titleBarView)
@@ -904,6 +1149,17 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
+  private func paneResizeCursor(at point: CGPoint) -> NSCursor? {
+    guard let hit = paneResizeHit(at: point) else {
+      return nil
+    }
+    return paneResizeCursor(for: hit.direction)
+  }
+
+  private func paneResizeCursor(for direction: NativeTerminalLayout.SplitDirection) -> NSCursor {
+    direction == .horizontal ? .resizeLeftRight : .resizeUpDown
+  }
+
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
     true
   }
@@ -934,6 +1190,7 @@ final class TerminalWorkspaceView: NSView {
       startCoordinate: hit.direction == .horizontal ? point.x : point.y,
       startRatios: currentRatios
     )
+    paneResizeCursor(for: hit.direction).set()
   }
 
   override func mouseDragged(with event: NSEvent) {
@@ -943,6 +1200,7 @@ final class TerminalWorkspaceView: NSView {
     }
 
     let point = convert(event.locationInWindow, from: nil)
+    paneResizeCursor(for: drag.direction).set()
     let coordinate = drag.direction == .horizontal ? point.x : point.y
     let delta = drag.direction == .horizontal
       ? coordinate - drag.startCoordinate
@@ -961,9 +1219,117 @@ final class TerminalWorkspaceView: NSView {
   override func mouseUp(with event: NSEvent) {
     if paneResizeDrag != nil {
       paneResizeDrag = nil
+      let point = convert(event.locationInWindow, from: nil)
+      paneResizeCursor(at: point)?.set()
       return
     }
+    paneHeaderDrag = nil
+    endPaneHeaderDragFeedback()
     super.mouseUp(with: event)
+  }
+
+  /**
+   CDXC:NativePaneReorder 2026-05-03-02:50
+   Pane title bars contain AppKit controls, text fields, Ghostty surfaces, and
+   WKWebViews that can consume mouse events before TerminalWorkspaceView sees
+   them. A window-local monitor observes the same native event stream and starts
+   header drags from the laid-out title-bar frames, while still letting normal
+   button and text events continue through AppKit. Title-bar actions are also
+   resolved here because native pane layers can keep the title-bar view itself
+   from receiving button mouse events.
+   */
+  private func installPaneHeaderEventMonitor() {
+    guard paneHeaderEventMonitor == nil else {
+      return
+    }
+    paneHeaderEventMonitor = NSEvent.addLocalMonitorForEvents(
+      matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+    ) { [weak self] event in
+      guard let self, event.window === self.window else {
+        return event
+      }
+      self.handlePaneHeaderMonitorEvent(event)
+      return event
+    }
+  }
+
+  private func uninstallPaneHeaderEventMonitor() {
+    guard let paneHeaderEventMonitor else {
+      return
+    }
+    NSEvent.removeMonitor(paneHeaderEventMonitor)
+    self.paneHeaderEventMonitor = nil
+  }
+
+  private func handlePaneHeaderMonitorEvent(_ event: NSEvent) {
+    switch event.type {
+    case .leftMouseDown:
+      let point = convert(event.locationInWindow, from: nil)
+      if let titleBarAction = paneTitleBarAction(at: point) {
+        /**
+         CDXC:BrowserPanes 2026-05-03-11:06
+         Browser-pane close uses the same AppKit title-bar buttons as T3 panes.
+         The window-level header-drag monitor also tracks action presses
+         because WKWebView and layer-backed title bars can keep the underlying
+         NSButton from receiving a normal click. Recording the action here makes
+         close reliable without turning title-bar button clicks into pane drags.
+         */
+        paneHeaderActionPress = titleBarAction
+        return
+      }
+      guard paneResizeHit(at: point) == nil,
+        let sessionId = paneTitleBarSessionId(at: point)
+      else {
+        return
+      }
+      handlePaneTitleBarMouseDown(
+        event,
+        sessionId: sessionId,
+        focusReason: "nativeTitleBarMonitorMouseDown")
+    case .leftMouseDragged:
+      if paneHeaderActionPress != nil {
+        return
+      }
+      /**
+       CDXC:NativePaneResize 2026-05-03-06:11
+       Active split resizing shares the same native mouse-drag stream as
+       title-bar pane reordering. The resize cursor owns that stream until
+       mouse-up, so the header monitor must not briefly restore the grab cursor
+       while the pointer is on a transparent resize line.
+       */
+      if let resizeDrag = paneResizeDrag {
+        paneResizeCursor(for: resizeDrag.direction).set()
+        return
+      }
+      guard let sessionId = paneHeaderDrag?.sourceSessionId else {
+        return
+      }
+      NSCursor.closedHand.set()
+      handlePaneTitleBarMouseDragged(event, sessionId: sessionId)
+    case .leftMouseUp:
+      if let pressedAction = paneHeaderActionPress {
+        paneHeaderActionPress = nil
+        let point = convert(event.locationInWindow, from: nil)
+        guard let releasedAction = paneTitleBarAction(at: point),
+          releasedAction.sessionId == pressedAction.sessionId,
+          releasedAction.action == pressedAction.action
+        else {
+          return
+        }
+        focusSession(sessionId: pressedAction.sessionId, reason: "nativeTitleBarMonitorAction")
+        sendEvent(
+          .terminalTitleBarAction(
+            sessionId: pressedAction.sessionId,
+            action: pressedAction.action))
+        return
+      }
+      guard let sessionId = paneHeaderDrag?.sourceSessionId else {
+        return
+      }
+      handlePaneTitleBarMouseUp(event, sessionId: sessionId)
+    default:
+      return
+    }
   }
 
   private func paneResizeHit(at point: CGPoint) -> PaneResizeHit? {
@@ -1042,6 +1408,241 @@ final class TerminalWorkspaceView: NSView {
         equalizePaneResizeRatios(in: child, path: "\(path).\(index)", matching: direction)
       }
     }
+  }
+
+  /**
+   CDXC:NativePaneReorder 2026-05-02-17:33
+   Native Ghostty and T3 panes are AppKit/WKWebView surfaces above the React
+   workspace DOM, so pane header drag-to-reorder must be detected in AppKit and
+   reported to the sidebar state owner. A short movement threshold preserves
+   normal title-bar clicks for focus while drags swap the source pane with the
+   pane under the release point.
+   */
+  private func handlePaneTitleBarMouseDown(
+    _ event: NSEvent,
+    sessionId: String,
+    focusReason: String
+  ) {
+    focusSession(sessionId: sessionId, reason: focusReason)
+    paneHeaderDrag = PaneHeaderDrag(
+      isDragging: false,
+      sourceSessionId: sessionId,
+      startPoint: convert(event.locationInWindow, from: nil),
+      targetSessionId: nil)
+  }
+
+  private func handlePaneTitleBarMouseDragged(_ event: NSEvent, sessionId: String) {
+    guard var drag = paneHeaderDrag, drag.sourceSessionId == sessionId else {
+      return
+    }
+    let point = convert(event.locationInWindow, from: nil)
+    if !drag.isDragging,
+      hypot(point.x - drag.startPoint.x, point.y - drag.startPoint.y)
+        < Self.paneHeaderDragThreshold
+    {
+      return
+    }
+    if !drag.isDragging {
+      drag.isDragging = true
+      paneHeaderDrag = drag
+      beginPaneHeaderDragFeedback(for: drag.sourceSessionId, at: point)
+    }
+    updatePaneHeaderDragFeedback(for: drag.sourceSessionId, at: point)
+  }
+
+  private func handlePaneTitleBarMouseUp(_ event: NSEvent, sessionId: String) {
+    guard let drag = paneHeaderDrag, drag.sourceSessionId == sessionId else {
+      return
+    }
+    paneHeaderDrag = nil
+    endPaneHeaderDragFeedback()
+    guard drag.isDragging else {
+      return
+    }
+    let point = convert(event.locationInWindow, from: nil)
+    guard let targetSessionId = paneSessionId(at: point), targetSessionId != drag.sourceSessionId
+    else {
+      return
+    }
+    sendEvent(
+      .paneReorderRequested(
+        sourceSessionId: drag.sourceSessionId,
+        targetSessionId: targetSessionId))
+  }
+
+  /**
+   CDXC:NativePaneReorder 2026-05-03-03:57
+   Reordering panes needs immediate native feedback because AppKit/WKWebView
+   pane surfaces do not show the React session-card drag affordances. While a
+   title bar is dragged, show a compact header ghost capped at 230px and outline
+   the pane that will receive the drop.
+   */
+  private func beginPaneHeaderDragFeedback(for sessionId: String, at point: CGPoint) {
+    let ghostView = paneHeaderDragGhostView ?? TerminalPaneHeaderDragGhostView()
+    paneHeaderDragGhostView = ghostView
+    if ghostView.superview !== self {
+      addSubview(ghostView)
+    }
+    ghostView.configure(
+      title: paneHeaderDisplayTitle(for: sessionId),
+      favicon: paneHeaderFavicon(for: sessionId),
+      agentIconDataUrl: sessionAgentIconDataUrls[sessionId],
+      agentIconColorHex: sessionAgentIconColors[sessionId],
+      maxWidth: Self.paneHeaderDragGhostMaxWidth
+    )
+    ghostView.layer?.zPosition = 230
+    ghostView.alphaValue = 0.92
+    ghostView.isHidden = false
+    NSCursor.closedHand.set()
+    updatePaneHeaderDragFeedback(for: sessionId, at: point)
+  }
+
+  private func updatePaneHeaderDragFeedback(for sourceSessionId: String, at point: CGPoint) {
+    NSCursor.closedHand.set()
+    paneHeaderDragGhostView?.frame.origin = paneHeaderDragGhostOrigin(
+      for: paneHeaderDragGhostView?.frame.size ?? .zero,
+      cursorPoint: point)
+    let targetSessionId = paneSessionId(at: point)
+    updatePaneHeaderDropTarget(sourceSessionId: sourceSessionId, targetSessionId: targetSessionId)
+    if var drag = paneHeaderDrag, drag.sourceSessionId == sourceSessionId {
+      drag.targetSessionId = targetSessionId == sourceSessionId ? nil : targetSessionId
+      paneHeaderDrag = drag
+    }
+  }
+
+  private func endPaneHeaderDragFeedback() {
+    let hadDragFeedback = paneHeaderDragGhostView != nil || paneHeaderDragTargetView != nil
+    paneHeaderDragGhostView?.removeFromSuperview()
+    paneHeaderDragGhostView = nil
+    paneHeaderDragTargetView?.removeFromSuperview()
+    paneHeaderDragTargetView = nil
+    if hadDragFeedback {
+      NSCursor.openHand.set()
+    }
+  }
+
+  private func updatePaneHeaderDropTarget(sourceSessionId: String, targetSessionId: String?) {
+    guard let targetSessionId, targetSessionId != sourceSessionId,
+      let targetFrame = paneFrame(for: targetSessionId)
+    else {
+      paneHeaderDragTargetView?.removeFromSuperview()
+      paneHeaderDragTargetView = nil
+      return
+    }
+    let targetView = paneHeaderDragTargetView ?? TerminalPaneHeaderDragTargetView()
+    paneHeaderDragTargetView = targetView
+    if targetView.superview !== self {
+      addSubview(targetView)
+    }
+    targetView.layer?.zPosition = 220
+    targetView.frame = targetFrame.insetBy(dx: 2, dy: 2)
+    targetView.isHidden = false
+  }
+
+  private func paneHeaderDragGhostOrigin(for size: CGSize, cursorPoint point: CGPoint) -> CGPoint {
+    let margin: CGFloat = 8
+    let hotSpot = CGPoint(x: 10, y: size.height / 2)
+    let maxX = max(margin, bounds.width - size.width - margin)
+    let maxY = max(margin, bounds.height - size.height - margin)
+    return CGPoint(
+      x: min(max(point.x - hotSpot.x, margin), maxX),
+      y: min(max(point.y - hotSpot.y, margin), maxY)
+    )
+  }
+
+  private func paneFrame(for sessionId: String) -> CGRect? {
+    if let session = sessions[sessionId] {
+      return session.borderView.frame
+    }
+    if let session = webPaneSessions[sessionId] {
+      return session.borderView.frame
+    }
+    return nil
+  }
+
+  private func paneHeaderDisplayTitle(for sessionId: String) -> String {
+    if let session = sessions[sessionId] {
+      return session.titleBarView.displayTitle
+    }
+    if let session = webPaneSessions[sessionId] {
+      return session.titleBarView.displayTitle
+    }
+    return normalizedTerminalSessionTitle(sessionTitles[sessionId], sessionId: sessionId)
+  }
+
+  private func paneHeaderFavicon(for sessionId: String) -> NSImage? {
+    webPaneSessions[sessionId]?.titleBarView.displayFavicon
+  }
+
+  private func focusSession(sessionId: String, reason: String) {
+    if sessions[sessionId] != nil {
+      focusTerminal(sessionId: sessionId, reason: reason)
+    } else if webPaneSessions[sessionId] != nil {
+      focusWebPane(sessionId: sessionId, reason: reason)
+    }
+  }
+
+  private func paneSessionId(at point: CGPoint) -> String? {
+    for (sessionId, session) in sessions where activeSessionIds.contains(sessionId) {
+      if session.borderView.frame.contains(point) {
+        return sessionId
+      }
+    }
+    for (sessionId, session) in webPaneSessions where activeSessionIds.contains(sessionId) {
+      if session.borderView.frame.contains(point) {
+        return sessionId
+      }
+    }
+    return nil
+  }
+
+  private func paneTitleBarSessionId(at point: CGPoint) -> String? {
+    for (sessionId, session) in sessions where activeSessionIds.contains(sessionId) {
+      if paneTitleBarView(session.titleBarView, containsDraggablePoint: point) {
+        return sessionId
+      }
+    }
+    for (sessionId, session) in webPaneSessions where activeSessionIds.contains(sessionId) {
+      if paneTitleBarView(session.titleBarView, containsDraggablePoint: point) {
+        return sessionId
+      }
+    }
+    return nil
+  }
+
+  private func paneTitleBarAction(at point: CGPoint) -> (
+    sessionId: String, action: TerminalTitleBarAction
+  )? {
+    for (sessionId, session) in sessions where activeSessionIds.contains(sessionId) {
+      guard session.titleBarView.frame.contains(point) else {
+        continue
+      }
+      let titleBarPoint = convert(point, to: session.titleBarView)
+      if let action = session.titleBarView.actionButtonAction(at: titleBarPoint) {
+        return (sessionId, action)
+      }
+    }
+    for (sessionId, session) in webPaneSessions where activeSessionIds.contains(sessionId) {
+      guard session.titleBarView.frame.contains(point) else {
+        continue
+      }
+      let titleBarPoint = convert(point, to: session.titleBarView)
+      if let action = session.titleBarView.actionButtonAction(at: titleBarPoint) {
+        return (sessionId, action)
+      }
+    }
+    return nil
+  }
+
+  private func paneTitleBarView(
+    _ titleBarView: TerminalSessionTitleBarView,
+    containsDraggablePoint point: CGPoint
+  ) -> Bool {
+    guard titleBarView.frame.contains(point) else {
+      return false
+    }
+    let titleBarPoint = convert(point, to: titleBarView)
+    return titleBarView.isDraggableHeaderPoint(titleBarPoint)
   }
 
   private func setFrame(_ rect: CGRect, for sessionId: String) {
@@ -1256,6 +1857,26 @@ final class TerminalWorkspaceView: NSView {
     guard webPaneSessions[sessionId] != nil else {
       return
     }
+    guard NativeT3RuntimeLauncher.isManagedRuntimeURL(url) else {
+      guard let session = webPaneSessions[sessionId] else {
+        return
+      }
+      /**
+       CDXC:BrowserPanes 2026-05-02-06:35
+       Non-T3 browser panes use the generic WKWebView loading path directly.
+       The T3 authentication/thread-route bootstrap is intentionally gated to
+       the managed localhost runtime so normal web URLs do not call T3-only APIs
+       or emit T3 thread-ready events.
+       */
+      NativeT3CodePaneReproLog.append("nativeWorkspace.browserWebPane.load.start", [
+        "cachePolicy": reason == "initial" ? "reloadIgnoringLocalCacheData" : "useProtocolCachePolicy",
+        "reason": reason,
+        "sessionId": sessionId,
+        "url": url.absoluteString,
+      ])
+      session.webView.load(Self.browserPaneURLRequest(url: url, reason: reason))
+      return
+    }
     guard !pendingAuthenticatedWebPaneLoadSessionIds.contains(sessionId) else {
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.authPending", [
         "reason": reason,
@@ -1323,6 +1944,20 @@ final class TerminalWorkspaceView: NSView {
         }
       }
     }
+  }
+
+  private static func browserPaneURLRequest(url: URL, reason: String) -> URLRequest {
+    /**
+     CDXC:BrowserPanes 2026-05-03-02:18
+     Browser panes set a Safari-compatible WebKit UA, but sites can still get a
+     stale disk-cached document from an older bare-WKWebView UA on app restore.
+     Bypass only the local cache for initial browser-pane navigations so the
+     first visible load receives markup for the current UA; user reloads and
+     in-page navigations keep normal browser cache semantics.
+     */
+    let cachePolicy: URLRequest.CachePolicy =
+      reason == "initial" ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy
+    return URLRequest(url: url, cachePolicy: cachePolicy, timeoutInterval: 60)
   }
 
   private func retryT3ThreadRouteIfStartupIsStillSettling(
@@ -1517,6 +2152,168 @@ final class TerminalWorkspaceView: NSView {
 
   private func sessionId(for webView: WKWebView) -> String? {
     webPaneSessions.first { _, session in session.webView === webView }?.key
+  }
+
+  private func updateWebPanePageMetadata(for webView: WKWebView, reason: String) {
+    guard let sessionId = sessionId(for: webView),
+      let session = webPaneSessions[sessionId],
+      !session.isManagedT3Pane
+    else {
+      return
+    }
+
+    let displayTitle = webPaneDisplayTitle(for: webView, fallbackTitle: session.title)
+    session.titleBarView.setTitle(normalizedTerminalSessionTitle(displayTitle, sessionId: sessionId))
+    sendEvent(.terminalTitleChanged(sessionId: sessionId, title: displayTitle))
+    if let url = webView.url?.absoluteString, !url.isEmpty {
+      /**
+       CDXC:BrowserPanes 2026-05-03-03:41
+       Browser pane restore must use the real committed WKWebView URL, not the
+       initial local wrapper URL used to create the pane. Persist URL changes
+       alongside title metadata so quitting and reopening zmux restores the
+       same page the user was viewing.
+       */
+      sendEvent(.browserUrlChanged(sessionId: sessionId, url: url))
+    }
+    updateWebPaneFavicon(for: session, pageURL: webView.url, reason: reason)
+    NativeT3CodePaneReproLog.append("nativeWorkspace.browserPane.metadata.updated", [
+      "reason": reason,
+      "sessionId": sessionId,
+      "title": displayTitle,
+      "url": webView.url?.absoluteString ?? NSNull(),
+    ])
+  }
+
+  private func webPaneDisplayTitle(for webView: WKWebView, fallbackTitle: String) -> String {
+    let title = webView.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !title.isEmpty {
+      return title
+    }
+    if let host = webView.url?.host, !host.isEmpty {
+      return host
+    }
+    let fallback = fallbackTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    return fallback.isEmpty ? "Browser" : fallback
+  }
+
+  private func updateWebPaneFavicon(for session: WebPaneSession, pageURL: URL?, reason: String) {
+    guard let pageURL,
+      pageURL.scheme == "http" || pageURL.scheme == "https"
+    else {
+      session.titleBarView.setFavicon(nil)
+      sendEvent(.browserFaviconChanged(sessionId: session.sessionId, faviconDataUrl: nil))
+      return
+    }
+
+    let sessionId = session.sessionId
+    let webView = session.webView
+    webPaneFaviconTasksBySessionId.removeValue(forKey: sessionId)?.cancel()
+    webPaneFaviconTasksBySessionId[sessionId] = Task { @MainActor in
+      guard self.webPaneSessions[sessionId]?.webView === webView else { return }
+      let faviconURL = await self.faviconURL(for: webView, pageURL: pageURL)
+      guard !Task.isCancelled, let faviconURL else {
+        session.titleBarView.setFavicon(nil)
+        self.sendEvent(.browserFaviconChanged(sessionId: sessionId, faviconDataUrl: nil))
+        return
+      }
+      do {
+        let (data, response) = try await URLSession.shared.data(from: faviconURL)
+        guard !Task.isCancelled,
+          let image = NSImage(data: data),
+          self.webPaneSessions[sessionId]?.webView.url?.host == pageURL.host
+        else {
+          return
+        }
+        session.titleBarView.setFavicon(image)
+        let mimeType =
+          (response as? HTTPURLResponse)?.mimeType
+          ?? response.mimeType
+          ?? Self.faviconMimeType(for: faviconURL)
+        /**
+         CDXC:BrowserPanes 2026-05-03-11:28
+         The sidebar browser card should show the same tab favicon as the
+         native browser pane title bar. Send the resolved favicon as a data URL
+         so React can render it without re-fetching from the page origin, and
+         so the browser session can persist the icon for app restore.
+         */
+        self.sendEvent(
+          .browserFaviconChanged(
+            sessionId: sessionId,
+            faviconDataUrl: Self.dataUrl(for: data, mimeType: mimeType)))
+        NativeT3CodePaneReproLog.append("nativeWorkspace.browserPane.favicon.updated", [
+          "faviconUrl": faviconURL.absoluteString,
+          "reason": reason,
+          "sessionId": sessionId,
+        ])
+      } catch {
+        session.titleBarView.setFavicon(nil)
+        self.sendEvent(.browserFaviconChanged(sessionId: sessionId, faviconDataUrl: nil))
+        NativeT3CodePaneReproLog.append("nativeWorkspace.browserPane.favicon.failed", [
+          "error": error.localizedDescription,
+          "faviconUrl": faviconURL.absoluteString,
+          "reason": reason,
+          "sessionId": sessionId,
+        ])
+      }
+    }
+  }
+
+  private func faviconURL(for webView: WKWebView, pageURL: URL) async -> URL? {
+    let script = """
+      (() => {
+        const links = Array.from(document.querySelectorAll('link[rel]'));
+        const icon = links.find((link) => /(^|\\s)(icon|shortcut icon|apple-touch-icon|mask-icon)(\\s|$)/i.test(link.rel || ''));
+        return icon?.href || '';
+      })()
+      """
+    if let href = try? await webView.evaluateJavaScript(script) as? String,
+      let resolved = resolvedFaviconURL(href: href, pageURL: pageURL)
+    {
+      return resolved
+    }
+    return fallbackFaviconURL(for: pageURL)
+  }
+
+  private func resolvedFaviconURL(href: String, pageURL: URL) -> URL? {
+    let trimmedHref = href.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedHref.isEmpty else {
+      return nil
+    }
+    return URL(string: trimmedHref, relativeTo: pageURL)?.absoluteURL
+  }
+
+  private func fallbackFaviconURL(for pageURL: URL) -> URL? {
+    guard let scheme = pageURL.scheme,
+      scheme == "http" || scheme == "https",
+      let host = pageURL.host
+    else {
+      return nil
+    }
+    var components = URLComponents()
+    components.scheme = scheme
+    components.host = host
+    components.port = pageURL.port
+    components.path = "/favicon.ico"
+    return components.url
+  }
+
+  private static func dataUrl(for data: Data, mimeType: String?) -> String {
+    "data:\(mimeType ?? "image/png");base64,\(data.base64EncodedString())"
+  }
+
+  private static func faviconMimeType(for url: URL) -> String {
+    switch url.pathExtension.lowercased() {
+    case "ico":
+      return "image/x-icon"
+    case "svg":
+      return "image/svg+xml"
+    case "jpg", "jpeg":
+      return "image/jpeg"
+    case "webp":
+      return "image/webp"
+    default:
+      return "image/png"
+    }
   }
 
   /**
@@ -2200,6 +2997,7 @@ extension TerminalWorkspaceView: WKNavigationDelegate {
     if let sessionId {
       completedWebPaneLoadSessionIds.insert(sessionId)
     }
+    updateWebPanePageMetadata(for: webView, reason: "navigationFinish")
     NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.finish", [
       "sessionId": sessionId ?? NSNull(),
       "title": webView.title ?? NSNull(),
@@ -2241,13 +3039,34 @@ extension TerminalWorkspaceView: WKNavigationDelegate {
     decidePolicyFor navigationAction: WKNavigationAction,
     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
   ) {
+    let requestedUrl = navigationAction.request.url
     NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.navigation.action", [
       "isMainFrame": navigationAction.targetFrame?.isMainFrame ?? false,
       "method": navigationAction.request.httpMethod ?? NSNull(),
       "navigationType": String(describing: navigationAction.navigationType),
       "sessionId": sessionId(for: webView) ?? NSNull(),
-      "url": navigationAction.request.url?.absoluteString ?? NSNull(),
+      "targetFrameMissing": navigationAction.targetFrame == nil,
+      "url": requestedUrl?.absoluteString ?? NSNull(),
     ])
+    if navigationAction.targetFrame == nil,
+      let requestedUrl,
+      requestedUrl.scheme == "http" || requestedUrl.scheme == "https"
+    {
+      /**
+       CDXC:BrowserPanes 2026-05-03-03:59
+       Embedded browser panes are single-pane browsers. Links that ask WebKit
+       for a new tab/window, including many search-result links, must retarget
+       into the existing WKWebView because zmux does not create overlay windows
+       for browser-pane navigation.
+       */
+      NativeT3CodePaneReproLog.append("nativeWorkspace.browserPane.navigation.retargetBlank", [
+        "sessionId": sessionId(for: webView) ?? NSNull(),
+        "url": requestedUrl.absoluteString,
+      ])
+      webView.load(navigationAction.request)
+      decisionHandler(.cancel)
+      return
+    }
     decisionHandler(.allow)
   }
 
@@ -2272,6 +3091,33 @@ extension TerminalWorkspaceView: WKNavigationDelegate {
       "sessionId": sessionId(for: webView) ?? NSNull(),
       "url": webView.url?.absoluteString ?? NSNull(),
     ])
+  }
+}
+
+extension TerminalWorkspaceView: WKUIDelegate {
+  func webView(
+    _ webView: WKWebView,
+    createWebViewWith configuration: WKWebViewConfiguration,
+    for navigationAction: WKNavigationAction,
+    windowFeatures: WKWindowFeatures
+  ) -> WKWebView? {
+    if navigationAction.targetFrame == nil,
+      let requestedUrl = navigationAction.request.url,
+      requestedUrl.scheme == "http" || requestedUrl.scheme == "https"
+    {
+      /**
+       CDXC:BrowserPanes 2026-05-03-03:59
+       JavaScript/window-open navigations use WKUIDelegate instead of the
+       normal committed navigation path. Keep them in the same embedded pane so
+       user clicks remain in-layout and never require an external overlay.
+       */
+      NativeT3CodePaneReproLog.append("nativeWorkspace.browserPane.navigation.uiRetargetBlank", [
+        "sessionId": sessionId(for: webView) ?? NSNull(),
+        "url": requestedUrl.absoluteString,
+      ])
+      webView.load(navigationAction.request)
+    }
+    return nil
   }
 }
 
@@ -2477,6 +3323,59 @@ private final class ZmuxGhosttySurfaceView: Ghostty.SurfaceView {
     default:
       return false
     }
+  }
+}
+
+private final class BrowserAddressTextFieldCell: NSTextFieldCell {
+  private static let verticalTextOffset: CGFloat = 1.5
+
+  override func drawingRect(forBounds rect: NSRect) -> NSRect {
+    adjustedTextFrame(super.drawingRect(forBounds: rect))
+  }
+
+  override func edit(
+    withFrame rect: NSRect,
+    in controlView: NSView,
+    editor textObj: NSText,
+    delegate: Any?,
+    event: NSEvent?
+  ) {
+    super.edit(
+      withFrame: adjustedTextFrame(rect),
+      in: controlView,
+      editor: textObj,
+      delegate: delegate,
+      event: event)
+  }
+
+  override func select(
+    withFrame rect: NSRect,
+    in controlView: NSView,
+    editor textObj: NSText,
+    delegate: Any?,
+    start selStart: Int,
+    length selLength: Int
+  ) {
+    super.select(
+      withFrame: adjustedTextFrame(rect),
+      in: controlView,
+      editor: textObj,
+      delegate: delegate,
+      start: selStart,
+      length: selLength)
+  }
+
+  private func adjustedTextFrame(_ frame: NSRect) -> NSRect {
+    var nextFrame = frame
+    /**
+     CDXC:BrowserPanes 2026-05-03-02:08
+     The browser address field frame aligns with toolbar controls, but AppKit
+     draws the text slightly high. Offset only the cell text/edit rect down two
+     pixels in AppKit field coordinates so the surrounding toolbar layout
+     remains unchanged.
+     */
+    nextFrame.origin.y += Self.verticalTextOffset
+    return nextFrame
   }
 }
 
@@ -2713,6 +3612,108 @@ private final class TerminalSearchBarView: NSView, NSTextFieldDelegate {
   }
 }
 
+private final class TerminalPaneHeaderDragTargetView: NSView {
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layer?.borderWidth = 2
+    layer?.cornerRadius = 6
+    layer?.borderColor = NSColor(calibratedRed: 0.44, green: 0.68, blue: 1, alpha: 0.95).cgColor
+    layer?.backgroundColor = NSColor(calibratedRed: 0.18, green: 0.42, blue: 0.86, alpha: 0.12).cgColor
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+}
+
+private final class TerminalPaneHeaderDragGhostView: NSView {
+  private static let height: CGFloat = 32
+  private static let horizontalPadding: CGFloat = 8
+  private static let iconSize: CGFloat = 16
+  private static let iconGap: CGFloat = 7
+
+  private let iconImageView = NSImageView(frame: .zero)
+  private let titleLabel = NSTextField(labelWithString: "")
+
+  override var isFlipped: Bool {
+    true
+  }
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layer?.backgroundColor = NSColor(calibratedRed: 0.08, green: 0.09, blue: 0.11, alpha: 0.96).cgColor
+    layer?.borderColor = NSColor(calibratedWhite: 1, alpha: 0.18).cgColor
+    layer?.borderWidth = 1
+    layer?.cornerRadius = 7
+    layer?.shadowColor = NSColor.black.cgColor
+    layer?.shadowOpacity = 0.32
+    layer?.shadowOffset = CGSize(width: 0, height: -5)
+    layer?.shadowRadius = 12
+
+    iconImageView.imageScaling = .scaleProportionallyDown
+    iconImageView.wantsLayer = true
+    iconImageView.layer?.cornerRadius = 3
+    iconImageView.layer?.masksToBounds = true
+    addSubview(iconImageView)
+
+    titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    titleLabel.textColor = NSColor(calibratedWhite: 0.94, alpha: 1)
+    titleLabel.lineBreakMode = .byTruncatingTail
+    addSubview(titleLabel)
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
+  func configure(
+    title: String,
+    favicon: NSImage?,
+    agentIconDataUrl: String?,
+    agentIconColorHex: String?,
+    maxWidth: CGFloat
+  ) {
+    titleLabel.stringValue = title
+    let agentIconImage = nativePaneImage(fromDataUrl: agentIconDataUrl, isTemplate: true)
+    iconImageView.image = favicon ?? agentIconImage
+    iconImageView.contentTintColor =
+      favicon == nil && agentIconImage != nil
+      ? nativePaneColor(fromHex: agentIconColorHex) ?? NSColor.white : nil
+    let measuredTitleWidth = ceil(
+      (title as NSString).size(withAttributes: [
+        .font: titleLabel.font ?? NSFont.systemFont(ofSize: 12, weight: .semibold)
+      ]).width
+    )
+    let width = min(
+      maxWidth,
+      max(96, Self.horizontalPadding * 2 + Self.iconSize + Self.iconGap + measuredTitleWidth)
+    )
+    frame.size = CGSize(width: width, height: Self.height)
+    needsLayout = true
+    layoutSubtreeIfNeeded()
+  }
+
+  override func layout() {
+    super.layout()
+    iconImageView.frame = CGRect(
+      x: Self.horizontalPadding,
+      y: floor((bounds.height - Self.iconSize) / 2),
+      width: Self.iconSize,
+      height: Self.iconSize
+    )
+    let titleX = iconImageView.frame.maxX + Self.iconGap
+    titleLabel.frame = CGRect(
+      x: titleX,
+      y: floor((bounds.height - 16) / 2),
+      width: max(0, bounds.width - titleX - Self.horizontalPadding),
+      height: 16
+    )
+  }
+
+}
+
 private final class TerminalSessionTitleBarView: NSView {
   private static let borderColor = NSColor(
     calibratedRed: 0x58 / 255,
@@ -2745,31 +3746,58 @@ private final class TerminalSessionTitleBarView: NSView {
     alpha: 1
   ).cgColor
 
+  private let faviconImageView = NSImageView(frame: .zero)
   private let titleLabel = NSTextField(labelWithString: "")
   private let activityIndicatorView = NSView(frame: .zero)
   private let bottomBorderView = NSView(frame: .zero)
   private let actionButtons: [(action: TerminalTitleBarAction, button: NSButton)]
+  private var agentIconColor: NSColor?
+  private var agentIconImage: NSImage?
   private var activity: NativeTerminalActivity?
-  var onMouseDown: (() -> Void)?
+  private var faviconImage: NSImage?
+  private var pendingMouseDownAction: TerminalTitleBarAction?
+  private var hoverTrackingArea: NSTrackingArea?
+  var onMouseDown: ((NSEvent) -> Void)?
+  var onMouseDragged: ((NSEvent) -> Void)?
+  var onMouseUp: ((NSEvent) -> Void)?
   var onAction: ((TerminalTitleBarAction) -> Void)?
+  var resizeCursorForPoint: ((NSPoint) -> NSCursor?)?
 
   override var isFlipped: Bool {
     true
   }
 
-  init(title: String) {
-    actionButtons = [
-      (.rename, Self.makeActionButton(systemSymbolName: "pencil", fallbackTitle: "R", tooltip: "Rename Session")),
-      (.fork, Self.makeActionButton(systemSymbolName: "arrow.triangle.branch", fallbackTitle: "F", tooltip: "Fork Session")),
-      (.reload, Self.makeActionButton(systemSymbolName: "arrow.clockwise", fallbackTitle: "R", tooltip: "Reload Session")),
-      (.sleep, Self.makeActionButton(systemSymbolName: "moon", fallbackTitle: "S", tooltip: "Sleep Session")),
-      (.close, Self.makeActionButton(systemSymbolName: "xmark", fallbackTitle: "X", tooltip: "Close Session")),
-    ]
+  var displayTitle: String {
+    titleLabel.stringValue
+  }
+
+  var displayFavicon: NSImage? {
+    faviconImage
+  }
+
+  static let defaultActions: [TerminalTitleBarAction] = [.rename, .fork, .reload, .sleep, .close]
+
+  init(title: String, actions: [TerminalTitleBarAction] = TerminalSessionTitleBarView.defaultActions) {
+    /**
+     CDXC:BrowserPanes 2026-05-03-03:48
+     Browser panes have navigation/tooling controls in their dedicated browser
+     toolbar. Their pane title bar should only keep close, while terminals and
+     managed T3 panes keep the full session action set.
+     */
+    actionButtons = actions.map { action in
+      (action, Self.makeActionButton(for: action))
+    }
     super.init(frame: .zero)
     wantsLayer = true
     layer?.backgroundColor = Self.backgroundColor
     layer?.borderColor = Self.borderColor
     layer?.borderWidth = 0
+
+    faviconImageView.imageScaling = .scaleProportionallyDown
+    faviconImageView.isHidden = true
+    faviconImageView.wantsLayer = true
+    faviconImageView.layer?.cornerRadius = 3
+    faviconImageView.layer?.masksToBounds = true
 
     titleLabel.stringValue = title
     titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .bold)
@@ -2784,6 +3812,7 @@ private final class TerminalSessionTitleBarView: NSView {
     bottomBorderView.wantsLayer = true
     bottomBorderView.layer?.backgroundColor = Self.borderColor
 
+    addSubview(faviconImageView)
     addSubview(titleLabel)
     addSubview(activityIndicatorView)
     for item in actionButtons {
@@ -2799,8 +3828,174 @@ private final class TerminalSessionTitleBarView: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
-    onMouseDown?()
-    super.mouseDown(with: event)
+    let point = convert(event.locationInWindow, from: nil)
+    if let action = actionButtonAction(at: point) {
+      pendingMouseDownAction = action
+      return
+    }
+    onMouseDown?(event)
+  }
+
+  override func mouseDragged(with event: NSEvent) {
+    if pendingMouseDownAction != nil {
+      return
+    }
+    onMouseDragged?(event)
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    if let action = pendingMouseDownAction {
+      pendingMouseDownAction = nil
+      let point = convert(event.locationInWindow, from: nil)
+      if actionButtonAction(at: point) == action {
+        onAction?(action)
+      }
+      return
+    }
+    onMouseUp?(event)
+  }
+
+  func isDraggableHeaderPoint(_ point: NSPoint) -> Bool {
+    guard bounds.contains(point) else {
+      return false
+    }
+    if resizeCursorForPoint?(point) != nil {
+      return false
+    }
+    return actionButtonAction(at: point) == nil
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard bounds.contains(point) else {
+      return nil
+    }
+    /**
+     CDXC:NativePaneReorder 2026-05-03-03:42
+     Pane headers are draggable from the visible title and empty title-bar
+     chrome, but action buttons must remain normal controls. Check the
+     laid-out button frames inside this title-bar view so the window-level drag
+     monitor never starts a header drag or focuses the terminal before a button
+     click can be resolved on mouse-up.
+
+     CDXC:BrowserPanes 2026-05-03-11:06
+     Delegate action-button hit testing to AppKit so browser pane close is a
+     normal NSButton click, matching T3 Code panes and preserving
+     Accessibility activation. The title-bar view itself still owns empty
+     chrome for pane dragging.
+     */
+    if let hitView = super.hitTest(point), hitView !== self {
+      return hitView
+    }
+    return self
+  }
+
+  func actionButtonAction(at point: NSPoint) -> TerminalTitleBarAction? {
+    for item in actionButtons where item.button.frame.contains(point) {
+      return item.action
+    }
+    /**
+     CDXC:BrowserPanes 2026-05-03-11:06
+     Browser title bars currently expose only close. Give that close action a
+     forgiving right-edge hit target so users can close browser panes like T3
+     panes even when the tiny borderless AppKit button does not receive the
+     click through the WKWebView pane stack.
+     */
+    if actionButtons.count == 1,
+      actionButtons.first?.action == .close,
+      CGRect(x: max(0, bounds.maxX - 44), y: 0, width: 44, height: bounds.height).contains(point)
+    {
+      return .close
+    }
+    return nil
+  }
+
+  override func resetCursorRects() {
+    super.resetCursorRects()
+    /**
+     CDXC:NativePaneResize 2026-05-03-05:06
+     The 4px native resize bands can overlap title-bar hit testing when pane
+     gaps are small. Cursor precedence must favor split resizing at the pane
+     boundary, so the title bar registers resize cursor rects for any overlap
+     before falling back to the pane-reorder hand cursor.
+     */
+    let firstActionButtonX = actionButtons.map(\.button.frame.minX).min() ?? bounds.maxX
+    let probeStep: CGFloat = 2
+    var cursorRunStart: CGFloat?
+    var cursorRunCursor: NSCursor?
+    var x: CGFloat = 0
+    while x <= bounds.width {
+      let probePoint = CGPoint(x: min(x, bounds.width), y: bounds.midY)
+      let resizeCursor = resizeCursorForPoint?(probePoint)
+      let cursor = resizeCursor ?? (probePoint.x < firstActionButtonX ? NSCursor.openHand : nil)
+      let cursorChanged = cursor !== cursorRunCursor
+      if cursorChanged {
+        if let cursorRunStart, let cursorRunCursor {
+          addCursorRect(
+            CGRect(
+              x: cursorRunStart,
+              y: 0,
+              width: max(1, x - cursorRunStart),
+              height: bounds.height),
+            cursor: cursorRunCursor)
+        }
+        cursorRunStart = cursor == nil ? nil : x
+        cursorRunCursor = cursor
+      }
+      x += probeStep
+    }
+    if let cursorRunStart, let cursorRunCursor {
+      addCursorRect(
+        CGRect(
+          x: cursorRunStart,
+          y: 0,
+          width: max(1, bounds.width - cursorRunStart),
+          height: bounds.height),
+        cursor: cursorRunCursor)
+    }
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let hoverTrackingArea {
+      removeTrackingArea(hoverTrackingArea)
+    }
+    let trackingArea = NSTrackingArea(
+      rect: .zero,
+      options: [.activeInKeyWindow, .cursorUpdate, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved],
+      owner: self,
+      userInfo: nil
+    )
+    hoverTrackingArea = trackingArea
+    addTrackingArea(trackingArea)
+  }
+
+  override func cursorUpdate(with event: NSEvent) {
+    setHeaderCursor(for: event)
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    setHeaderCursor(for: event)
+  }
+
+  override func mouseMoved(with event: NSEvent) {
+    setHeaderCursor(for: event)
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    NSCursor.arrow.set()
+  }
+
+  private func setHeaderCursor(for event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    if let resizeCursor = resizeCursorForPoint?(point) {
+      resizeCursor.set()
+      return
+    }
+    if isDraggableHeaderPoint(point) {
+      NSCursor.openHand.set()
+    } else {
+      NSCursor.arrow.set()
+    }
   }
 
   override func layout() {
@@ -2818,6 +4013,11 @@ private final class TerminalSessionTitleBarView: NSView {
      Terminal titles should not truncate before reaching the right-side action
      cluster. Keep title-bar actions compact so pane names use the available
      chrome width while still leaving a non-overlapping hit target per action.
+
+     CDXC:BrowserPanes 2026-05-03-01:58
+     Browser pane title bars keep only normal session controls on the right.
+     Browser navigation/tooling belongs in the address toolbar, while the
+     webpage favicon and title identify the page on the left.
      */
     for item in actionButtons.reversed() {
       trailingX -= buttonSize
@@ -2831,9 +4031,44 @@ private final class TerminalSessionTitleBarView: NSView {
      focus state visible through the pane border while preserving a small
      card-matched activity dot immediately after the title for done/working.
      */
+    let faviconSize: CGFloat = 16
+    let faviconGap: CGFloat = 6
+    /**
+     CDXC:NativePaneReorder 2026-05-03-04:52
+     Pane title bars should identify terminal/T3 sessions with the same agent
+     logo shown on the session card, using the existing favicon placement to
+     avoid adding new chrome. Browser favicons remain higher priority because
+     they identify the loaded page more specifically than the generic browser
+     logo. Sidebar agent SVGs are mask assets, so native AppKit renders them as
+     template images tinted with the same per-agent color as the session card
+     instead of using their black source fill on dark chrome.
+     */
+    let identityImage = faviconImage ?? agentIconImage
+    let hasIdentityImage = identityImage != nil
+    faviconImageView.image = identityImage
+    faviconImageView.contentTintColor =
+      faviconImage == nil && agentIconImage != nil ? agentIconColor ?? Self.titleColor : nil
+    if hasIdentityImage {
+      faviconImageView.isHidden = false
+      faviconImageView.frame = CGRect(
+        x: insetX,
+        y: floor((bounds.height - faviconSize) / 2),
+        width: faviconSize,
+        height: faviconSize
+      )
+    } else {
+      faviconImageView.isHidden = true
+      faviconImageView.frame = CGRect(
+        x: insetX,
+        y: floor((bounds.height - faviconSize) / 2),
+        width: 0,
+        height: 0
+      )
+    }
+    let titleX = hasIdentityImage ? insetX + faviconSize + faviconGap : insetX
     let titleTrailing = trailingX
     let maxTitleWidth = max(
-      titleTrailing - insetX - (activity == nil ? 2 : indicatorSize + indicatorGap + 2),
+      titleTrailing - titleX - (activity == nil ? 2 : indicatorSize + indicatorGap + 2),
       0
     )
     /**
@@ -2849,7 +4084,7 @@ private final class TerminalSessionTitleBarView: NSView {
       ]).width
     )
     titleLabel.frame = CGRect(
-      x: insetX,
+      x: titleX,
       y: floor((bounds.height - 16) / 2),
       width: maxTitleWidth,
       height: 16
@@ -2862,6 +4097,14 @@ private final class TerminalSessionTitleBarView: NSView {
       height: indicatorSize
     )
     bottomBorderView.frame = CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
+    /**
+     CDXC:NativePaneReorder 2026-05-03-04:42
+     Header drag affordance must stay visible after the pointer settles, not
+     only during mouse-moved events. AppKit builds cursor rectangles from the
+     laid-out action-button frames, so refresh them after layout changes the
+     draggable title-bar width.
+     */
+    window?.invalidateCursorRects(for: self)
   }
 
   func setTitle(_ title: String) {
@@ -2869,6 +4112,17 @@ private final class TerminalSessionTitleBarView: NSView {
       titleLabel.stringValue = title
       needsLayout = true
     }
+  }
+
+  func setFavicon(_ image: NSImage?) {
+    faviconImage = image
+    needsLayout = true
+  }
+
+  func setAgentIconDataUrl(_ dataUrl: String?, colorHex: String?) {
+    agentIconImage = nativePaneImage(fromDataUrl: dataUrl, isTemplate: true)
+    agentIconColor = nativePaneColor(fromHex: colorHex)
+    needsLayout = true
   }
 
   func setState(activity nextActivity: NativeTerminalActivity?) {
@@ -2894,6 +4148,21 @@ private final class TerminalSessionTitleBarView: NSView {
     onAction?(item.action)
   }
 
+  private static func makeActionButton(for action: TerminalTitleBarAction) -> NSButton {
+    switch action {
+    case .rename:
+      return makeActionButton(systemSymbolName: "pencil", fallbackTitle: "R", tooltip: "Rename Session")
+    case .fork:
+      return makeActionButton(systemSymbolName: "arrow.triangle.branch", fallbackTitle: "F", tooltip: "Fork Session")
+    case .reload:
+      return makeActionButton(systemSymbolName: "arrow.clockwise", fallbackTitle: "R", tooltip: "Reload Session")
+    case .sleep:
+      return makeActionButton(systemSymbolName: "moon", fallbackTitle: "S", tooltip: "Sleep Session")
+    case .close:
+      return makeActionButton(systemSymbolName: "xmark", fallbackTitle: "X", tooltip: "Close Session")
+    }
+  }
+
   private static func makeActionButton(
     systemSymbolName: String,
     fallbackTitle: String,
@@ -2915,11 +4184,108 @@ private final class TerminalSessionTitleBarView: NSView {
   }
 }
 
-final class WebPaneHostView: NSView {
-  private let webView: WKWebView
+final class WebPaneHostView: NSView, NSTextFieldDelegate {
+  private enum BrowserPaneThemeMode: String {
+    case system
+    case light
+    case dark
 
-  init(webView: WKWebView) {
+    var title: String {
+      switch self {
+      case .system:
+        return "System"
+      case .light:
+        return "Light"
+      case .dark:
+        return "Dark"
+      }
+    }
+
+    var symbolName: String {
+      switch self {
+      case .system:
+        return "circle.lefthalf.filled"
+      case .light:
+        return "sun.max"
+      case .dark:
+        return "moon"
+      }
+    }
+  }
+
+  private static let browserToolbarHeight: CGFloat = 40
+  private static let toolbarButtonSize = CGSize(width: 28, height: 28)
+  private static let toolbarHorizontalPadding: CGFloat = 12
+  private static let toolbarItemGap: CGFloat = 10
+  private static let addressMinimumWidth: CGFloat = 180
+
+  private let webView: WKWebView
+  private let showsBrowserToolbar: Bool
+  private let onFocus: (() -> Void)?
+  private let onOpenDevTools: (() -> Void)?
+  private let onInjectReactGrab: (() -> Void)?
+  private let onShowProfilePicker: (() -> Void)?
+  private let onShowImportSettings: (() -> Void)?
+  private let toolbarView = NSView(frame: .zero)
+  private let backButton = WebPaneHostView.makeToolbarButton(
+    systemSymbolName: "chevron.left",
+    fallbackTitle: "<",
+    tooltip: "Back"
+  )
+  private let forwardButton = WebPaneHostView.makeToolbarButton(
+    systemSymbolName: "chevron.right",
+    fallbackTitle: ">",
+    tooltip: "Forward"
+  )
+  private let reloadButton = WebPaneHostView.makeToolbarButton(
+    systemSymbolName: "arrow.clockwise",
+    fallbackTitle: "R",
+    tooltip: "Reload"
+  )
+  private let securityIcon = NSImageView(frame: .zero)
+  private let addressField = NSTextField(frame: .zero)
+  private let devToolsButton = WebPaneHostView.makeToolbarButton(
+    systemSymbolName: "wrench.and.screwdriver",
+    fallbackTitle: "D",
+    tooltip: "Toggle DevTools"
+  )
+  private let reactGrabButton = WebPaneHostView.makeToolbarButton(
+    systemSymbolName: "cursorarrow.click.2",
+    fallbackTitle: "RG",
+    tooltip: "React Grab"
+  )
+  private let profileButton = WebPaneHostView.makeToolbarButton(
+    systemSymbolName: "person.crop.circle",
+    fallbackTitle: "P",
+    tooltip: "Browser Profile"
+  )
+  private let appearanceButton = WebPaneHostView.makeToolbarButton(
+    systemSymbolName: "circle.lefthalf.filled",
+    fallbackTitle: "A",
+    tooltip: "Toggle Page Appearance"
+  )
+  private var navigationObservations: [NSKeyValueObservation] = []
+  private var addressFieldKeyMonitor: Any?
+  private var browserThemeMode: BrowserPaneThemeMode = .system
+  private var isEditingAddress = false
+
+  init(
+    webView: WKWebView,
+    showsBrowserToolbar: Bool = false,
+    initialAddress: String? = nil,
+    onFocus: (() -> Void)? = nil,
+    onOpenDevTools: (() -> Void)? = nil,
+    onInjectReactGrab: (() -> Void)? = nil,
+    onShowProfilePicker: (() -> Void)? = nil,
+    onShowImportSettings: (() -> Void)? = nil
+  ) {
     self.webView = webView
+    self.showsBrowserToolbar = showsBrowserToolbar
+    self.onFocus = onFocus
+    self.onOpenDevTools = onOpenDevTools
+    self.onInjectReactGrab = onInjectReactGrab
+    self.onShowProfilePicker = onShowProfilePicker
+    self.onShowImportSettings = onShowImportSettings
     super.init(frame: .zero)
     translatesAutoresizingMaskIntoConstraints = true
     autoresizesSubviews = true
@@ -2930,30 +4296,80 @@ final class WebPaneHostView: NSView {
     webView.translatesAutoresizingMaskIntoConstraints = true
     webView.autoresizingMask = [.width, .height]
     webView.frame = bounds
+    if showsBrowserToolbar {
+      configureBrowserToolbar(initialAddress: initialAddress)
+      addSubview(toolbarView)
+    }
     addSubview(webView)
+    updateBrowserToolbarState()
   }
 
   required init?(coder: NSCoder) {
     fatalError("init(coder:) is not supported")
   }
 
+  deinit {
+    uninstallAddressFieldKeyMonitor()
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    uninstallAddressFieldKeyMonitor()
+    if window != nil {
+      installAddressFieldKeyMonitor()
+    }
+  }
+
   override func layout() {
     super.layout()
+    if showsBrowserToolbar, toolbarView.superview !== self {
+      toolbarView.removeFromSuperview()
+      addSubview(toolbarView)
+    }
     if webView.superview !== self {
       webView.removeFromSuperview()
       addSubview(webView)
     }
-    if webView.frame != bounds {
-      webView.frame = bounds
+    let webFrame: CGRect
+    if showsBrowserToolbar {
+      let toolbarHeight = min(Self.browserToolbarHeight, max(0, bounds.height))
+      toolbarView.frame = CGRect(
+        x: 0,
+        y: bounds.height - toolbarHeight,
+        width: bounds.width,
+        height: toolbarHeight
+      )
+      layoutBrowserToolbar()
+      webFrame = CGRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - toolbarHeight))
+    } else {
+      webFrame = bounds
+    }
+    if webView.frame != webFrame {
+      webView.frame = webFrame
     }
   }
 
   func refreshHostedWebView(reason: String) {
+    if showsBrowserToolbar, toolbarView.superview !== self {
+      toolbarView.removeFromSuperview()
+      addSubview(toolbarView)
+    }
     if webView.superview !== self {
       webView.removeFromSuperview()
       addSubview(webView)
     }
-    webView.frame = bounds
+    let toolbarHeight = showsBrowserToolbar ? min(Self.browserToolbarHeight, max(0, bounds.height)) : 0
+    if showsBrowserToolbar {
+      toolbarView.frame = CGRect(
+        x: 0,
+        y: bounds.height - toolbarHeight,
+        width: bounds.width,
+        height: toolbarHeight
+      )
+      layoutBrowserToolbar()
+    }
+    webView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - toolbarHeight))
+    updateBrowserToolbarState()
     needsLayout = true
     needsDisplay = true
     webView.needsLayout = true
@@ -2969,6 +4385,418 @@ final class WebPaneHostView: NSView {
       "webUrl": webView.url?.absoluteString ?? NSNull(),
       "windowNumber": window?.windowNumber ?? NSNull(),
     ])
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    onFocus?()
+    super.mouseDown(with: event)
+  }
+
+  func controlTextDidBeginEditing(_ obj: Notification) {
+    isEditingAddress = true
+  }
+
+  func controlTextDidEndEditing(_ obj: Notification) {
+    isEditingAddress = false
+    if isReturnTextMovement(obj) {
+      /**
+       CDXC:BrowserPanes 2026-05-03-04:09
+       AppKit can finish NSTextField editing on Return without sending the
+       target/action first. Commit here too so typed browser URLs navigate
+       instead of being overwritten by the previous WKWebView URL.
+       */
+      commitAddress()
+      return
+    }
+    updateBrowserToolbarState()
+  }
+
+  private func isReturnTextMovement(_ notification: Notification) -> Bool {
+    guard let movement = notification.userInfo?["NSTextMovement"] as? Int else {
+      return false
+    }
+    return movement == NSReturnTextMovement
+  }
+
+  func control(
+    _ control: NSControl,
+    textView: NSTextView,
+    doCommandBy commandSelector: Selector
+  ) -> Bool {
+    guard control === addressField else {
+      return false
+    }
+    if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+      /**
+       CDXC:BrowserPanes 2026-05-03-03:59
+       Address-bar Return must always drive WKWebView navigation. Handling the
+       text command directly avoids AppKit swallowing the field action after a
+       page focus transition or autocomplete interaction.
+       */
+      commitAddress()
+      window?.makeFirstResponder(webView)
+      return true
+    }
+    if commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
+      commitAddress()
+      window?.makeFirstResponder(webView)
+      return true
+    }
+    if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+      isEditingAddress = false
+      updateBrowserToolbarState()
+      window?.makeFirstResponder(webView)
+      return true
+    }
+    return false
+  }
+
+  private func installAddressFieldKeyMonitor() {
+    guard addressFieldKeyMonitor == nil else {
+      return
+    }
+    addressFieldKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      guard let self else {
+        return event
+      }
+      guard self.shouldCommitAddress(forKeyDown: event) else {
+        return event
+      }
+      /**
+       CDXC:BrowserPanes 2026-05-03-04:22
+       Embedded browser panes use native AppKit address chrome. Some field
+       editor paths consume Return before NSTextField target/action or delegate
+       callbacks run, so commit Return/keypad-Enter at the pane level while this
+       address field is actively edited. This keeps typed URLs navigating in the
+       embedded pane instead of leaving stale page content behind the new text.
+       */
+      self.commitAddress()
+      self.window?.makeFirstResponder(self.webView)
+      return nil
+    }
+  }
+
+  private func uninstallAddressFieldKeyMonitor() {
+    if let addressFieldKeyMonitor {
+      NSEvent.removeMonitor(addressFieldKeyMonitor)
+    }
+    addressFieldKeyMonitor = nil
+  }
+
+  private func shouldCommitAddress(forKeyDown event: NSEvent) -> Bool {
+    guard showsBrowserToolbar else {
+      return false
+    }
+    guard event.window === window, window?.isKeyWindow == true else {
+      return false
+    }
+    guard addressField.currentEditor() != nil || isEditingAddress else {
+      return false
+    }
+    guard window?.fieldEditor(false, for: addressField) === window?.firstResponder else {
+      return false
+    }
+    if event.keyCode == 36 || event.keyCode == 76 {
+      return true
+    }
+    return event.characters == "\r" || event.characters == "\n"
+  }
+
+  private func configureBrowserToolbar(initialAddress: String?) {
+    toolbarView.translatesAutoresizingMaskIntoConstraints = true
+    toolbarView.autoresizesSubviews = false
+    toolbarView.wantsLayer = true
+    toolbarView.layer?.backgroundColor = NSColor.black.cgColor
+
+    [backButton, forwardButton, reloadButton, reactGrabButton, profileButton, appearanceButton, devToolsButton].forEach {
+      button in
+      button.target = self
+      toolbarView.addSubview(button)
+    }
+    backButton.action = #selector(goBack)
+    forwardButton.action = #selector(goForward)
+    reloadButton.action = #selector(reloadPage)
+    devToolsButton.action = #selector(openDevTools)
+    reactGrabButton.action = #selector(injectReactGrab)
+    profileButton.action = #selector(showProfilePicker)
+    appearanceButton.action = #selector(showAppearanceMenu)
+
+    securityIcon.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Secure connection")
+    securityIcon.contentTintColor = NSColor(calibratedWhite: 0.78, alpha: 0.9)
+    securityIcon.imageScaling = .scaleProportionallyDown
+    toolbarView.addSubview(securityIcon)
+
+    addressField.cell = BrowserAddressTextFieldCell(textCell: "")
+    addressField.stringValue = initialAddress ?? ""
+    addressField.delegate = self
+    addressField.target = self
+    addressField.action = #selector(commitAddress)
+    addressField.isBordered = false
+    addressField.drawsBackground = false
+    addressField.isEditable = true
+    addressField.isSelectable = true
+    addressField.focusRingType = .none
+    addressField.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+    addressField.textColor = NSColor(calibratedWhite: 0.94, alpha: 0.95)
+    addressField.placeholderString = "Search or enter address"
+    addressField.lineBreakMode = .byTruncatingMiddle
+    addressField.cell?.lineBreakMode = .byTruncatingMiddle
+    addressField.cell?.usesSingleLineMode = true
+    addressField.cell?.wraps = false
+    toolbarView.addSubview(addressField)
+
+    /**
+     CDXC:BrowserPanes 2026-05-02-17:03
+     The address bar is native AppKit chrome for embedded browser panes. It
+     normalizes typed URLs/searches and drives the pane's own WKWebView, keeping
+     browser navigation inside the pane instead of opening external overlays.
+     */
+    navigationObservations = [
+      webView.observe(\.url, options: [.initial, .new]) { [weak self] _, _ in
+        Task { @MainActor in self?.updateBrowserToolbarState() }
+      },
+      webView.observe(\.canGoBack, options: [.initial, .new]) { [weak self] _, _ in
+        Task { @MainActor in self?.updateBrowserToolbarState() }
+      },
+      webView.observe(\.canGoForward, options: [.initial, .new]) { [weak self] _, _ in
+        Task { @MainActor in self?.updateBrowserToolbarState() }
+      },
+      webView.observe(\.isLoading, options: [.initial, .new]) { [weak self] _, _ in
+        Task { @MainActor in self?.updateBrowserToolbarState() }
+      },
+    ]
+  }
+
+  private func layoutBrowserToolbar() {
+    guard showsBrowserToolbar else {
+      return
+    }
+    let height = toolbarView.bounds.height
+    var x = Self.toolbarHorizontalPadding
+    let buttonY = floor((height - Self.toolbarButtonSize.height) / 2)
+    for button in [backButton, forwardButton, reloadButton] {
+      button.frame = CGRect(origin: CGPoint(x: x, y: buttonY), size: Self.toolbarButtonSize)
+      x += Self.toolbarButtonSize.width + Self.toolbarItemGap
+    }
+
+    /**
+     CDXC:BrowserPanes 2026-05-02-17:13
+     The browser address row should match the reference chrome exactly: React
+     Grab, profile, theme, and DevTools live to the right of the URL field.
+     Import remains a profile-menu action instead of a fifth always-visible
+     toolbar button so the pane chrome does not drift from the expected layout.
+     */
+    let rightButtons = [reactGrabButton, profileButton, appearanceButton, devToolsButton]
+    var rightX = toolbarView.bounds.width - Self.toolbarHorizontalPadding
+    for button in rightButtons.reversed() {
+      rightX -= Self.toolbarButtonSize.width
+      button.frame = CGRect(origin: CGPoint(x: rightX, y: buttonY), size: Self.toolbarButtonSize)
+      rightX -= Self.toolbarItemGap
+    }
+
+    let addressX = x + 18
+    let addressRight = rightX - 14
+    let availableAddressWidth = max(0, addressRight - addressX)
+    /**
+     CDXC:BrowserPanes 2026-05-03-01:58
+     The embedded browser URL text must read like toolbar chrome, not a page
+     heading. Keep the field compact and vertically centered next to the lock
+     icon so long URLs do not dominate the pane.
+     */
+    let addressHeight: CGFloat = 20
+    let addressY = floor((height - addressHeight) / 2)
+    securityIcon.frame = CGRect(x: addressX, y: floor((height - 14) / 2), width: 14, height: 14)
+    addressField.frame = CGRect(
+      x: addressX + 22,
+      y: addressY,
+      width: max(0, availableAddressWidth - 22),
+      height: addressHeight
+    )
+  }
+
+  private func updateBrowserToolbarState() {
+    guard showsBrowserToolbar else {
+      return
+    }
+    backButton.isEnabled = webView.canGoBack
+    forwardButton.isEnabled = webView.canGoForward
+    reloadButton.toolTip = webView.isLoading ? "Stop Loading" : "Reload"
+    let lockSymbol = webView.url?.scheme == "https" ? "lock.fill" : "globe"
+    securityIcon.image = NSImage(systemSymbolName: lockSymbol, accessibilityDescription: nil)
+    if !isEditingAddress {
+      addressField.stringValue = webView.url?.absoluteString ?? addressField.stringValue
+    }
+  }
+
+  private static func browserPaneNavigationRequest(url: URL) -> URLRequest {
+    /**
+     CDXC:BrowserPanes 2026-05-03-02:28
+     Address-bar navigations create a fresh top-level page, just like restored
+     browser panes. Ignore stale local document cache here too so sites that
+     vary HTML by user agent do not display old bare-WKWebView markup until the
+     user manually reloads.
+     */
+    URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
+  }
+
+  @objc private func goBack() {
+    onFocus?()
+    if webView.canGoBack {
+      webView.goBack()
+    }
+  }
+
+  @objc private func goForward() {
+    onFocus?()
+    if webView.canGoForward {
+      webView.goForward()
+    }
+  }
+
+  @objc private func reloadPage() {
+    onFocus?()
+    if webView.isLoading {
+      webView.stopLoading()
+    } else {
+      webView.reload()
+    }
+  }
+
+  @objc private func commitAddress() {
+    /**
+     CDXC:BrowserPanes 2026-05-03-04:36
+     Address-bar commits must snapshot the edited text before focusing the pane.
+     Focusing can end AppKit field editing and refresh toolbar state from the
+     previous WKWebView URL, which made pasted URLs appear accepted but navigate
+     back to the old page when Return was pressed.
+     */
+    let input = addressField.stringValue
+    guard let url = Self.url(fromAddressInput: input) else {
+      NSSound.beep()
+      updateBrowserToolbarState()
+      return
+    }
+    onFocus?()
+    NativeT3CodePaneReproLog.append("nativeWorkspace.browserPane.address.commit", [
+      "input": input,
+      "url": url.absoluteString,
+    ])
+    addressField.stringValue = url.absoluteString
+    webView.load(Self.browserPaneNavigationRequest(url: url))
+  }
+
+  @objc private func openDevTools() {
+    onOpenDevTools?()
+  }
+
+  @objc private func injectReactGrab() {
+    onInjectReactGrab?()
+  }
+
+  @objc private func showProfilePicker() {
+    onShowProfilePicker?()
+  }
+
+  @objc private func showAppearanceMenu() {
+    onFocus?()
+    let menu = NSMenu(title: "Browser Theme")
+    for mode in [BrowserPaneThemeMode.system, .light, .dark] {
+      let item = NSMenuItem(title: mode.title, action: #selector(selectAppearanceMode(_:)), keyEquivalent: "")
+      item.identifier = NSUserInterfaceItemIdentifier(mode.rawValue)
+      item.target = self
+      item.state = mode == browserThemeMode ? .on : .off
+      menu.addItem(item)
+    }
+    NSMenu.popUpContextMenu(
+      menu,
+      with: syntheticMenuEvent(),
+      for: appearanceButton
+    )
+  }
+
+  @objc private func selectAppearanceMode(_ sender: NSMenuItem) {
+    guard let rawValue = sender.identifier?.rawValue,
+      let mode = BrowserPaneThemeMode(rawValue: rawValue)
+    else {
+      return
+    }
+    /**
+     CDXC:BrowserPanes 2026-05-02-17:32
+     The browser theme top-bar control mirrors the reference System/Light/Dark
+     menu. Apply the choice directly to the embedded WKWebView so compatible
+     pages update in place without replacing the browser pane or using overlay UI.
+     */
+    browserThemeMode = mode
+    switch mode {
+    case .system:
+      webView.appearance = nil
+    case .light:
+      webView.appearance = NSAppearance(named: .aqua)
+    case .dark:
+      webView.appearance = NSAppearance(named: .darkAqua)
+    }
+    appearanceButton.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: "Browser Theme")
+  }
+
+  @objc private func showImportSettings() {
+    onShowImportSettings?()
+  }
+
+  private static func url(fromAddressInput value: String) -> URL? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      return nil
+    }
+    if let url = URL(string: trimmed), url.scheme != nil {
+      return url
+    }
+    if trimmed == "localhost" || trimmed.hasPrefix("localhost:") || trimmed.hasPrefix("127.0.0.1") {
+      return URL(string: "http://\(trimmed)")
+    }
+    if trimmed.contains(".") && !trimmed.contains(" ") {
+      return URL(string: "https://\(trimmed)")
+    }
+    var components = URLComponents(string: "https://www.google.com/search")
+    components?.queryItems = [URLQueryItem(name: "q", value: trimmed)]
+    return components?.url
+  }
+
+  private static func makeToolbarButton(
+    systemSymbolName: String,
+    fallbackTitle: String,
+    tooltip: String
+  ) -> NSButton {
+    let button = NSButton(title: "", target: nil, action: nil)
+    button.bezelStyle = .texturedRounded
+    button.isBordered = false
+    button.imagePosition = .imageOnly
+    button.toolTip = tooltip
+    button.contentTintColor = NSColor(calibratedWhite: 0.86, alpha: 0.82)
+    button.focusRingType = .none
+    if let image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: tooltip) {
+      button.image = image
+    } else {
+      button.title = fallbackTitle
+      button.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    }
+    return button
+  }
+
+  private func syntheticMenuEvent() -> NSEvent {
+    if let currentEvent = NSApp.currentEvent {
+      return currentEvent
+    }
+    return NSEvent.mouseEvent(
+      with: .rightMouseDown,
+      location: NSEvent.mouseLocation,
+      modifierFlags: [],
+      timestamp: ProcessInfo.processInfo.systemUptime,
+      windowNumber: window?.windowNumber ?? 0,
+      context: nil,
+      eventNumber: 0,
+      clickCount: 1,
+      pressure: 1
+    )!
   }
 
   private static func describeFrame(_ frame: CGRect) -> [String: Double] {

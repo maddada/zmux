@@ -18,6 +18,7 @@ import {
 import { installAppModalGlobalErrorLogging } from "../../sidebar/app-modal-error-log";
 import { openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
 import { SidebarApp } from "../../sidebar/sidebar-app";
+import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "../../sidebar/agent-logos";
 import {
   explainFirstPromptAutoRenameDecision,
   resolveFirstPromptAutoRenameStrategy,
@@ -67,6 +68,7 @@ import {
   type SidebarCommandSessionIndicator,
   type SessionGridDirection,
   type SessionGroupRecord,
+  type BrowserSessionRecord,
 } from "../../shared/session-grid-contract";
 import { createDisplaySessionLayout } from "../../shared/active-sessions-sort";
 import { focusDirectionInSnapshot } from "../../shared/session-grid-state-create-focus";
@@ -88,6 +90,8 @@ import {
   removeSessionInSimpleWorkspace,
   renameGroupInSimpleWorkspace,
   setGroupSleepingInSimpleWorkspace,
+  setBrowserSessionFaviconDataUrlInSimpleWorkspace,
+  setBrowserSessionUrlInSimpleWorkspace,
   setSessionFavoriteInSimpleWorkspace,
   setSessionSleepingInSimpleWorkspace,
   setSessionTitleInSimpleWorkspace,
@@ -95,6 +99,7 @@ import {
   setTerminalSessionAgentNameInSimpleWorkspace,
   setViewModeInSimpleWorkspace,
   setVisibleCountInSimpleWorkspace,
+  swapVisibleSessionsInSimpleWorkspace,
   syncGroupOrderInSimpleWorkspace,
   syncSessionOrderInSimpleWorkspace,
   toggleFullscreenSessionInSimpleWorkspace,
@@ -178,6 +183,7 @@ type NativeHostCommand =
   | { sessionId: string; type: "closeWebPane" }
   | { sessionId: string; type: "focusTerminal" }
   | { sessionId: string; type: "focusWebPane" }
+  | { sessionId: string; type: "reloadWebPane" }
   | { cwd: string; type: "startT3CodeRuntime" }
   | { type: "stopT3CodeRuntime" }
   | { type: "activateApp" }
@@ -190,6 +196,8 @@ type NativeHostCommand =
       focusedSessionId?: string;
       layout?: NativeTerminalLayout;
       paneGap?: number;
+      sessionAgentIconDataUrls?: Record<string, string>;
+      sessionAgentIconColors?: Record<string, string>;
       sessionActivities?: Record<string, "attention" | "working">;
       sessionTitles?: Record<string, string>;
       type: "setActiveTerminalSet";
@@ -240,6 +248,10 @@ type NativeHostCommand =
   | { type: "openExternalUrl"; url: string }
   | { type: "openBrowserWindow"; url: string }
   | { type: "showBrowserWindow" }
+  | { sessionId: string; type: "openBrowserDevTools" }
+  | { sessionId: string; type: "injectBrowserReactGrab" }
+  | { sessionId: string; type: "showBrowserProfilePicker" }
+  | { sessionId: string; type: "showBrowserImportSettings" }
   | { side: "left" | "right"; type: "setSidebarSide" }
   | {
       enabled: boolean;
@@ -295,11 +307,14 @@ type NativeTerminalLayout =
 type NativeHostEvent =
   | { foregroundPid?: number; sessionId: string; ttyName?: string; type: "terminalReady" }
   | { sessionId: string; title: string; type: "terminalTitleChanged" }
+  | { faviconDataUrl?: string; sessionId: string; type: "browserFaviconChanged" }
+  | { sessionId: string; type: "browserUrlChanged"; url: string }
   | {
       action: "close" | "fork" | "reload" | "rename" | "sleep";
       sessionId: string;
       type: "terminalTitleBarAction";
     }
+  | { sourceSessionId: string; targetSessionId: string; type: "paneReorderRequested" }
   | { cwd: string; sessionId: string; type: "terminalCwdChanged" }
   | { exitCode?: number; sessionId: string; type: "terminalExited" }
   | { sessionId: string; type: "terminalFocused" }
@@ -949,7 +964,7 @@ function openNativeExternalUrl(url: string): void {
   postNative({ type: "openExternalUrl", url });
 }
 
-function openNativeBrowserWindow(url: string): void {
+function openChromeCanaryBrowserWindow(url: string): void {
   /**
    * CDXC:BrowserOverlay 2026-04-26-05:14
    * Browser-type actions should not use the user's default browser. They launch
@@ -957,6 +972,92 @@ function openNativeBrowserWindow(url: string): void {
    * window above the currently attached zmux window.
    */
   postNative({ type: "openBrowserWindow", url });
+}
+
+function openNativeBrowserWindow(url: string): BrowserSessionRecord | undefined {
+  if (settings.browserOpenMode === "browser-pane") {
+    return createNativeBrowserSession(url);
+  }
+  openChromeCanaryBrowserWindow(url);
+  return undefined;
+}
+
+function normalizeBrowserPaneUrl(url: string): string {
+  const trimmedUrl = url.trim() || DEFAULT_BROWSER_LAUNCH_URL;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmedUrl)) {
+    return trimmedUrl;
+  }
+  return `https://${trimmedUrl}`;
+}
+
+function browserPaneTitleFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname || "Browser";
+  } catch {
+    return "Browser";
+  }
+}
+
+function createNativeBrowserSession(url: string, groupId?: string): BrowserSessionRecord | undefined {
+  const project = activeProject();
+  const normalizedUrl = normalizeBrowserPaneUrl(url);
+  const targetWorkspace = groupId
+    ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
+    : project.workspace;
+  /**
+   * CDXC:BrowserPanes 2026-05-02-06:35
+   * Browser-pane mode turns every browser action into a first-class workspace
+   * browser session. The card lives beside terminal and T3 cards in the active
+   * group instead of appearing in the old dedicated Chrome Canary Browsers
+   * section, matching the requested pane-based workflow.
+   */
+  const result = createSessionInSimpleWorkspace(targetWorkspace, {
+    browser: { url: normalizedUrl },
+    kind: "browser",
+    title: browserPaneTitleFromUrl(normalizedUrl),
+  });
+  const session = result.session?.kind === "browser" ? result.session : undefined;
+  if (!session) {
+    return undefined;
+  }
+
+  const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
+  updateActiveProjectWorkspace(() => result.snapshot);
+  postNative({
+    cwd: project.path,
+    sessionId: nativeSessionId,
+    title: session.title || "Browser",
+    type: "createWebPane",
+    url: normalizedUrl,
+  });
+  postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
+  publish();
+  return session;
+}
+
+function revealSessionAsAdditionalNativePane(
+  sessionId: string,
+): void {
+  const group = activeWorkspaceGroup();
+  const nextVisibleCount = clampVisibleSessionCount(
+    Math.min(group.snapshot.sessions.length, group.snapshot.visibleCount + 1),
+  );
+  /**
+   * CDXC:BrowserPanes 2026-05-02-17:48
+   * Browser top-row split controls must create visible native panes, not
+   * background sidebar cards. Zmux's workspace state is the source of truth for
+   * the AppKit layout, so focus the new session and expand visibleCount before
+   * the next native layout sync.
+   */
+  updateActiveProjectWorkspace((workspace) =>
+    setVisibleCountInSimpleWorkspace(
+      focusSessionInSimpleWorkspace(workspace, sessionId).snapshot,
+      nextVisibleCount,
+    ),
+  );
+  syncNativeLayout();
+  publish();
 }
 
 function applyRecommendedGhosttySettings(): void {
@@ -2379,7 +2480,15 @@ function getNativeSidebarCommandSessionIndicators(
 function buildSidebarMessage(): SidebarHydrateMessage {
   const project = activeProject();
   const snapshot = activeSnapshot();
-  const browserGroups = isChromeCanaryRunning ? [buildChromeCanaryBrowserGroup()] : [];
+  /**
+   * CDXC:BrowserPanes 2026-05-02-06:35
+   * Browser-pane mode hides the dedicated Chrome Canary Browsers section
+   * because browser actions become ordinary workspace session cards. Canary
+   * remains visible only while the Chrome Canary integration is selected.
+   */
+  const showChromeCanaryBrowserGroup =
+    settings.browserOpenMode === "chrome-canary" && isChromeCanaryRunning;
+  const browserGroups = showChromeCanaryBrowserGroup ? [buildChromeCanaryBrowserGroup()] : [];
   /**
    * CDXC:NativeSidebar 2026-04-27-17:03
    * Native sidebar editor checks must stay aligned with the shipped UX. Keep
@@ -2406,7 +2515,7 @@ function buildSidebarMessage(): SidebarHydrateMessage {
         {
           actions: settings.showSidebarActions,
           agents: settings.showSidebarAgents,
-          browsers: isChromeCanaryRunning,
+          browsers: showChromeCanaryBrowserGroup,
           git: settings.showSidebarGitButton,
         },
         collapsedSections,
@@ -2561,6 +2670,12 @@ function ensureVisibleNativeSessions(reason: string): void {
         if (session.kind === "t3") {
           if (!nativeSessionIdBySidebarSessionId.has(session.sessionId)) {
             restoreNativeT3Session(project, session, reason);
+          }
+          continue;
+        }
+        if (session.kind === "browser") {
+          if (!nativeSessionIdBySidebarSessionId.has(session.sessionId)) {
+            restoreNativeBrowserSession(project, session, reason);
           }
           continue;
         }
@@ -3451,6 +3566,34 @@ function restoreNativeT3Session(
   });
 }
 
+function restoreNativeBrowserSession(
+  project: NativeProject,
+  session: BrowserSessionRecord,
+  reason: string,
+): void {
+  /**
+   * CDXC:BrowserPanes 2026-05-02-06:35
+   * Persisted browser-pane cards restore through the same native web-pane host
+   * as newly opened browser actions. This keeps app restarts from turning
+   * browser session cards into inert sidebar entries.
+   */
+  const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
+  postNative({
+    cwd: project.path,
+    sessionId: nativeSessionId,
+    title: session.title || browserPaneTitleFromUrl(session.browser.url),
+    type: "createWebPane",
+    url: session.browser.url,
+  });
+  postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
+  appendAgentDetectionDebugLog("nativeSidebar.browserSession.restored", {
+    nativeSessionId,
+    reason,
+    sessionId: session.sessionId,
+    url: session.browser.url,
+  });
+}
+
 function syncSessionTitleFromNativeTerminalTitle(
   sessionId: string,
   rawTitle: string,
@@ -4028,7 +4171,10 @@ function closeTerminal(sessionId: string): void {
   nativeWorkingStartedAtBySessionId.delete(sessionId);
   postNative({
     sessionId: nativeSessionId,
-    type: sessionRecord?.kind === "t3" ? "closeWebPane" : "closeTerminal",
+    type:
+      sessionRecord?.kind === "t3" || sessionRecord?.kind === "browser"
+        ? "closeWebPane"
+        : "closeTerminal",
   });
   publish();
 }
@@ -4038,9 +4184,13 @@ function focusTerminal(sessionId: string): void {
     (workspace) => focusSessionInSimpleWorkspace(workspace, sessionId).snapshot,
   );
   const sessionRecord = findSessionRecord(sessionId);
-  if (sessionRecord?.kind === "t3") {
+  if (sessionRecord?.kind === "t3" || sessionRecord?.kind === "browser") {
     if (!nativeSessionIdBySidebarSessionId.has(sessionId)) {
-      restoreNativeT3Session(activeProject(), sessionRecord, "focus-restored-session");
+      if (sessionRecord.kind === "t3") {
+        restoreNativeT3Session(activeProject(), sessionRecord, "focus-restored-session");
+      } else {
+        restoreNativeBrowserSession(activeProject(), sessionRecord, "focus-restored-session");
+      }
     }
     postNative({
       sessionId: nativeSessionIdForSidebarSession(sessionId),
@@ -4063,7 +4213,9 @@ function focusTerminal(sessionId: string): void {
   postNative({
     sessionId: nativeSessionIdForSidebarSession(sessionId),
     type: activeSnapshot().sessions.some(
-      (candidate) => candidate.sessionId === sessionId && candidate.kind === "t3",
+      (candidate) =>
+        candidate.sessionId === sessionId &&
+        (candidate.kind === "t3" || candidate.kind === "browser"),
     )
       ? "focusWebPane"
       : "focusTerminal",
@@ -6265,6 +6417,27 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "openT3SessionBrowserAccessLink":
       openNativeExternalUrl(message.url);
       return;
+    case "runBrowserPaneAction": {
+      const sessionRecord = findSessionRecord(message.sessionId);
+      if (sessionRecord?.kind !== "browser") {
+        return;
+      }
+      const nativeSessionId = nativeSessionIdForSidebarSession(message.sessionId);
+      switch (message.action) {
+        case "devtools":
+          postNative({ sessionId: nativeSessionId, type: "openBrowserDevTools" });
+          return;
+        case "react-grab":
+          postNative({ sessionId: nativeSessionId, type: "injectBrowserReactGrab" });
+          return;
+        case "profile-picker":
+          postNative({ sessionId: nativeSessionId, type: "showBrowserProfilePicker" });
+          return;
+        case "import-settings":
+          postNative({ sessionId: nativeSessionId, type: "showBrowserImportSettings" });
+          return;
+      }
+    }
     case "sidebarDebugLog":
       if (!isNativeSidebarDebugLoggingEnabled()) {
         return;
@@ -6376,18 +6549,36 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
 }
 
 function syncNativeLayout(): void {
+  const sidebarSessionsById = new Map(
+    createProjectedSidebarSessionsForGroup(activeWorkspaceGroup()).map((session) => [
+      session.sessionId,
+      session,
+    ]),
+  );
   const snapshot = activeSnapshot();
-  const visibleIds = new Set(snapshot.visibleSessionIds);
-  const visibleSessionIds = snapshot.sessions
-    .filter(
-      (session) =>
-        (session.kind === "terminal" || session.kind === "t3") &&
-        visibleIds.has(session.sessionId),
-    )
+  const visibleSessionRecordsById = new Map(
+    snapshot.sessions.map((session) => [session.sessionId, session]),
+  );
+  /**
+   * CDXC:BrowserPanes 2026-05-02-11:59
+   * Browser-pane mode must feed browser sessions into the same native AppKit
+   * layout tree as terminals and T3 panes. Creating the WKWebView is not
+   * enough; omitting the browser id from setActiveTerminalSet makes Swift move
+   * the loaded web pane offscreen during the next layout sync.
+   *
+   * CDXC:NativePaneReorder 2026-05-03-06:38
+   * Native layout order must follow visibleSessionIds directly. Filtering the
+   * full stored session list can resurrect hidden sessions when pane
+   * drag-and-drop changes only the visible split placement.
+   */
+  const visibleSessions = snapshot.visibleSessionIds
+    .map((sessionId) => visibleSessionRecordsById.get(sessionId))
+    .filter((session): session is NonNullable<typeof session> => session !== undefined);
+  const visibleSessionIds = visibleSessions
     .map((session) => nativeSessionIdForSidebarSession(session.sessionId));
-  const attentionSessionIds = snapshot.sessions
+  const attentionSessionIds = visibleSessions
     .filter((session) => {
-      if (session.kind !== "terminal" || !visibleIds.has(session.sessionId)) {
+      if (session.kind !== "terminal") {
         return false;
       }
       const terminalState = terminalStateById.get(session.sessionId);
@@ -6395,19 +6586,36 @@ function syncNativeLayout(): void {
     })
     .map((session) => nativeSessionIdForSidebarSession(session.sessionId));
   const sessionActivities: Record<string, "attention" | "working"> = {};
+  const sessionAgentIconColors: Record<string, string> = {};
+  const sessionAgentIconDataUrls: Record<string, string> = {};
   const sessionTitles: Record<string, string> = {};
-  for (const session of snapshot.sessions) {
-    if (session.kind !== "terminal" || !visibleIds.has(session.sessionId)) {
-      continue;
-    }
+  for (const session of visibleSessions) {
     const nativeSessionId = nativeSessionIdForSidebarSession(session.sessionId);
     sessionTitles[nativeSessionId] = session.title;
+    /**
+     * CDXC:NativePaneReorder 2026-05-03-03:57
+     * Native pane reorder feedback must show the same identity cue as the
+     * session card. Send the projected sidebar icon data URL and CSS mask
+     * color through layout sync so Swift uses live agent detection and renders
+     * the same tinted logo instead of re-implementing agent artwork.
+     */
+    const agentIcon = sidebarSessionsById.get(session.sessionId)?.agentIcon;
+    if (agentIcon) {
+      sessionAgentIconDataUrls[nativeSessionId] = AGENT_LOGOS[agentIcon];
+      sessionAgentIconColors[nativeSessionId] = AGENT_LOGO_COLORS[agentIcon];
+    }
+    if (session.kind !== "terminal") {
+      continue;
+    }
     const activity = terminalStateById.get(session.sessionId)?.activity;
     if (activity === "attention" || activity === "working") {
       sessionActivities[nativeSessionId] = activity;
     }
   }
-  const layout = buildLayout(visibleSessionIds, snapshot.visibleCount);
+  const layout = buildLayout(
+    visibleSessionIds,
+    snapshot.visibleCount,
+  );
   /**
    * CDXC:NativeTerminals 2026-04-28-03:37
    * Native title bars must mirror the same per-session state used by sidebar
@@ -6435,6 +6643,8 @@ function syncNativeLayout(): void {
      * with every native layout sync so slider drags repaint AppKit spacing.
      */
     paneGap: settings.workspacePaneGap,
+    sessionAgentIconDataUrls,
+    sessionAgentIconColors,
     sessionActivities,
     sessionTitles,
     type: "setActiveTerminalSet",
@@ -6495,6 +6705,13 @@ window.addEventListener("zmux-native-host-event", (event) => {
     runNativeHotkeyAction(hostEvent.actionId);
     return;
   }
+  if (hostEvent.type === "paneReorderRequested") {
+    handleNativePaneReorderRequested(
+      sidebarSessionIdForNativeSession(hostEvent.sourceSessionId),
+      sidebarSessionIdForNativeSession(hostEvent.targetSessionId),
+    );
+    return;
+  }
   const sidebarSessionId = sidebarSessionIdForNativeSession(hostEvent.sessionId);
   if (hostEvent.type === "t3ThreadReady") {
     /**
@@ -6518,110 +6735,91 @@ window.addEventListener("zmux-native-host-event", (event) => {
     publish();
     return;
   }
-  const terminalState = terminalStateById.get(sidebarSessionId);
-  if (!terminalState) {
-    appendSessionTitleDebugLog("nativeSidebar.nativeEventIgnored", {
-      nativeSessionId: hostEvent.sessionId,
-      reason: "terminal-state-missing",
-      sidebarSessionId,
-      type: hostEvent.type,
-    });
-    return;
-  }
   if (hostEvent.type === "terminalTitleChanged") {
-    const previousActivity = terminalState.activity;
-    const previousTerminalTitle = terminalState.terminalTitle;
-    const knownAgentNameBeforeDetection = terminalState.agentName;
-    const previousVisibleTerminalTitle = getVisibleTerminalTitle(previousTerminalTitle);
-    const previousDerivedActivity = titleDerivedActivityBySessionId.get(sidebarSessionId);
-    const nextDerivedActivity = getTitleDerivedSessionActivityFromTransition(
-      previousTerminalTitle,
-      hostEvent.title,
-      previousDerivedActivity,
-      knownAgentNameBeforeDetection,
-    );
-    const effectiveDerivedActivity = nextDerivedActivity
-      ? getNativeEffectiveTitleActivity(sidebarSessionId, nextDerivedActivity)
-      : undefined;
-    terminalState.terminalTitle = hostEvent.title;
-    /**
-     * CDXC:AgentDetection 2026-04-26-10:50
-     * Native Ghostty sessions may start as plain shells and only later reveal
-     * the active agent through terminal titles. Mirror demo-project's title
-     * detector so Codex, Claude, Gemini, and Copilot titles update the sidebar
-     * icon/status without requiring launch through an agent button.
-     */
-    if (effectiveDerivedActivity) {
-      titleDerivedActivityBySessionId.set(sidebarSessionId, effectiveDerivedActivity);
-      terminalState.agentName = effectiveDerivedActivity.agentName;
-      terminalState.activity = effectiveDerivedActivity.activity;
-      setTerminalSessionAgentName(sidebarSessionId, effectiveDerivedActivity.agentName);
-      if (previousActivity !== "attention" && terminalState.activity === "attention") {
-        playNativeSessionCompletionSound(sidebarSessionId, "terminal-title");
-      }
-    } else {
-      titleDerivedActivityBySessionId.delete(sidebarSessionId);
-    }
-    syncSessionTitleFromNativeTerminalTitle(
-      sidebarSessionId,
-      hostEvent.title,
-      previousTerminalTitle,
-    );
-    /**
-     * CDXC:AgentDetection 2026-04-29-09:16
-     * Codex/Claude spinner glyphs can change terminal titles many times per
-     * second. Preserve the title-derived activity state above, but skip sidebar
-     * publishes when only the spinner glyph changed and the visible title/status
-     * stayed equivalent.
-     */
-    if (
-      previousVisibleTerminalTitle === getVisibleTerminalTitle(hostEvent.title) &&
-      previousActivity === terminalState.activity &&
-      knownAgentNameBeforeDetection === terminalState.agentName &&
-      haveSameTitleDerivedSessionActivity(previousDerivedActivity, effectiveDerivedActivity)
-    ) {
+    const session = findSessionRecord(sidebarSessionId);
+    if (session?.kind === "browser") {
+      /**
+       * CDXC:BrowserPanes 2026-05-03-01:58
+       * WKWebView reports page titles over the existing native title event.
+       * Browser sessions do not have terminal activity state, so accept these
+       * updates before terminal-specific title detection and persist them for
+       * the next native layout sync.
+       */
+      updateActiveProjectWorkspace(
+        (workspace) =>
+          setSessionTitleInSimpleWorkspace(workspace, sidebarSessionId, hostEvent.title, {
+            titleSource: "browser-auto",
+          }).snapshot,
+      );
+      publish();
       return;
     }
-  } else if (hostEvent.type === "terminalTitleBarAction") {
+  }
+  if (hostEvent.type === "browserUrlChanged") {
+    const session = findSessionRecord(sidebarSessionId);
+    if (session?.kind === "browser") {
+      /**
+       * CDXC:BrowserPanes 2026-05-03-03:41
+       * Native browser panes own navigation, so the sidebar must accept the
+       * committed WKWebView URL over the host event bus and persist it on the
+       * browser card before app restart.
+       */
+      updateActiveProjectWorkspace(
+        (workspace) =>
+          setBrowserSessionUrlInSimpleWorkspace(workspace, sidebarSessionId, hostEvent.url)
+            .snapshot,
+      );
+      publish();
+      return;
+    }
+  }
+  if (hostEvent.type === "browserFaviconChanged") {
+    const session = findSessionRecord(sidebarSessionId);
+    if (session?.kind === "browser") {
+      /**
+       * CDXC:BrowserPanes 2026-05-03-11:28
+       * Browser pane cards should show the page favicon when WebKit has one,
+       * falling back to the default browser glyph otherwise. Native WebKit
+       * already resolves the page favicon for the pane title bar, so persist
+       * that same data URL here instead of duplicating browser fetch logic in
+       * the sidebar.
+       */
+      updateActiveProjectWorkspace(
+        (workspace) =>
+          setBrowserSessionFaviconDataUrlInSimpleWorkspace(
+            workspace,
+            sidebarSessionId,
+            hostEvent.faviconDataUrl,
+          ).snapshot,
+      );
+      publish();
+      return;
+    }
+  }
+  if (hostEvent.type === "terminalTitleBarAction") {
+    /**
+     * CDXC:BrowserPanes 2026-05-03-11:15
+     * Browser panes use the shared native title-bar action event, but they do
+     * not have terminal runtime state. Handle title-bar actions before the
+     * terminal-only state guard so the browser close button removes the pane
+     * through the same workspace/session path as T3 Code and terminals.
+     */
     handleNativeTerminalTitleBarAction(sidebarSessionId, hostEvent.action);
     return;
-  } else if (hostEvent.type === "terminalExited") {
-    terminalState.lifecycleState = "done";
-    terminalState.activity = "idle";
-    nativeWorkingStartedAtBySessionId.delete(sidebarSessionId);
-    handleNativeSidebarCommandSessionExit(sidebarSessionId, hostEvent.exitCode);
-  } else if (hostEvent.type === "terminalError") {
-    terminalState.lifecycleState = "error";
-    terminalState.activity = "attention";
-    terminalState.terminalTitle = hostEvent.message;
-    nativeWorkingStartedAtBySessionId.delete(sidebarSessionId);
-  } else if (hostEvent.type === "terminalBell") {
-    const suppressedUntil = getNativeActivitySuppressedUntil(sidebarSessionId);
-    if (
-      suppressedUntil !== undefined &&
-      Number.isFinite(suppressedUntil) &&
-      Date.now() < suppressedUntil
-    ) {
-      appendAgentDetectionDebugLog("nativeSidebar.activitySuppression.bellSuppressed", {
-        sessionId: sidebarSessionId,
-        suppressedUntil: new Date(suppressedUntil).toISOString(),
-      });
-      return;
-    }
-    const previousActivity = terminalState.activity;
-    terminalState.activity = "attention";
-    if (previousActivity !== "attention") {
-      playNativeSessionCompletionSound(sidebarSessionId, "terminal-bell");
-    }
-  } else if (hostEvent.type === "terminalReady") {
-    terminalState.lifecycleState = "running";
-  } else if (hostEvent.type === "terminalFocused") {
+  }
+  if (hostEvent.type === "terminalFocused") {
     /**
      * CDXC:NativeTerminalFocus 2026-04-26-21:32
      * Clicking or typing in a split Ghostty surface changes AppKit focus before
      * sidebar state knows about it. Treat native terminalFocused as the
      * authoritative user-focus signal so later layout sync sends the focused
      * session the user is actually typing in instead of stale sidebar focus.
+     *
+     * CDXC:NativeWebPaneFocus 2026-05-03-06:59
+     * T3 Code and browser panes use the same native focus event even though
+     * they do not have terminal runtime state. Handle focus before the
+     * terminal-only state guard so clicking a WKWebView updates the active
+     * sidebar card instead of only drawing the AppKit border.
      */
     const previousFocusedSessionId = activeSnapshot().focusedSessionId;
     if (previousFocusedSessionId === sidebarSessionId) {
@@ -6655,15 +6853,171 @@ window.addEventListener("zmux-native-host-event", (event) => {
     if (!focusChanged) {
       return;
     }
+  } else {
+    const terminalState = terminalStateById.get(sidebarSessionId);
+    if (!terminalState) {
+      appendSessionTitleDebugLog("nativeSidebar.nativeEventIgnored", {
+        nativeSessionId: hostEvent.sessionId,
+        reason: "terminal-state-missing",
+        sidebarSessionId,
+        type: hostEvent.type,
+      });
+      return;
+    }
+    if (hostEvent.type === "terminalTitleChanged") {
+      const previousActivity = terminalState.activity;
+      const previousTerminalTitle = terminalState.terminalTitle;
+      const knownAgentNameBeforeDetection = terminalState.agentName;
+      const previousVisibleTerminalTitle = getVisibleTerminalTitle(previousTerminalTitle);
+      const previousDerivedActivity = titleDerivedActivityBySessionId.get(sidebarSessionId);
+      const nextDerivedActivity = getTitleDerivedSessionActivityFromTransition(
+        previousTerminalTitle,
+        hostEvent.title,
+        previousDerivedActivity,
+        knownAgentNameBeforeDetection,
+      );
+      const effectiveDerivedActivity = nextDerivedActivity
+        ? getNativeEffectiveTitleActivity(sidebarSessionId, nextDerivedActivity)
+        : undefined;
+      terminalState.terminalTitle = hostEvent.title;
+      /**
+       * CDXC:AgentDetection 2026-04-26-10:50
+       * Native Ghostty sessions may start as plain shells and only later reveal
+       * the active agent through terminal titles. Mirror demo-project's title
+       * detector so Codex, Claude, Gemini, and Copilot titles update the sidebar
+       * icon/status without requiring launch through an agent button.
+       */
+      if (effectiveDerivedActivity) {
+        titleDerivedActivityBySessionId.set(sidebarSessionId, effectiveDerivedActivity);
+        terminalState.agentName = effectiveDerivedActivity.agentName;
+        terminalState.activity = effectiveDerivedActivity.activity;
+        setTerminalSessionAgentName(sidebarSessionId, effectiveDerivedActivity.agentName);
+        if (previousActivity !== "attention" && terminalState.activity === "attention") {
+          playNativeSessionCompletionSound(sidebarSessionId, "terminal-title");
+        }
+      } else {
+        titleDerivedActivityBySessionId.delete(sidebarSessionId);
+      }
+      syncSessionTitleFromNativeTerminalTitle(
+        sidebarSessionId,
+        hostEvent.title,
+        previousTerminalTitle,
+      );
+      /**
+       * CDXC:AgentDetection 2026-04-29-09:16
+       * Codex/Claude spinner glyphs can change terminal titles many times per
+       * second. Preserve the title-derived activity state above, but skip sidebar
+       * publishes when only the spinner glyph changed and the visible title/status
+       * stayed equivalent.
+       */
+      if (
+        previousVisibleTerminalTitle === getVisibleTerminalTitle(hostEvent.title) &&
+        previousActivity === terminalState.activity &&
+        knownAgentNameBeforeDetection === terminalState.agentName &&
+        haveSameTitleDerivedSessionActivity(previousDerivedActivity, effectiveDerivedActivity)
+      ) {
+        return;
+      }
+    } else if (hostEvent.type === "terminalExited") {
+      terminalState.lifecycleState = "done";
+      terminalState.activity = "idle";
+      nativeWorkingStartedAtBySessionId.delete(sidebarSessionId);
+      handleNativeSidebarCommandSessionExit(sidebarSessionId, hostEvent.exitCode);
+    } else if (hostEvent.type === "terminalError") {
+      terminalState.lifecycleState = "error";
+      terminalState.activity = "attention";
+      terminalState.terminalTitle = hostEvent.message;
+      nativeWorkingStartedAtBySessionId.delete(sidebarSessionId);
+    } else if (hostEvent.type === "terminalBell") {
+      const suppressedUntil = getNativeActivitySuppressedUntil(sidebarSessionId);
+      if (
+        suppressedUntil !== undefined &&
+        Number.isFinite(suppressedUntil) &&
+        Date.now() < suppressedUntil
+      ) {
+        appendAgentDetectionDebugLog("nativeSidebar.activitySuppression.bellSuppressed", {
+          sessionId: sidebarSessionId,
+          suppressedUntil: new Date(suppressedUntil).toISOString(),
+        });
+        return;
+      }
+      const previousActivity = terminalState.activity;
+      terminalState.activity = "attention";
+      if (previousActivity !== "attention") {
+        playNativeSessionCompletionSound(sidebarSessionId, "terminal-bell");
+      }
+    } else if (hostEvent.type === "terminalReady") {
+      terminalState.lifecycleState = "running";
+    }
   }
   publish();
 });
+
+function handleNativePaneReorderRequested(
+  sourceSessionId: string,
+  targetSessionId: string,
+): void {
+  if (sourceSessionId === targetSessionId) {
+    return;
+  }
+  const group = activeWorkspaceGroup();
+  const currentVisibleSessionIds = group.snapshot.visibleSessionIds;
+  const sourceIndex = currentVisibleSessionIds.indexOf(sourceSessionId);
+  const targetIndex = currentVisibleSessionIds.indexOf(targetSessionId);
+  if (sourceIndex < 0 || targetIndex < 0) {
+    appendTerminalFocusDebugLog("nativePaneReorder.ignored", {
+      groupId: group.groupId,
+      reason: "session-not-visible",
+      sourceSessionId,
+      targetSessionId,
+    });
+    return;
+  }
+
+  const nextVisibleSessionIds = currentVisibleSessionIds.map((sessionId) => {
+    if (sessionId === sourceSessionId) {
+      return targetSessionId;
+    }
+    if (sessionId === targetSessionId) {
+      return sourceSessionId;
+    }
+    return sessionId;
+  });
+  /**
+   * CDXC:NativePaneReorder 2026-05-02-17:33
+   * AppKit title bars own pointer events for native Ghostty, T3, and browser
+   * panes. When Swift reports a header drop, mutate the active sidebar
+   * workspace order so the next native layout sync moves the panes and
+   * persists the same order used by sidebar/session state.
+   *
+   * CDXC:NativePaneReorder 2026-05-03-06:38
+   * A pane drop swaps only the two currently surfaced panes. Hidden sessions
+   * must stay hidden; using the full session list here can make a background
+   * T3/browser/terminal pane appear when the visible split is reordered.
+   */
+  updateActiveProjectWorkspace(
+    (workspace) =>
+      swapVisibleSessionsInSimpleWorkspace(
+        workspace,
+        group.groupId,
+        sourceSessionId,
+        targetSessionId,
+      ).snapshot,
+  );
+  appendTerminalFocusDebugLog("nativePaneReorder.applied", {
+    groupId: group.groupId,
+    nextVisibleSessionIds,
+    sourceSessionId,
+    targetSessionId,
+  });
+  publish();
+}
 
 function handleNativeTerminalTitleBarAction(
   sessionId: string,
   action: Extract<NativeHostEvent, { type: "terminalTitleBarAction" }>["action"],
 ): void {
-  const session = findTerminalSession(sessionId);
+  const session = findSessionRecord(sessionId);
   if (!session) {
     return;
   }
@@ -6684,13 +7038,34 @@ function handleNativeTerminalTitleBarAction(
       });
       return;
     case "fork":
-      forkNativeSession(sessionId);
+      if (session.kind === "terminal") {
+        forkNativeSession(sessionId);
+      } else if (session.kind === "browser") {
+        const nextSession = createNativeBrowserSession(session.browser.url, findSessionGroupId(sessionId));
+        if (nextSession) {
+          revealSessionAsAdditionalNativePane(nextSession.sessionId);
+        }
+      } else if (session.kind === "t3") {
+        const nextSession = createNativeT3Session(findSessionGroupId(sessionId));
+        if (nextSession) {
+          revealSessionAsAdditionalNativePane(nextSession.sessionId);
+        }
+      }
       return;
     case "reload":
-      restartNativeSession(sessionId);
+      if (session.kind === "terminal") {
+        restartNativeSession(sessionId);
+      } else {
+        postNative({
+          sessionId: nativeSessionIdForSidebarSession(sessionId),
+          type: "reloadWebPane",
+        });
+      }
       return;
     case "sleep":
-      setNativeSessionSleeping(sessionId, true);
+      if (session.kind === "terminal") {
+        setNativeSessionSleeping(sessionId, true);
+      }
       return;
     case "close":
       closeTerminal(sessionId);
