@@ -255,6 +255,10 @@ export function normalizeSessionRecord(session: SessionRecord): SessionRecord {
       ...session,
       alias,
       browser: {
+        faviconDataUrl:
+          typeof session.browser.faviconDataUrl === "string"
+            ? session.browser.faviconDataUrl
+            : undefined,
         url: session.browser.url,
       },
       displayId,
@@ -286,6 +290,7 @@ function normalizeSessionTitleSource(
 ): SessionTitleSource | undefined {
   const candidateSource = session.titleSource;
   if (
+    candidateSource === "browser-auto" ||
     candidateSource === "generated" ||
     candidateSource === "placeholder" ||
     candidateSource === "terminal-auto" ||

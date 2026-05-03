@@ -106,10 +106,11 @@ export function createSidebarSessionItems(
   return getOrderedSessions(snapshot).map((session) => ({
     activity: "idle",
     activityLabel: undefined,
-    agentIcon: undefined,
+    agentIcon: session.kind === "browser" ? "browser" : undefined,
     alias: session.alias,
     column: session.column,
     detail: undefined,
+    faviconDataUrl: session.kind === "browser" ? session.browser.faviconDataUrl : undefined,
     lifecycleState:
       session.kind === "browser" ? "running" : session.isSleeping === true ? "sleeping" : "done",
     firstUserMessage: session.firstUserMessage,

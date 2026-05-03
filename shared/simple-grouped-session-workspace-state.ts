@@ -21,7 +21,7 @@ import {
   type CreateSessionRecordOptions,
 } from "./session-grid-contract";
 import { normalizeWorkspaceSessionDisplayIds } from "./grouped-session-workspace-state-helpers";
-import { normalizeSessionRecord } from "./session-grid-state-helpers";
+import { normalizeSessionRecord, reindexSessionsInOrder } from "./session-grid-state-helpers";
 import { reorderGroupSessions } from "./session-order-reorder";
 import { normalizeT3SessionMetadata } from "./t3-session-metadata";
 
@@ -487,6 +487,67 @@ export function setSessionTitleInSimpleWorkspace(
   }));
 }
 
+export function setBrowserSessionUrlInSimpleWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  sessionId: string,
+  url: string,
+): WorkspaceMutationResult {
+  const nextUrl = url.trim();
+  if (!nextUrl) {
+    return { changed: false, snapshot };
+  }
+
+  /**
+   * CDXC:BrowserPanes 2026-05-03-03:41
+   * Browser pane cards persist their current WKWebView location in the simple
+   * workspace snapshot. Restoring from this field keeps app reopen on the page
+   * the user last reached instead of the original create-pane URL.
+   */
+  return updateSession(snapshot, sessionId, (session) => {
+    if (session.kind !== "browser" || session.browser.url === nextUrl) {
+      return session;
+    }
+
+    return {
+      ...session,
+      browser: {
+        ...session.browser,
+        url: nextUrl,
+      },
+    };
+  });
+}
+
+export function setBrowserSessionFaviconDataUrlInSimpleWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  sessionId: string,
+  faviconDataUrl: string | undefined,
+): WorkspaceMutationResult {
+  /**
+   * CDXC:BrowserPanes 2026-05-03-11:28
+   * Browser pane sidebar cards should use the loaded tab favicon when WebKit
+   * discovers one. Persist the favicon data URL on the browser session so the
+   * card keeps the tab identity across sidebar hydration and app reopen.
+   */
+  return updateSession(snapshot, sessionId, (session) => {
+    if (session.kind !== "browser") {
+      return session;
+    }
+    const nextFaviconDataUrl = faviconDataUrl?.trim() || undefined;
+    if (session.browser.faviconDataUrl === nextFaviconDataUrl) {
+      return session;
+    }
+
+    return {
+      ...session,
+      browser: {
+        ...session.browser,
+        faviconDataUrl: nextFaviconDataUrl,
+      },
+    };
+  });
+}
+
 export function setTerminalSessionAgentNameInSimpleWorkspace(
   snapshot: GroupedSessionWorkspaceSnapshot,
   sessionId: string,
@@ -638,6 +699,77 @@ export function syncSessionOrderInSimpleWorkspace(
   const nextSnapshot = updateGroup(snapshot, groupId, (targetGroup) => ({
     ...targetGroup,
     snapshot: normalizeGroupSnapshot(result.snapshot),
+  }));
+
+  return {
+    changed: !areSnapshotsEqual(snapshot, nextSnapshot),
+    snapshot: nextSnapshot,
+  };
+}
+
+export function swapVisibleSessionsInSimpleWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  groupId: string,
+  sourceSessionId: string,
+  targetSessionId: string,
+): WorkspaceMutationResult {
+  if (sourceSessionId === targetSessionId) {
+    return { changed: false, snapshot };
+  }
+
+  const group = getGroupById(snapshot, groupId);
+  if (!group) {
+    return { changed: false, snapshot };
+  }
+
+  const sourceVisibleIndex = group.snapshot.visibleSessionIds.indexOf(sourceSessionId);
+  const targetVisibleIndex = group.snapshot.visibleSessionIds.indexOf(targetSessionId);
+  if (sourceVisibleIndex < 0 || targetVisibleIndex < 0) {
+    return { changed: false, snapshot };
+  }
+
+  const sourceSessionIndex = group.snapshot.sessions.findIndex(
+    (session) => session.sessionId === sourceSessionId,
+  );
+  const targetSessionIndex = group.snapshot.sessions.findIndex(
+    (session) => session.sessionId === targetSessionId,
+  );
+  if (sourceSessionIndex < 0 || targetSessionIndex < 0) {
+    return { changed: false, snapshot };
+  }
+
+  const nextVisibleSessionIds = [...group.snapshot.visibleSessionIds];
+  nextVisibleSessionIds[sourceVisibleIndex] = targetSessionId;
+  nextVisibleSessionIds[targetVisibleIndex] = sourceSessionId;
+  const nextFocusedSessionId = nextVisibleSessionIds.includes(group.snapshot.focusedSessionId ?? "")
+    ? group.snapshot.focusedSessionId
+    : nextVisibleSessionIds[0];
+
+  const nextSessions = [...group.snapshot.sessions];
+  nextSessions[sourceSessionIndex] = group.snapshot.sessions[targetSessionIndex]!;
+  nextSessions[targetSessionIndex] = group.snapshot.sessions[sourceSessionIndex]!;
+
+  /**
+   * CDXC:NativePaneReorder 2026-05-03-06:38
+   * Native pane drag-and-drop reorders the panes the user can currently see;
+   * it must never change which hidden/background sessions are surfaced. Keep
+   * visibleSessionIds as the source of truth for the displayed pane set, while
+   * swapping the same two records in the stored session order so sidebar order
+   * and native placement remain aligned without pulling hidden sessions into
+   * the visible split.
+   *
+   * If focus points at a hidden/background session, pin focus to the reordered
+   * visible set before normalization. Otherwise the normal focus-preservation
+   * rule would add that hidden id back to visibleSessionIds and replace a pane.
+   */
+  const nextSnapshot = updateGroup(snapshot, groupId, (targetGroup) => ({
+    ...targetGroup,
+    snapshot: normalizeGroupSnapshot({
+      ...targetGroup.snapshot,
+      focusedSessionId: nextFocusedSessionId,
+      sessions: reindexSessionsInOrder(nextSessions),
+      visibleSessionIds: nextVisibleSessionIds,
+    }),
   }));
 
   return {
@@ -885,7 +1017,14 @@ function prepareGroupForDisplayIdNormalization(
     snapshot: {
       ...createDefaultSessionGridSnapshot(),
       ...group.snapshot,
-      sessions: group.snapshot.sessions.filter((session) => session.kind !== "browser"),
+      /**
+       * CDXC:BrowserPanes 2026-05-02-12:04
+       * Browser panes are embedded WKWebView workspace sessions, not transient
+       * external browser overlays. Keep browser records during workspace
+       * normalization so sidebar cards, visible ids, and native split layout
+       * all use the same persistent session list as terminal and T3 panes.
+       */
+      sessions: group.snapshot.sessions,
     },
     title: group.title?.trim() || (index === 0 ? DEFAULT_MAIN_GROUP_TITLE : `Group ${index + 1}`),
   };
@@ -898,7 +1037,7 @@ function normalizeGroupSnapshot(
   const sessions = getOrderedSessions({
     ...createDefaultSessionGridSnapshot(),
     ...snapshot,
-    sessions: snapshot.sessions.filter((session) => session.kind !== "browser"),
+    sessions: snapshot.sessions,
   }).map((session, index) => {
     const position = getSlotPosition(index);
     const nextSession = normalizeSessionRecord(session);

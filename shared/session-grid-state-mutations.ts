@@ -156,7 +156,7 @@ export function setBrowserSessionMetadataInSnapshot(
     changed = true;
     return {
       ...session,
-      browser: { url: normalizedUrl },
+      browser: { ...session.browser, url: normalizedUrl },
       title: normalizedTitle,
     };
   });

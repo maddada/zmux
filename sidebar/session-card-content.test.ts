@@ -162,6 +162,32 @@ describe("getSessionCardTitleTooltip", () => {
   });
 });
 
+describe("SessionFloatingAgentIcon", () => {
+  test("should render a browser favicon when the browser session has one", () => {
+    const faviconDataUrl = "data:image/png;base64,ZmF2aWNvbg==";
+    const markup = renderToStaticMarkup(
+      createElement(SessionFloatingAgentIcon, {
+        agentIcon: "browser",
+        faviconDataUrl,
+      }),
+    );
+
+    expect(markup).toContain('data-icon-variant="favicon"');
+    expect(markup).toContain(`src="${faviconDataUrl}"`);
+  });
+
+  test("should render the browser fallback icon when no favicon is available", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionFloatingAgentIcon, {
+        agentIcon: "browser",
+      }),
+    );
+
+    expect(markup).toContain('data-agent-icon="browser"');
+    expect(markup).not.toContain("data-icon-variant");
+  });
+});
+
 describe("formatSessionHeadingText", () => {
   test("should append the unsynced marker when the displayed title comes from the user title", () => {
     expect(

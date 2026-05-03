@@ -1,4 +1,4 @@
-import { IconLoader2, IconWorld } from "@tabler/icons-react";
+import { IconBrowser, IconLoader2 } from "@tabler/icons-react";
 import { Tooltip } from "@base-ui/react/tooltip";
 import {
   cloneElement,
@@ -111,6 +111,7 @@ export function SessionCardContent({
             {hasHeaderAgentIcon ? (
               <SessionHeaderAgentIcon
                 agentIcon={session.agentIcon}
+                faviconDataUrl={session.faviconDataUrl}
                 isFavorite={session.isFavorite}
                 isGeneratingFirstPromptTitle={session.isGeneratingFirstPromptTitle}
                 isReloading={session.isReloading}
@@ -329,6 +330,7 @@ export function getSessionTitleTooltipOptions({
 
 type SessionAgentIconProps = {
   agentIcon: SidebarSessionItem["agentIcon"];
+  faviconDataUrl?: string;
   isFavorite?: boolean;
   isGeneratingFirstPromptTitle?: boolean;
   isReloading?: boolean;
@@ -347,6 +349,7 @@ type SessionAgentIconDecorationProps = SessionAgentIconProps & {
 function SessionAgentIconDecoration({
   agentIcon,
   className,
+  faviconDataUrl,
   isFavorite = false,
   isGeneratingFirstPromptTitle = false,
   isReloading = false,
@@ -359,8 +362,28 @@ function SessionAgentIconDecoration({
 
   const favoriteState = String(isFavorite);
   if (agentIcon === "browser") {
+    if (faviconDataUrl) {
+      /**
+       * CDXC:BrowserPanes 2026-05-03-11:28
+       * Browser-pane cards identify the loaded tab with the page favicon when
+       * available. Keep the Tabler browser glyph as the fallback so cards still
+       * have a stable browser affordance before favicon discovery or for pages
+       * without icons.
+       */
+      return (
+        <img
+          alt=""
+          aria-hidden="true"
+          className={tablerClassName}
+          data-agent-icon="browser"
+          data-favorite={favoriteState}
+          data-icon-variant="favicon"
+          src={faviconDataUrl}
+        />
+      );
+    }
     return (
-      <IconWorld
+      <IconBrowser
         aria-hidden="true"
         className={tablerClassName}
         data-agent-icon="browser"
@@ -390,11 +413,16 @@ function SessionAgentIconDecoration({
   );
 }
 
-export function SessionFloatingAgentIcon({ agentIcon, isFavorite = false }: SessionAgentIconProps) {
+export function SessionFloatingAgentIcon({
+  agentIcon,
+  faviconDataUrl,
+  isFavorite = false,
+}: SessionAgentIconProps) {
   return (
     <SessionAgentIconDecoration
       agentIcon={agentIcon}
       className="session-floating-agent-icon"
+      faviconDataUrl={faviconDataUrl}
       isFavorite={isFavorite}
       loadingClassName="session-floating-reloading-icon"
       tablerClassName="session-floating-agent-tabler-icon"
@@ -404,6 +432,7 @@ export function SessionFloatingAgentIcon({ agentIcon, isFavorite = false }: Sess
 
 function SessionHeaderAgentIcon({
   agentIcon,
+  faviconDataUrl,
   isFavorite = false,
   isGeneratingFirstPromptTitle = false,
   isReloading = false,
@@ -412,6 +441,7 @@ function SessionHeaderAgentIcon({
     <SessionAgentIconDecoration
       agentIcon={agentIcon}
       className="session-header-agent-icon"
+      faviconDataUrl={faviconDataUrl}
       isFavorite={isFavorite}
       isGeneratingFirstPromptTitle={isGeneratingFirstPromptTitle}
       isReloading={isReloading}

@@ -19,10 +19,21 @@ export type SessionLifecycleState = "running" | "done" | "sleeping" | "error";
 /**
  * CDXC:SessionTitleSync 2026-04-27-17:45
  * Session titles keep provenance so restart restore can trust real terminal
- * titles while rejecting placeholders, shell paths, command names, and legacy
- * auto-captured noise such as mojibake.
+ * titles and browser page titles while rejecting placeholders, shell paths,
+ * command names, and legacy auto-captured noise such as mojibake.
+ *
+ * CDXC:BrowserPanes 2026-05-03-01:58
+ * Browser pane cards and native title bars use webpage titles supplied by the
+ * embedded WKWebView. Track that source separately from terminal OSC/window
+ * titles so browser reloads can refresh page identity without looking like a
+ * user rename.
  */
-export type SessionTitleSource = "generated" | "placeholder" | "terminal-auto" | "user";
+export type SessionTitleSource =
+  | "browser-auto"
+  | "generated"
+  | "placeholder"
+  | "terminal-auto"
+  | "user";
 
 export type SidebarTheme =
   | "plain-dark"
@@ -64,6 +75,7 @@ export type T3SessionMetadata = {
 };
 
 export type BrowserSessionMetadata = {
+  faviconDataUrl?: string;
   url: string;
 };
 

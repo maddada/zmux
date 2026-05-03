@@ -26,3 +26,20 @@ export const AGENT_LOGOS: Record<SidebarAgentIcon, string> = {
   opencode: svgTextToDataUrl(opencodeLogo),
   t3: svgTextToDataUrl(t3Logo),
 };
+
+/**
+ * CDXC:NativePaneReorder 2026-05-03-04:59
+ * Sidebar agent SVGs are mask assets, so their visible color comes from CSS,
+ * not the SVG fill. Native title bars and drag ghosts receive this same color
+ * map with the data URL so AppKit can tint the template image to match the
+ * session card.
+ */
+export const AGENT_LOGO_COLORS: Record<SidebarAgentIcon, string> = {
+  browser: "#82b7ff",
+  claude: "#d97757",
+  codex: "#ffffff",
+  copilot: "#ffffff",
+  gemini: "#8b9aff",
+  opencode: "#6d96c0",
+  t3: "#ffa6fb",
+};

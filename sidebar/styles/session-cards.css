@@ -618,6 +618,14 @@
   --session-agent-icon-color: #82b7ff;
 }
 
+.session-floating-agent-tabler-icon[data-agent-icon="browser"][data-icon-variant="favicon"],
+.session-header-agent-tabler-icon[data-agent-icon="browser"][data-icon-variant="favicon"] {
+  border-radius: 3px;
+  height: calc(14px * var(--sidebar-density-scale));
+  object-fit: contain;
+  width: calc(14px * var(--sidebar-density-scale));
+}
+
 .session-floating-agent-icon[data-agent-icon="browser"],
 .session-header-agent-icon[data-agent-icon="browser"] {
   --session-agent-icon-color: #82b7ff;

@@ -398,6 +398,7 @@ function normalizeSessionTitleSource(
   title: string,
 ): SessionTitleSource {
   if (
+    source === "browser-auto" ||
     source === "generated" ||
     source === "placeholder" ||
     source === "terminal-auto" ||

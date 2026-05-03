@@ -1,7 +1,10 @@
 import {
   IconCopy,
+  IconCode,
   IconDeviceMobile,
+  IconDownload,
   IconGitFork,
+  IconHandFinger,
   IconMessageCircle,
   IconMoon,
   IconPencil,
@@ -9,6 +12,7 @@ import {
   IconRefresh,
   IconSparkles,
   IconStar,
+  IconUserCircle,
   IconX,
 } from "@tabler/icons-react";
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
@@ -49,7 +53,7 @@ import { useSidebarStore } from "./sidebar-store";
 import type { WebviewApi } from "./webview-api";
 
 const CONTEXT_MENU_MARGIN_PX = 12;
-const CONTEXT_MENU_WIDTH_PX = 156;
+const CONTEXT_MENU_WIDTH_PX = 178;
 const CONTEXT_MENU_ITEM_HEIGHT_PX = 34;
 const CONTEXT_MENU_DIVIDER_HEIGHT_PX = 13;
 const CONTEXT_MENU_VERTICAL_PADDING_PX = 12;
@@ -558,6 +562,27 @@ export function SortableSessionCard({
     });
   };
 
+  const requestBrowserPaneAction = (
+    action: "devtools" | "react-grab" | "profile-picker" | "import-settings",
+  ) => {
+    if (!isBrowserSession) {
+      return;
+    }
+
+    setContextMenuPosition(undefined);
+    /**
+     * CDXC:BrowserPanes 2026-05-02-06:35
+     * Browser-pane cards surface the browser-specific controls in their
+     * context menu so the sidebar can reach native WebKit features while the
+     * browser itself renders as a regular workspace pane.
+     */
+    vscode.postMessage({
+      action,
+      sessionId: session.sessionId,
+      type: "runBrowserPaneAction",
+    });
+  };
+
   const requestGenerateSessionName = () => {
     setContextMenuPosition(undefined);
     /**
@@ -670,6 +695,62 @@ export function SortableSessionCard({
   }
 
   const sessionActions: SessionContextMenuAction[] = [];
+  if (isBrowserSession) {
+    sessionActions.push(
+      {
+        icon: (
+          <IconCode
+            aria-hidden="true"
+            className="session-context-menu-icon"
+            size={16}
+            stroke={1.8}
+          />
+        ),
+        key: "browser-devtools",
+        label: "DevTools",
+        onClick: () => requestBrowserPaneAction("devtools"),
+      },
+      {
+        icon: (
+          <IconHandFinger
+            aria-hidden="true"
+            className="session-context-menu-icon"
+            size={16}
+            stroke={1.8}
+          />
+        ),
+        key: "browser-react-grab",
+        label: "React Grab",
+        onClick: () => requestBrowserPaneAction("react-grab"),
+      },
+      {
+        icon: (
+          <IconUserCircle
+            aria-hidden="true"
+            className="session-context-menu-icon"
+            size={16}
+            stroke={1.8}
+          />
+        ),
+        key: "browser-profile",
+        label: "Profile",
+        onClick: () => requestBrowserPaneAction("profile-picker"),
+      },
+      {
+        icon: (
+          <IconDownload
+            aria-hidden="true"
+            className="session-context-menu-icon"
+            size={16}
+            stroke={1.8}
+          />
+        ),
+        key: "browser-import",
+        label: "Import Settings",
+        onClick: () => requestBrowserPaneAction("import-settings"),
+      },
+    );
+  }
   if (session.firstUserMessage?.trim()) {
     sessionActions.push({
       icon: (
@@ -856,6 +937,7 @@ export function SortableSessionCard({
           />
           <SessionFloatingAgentIcon
             agentIcon={session.agentIcon}
+            faviconDataUrl={session.faviconDataUrl}
             isFavorite={session.isFavorite}
             isReloading={session.isReloading}
           />

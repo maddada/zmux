@@ -19,7 +19,14 @@ export function reorderGroupSessions(
   const currentSessions = getOrderedSessions({
     ...createDefaultSessionGridSnapshot(),
     ...snapshot,
-    sessions: snapshot.sessions.filter((session) => session.kind !== "browser"),
+    /**
+     * CDXC:NativePaneReorder 2026-05-03-02:50
+     * Native header drag-to-reorder works across every visible pane type:
+     * terminal, T3, and browser. Keep browser records in the reorder set so a
+     * drop involving a WKWebView pane mutates the same session order that
+     * native layout renders.
+     */
+    sessions: snapshot.sessions,
   });
   const currentExactSessionIds = currentSessions.map((session) => session.sessionId);
   const currentCanonicalSessionIds = currentSessions.map((session) =>

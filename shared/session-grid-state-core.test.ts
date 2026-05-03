@@ -226,6 +226,7 @@ describe("session shortcut labels", () => {
     expect(items[0]?.isSleeping).toBe(true);
     expect(items[0]?.isRunning).toBe(false);
   });
+
 });
 
 describe("session surface titles", () => {

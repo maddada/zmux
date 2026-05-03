@@ -559,6 +559,7 @@ function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSess
     left.alias === right.alias &&
     left.column === right.column &&
     left.detail === right.detail &&
+    left.faviconDataUrl === right.faviconDataUrl &&
     left.isGeneratingFirstPromptTitle === right.isGeneratingFirstPromptTitle &&
     left.isReloading === right.isReloading &&
     left.lifecycleState === right.lifecycleState &&

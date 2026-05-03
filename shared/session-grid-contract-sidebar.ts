@@ -56,6 +56,7 @@ export type SidebarSessionItem = {
   activity: "idle" | "working" | "attention";
   activityLabel?: string;
   agentIcon?: SidebarAgentIcon;
+  faviconDataUrl?: string;
   firstUserMessage?: string;
   isGeneratingFirstPromptTitle?: boolean;
   isReloading?: boolean;
@@ -506,6 +507,17 @@ export type SidebarToExtensionMessage =
   | {
       type: "openT3SessionBrowserAccessLink";
       url: string;
+    }
+  | {
+      /**
+       * CDXC:BrowserPanes 2026-05-02-06:35
+       * Browser session cards expose pane-specific controls copied from the
+       * native browser workflow: DevTools, React Grab, profile selection, and
+       * browser-data import. The native host owns the macOS UI and WebKit work.
+       */
+      action: "devtools" | "react-grab" | "profile-picker" | "import-settings";
+      sessionId: string;
+      type: "runBrowserPaneAction";
     }
   | {
       historyId: string;

@@ -21,6 +21,7 @@ import {
   setSessionSleepingInSimpleWorkspace,
   setT3SessionMetadataInSimpleWorkspace,
   setVisibleCountInSimpleWorkspace,
+  swapVisibleSessionsInSimpleWorkspace,
   syncSessionOrderInSimpleWorkspace,
 } from "./simple-grouped-session-workspace-state";
 
@@ -79,7 +80,7 @@ describe("normalizeSimpleGroupedSessionWorkspaceSnapshot", () => {
     );
   });
 
-  test("should drop browser sessions and keep a usable main group", () => {
+  test("should preserve browser sessions as workspace panes", () => {
     const snapshot = normalizeSimpleGroupedSessionWorkspaceSnapshot({
       activeGroupId: DEFAULT_MAIN_GROUP_ID,
       groups: [
@@ -108,8 +109,15 @@ describe("normalizeSimpleGroupedSessionWorkspaceSnapshot", () => {
     });
 
     expect(snapshot.groups).toHaveLength(1);
-    expect(snapshot.groups[0]?.snapshot.sessions).toEqual([]);
-    expect(snapshot.groups[0]?.snapshot.visibleCount).toBe(1);
+    expect(snapshot.groups[0]?.snapshot.sessions).toEqual([
+      expect.objectContaining({
+        browser: { url: "https://example.com" },
+        kind: "browser",
+        title: "Browser",
+      }),
+    ]);
+    expect(snapshot.groups[0]?.snapshot.focusedSessionId).toBe("session-1");
+    expect(snapshot.groups[0]?.snapshot.visibleSessionIds).toEqual(["session-1"]);
   });
 
   test("should repair duplicate generated display ids", () => {
@@ -553,6 +561,242 @@ describe("syncSessionOrderInSimpleWorkspace", () => {
       sessionIdForDisplay(8),
       sessionIdForDisplay(9),
     ]);
+  });
+
+  test("should reorder browser panes with terminal panes", () => {
+    const terminalSession = createSessionRecord(1, 0);
+    const browserSession = createSessionRecord(2, 1, {
+      browser: { url: "https://example.com" },
+      kind: "browser",
+      title: "example.com",
+    });
+    const result = syncSessionOrderInSimpleWorkspace(
+      createWorkspaceSnapshot({
+        activeGroupId: DEFAULT_MAIN_GROUP_ID,
+        groups: [
+          {
+            groupId: DEFAULT_MAIN_GROUP_ID,
+            snapshot: {
+              focusedSessionId: terminalSession.sessionId,
+              fullscreenRestoreVisibleCount: undefined,
+              sessions: [terminalSession, browserSession],
+              viewMode: "grid",
+              visibleCount: 2,
+              visibleSessionIds: [terminalSession.sessionId, browserSession.sessionId],
+            },
+            title: "Main",
+          },
+        ],
+        nextGroupNumber: 2,
+        nextSessionDisplayId: 2,
+        nextSessionNumber: 3,
+      }),
+      DEFAULT_MAIN_GROUP_ID,
+      [browserSession.sessionId, terminalSession.sessionId],
+    );
+
+    expect(result.changed).toBe(true);
+    expect(
+      result.snapshot.groups[0]?.snapshot.sessions.map((session) => session.sessionId),
+    ).toEqual([browserSession.sessionId, terminalSession.sessionId]);
+    expect(result.snapshot.groups[0]?.snapshot.visibleSessionIds).toEqual([
+      browserSession.sessionId,
+      terminalSession.sessionId,
+    ]);
+  });
+});
+
+describe("swapVisibleSessionsInSimpleWorkspace", () => {
+  test("should swap surfaced pane placement without surfacing hidden sessions", () => {
+    const hiddenT3Session = createSessionRecord(1, 0, {
+      kind: "t3",
+      t3: {
+        projectId: "project",
+        serverOrigin: "http://127.0.0.1:3000",
+        threadId: "thread-hidden",
+        workspaceRoot: "/workspace",
+      },
+      title: "T3 Code",
+    });
+    const firstVisibleSession = createSessionRecord(2, 1);
+    const secondVisibleSession = createSessionRecord(3, 2);
+    const thirdVisibleSession = createSessionRecord(4, 3);
+    const result = swapVisibleSessionsInSimpleWorkspace(
+      createWorkspaceSnapshot({
+        activeGroupId: DEFAULT_MAIN_GROUP_ID,
+        groups: [
+          {
+            groupId: DEFAULT_MAIN_GROUP_ID,
+            snapshot: {
+              focusedSessionId: firstVisibleSession.sessionId,
+              fullscreenRestoreVisibleCount: undefined,
+              sessions: [
+                hiddenT3Session,
+                firstVisibleSession,
+                secondVisibleSession,
+                thirdVisibleSession,
+              ],
+              viewMode: "grid",
+              visibleCount: 3,
+              visibleSessionIds: [
+                firstVisibleSession.sessionId,
+                secondVisibleSession.sessionId,
+                thirdVisibleSession.sessionId,
+              ],
+            },
+            title: "Main",
+          },
+        ],
+        nextGroupNumber: 2,
+        nextSessionDisplayId: 4,
+        nextSessionNumber: 5,
+      }),
+      DEFAULT_MAIN_GROUP_ID,
+      firstVisibleSession.sessionId,
+      secondVisibleSession.sessionId,
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.snapshot.groups[0]?.snapshot.visibleSessionIds).toEqual([
+      secondVisibleSession.sessionId,
+      firstVisibleSession.sessionId,
+      thirdVisibleSession.sessionId,
+    ]);
+    expect(result.snapshot.groups[0]?.snapshot.visibleSessionIds).not.toContain(
+      hiddenT3Session.sessionId,
+    );
+    expect(
+      result.snapshot.groups[0]?.snapshot.sessions.map((session) => session.sessionId),
+    ).toEqual([
+      hiddenT3Session.sessionId,
+      secondVisibleSession.sessionId,
+      firstVisibleSession.sessionId,
+      thirdVisibleSession.sessionId,
+    ]);
+  });
+
+  test("should ignore drops involving hidden sessions", () => {
+    const hiddenT3Session = createSessionRecord(1, 0, {
+      kind: "t3",
+      t3: {
+        projectId: "project",
+        serverOrigin: "http://127.0.0.1:3000",
+        threadId: "thread-hidden",
+        workspaceRoot: "/workspace",
+      },
+      title: "T3 Code",
+    });
+    const firstVisibleSession = createSessionRecord(2, 1);
+    const secondVisibleSession = createSessionRecord(3, 2);
+    const snapshot = createWorkspaceSnapshot({
+      activeGroupId: DEFAULT_MAIN_GROUP_ID,
+      groups: [
+        {
+          groupId: DEFAULT_MAIN_GROUP_ID,
+          snapshot: {
+            focusedSessionId: firstVisibleSession.sessionId,
+            fullscreenRestoreVisibleCount: undefined,
+            sessions: [hiddenT3Session, firstVisibleSession, secondVisibleSession],
+            viewMode: "grid",
+            visibleCount: 2,
+            visibleSessionIds: [firstVisibleSession.sessionId, secondVisibleSession.sessionId],
+          },
+          title: "Main",
+        },
+      ],
+      nextGroupNumber: 2,
+      nextSessionDisplayId: 3,
+      nextSessionNumber: 4,
+    });
+
+    const result = swapVisibleSessionsInSimpleWorkspace(
+      snapshot,
+      DEFAULT_MAIN_GROUP_ID,
+      firstVisibleSession.sessionId,
+      hiddenT3Session.sessionId,
+    );
+
+    expect(result.changed).toBe(false);
+    expect(result.snapshot.groups[0]?.snapshot.visibleSessionIds).toEqual([
+      firstVisibleSession.sessionId,
+      secondVisibleSession.sessionId,
+    ]);
+  });
+
+  test("should not surface a hidden focused session while swapping visible panes", () => {
+    const hiddenT3Session = createSessionRecord(1, 0, {
+      kind: "t3",
+      t3: {
+        projectId: "project",
+        serverOrigin: "http://127.0.0.1:3000",
+        threadId: "thread-hidden",
+        workspaceRoot: "/workspace",
+      },
+      title: "T3 Code",
+    });
+    const firstVisibleSession = createSessionRecord(2, 1);
+    const secondVisibleSession = createSessionRecord(3, 2);
+    const thirdVisibleSession = createSessionRecord(4, 3);
+    const snapshot = createWorkspaceSnapshot({
+      activeGroupId: DEFAULT_MAIN_GROUP_ID,
+      groups: [
+        {
+          groupId: DEFAULT_MAIN_GROUP_ID,
+          snapshot: {
+            focusedSessionId: firstVisibleSession.sessionId,
+            fullscreenRestoreVisibleCount: undefined,
+            sessions: [
+              hiddenT3Session,
+              firstVisibleSession,
+              secondVisibleSession,
+              thirdVisibleSession,
+            ],
+            viewMode: "grid",
+            visibleCount: 3,
+            visibleSessionIds: [
+              firstVisibleSession.sessionId,
+              secondVisibleSession.sessionId,
+              thirdVisibleSession.sessionId,
+            ],
+          },
+          title: "Main",
+        },
+      ],
+      nextGroupNumber: 2,
+      nextSessionDisplayId: 4,
+      nextSessionNumber: 5,
+    });
+    const snapshotWithHiddenFocus = {
+      ...snapshot,
+      groups: snapshot.groups.map((group) =>
+        group.groupId === DEFAULT_MAIN_GROUP_ID
+          ? {
+              ...group,
+              snapshot: {
+                ...group.snapshot,
+                focusedSessionId: hiddenT3Session.sessionId,
+              },
+            }
+          : group,
+      ),
+    };
+
+    const result = swapVisibleSessionsInSimpleWorkspace(
+      snapshotWithHiddenFocus,
+      DEFAULT_MAIN_GROUP_ID,
+      firstVisibleSession.sessionId,
+      secondVisibleSession.sessionId,
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.snapshot.groups[0]?.snapshot.visibleSessionIds).toEqual([
+      secondVisibleSession.sessionId,
+      firstVisibleSession.sessionId,
+      thirdVisibleSession.sessionId,
+    ]);
+    expect(result.snapshot.groups[0]?.snapshot.focusedSessionId).toBe(
+      secondVisibleSession.sessionId,
+    );
   });
 });
 
