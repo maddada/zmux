@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.3 - 2026-05-03
+
+<!-- CDXC:Distribution 2026-05-03-08:14: Release notes for 1.4.3 must include
+all commits after v1.4.2 so README, GitHub, Sparkle, and Homebrew release
+metadata describe the same shipped behavior. -->
+
+- Added an opt-in Browser Panes mode that opens browser actions as first-class workspace panes instead of Chrome Canary windows.
+- Added native browser pane controls for address navigation, reload, DevTools, React Grab, profile selection, and browser-data import messaging.
+- Persisted browser pane URLs, favicons, and browser-auto titles so sidebar cards and app restarts reflect the current page.
+- Added native pane header drag-to-reorder support across terminal, T3, and browser panes without surfacing hidden sessions.
+
 ## 1.4.2 - 2026-05-02
 
 <!-- CDXC:Distribution 2026-05-02-11:33: Release notes for 1.4.2 must call
