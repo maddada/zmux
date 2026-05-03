@@ -18,7 +18,7 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:shortVersionString>1.4.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <sparkle:releaseNotesLink sparkle:edSignature="rf7OwZwRnuKfceJqd/mZIlhhNpD1sYoVZVVgFA0dSPuLrvWpXgJlbKtAWlqH7X5+S6xzF/maqgaxNMbXroh4BQ==" sparkle:length="865">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.3.md</sparkle:releaseNotesLink>
+            <sparkle:releaseNotesLink sparkle:edSignature="xtNE5nnvIhHYHA2+9HkBFUgS44UPM/MzoME8vlPSG5rxug6O3N3rW+/VFehqS8DXfdjsORBck4PF/OXk/s2bCg==" sparkle:length="407">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.3.md</sparkle:releaseNotesLink>
             <enclosure url="https://github.com/maddada/zmux/releases/download/v1.4.3/zmux-1.4.3.dmg" length="24009650" type="application/octet-stream" sparkle:edSignature="C+xJtw8mfe0Ehgq5t6Am/5Es3z8186Jvs54fHQyizZnSwunPeGJHjOGiExZl7Bda2NjNrZt1iZn5VdzmAKNwAg=="/>
         </item>
         <item>
@@ -29,7 +29,7 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:shortVersionString>1.4.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <sparkle:releaseNotesLink sparkle:edSignature="0qk4s9DD8Apxkp47P5Lsy9t9yTZN12ZVc2/UNxh7FL+XWzM/Lh5PMbEX7QaVRMxWXFsUf/PxIluhozlvApmnBA==" sparkle:length="604">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.2.md</sparkle:releaseNotesLink>
+            <sparkle:releaseNotesLink sparkle:edSignature="ZrpJF7C/iXAAROoIR1s9/E9BUufGb708U8uR16Agl3VORgEl2z6ljy3xpi6HWRV/a8oE0D1QIReTLHVe+5BoAw==" sparkle:length="164">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.2.md</sparkle:releaseNotesLink>
             <enclosure url="https://github.com/maddada/zmux/releases/download/v1.4.2/zmux-1.4.2.dmg" length="23926695" type="application/octet-stream" sparkle:edSignature="0+DqQqhDhABrXy/cRoaSJ5GsFa3y8Zf55DSRrOcpJ23DWVWKGN5IN6uelNHj1YODlLvMadX0LyD0yZ22OGWGAw=="/>
         </item>
         <item>
@@ -40,12 +40,12 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:shortVersionString>1.4.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <sparkle:releaseNotesLink sparkle:edSignature="7Ap8Z+0nA8kxXZ0mr0ojxYKzMnqCj+PYeB6rolquDxGJscAIJH0HKLIUO7ZTdWSe4FhgMDAWFsEG+Gl0pehUBg==" sparkle:length="762">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.1.md</sparkle:releaseNotesLink>
+            <sparkle:releaseNotesLink sparkle:edSignature="3i4skot85llm/hRQoDyP5PNhC9IQN8E3g7TQRNRiyv5Cs2cLC6ca9nDSkE03SLskgtB/wZnUc9DvOUW5qbKJBg==" sparkle:length="299">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.1.md</sparkle:releaseNotesLink>
             <enclosure url="https://github.com/maddada/zmux/releases/download/v1.4.1/zmux-1.4.1.dmg" length="23926654" type="application/octet-stream" sparkle:edSignature="8+KTcrIEvke0MyRCXdwRPOcDAQyKYNeCoIKDQQCG7SSKtIY3sZ/n6dZvrSVWrQkChssxW2mNjJnuANeHrgIUAw=="/>
         </item>
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: AIU1o2mg6F76uOdYzxGBVigsEyCkyYE/dgj8DHwtAWdN2BJWb0rvzSCrpQdh46tO1FOnHyTzCXnFMupKZuiHCw==
+edSignature: k+tlwK/wfPzXbPBn+NwJRPCekfgPMW07a616KO4kEj9FHbyCR7bY0p1i5p9MiMtZnQy1voDzTAd6vM6hz+BxDQ==
 length: 4020
 -->
