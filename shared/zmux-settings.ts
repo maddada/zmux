@@ -26,6 +26,7 @@ import {
 } from "./zmux-hotkeys";
 
 export type TerminalCursorStyle = "bar" | "block" | "underline";
+export type BrowserOpenMode = "chrome-canary" | "browser-pane";
 export type ZedOverlayTargetApp = "zed" | "zed-preview" | "vscode" | "vscode-insiders";
 const MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 0.25;
 const MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 8;
@@ -39,6 +40,7 @@ const MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 8;
 export type zmuxSettings = {
   actionCompletionSound: CompletionSoundSetting;
   agentManagerZoomPercent: number;
+  browserOpenMode: BrowserOpenMode;
   completionBellEnabled: boolean;
   completionSound: CompletionSoundSetting;
   createSessionOnSidebarDoubleClick: boolean;
@@ -84,6 +86,13 @@ export type zmuxSettings = {
 export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   actionCompletionSound: "shamisenreverb",
   agentManagerZoomPercent: DEFAULT_AGENT_MANAGER_ZOOM_PERCENT,
+  /**
+   * CDXC:BrowserPanes 2026-05-02-06:35
+   * Browser-pane support is opt-in so existing installs keep launching browser
+   * actions through the established Chrome Canary placement flow until the user
+   * chooses in-app browser panes from Settings.
+   */
+  browserOpenMode: "chrome-canary",
   completionBellEnabled: false,
   completionSound: DEFAULT_COMPLETION_SOUND,
   createSessionOnSidebarDoubleClick: false,
@@ -143,6 +152,14 @@ export const TERMINAL_ENGINE_SETTING_OPTIONS: ReadonlyArray<{
   value: TerminalEngine;
 }> = [{ label: "Ghostty Native", value: "ghostty-native" }];
 
+export const BROWSER_OPEN_MODE_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: BrowserOpenMode;
+}> = [
+  { label: "Chrome Canary", value: "chrome-canary" },
+  { label: "Browser Panes", value: "browser-pane" },
+];
+
 export const ZED_OVERLAY_TARGET_APP_OPTIONS: ReadonlyArray<{
   label: string;
   value: ZedOverlayTargetApp;
@@ -166,6 +183,15 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
     ),
     agentManagerZoomPercent: clampAgentManagerZoomPercent(
       readNumber(source, "agentManagerZoomPercent", DEFAULT_zmux_SETTINGS.agentManagerZoomPercent),
+    ),
+    /**
+     * CDXC:BrowserPanes 2026-05-02-06:35
+     * The setting chooses the browser action target: Chrome Canary keeps the
+     * native external browser integration, while Browser Panes creates normal
+     * workspace session cards backed by native WKWebView panes.
+     */
+    browserOpenMode: normalizeBrowserOpenMode(
+      readString(source, "browserOpenMode", DEFAULT_zmux_SETTINGS.browserOpenMode),
     ),
     completionBellEnabled: readBoolean(
       source,
@@ -347,6 +373,10 @@ export function getTerminalFontFamilyForzmuxSettings(settings: zmuxSettings): st
 
 function normalizeTerminalCursorStyle(value: string | undefined): TerminalCursorStyle {
   return value === "block" || value === "underline" ? value : "bar";
+}
+
+function normalizeBrowserOpenMode(value: string | undefined): BrowserOpenMode {
+  return value === "browser-pane" ? "browser-pane" : DEFAULT_zmux_SETTINGS.browserOpenMode;
 }
 
 function normalizeZedOverlayTargetApp(value: string | undefined): ZedOverlayTargetApp {

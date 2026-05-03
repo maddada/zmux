@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  BROWSER_OPEN_MODE_OPTIONS,
   DEFAULT_zmux_SETTINGS,
   normalizezmuxSettings,
   ZED_OVERLAY_TARGET_APP_OPTIONS,
@@ -37,6 +38,29 @@ describe("normalizezmuxSettings", () => {
     expect(DEFAULT_zmux_SETTINGS.syncOpenProjectWithZed).toBe(true);
     expect(normalizezmuxSettings({ syncOpenProjectWithZed: false })).toMatchObject({
       syncOpenProjectWithZed: false,
+    });
+  });
+
+  test("defaults browser actions to Chrome Canary and keeps browser panes opt-in", () => {
+    /**
+     * CDXC:BrowserPanes 2026-05-02-06:35
+     * Chrome Canary remains the default browser action target. Browser panes are
+     * selected explicitly so the existing browser-window workflow is not
+     * replaced by a persisted-settings migration.
+     */
+    expect(DEFAULT_zmux_SETTINGS.browserOpenMode).toBe("chrome-canary");
+    expect(normalizezmuxSettings({})).toMatchObject({
+      browserOpenMode: "chrome-canary",
+    });
+    expect(normalizezmuxSettings({ browserOpenMode: "browser-pane" })).toMatchObject({
+      browserOpenMode: "browser-pane",
+    });
+    expect(normalizezmuxSettings({ browserOpenMode: "Safari" })).toMatchObject({
+      browserOpenMode: "chrome-canary",
+    });
+    expect(BROWSER_OPEN_MODE_OPTIONS).toContainEqual({
+      label: "Browser Panes",
+      value: "browser-pane",
     });
   });
 

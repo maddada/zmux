@@ -33,10 +33,12 @@ import {
   type SidebarThemeVariant,
 } from "../shared/session-grid-contract";
 import {
+  BROWSER_OPEN_MODE_OPTIONS,
   DEFAULT_zmux_SETTINGS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   ZED_OVERLAY_TARGET_APP_OPTIONS,
   normalizezmuxSettings,
+  type BrowserOpenMode,
   type TerminalCursorStyle,
   type ZedOverlayTargetApp,
   type zmuxSettings,
@@ -452,6 +454,20 @@ export function SettingsModal({
                 description="Expose debugging-only sidebar controls."
                 label="Show debugging UI"
                 onChange={(checked) => updateDraft("debuggingMode", checked)}
+              />
+            </SettingsSection>
+
+            <SettingsSection title="Browser">
+              {/* CDXC:BrowserPanes 2026-05-02-06:35: Users can keep the
+                  existing Chrome Canary native-window integration or route
+                  browser actions into workspace browser panes that behave like
+                  normal session cards inside sidebar groups. */}
+              <SelectField
+                description="Choose where browser actions open URLs."
+                label="Open URLs With"
+                onChange={(value) => updateDraft("browserOpenMode", value as BrowserOpenMode)}
+                options={BROWSER_OPEN_MODE_OPTIONS}
+                value={draft.browserOpenMode}
               />
             </SettingsSection>
 
