@@ -31,6 +31,7 @@ brew install --cask maddada/tap/zmux
 - Native Sparkle updates for macOS releases.
 - Native T3 Code panes with managed runtime bootstrap, authenticated thread routing, and remote/browser access links.
 - Optional Browser Panes mode opens browser actions as workspace panes with address navigation, reload, DevTools, React Grab, profiles, and favicon-backed sidebar cards.
+- Native title-bar Actions and Open In split controls can run the primary command or show React-rendered dropdown menus without replacing macOS window dragging.
 - Combined sidebar mode shows one project group per project across all projects, with Separated mode still available.
 - Recent Projects keeps closed or empty combined-mode projects available with fuzzy project/path search.
 - Project context menus can open config, set project theme, copy path, open in Finder, open in the selected IDE, or close a project into Recent Projects.
@@ -39,6 +40,8 @@ brew install --cask maddada/tap/zmux
 - Native T3 runtime retention keeps supervised T3 Code panes alive through startup/auth races and syncs thread changes back into the sidebar.
 - Native IDE attachment controls with an optional hidden title-bar attach button.
 - Standard macOS app menu with Settings and Check for Updates.
+- Focus-safe native layout sync avoids stealing typing focus during passive terminal status updates.
+- Embedded Ghostty terminals strip inherited color-disabling environment keys so agent CLIs keep color output.
 - Agent launch diagnostics record inherited color-related environment values for debugging monochrome CLI sessions.
 - Workspace dock highlights the active project and dims inactive project icons.
 - Rich text mode pop up (ctrl+g) <- in testing
