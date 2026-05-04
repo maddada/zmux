@@ -684,6 +684,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     window.contentView = root
     window.delegate = self
     installAttachToIdeTitlebarButton(on: window)
+    installPrimaryTitlebarControls(on: window)
     window.makeKeyAndOrderFront(nil)
     self.window = window
     let zedOverlayController = ZedOverlayController(
@@ -824,6 +825,127 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     } else {
       (window?.contentView as? zmuxRootView)?.applyNativeZedOverlayDetached(targetApp: targetApp)
     }
+  }
+
+  @MainActor private func installPrimaryTitlebarControls(on window: NSWindow) {
+    /**
+     CDXC:NativeWindowChrome 2026-05-04-16:24
+     The requested Actions and Open In controls must live in the native title
+     bar so empty title-bar space remains draggable. Each split control sends
+     only primary/menu intent to React; React owns dropdown content because it
+     already has the active project actions and selected IDE state.
+     */
+    guard let titlebarView = window.standardWindowButton(.closeButton)?.superview else {
+      return
+    }
+
+    let actionsControl = makeTitlebarSplitControl(
+      primarySymbolName: "play",
+      primaryAccessibilityDescription: "Run action",
+      tag: 0
+    )
+    actionsControl.toolTip = "Actions"
+    let openInControl = makeTitlebarSplitControl(
+      primarySymbolName: "chevron.left.forwardslash.chevron.right",
+      primaryAccessibilityDescription: "Open in",
+      tag: 1
+    )
+    openInControl.toolTip = "Open in"
+
+    let stack = NSStackView(views: [actionsControl, openInControl])
+    stack.orientation = .horizontal
+    stack.alignment = .centerY
+    stack.spacing = 12
+    stack.distribution = .gravityAreas
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    titlebarView.addSubview(stack)
+
+    let centerYAnchor =
+      window.standardWindowButton(.closeButton)?.centerYAnchor ?? titlebarView.centerYAnchor
+    NSLayoutConstraint.activate([
+      stack.trailingAnchor.constraint(equalTo: titlebarView.trailingAnchor, constant: -24),
+      stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+      actionsControl.heightAnchor.constraint(equalToConstant: 30),
+      actionsControl.widthAnchor.constraint(equalToConstant: 76),
+      openInControl.heightAnchor.constraint(equalToConstant: 30),
+      openInControl.widthAnchor.constraint(equalToConstant: 76),
+    ])
+  }
+
+  @MainActor private func makeTitlebarSplitControl(
+    primarySymbolName: String,
+    primaryAccessibilityDescription: String,
+    tag: Int
+  ) -> NSSegmentedControl {
+    let control = NSSegmentedControl(frame: .zero)
+    control.segmentCount = 2
+    control.trackingMode = .momentary
+    control.segmentStyle = .rounded
+    control.controlSize = .large
+    control.target = self
+    control.action = #selector(handlePrimaryTitlebarControl(_:))
+    control.tag = tag
+    control.translatesAutoresizingMaskIntoConstraints = false
+
+    let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+    let primaryImage = NSImage(
+      systemSymbolName: primarySymbolName,
+      accessibilityDescription: primaryAccessibilityDescription
+    )?.withSymbolConfiguration(symbolConfiguration)
+    let menuImage = NSImage(
+      systemSymbolName: "chevron.down",
+      accessibilityDescription: "Show menu"
+    )?.withSymbolConfiguration(symbolConfiguration)
+    control.setImage(primaryImage, forSegment: 0)
+    control.setImage(menuImage, forSegment: 1)
+    control.setWidth(46, forSegment: 0)
+    control.setWidth(30, forSegment: 1)
+    control.setToolTip(primaryAccessibilityDescription, forSegment: 0)
+    control.setToolTip("Show menu", forSegment: 1)
+    return control
+  }
+
+  @objc @MainActor private func handlePrimaryTitlebarControl(_ sender: NSSegmentedControl) {
+    let kind = sender.tag == 1 ? "openIn" : "actions"
+    if sender.selectedSegment == 1 {
+      let anchor = titlebarControlAnchor(for: sender)
+      sendTitlebarControlEvent(kind: kind, action: "menu", anchor: anchor)
+      return
+    }
+    sendTitlebarControlEvent(kind: kind, action: "primary", anchor: nil)
+  }
+
+  @MainActor private func titlebarControlAnchor(for control: NSView) -> (
+    left: Double, top: Double, width: Double, height: Double
+  )? {
+    guard let contentView = window?.contentView else {
+      return nil
+    }
+    let rect = contentView.convert(control.bounds, from: control)
+    let top = max(8, contentView.bounds.height - rect.minY + 8)
+    return (
+      left: Double(rect.minX),
+      top: Double(top),
+      width: Double(rect.width),
+      height: Double(rect.height)
+    )
+  }
+
+  @MainActor private func sendTitlebarControlEvent(
+    kind: String,
+    action: String,
+    anchor: (left: Double, top: Double, width: Double, height: Double)?
+  ) {
+    let event = HostEvent.titleBarControlClicked(
+      kind: kind,
+      action: action,
+      left: anchor?.left,
+      top: anchor?.top,
+      width: anchor?.width,
+      height: anchor?.height
+    )
+    bridge?.send(event)
+    (window?.contentView as? zmuxRootView)?.postHostEvent(event)
   }
 
   @MainActor private func updateAttachToIdeTitlebarButton(
@@ -2776,6 +2898,19 @@ final class zmuxRootView: NSView {
        Persistent helper mode was removed, so full-window modal presentation no
        longer pauses or resurfaces external terminal windows. The modal host
        only needs to show its overlay above the embedded terminal view.
+       */
+      modalHostView.isHidden = false
+      pendingModalHostOpenMessage = isModalHostReady ? nil : message
+      if let latestModalHostSidebarState {
+        dispatchModalHostMessage(latestModalHostSidebarState)
+      }
+      dispatchModalHostMessage(message)
+    case "titleBarMenu":
+      /**
+       CDXC:NativeWindowChrome 2026-05-04-16:24
+       Title-bar dropdowns use the same full-window React host as modals, but
+       without a modal backdrop. Show the transparent host for menu hit-testing
+       and dispatch current sidebar state before the menu request.
        */
       modalHostView.isHidden = false
       pendingModalHostOpenMessage = isModalHostReady ? nil : message

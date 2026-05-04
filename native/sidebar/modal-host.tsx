@@ -1,5 +1,12 @@
 import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
+import {
+  IconCheck,
+  IconCode,
+  IconFolderOpen,
+  IconPlayerPlay,
+  IconPlus,
+} from "@tabler/icons-react";
 import { AgentConfigModal, type AgentConfigDraft } from "../../sidebar/agent-config-modal";
 import { CommandConfigModal, type CommandConfigDraft } from "../../sidebar/command-config-modal";
 import { DaemonSessionsModal } from "../../sidebar/daemon-sessions-modal";
@@ -17,14 +24,15 @@ import {
   WorkspaceConfigModal,
   type WorkspaceConfigModalProps,
 } from "../../sidebar/workspace-config-modal";
-import type { SidebarActionType } from "../../shared/sidebar-commands";
+import type { SidebarActionType, SidebarCommandButton } from "../../shared/sidebar-commands";
 import type { ExtensionToSidebarMessage } from "../../shared/session-grid-contract";
+import { getZedOverlayTargetAppLabel } from "../../shared/zmux-settings";
 import type { WorkspaceProjectConfigDraft } from "../../shared/workspace-dock-icons";
 import {
   installAppModalGlobalErrorLogging,
   logAppModalError,
 } from "../../sidebar/app-modal-error-log";
-import { postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
+import { openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
 import { useSidebarStore } from "../../sidebar/sidebar-store";
 import type { WebviewApi } from "../../sidebar/webview-api";
 import "../../sidebar/styles.css";
@@ -63,6 +71,18 @@ type AppModalHostMessage =
       title?: string;
       type: "open";
     }
+  | {
+      anchor: {
+        height: number;
+        left: number;
+        top: number;
+        width: number;
+      };
+      kind: "actions" | "openIn";
+      primaryCommandId?: string;
+      primaryOpenInTarget?: "finder" | "ide";
+      type: "titleBarMenu";
+    }
   | { type: "close" }
   | { message: unknown; type: "sidebarState" };
 
@@ -91,6 +111,8 @@ type ConfigModalState = {
   lockedActionType?: SidebarActionType;
   projectConfigDraft?: WorkspaceProjectConfigDraft;
 };
+
+type TitleBarMenuState = Extract<AppModalHostMessage, { type: "titleBarMenu" }>;
 
 const WORKSPACE_CONFIG_THEME_OPTIONS = [
   { label: "Plain Dark", value: "plain-dark" },
@@ -137,6 +159,165 @@ function closeModal() {
   postAppModalHostMessage({ type: "close" }, "AppModals:close");
 }
 
+function TitleBarMenuOverlay({
+  commands,
+  menu,
+  onClose,
+  selectedIdeLabel,
+  vscode,
+}: {
+  commands: readonly SidebarCommandButton[];
+  menu: TitleBarMenuState | undefined;
+  onClose: () => void;
+  selectedIdeLabel: string;
+  vscode: WebviewApi;
+}) {
+  if (!menu) {
+    return null;
+  }
+
+  const menuWidth = menu.kind === "actions" ? 260 : 220;
+  const left = Math.max(
+    8,
+    Math.min(menu.anchor.left + menu.anchor.width - menuWidth, window.innerWidth - menuWidth - 8),
+  );
+  const top = Math.max(8, Math.min(menu.anchor.top, window.innerHeight - 96));
+  const configuredCommands = commands.filter(isConfiguredTitlebarCommand);
+
+  const runCommand = (commandId: string) => {
+    vscode.postMessage({
+      commandId,
+      type: "runSidebarCommand",
+    });
+    onClose();
+  };
+
+  const openIn = (target: "finder" | "ide") => {
+    if (target === "finder") {
+      vscode.postMessage({ type: "openActiveWorkspaceProjectInFinder" });
+    } else {
+      vscode.postMessage({ type: "openActiveWorkspaceProjectInIde" });
+    }
+    onClose();
+  };
+
+  return (
+    <div className="titlebar-menu-layer" onMouseDown={onClose} role="presentation">
+      <div
+        className="session-context-menu titlebar-menu"
+        onMouseDown={(event) => event.stopPropagation()}
+        role="menu"
+        style={{ left, top, width: menuWidth }}
+      >
+        {menu.kind === "actions" ? (
+          <>
+            <div className="titlebar-menu-label">zmux actions</div>
+            {configuredCommands.length > 0 ? (
+              configuredCommands.map((command) => (
+                <button
+                  className="session-context-menu-item titlebar-menu-item"
+                  key={command.commandId}
+                  onClick={() => runCommand(command.commandId)}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconPlayerPlay
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={18}
+                  />
+                  <span className="titlebar-menu-item-label">{titlebarCommandLabel(command)}</span>
+                  {menu.primaryCommandId === command.commandId ? (
+                    <IconCheck
+                      aria-hidden="true"
+                      className="session-context-menu-trailing-icon"
+                      size={18}
+                    />
+                  ) : null}
+                </button>
+              ))
+            ) : (
+              <div className="titlebar-menu-empty">No actions configured</div>
+            )}
+            <div className="session-context-menu-divider" role="separator" />
+            <button
+              className="session-context-menu-item titlebar-menu-item"
+              onClick={() => {
+                openAppModal({
+                  commandDraft: createEmptyCommandDraft(),
+                  lockedActionType: "terminal",
+                  modal: "commandConfig",
+                  type: "open",
+                });
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <IconPlus aria-hidden="true" className="session-context-menu-icon" size={18} />
+              Add action
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="titlebar-menu-label">open in</div>
+            <button
+              className="session-context-menu-item titlebar-menu-item"
+              onClick={() => openIn("ide")}
+              role="menuitem"
+              type="button"
+            >
+              <IconCode aria-hidden="true" className="session-context-menu-icon" size={18} />
+              <span className="titlebar-menu-item-label">{selectedIdeLabel}</span>
+              {menu.primaryOpenInTarget !== "finder" ? (
+                <IconCheck
+                  aria-hidden="true"
+                  className="session-context-menu-trailing-icon"
+                  size={18}
+                />
+              ) : null}
+            </button>
+            <button
+              className="session-context-menu-item titlebar-menu-item"
+              onClick={() => openIn("finder")}
+              role="menuitem"
+              type="button"
+            >
+              <IconFolderOpen
+                aria-hidden="true"
+                className="session-context-menu-icon"
+                size={18}
+              />
+              <span className="titlebar-menu-item-label">Finder</span>
+              {menu.primaryOpenInTarget === "finder" ? (
+                <IconCheck
+                  aria-hidden="true"
+                  className="session-context-menu-trailing-icon"
+                  size={18}
+                />
+              ) : null}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function isConfiguredTitlebarCommand(command: SidebarCommandButton): boolean {
+  return command.actionType === "browser" ? Boolean(command.url) : Boolean(command.command);
+}
+
+function titlebarCommandLabel(command: SidebarCommandButton): string {
+  const name = command.name.trim();
+  if (name) {
+    return name;
+  }
+  if (command.actionType === "terminal" && command.command) {
+    return command.command.trim().split("\n")[0] || "Terminal action";
+  }
+  return command.actionType === "browser" ? "Browser action" : "Terminal action";
+}
+
 function AppModalHost() {
   const {
     activeModal,
@@ -146,11 +327,31 @@ function AppModalHost() {
     renameSession,
     t3BrowserAccess,
     t3ThreadId,
+    titleBarMenu,
   } = useModalStateFromNative();
   const settings = useSidebarStore((state) => state.hud.settings);
+  const theme = useSidebarStore((state) => state.hud.theme);
+  const commands = useSidebarStore((state) => state.hud.commands);
+
+  useEffect(() => {
+    document.body.dataset.sidebarTheme = theme;
+
+    return () => {
+      delete document.body.dataset.sidebarTheme;
+    };
+  }, [theme]);
 
   return (
     <>
+      <TitleBarMenuOverlay
+        commands={commands}
+        menu={titleBarMenu}
+        onClose={closeModal}
+        selectedIdeLabel={
+          settings ? getZedOverlayTargetAppLabel(settings.zedOverlayTargetApp) : "IDE"
+        }
+        vscode={vscode}
+      />
       <PreviousSessionsModal
         isOpen={activeModal === "previousSessions"}
         onClose={closeModal}
@@ -351,6 +552,7 @@ function useModalStateFromNative() {
   const [renameSession, setRenameSession] = useState<RenameSessionModalState>();
   const [t3BrowserAccess, setT3BrowserAccess] = useState<T3BrowserAccessMessage>();
   const [t3ThreadId, setT3ThreadId] = useState<T3ThreadIdModalState>();
+  const [titleBarMenu, setTitleBarMenu] = useState<TitleBarMenuState>();
 
   useEffect(() => {
     const handleMessage = (event: Event) => {
@@ -361,6 +563,7 @@ function useModalStateFromNative() {
         }
 
         if (message.type === "open") {
+          setTitleBarMenu(undefined);
           if (message.modal === "renameSession") {
             if (!message.sessionId) {
               throw new Error("Rename modal request is missing sessionId.");
@@ -471,8 +674,27 @@ function useModalStateFromNative() {
           return;
         }
 
+        if (message.type === "titleBarMenu") {
+          /**
+           * CDXC:NativeWindowChrome 2026-05-04-16:24
+           * Title-bar menus are lightweight React overlays, not native menus,
+           * so they can reuse sidebar action data and still align to the
+           * AppKit split button that opened them.
+           */
+          setTitleBarMenu(message);
+          setActiveModal(undefined);
+          setConfig({});
+          setFindPreviousSession(undefined);
+          setFirstUserMessage(undefined);
+          setRenameSession(undefined);
+          setT3BrowserAccess(undefined);
+          setT3ThreadId(undefined);
+          return;
+        }
+
         if (message.type === "close") {
           setActiveModal(undefined);
+          setTitleBarMenu(undefined);
           setConfig({});
           setFindPreviousSession(undefined);
           setFirstUserMessage(undefined);
@@ -506,6 +728,7 @@ function useModalStateFromNative() {
     renameSession,
     t3BrowserAccess,
     t3ThreadId,
+    titleBarMenu,
   };
 }
 

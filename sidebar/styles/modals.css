@@ -24,6 +24,49 @@
   display: block;
 }
 
+.titlebar-menu-layer {
+  /*
+   * CDXC:NativeWindowChrome 2026-05-04-16:24
+   * Title-bar dropdowns must be React menus aligned to native AppKit buttons.
+   * Use the full-window modal host as a transparent click-catcher so the menu
+   * can appear over terminal panes without replacing native window dragging.
+   */
+  inset: 0;
+  position: fixed;
+  z-index: 1250;
+}
+
+.titlebar-menu {
+  box-sizing: border-box;
+  z-index: 1251;
+}
+
+.titlebar-menu-label {
+  color: color-mix(in srgb, var(--app-foreground) 56%, transparent);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.2;
+  padding: 10px 12px 12px;
+}
+
+.titlebar-menu-item {
+  font-size: 14px;
+  min-height: 36px;
+}
+
+.titlebar-menu-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titlebar-menu-empty {
+  color: color-mix(in srgb, var(--app-foreground) 56%, transparent);
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
 /**
  * CDXC:AppModals 2026-04-26-15:47
  * Full-app modal overlays should preserve terminal readability behind dialogs:

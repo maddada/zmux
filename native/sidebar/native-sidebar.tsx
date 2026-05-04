@@ -210,6 +210,7 @@ type NativeHostCommand =
       activeSessionIds: string[];
       attentionSessionIds?: string[];
       backgroundColor?: string;
+      focusRequestId?: number;
       focusedSessionId?: string;
       layout?: NativeTerminalLayout;
       paneGap?: number;
@@ -331,6 +332,15 @@ type NativeTerminalLayout =
 
 type NativeHostEvent =
   | { foregroundPid?: number; sessionId: string; ttyName?: string; type: "terminalReady" }
+  | {
+      action: "menu" | "primary";
+      height?: number;
+      kind: "actions" | "openIn";
+      left?: number;
+      top?: number;
+      type: "titleBarControlClicked";
+      width?: number;
+    }
   | { sessionId: string; title: string; type: "terminalTitleChanged" }
   | { faviconDataUrl?: string; sessionId: string; type: "browserFaviconChanged" }
   | { sessionId: string; type: "browserUrlChanged"; url: string }
@@ -450,6 +460,8 @@ const AGENT_ORDER_STORAGE_KEY = "zmux-native-agent-order";
 const COMMANDS_STORAGE_KEY = "zmux-native-commands";
 const COMMAND_ORDER_STORAGE_KEY = "zmux-native-command-order";
 const DELETED_DEFAULT_COMMANDS_STORAGE_KEY = "zmux-native-deleted-default-commands";
+const TITLEBAR_PRIMARY_ACTION_STORAGE_KEY = "zmux-native-titlebar-primary-action";
+const TITLEBAR_PRIMARY_OPEN_IN_STORAGE_KEY = "zmux-native-titlebar-primary-open-in";
 const PROJECTS_STORAGE_KEY = "zmux-native-projects";
 const SCRATCH_PAD_STORAGE_KEY = "zmux-native-scratch-pad";
 const PINNED_PROMPTS_STORAGE_KEY = "zmux-native-pinned-prompts";
@@ -707,6 +719,10 @@ const restoredProjectState = readStoredProjects();
 let projects: NativeProject[] = restoredProjectState.projects;
 let activeProjectId = restoredProjectState.activeProjectId;
 let revision = 0;
+let nextNativeLayoutFocusRequestId = 0;
+let pendingNativeLayoutFocusRequest:
+  | { reason: string; requestId: number; sessionId: string }
+  | undefined;
 let pendingZedProjectSyncTimeout: number | undefined;
 const sidebarBus = new SurfaceMessageBus<ExtensionToSidebarMessage>();
 const terminalStateById = new Map<
@@ -742,6 +758,12 @@ type NativeSidebarCommandSession = {
  */
 const sidebarCommandSessionByCommandId = new Map<string, NativeSidebarCommandSession>();
 const sidebarCommandCommandIdBySessionId = new Map<string, string>();
+let titlebarPrimaryActionCommandId =
+  localStorage.getItem(TITLEBAR_PRIMARY_ACTION_STORAGE_KEY)?.trim() || undefined;
+let titlebarPrimaryOpenInTarget =
+  localStorage.getItem(TITLEBAR_PRIMARY_OPEN_IN_STORAGE_KEY)?.trim() === "finder"
+    ? "finder"
+    : "ide";
 /**
  * CDXC:NativeTerminals 2026-04-26-06:45
  * Sidebar workspace snapshots normalize terminal ids back to canonical display
@@ -991,6 +1013,7 @@ function summarizeNativeFocusCommand(command: NativeHostCommand): Record<string,
   return {
     activeSessionIds: "activeSessionIds" in command ? command.activeSessionIds : undefined,
     backgroundColor: "backgroundColor" in command ? command.backgroundColor : undefined,
+    focusRequestId: "focusRequestId" in command ? command.focusRequestId : undefined,
     focusedSessionId: "focusedSessionId" in command ? command.focusedSessionId : undefined,
     hasInitialInput: "initialInput" in command ? Boolean(command.initialInput) : undefined,
     layoutLeafSessionIds:
@@ -1002,6 +1025,14 @@ function summarizeNativeFocusCommand(command: NativeHostCommand): Record<string,
     title: "title" in command ? command.title : undefined,
     type: command.type,
     visible: "visible" in command ? command.visible : undefined,
+  };
+}
+
+function queueNativeLayoutFocusRequest(sessionId: string, reason: string): void {
+  pendingNativeLayoutFocusRequest = {
+    reason,
+    requestId: ++nextNativeLayoutFocusRequestId,
+    sessionId,
   };
 }
 
@@ -5155,6 +5186,7 @@ function focusTerminal(sessionId: string): void {
   updateActiveProjectWorkspace(
     (workspace) => focusSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot,
   );
+  queueNativeLayoutFocusRequest(reference.sessionId, "focusTerminal");
   const sessionRecord = findSessionRecord(reference.sessionId);
   if (sessionRecord?.kind === "t3" || sessionRecord?.kind === "browser") {
     if (!nativeSessionIdBySidebarSessionId.has(reference.sessionId)) {
@@ -6233,6 +6265,90 @@ function runNativeSidebarCommand(
   return session;
 }
 
+function isRunnableNativeSidebarCommand(command: SidebarCommandButton): boolean {
+  return command.actionType === "browser" ? Boolean(command.url) : Boolean(command.command);
+}
+
+function resolveTitlebarPrimaryActionCommand(): SidebarCommandButton | undefined {
+  const selectedCommand = commands.find(
+    (command) =>
+      command.commandId === titlebarPrimaryActionCommandId &&
+      isRunnableNativeSidebarCommand(command),
+  );
+  if (selectedCommand) {
+    return selectedCommand;
+  }
+  return commands.find(isRunnableNativeSidebarCommand);
+}
+
+function setTitlebarPrimaryActionCommand(commandId: string): void {
+  /**
+   * CDXC:NativeWindowChrome 2026-05-04-16:24
+   * The native Actions title-bar button must run the last action the user
+   * clicked, whether that click came from the sidebar Actions grid or the
+   * title-bar React dropdown. Persist only the command id; command definitions
+   * remain owned by the existing project action data.
+   */
+  titlebarPrimaryActionCommandId = commandId;
+  localStorage.setItem(TITLEBAR_PRIMARY_ACTION_STORAGE_KEY, commandId);
+}
+
+function setTitlebarPrimaryOpenInTarget(target: "finder" | "ide"): void {
+  titlebarPrimaryOpenInTarget = target;
+  localStorage.setItem(TITLEBAR_PRIMARY_OPEN_IN_STORAGE_KEY, target);
+}
+
+function runTitlebarPrimaryAction(): void {
+  const command = resolveTitlebarPrimaryActionCommand();
+  if (!command) {
+    showNativeMessage("warning", "Configure an action before using the title bar Actions button.");
+    return;
+  }
+  setTitlebarPrimaryActionCommand(command.commandId);
+  runNativeSidebarCommand(command);
+}
+
+function runTitlebarPrimaryOpenIn(): void {
+  const project = activeProject();
+  if (titlebarPrimaryOpenInTarget === "finder") {
+    openNativeWorkspaceInFinder(project.path);
+    return;
+  }
+  openNativeWorkspaceInSelectedIde(project.path);
+}
+
+function handleTitlebarControlClicked(
+  hostEvent: Extract<NativeHostEvent, { type: "titleBarControlClicked" }>,
+): void {
+  if (hostEvent.action === "primary") {
+    if (hostEvent.kind === "actions") {
+      runTitlebarPrimaryAction();
+      return;
+    }
+    runTitlebarPrimaryOpenIn();
+    return;
+  }
+
+  /**
+   * CDXC:NativeWindowChrome 2026-05-04-16:24
+   * Native title-bar dropdown clicks are rendered by the full-window React
+   * modal host. Forward the AppKit anchor and current primary selections so
+   * the menu aligns under the native button and marks the next primary action.
+   */
+  postAppModalHost({
+    anchor: {
+      height: hostEvent.height ?? 0,
+      left: hostEvent.left ?? 0,
+      top: hostEvent.top ?? 8,
+      width: hostEvent.width ?? 0,
+    },
+    kind: hostEvent.kind,
+    primaryCommandId: resolveTitlebarPrimaryActionCommand()?.commandId,
+    primaryOpenInTarget: titlebarPrimaryOpenInTarget,
+    type: "titleBarMenu",
+  });
+}
+
 async function handleNativeCliCommand(action: string, payload: Record<string, unknown>) {
   /**
    * CDXC:DebugCli 2026-04-27-07:18
@@ -7264,6 +7380,10 @@ function focusProject(projectId: string): void {
     scheduleSyncOpenProjectWithZed("focusProject");
   }
   void refreshGitState();
+  const focusedSessionId = activeSnapshot().focusedSessionId;
+  if (focusedSessionId) {
+    queueNativeLayoutFocusRequest(focusedSessionId, "focusProject");
+  }
   publish();
 }
 
@@ -7688,6 +7808,17 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       openNativeWorkspaceInSelectedIde(groupReference.project.path);
       return;
     }
+    case "openActiveWorkspaceProjectInFinder":
+      setTitlebarPrimaryOpenInTarget("finder");
+      openNativeWorkspaceInFinder(activeProject().path);
+      return;
+    case "openActiveWorkspaceProjectInIde":
+      setTitlebarPrimaryOpenInTarget("ide");
+      openNativeWorkspaceInSelectedIde(activeProject().path);
+      return;
+    case "setTitlebarPrimaryOpenInTarget":
+      setTitlebarPrimaryOpenInTarget(message.target);
+      return;
     case "setWorkspaceProjectThemeForGroup": {
       const groupReference = resolveSidebarGroupReference(message.groupId);
       setProjectTheme(groupReference.project.projectId, message.theme);
@@ -7962,6 +8093,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "runSidebarCommand": {
       const command = commands.find((candidate) => candidate.commandId === message.commandId);
       if (command) {
+        setTitlebarPrimaryActionCommand(command.commandId);
         runNativeSidebarCommand(command, message.runMode);
       }
       return;
@@ -8108,6 +8240,16 @@ function syncNativeLayout(): void {
     visibleSessionIds,
     snapshot.visibleCount,
   );
+  const focusedNativeSessionId = snapshot.focusedSessionId
+    ? nativeSessionIdForSidebarSession(snapshot.focusedSessionId)
+    : undefined;
+  const shouldConsumeFocusRequest =
+    pendingNativeLayoutFocusRequest !== undefined &&
+    pendingNativeLayoutFocusRequest.sessionId === snapshot.focusedSessionId &&
+    visibleSessions.some((session) => session.sessionId === pendingNativeLayoutFocusRequest?.sessionId);
+  const focusRequestId = shouldConsumeFocusRequest
+    ? pendingNativeLayoutFocusRequest?.requestId
+    : undefined;
   /**
    * CDXC:NativeTerminals 2026-04-28-03:37
    * Native title bars must mirror the same per-session state used by sidebar
@@ -8119,14 +8261,20 @@ function syncNativeLayout(): void {
    * Native pane title bars must render the full sidebar session title, not the
    * Ghostty window title. Agent terminal titles can already contain an
    * ellipsis, so the layout sync owns the display title used by AppKit chrome.
+   *
+   * CDXC:NativeTerminalFocus 2026-05-04-16:02
+   * A visible side terminal becoming done/green must not move keyboard focus
+   * away from the terminal the user is typing in. Treat focusedSessionId in
+   * passive status/layout sync as selection display only; Swift receives
+   * focusRequestId only for explicit user focus commands such as sidebar
+   * session focus, hotkeys, or project switching.
    */
   postNative({
     activeSessionIds: visibleSessionIds,
     attentionSessionIds,
     backgroundColor: settings.workspaceBackgroundColor,
-    focusedSessionId: snapshot.focusedSessionId
-      ? nativeSessionIdForSidebarSession(snapshot.focusedSessionId)
-      : undefined,
+    ...(focusRequestId !== undefined ? { focusRequestId } : {}),
+    focusedSessionId: focusedNativeSessionId,
     layout,
     /**
      * CDXC:WorkspaceLayout 2026-04-28-06:01
@@ -8141,6 +8289,9 @@ function syncNativeLayout(): void {
     sessionTitles,
     type: "setActiveTerminalSet",
   });
+  if (shouldConsumeFocusRequest) {
+    pendingNativeLayoutFocusRequest = undefined;
+  }
 }
 
 function buildLayout(
@@ -8195,6 +8346,10 @@ window.addEventListener("zmux-native-host-event", (event) => {
       actionId: hostEvent.actionId,
     });
     runNativeHotkeyAction(hostEvent.actionId);
+    return;
+  }
+  if (hostEvent.type === "titleBarControlClicked") {
+    handleTitlebarControlClicked(hostEvent);
     return;
   }
   if (hostEvent.type === "paneReorderRequested") {

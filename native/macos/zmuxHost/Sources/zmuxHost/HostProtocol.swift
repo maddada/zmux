@@ -220,6 +220,7 @@ struct SetActiveTerminalSet: Decodable {
   let activeSessionIds: [String]
   let attentionSessionIds: [String]?
   let backgroundColor: String?
+  let focusRequestId: Int?
   let focusedSessionId: String?
   let layout: NativeTerminalLayout?
   let paneGap: Double?
@@ -414,6 +415,7 @@ enum NativeTerminalLayout: Decodable {
 enum HostEvent: Encodable {
   case hostReady
   case nativeHotkey(actionId: String)
+  case titleBarControlClicked(kind: String, action: String, left: Double?, top: Double?, width: Double?, height: Double?)
   case terminalReady(sessionId: String, ttyName: String?, foregroundPid: Int?)
   case terminalTitleChanged(sessionId: String, title: String)
   case browserFaviconChanged(sessionId: String, faviconDataUrl: String?)
@@ -456,6 +458,11 @@ enum HostEvent: Encodable {
     case payloadJson
     case sourceSessionId
     case targetSessionId
+    case kind
+    case left
+    case top
+    case width
+    case height
   }
 
   func encode(to encoder: Encoder) throws {
@@ -474,6 +481,22 @@ enum HostEvent: Encodable {
        */
       try container.encode("nativeHotkey", forKey: .type)
       try container.encode(actionId, forKey: .actionId)
+    case .titleBarControlClicked(let kind, let action, let left, let top, let width, let height):
+      /**
+       CDXC:NativeWindowChrome 2026-05-04-16:24
+       Native title-bar buttons keep AppKit window dragging intact, while their
+       dropdowns are rendered by React in the full-window overlay. Send the
+       button kind and content-area anchor over the existing host-event bus so
+       React can align menus under the native control without replacing the
+       macOS title bar.
+       */
+      try container.encode("titleBarControlClicked", forKey: .type)
+      try container.encode(kind, forKey: .kind)
+      try container.encode(action, forKey: .action)
+      try container.encodeIfPresent(left, forKey: .left)
+      try container.encodeIfPresent(top, forKey: .top)
+      try container.encodeIfPresent(width, forKey: .width)
+      try container.encodeIfPresent(height, forKey: .height)
     case .terminalReady(let sessionId, let ttyName, let foregroundPid):
       try container.encode("terminalReady", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)

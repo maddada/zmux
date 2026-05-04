@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Darwin
 import GhosttyKit
 import QuartzCore
 import WebKit
@@ -57,6 +58,78 @@ private let nativeTerminalColorEnvironmentKeys = [
   "TERM_PROGRAM",
   "TERM_PROGRAM_VERSION",
 ]
+
+private let nativeGhosttyTerminalColorDisablingEnvironmentKeys = [
+  "ANSI_COLORS_DISABLED",
+  "NO_COLOR",
+  "NODE_DISABLE_COLORS",
+]
+
+private func nativeGhosttyTerminalEnvironment(
+  _ environment: [String: String]?
+) -> [String: String] {
+  /**
+   CDXC:GhosttyTerminalColorEnv 2026-05-04-22:46
+   Embedded Ghostty terminals are interactive color-capable PTYs. Agent-managed
+   launch environments can carry NO_COLOR into zmux; strip color-disabling keys
+   at the native Ghostty boundary and set non-forcing color opt-in without
+   changing the xterm.js terminal path.
+   */
+  var result = environment ?? [:]
+  for key in nativeGhosttyTerminalColorDisablingEnvironmentKeys {
+    result.removeValue(forKey: key)
+  }
+  result["CLICOLOR"] = "1"
+  return result
+}
+
+private func nativeGhosttyTerminalEffectiveProcessEnvironment() -> [String: String] {
+  var environment = ProcessInfo.processInfo.environment
+  for key in nativeGhosttyTerminalColorDisablingEnvironmentKeys {
+    environment.removeValue(forKey: key)
+  }
+  environment["CLICOLOR"] = "1"
+  return environment
+}
+
+private func nativeProcessEnvironmentValue(_ key: String) -> String? {
+  guard let value = getenv(key) else {
+    return nil
+  }
+  return String(cString: value)
+}
+
+private func withNativeGhosttyTerminalProcessEnvironment<T>(_ body: () -> T) -> T {
+  /**
+   CDXC:GhosttyTerminalColorEnv 2026-05-04-22:46
+   Ghostty embedded surfaces snapshot the host process environment when the
+   surface is created. Temporarily sanitize only that creation window so spawned
+   shells do not inherit NO_COLOR from the app launch context, then restore the
+   app process environment for unrelated native work.
+   */
+  var savedEnvironment: [String: String?] = [:]
+  let keysToSave = nativeGhosttyTerminalColorDisablingEnvironmentKeys + ["CLICOLOR"]
+  for key in keysToSave {
+    savedEnvironment[key] = nativeProcessEnvironmentValue(key)
+  }
+
+  for key in nativeGhosttyTerminalColorDisablingEnvironmentKeys {
+    unsetenv(key)
+  }
+  setenv("CLICOLOR", "1", 1)
+
+  defer {
+    for key in keysToSave {
+      if let value = savedEnvironment[key] ?? nil {
+        setenv(key, value, 1)
+      } else {
+        unsetenv(key)
+      }
+    }
+  }
+
+  return body()
+}
 
 private func nativeTerminalColorEnvironmentSnapshot(_ environment: [String: String]) -> [String: Any] {
   /**
@@ -156,6 +229,7 @@ final class TerminalWorkspaceView: NSView {
   private var sessionTitles = [String: String]()
   private var focusedSessionId: String?
   private var lastEmittedFocusedSessionId: String?
+  private var lastAppliedLayoutFocusRequestId: Int?
   private var paneGap = TerminalWorkspaceView.defaultPaneGap
   private var programmaticFocusDepth = 0
   private var terminalLayout: NativeTerminalLayout?
@@ -249,7 +323,7 @@ final class TerminalWorkspaceView: NSView {
 
     var config = Ghostty.SurfaceConfiguration()
     config.workingDirectory = command.cwd
-    config.environmentVariables = command.env ?? [:]
+    config.environmentVariables = nativeGhosttyTerminalEnvironment(command.env)
     config.initialInput = command.initialInput
     TerminalFocusDebugLog.append(
       event: "nativeWorkspace.createTerminal.surfaceInit.start",
@@ -259,10 +333,14 @@ final class TerminalWorkspaceView: NSView {
         "hasInitialInput": command.initialInput?.isEmpty == false,
         "processColorEnv": nativeTerminalColorEnvironmentSnapshot(ProcessInfo.processInfo.environment),
         "requestedSessionId": command.sessionId,
+        "surfaceProcessColorEnv": nativeTerminalColorEnvironmentSnapshot(
+          nativeGhosttyTerminalEffectiveProcessEnvironment()),
         "title": command.title ?? "",
         "workingDirectory": command.cwd,
       ])
-    let surfaceView = ZmuxGhosttySurfaceView(app, baseConfig: config)
+    let surfaceView = withNativeGhosttyTerminalProcessEnvironment {
+      ZmuxGhosttySurfaceView(app, baseConfig: config)
+    }
     TerminalFocusDebugLog.append(
       event: "nativeWorkspace.createTerminal.surfaceInit.completed",
       details: [
@@ -1047,22 +1125,50 @@ final class TerminalWorkspaceView: NSView {
         "activeSessionIds": Array(activeSessionIds).sorted(),
         "attentionSessionIds": Array(attentionSessionIds).sorted(),
         "backgroundColor": command.backgroundColor ?? "default",
+        "focusRequestId": command.focusRequestId ?? 0,
         "focusedSessionId": nullableString(command.focusedSessionId),
         "paneGap": Double(paneGap),
         "responderAfterLayout": responderSnapshot(),
         "responderBefore": responderBefore,
         "visibleSessionIds": orderedVisibleSessionIds(),
       ])
+    guard let focusRequestId = command.focusRequestId else {
+      /**
+       CDXC:NativeTerminalFocus 2026-05-04-16:02
+       Passive status/layout sync can mark a side pane done/green while the
+       user is typing in another terminal. Do not translate focusedSessionId
+       into AppKit first-responder focus unless native-sidebar attached a fresh
+       explicit focus request id.
+       */
+      TerminalFocusDebugLog.append(
+        event: "nativeWorkspace.setActiveTerminalSet.focusSkipped",
+        details: [
+          "focusedSessionId": nullableString(command.focusedSessionId),
+          "reason": "missingFocusRequestId",
+          "responder": responderSnapshot(),
+        ])
+      return
+    }
+    guard lastAppliedLayoutFocusRequestId != focusRequestId else {
+      TerminalFocusDebugLog.append(
+        event: "nativeWorkspace.setActiveTerminalSet.focusSkipped",
+        details: [
+          "focusRequestId": focusRequestId,
+          "focusedSessionId": nullableString(command.focusedSessionId),
+          "reason": "duplicateFocusRequestId",
+        ])
+      return
+    }
+    lastAppliedLayoutFocusRequestId = focusRequestId
     if let focusedSessionId = command.focusedSessionId,
       activeSessionIds.contains(focusedSessionId)
     {
       if shouldPreserveNonTerminalFirstResponder() {
         /**
          CDXC:ScratchPadFocus 2026-04-28-05:35
-         Passive sidebar state sync must not steal typing focus from the
-         full-window modal host or other WKWebView controls. Explicit terminal
-         focus commands still call focusTerminal directly; only
-         setActiveTerminalSet preserves a non-terminal first responder.
+         Layout focus requests must not steal typing focus from the full-window
+         modal host or other WKWebView controls. Explicit terminal focus should
+         still preserve non-terminal first responders when a modal owns input.
          */
         TerminalFocusDebugLog.append(
           event: "nativeWorkspace.setActiveTerminalSet.focusPreserved",
@@ -1077,6 +1183,15 @@ final class TerminalWorkspaceView: NSView {
       } else if webPaneSessions[focusedSessionId] != nil {
         focusWebPane(sessionId: focusedSessionId, reason: "setActiveTerminalSet")
       }
+    } else {
+      TerminalFocusDebugLog.append(
+        event: "nativeWorkspace.setActiveTerminalSet.focusSkipped",
+        details: [
+          "activeSessionIds": Array(activeSessionIds).sorted(),
+          "focusRequestId": focusRequestId,
+          "focusedSessionId": nullableString(command.focusedSessionId),
+          "reason": "focusedSessionNotActive",
+        ])
     }
   }
 
