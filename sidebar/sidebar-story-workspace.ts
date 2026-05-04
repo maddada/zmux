@@ -14,6 +14,7 @@ import {
 } from "../shared/session-grid-contract";
 import type { SidebarAgentButton } from "../shared/sidebar-agents";
 import type { SidebarCommandButton } from "../shared/sidebar-commands";
+import type { zmuxSettings } from "../shared/zmux-settings";
 import {
   createGroupInWorkspace,
   createGroupFromSessionInWorkspace,
@@ -37,10 +38,12 @@ type SidebarStoryWorkspaceOptions = {
   completionBellEnabled: boolean;
   completionSound: SidebarHydrateMessage["hud"]["completionSound"];
   debuggingMode: boolean;
+  recentProjects: SidebarHydrateMessage["hud"]["recentProjects"];
   scratchPadContent: string;
   showCloseButtonOnSessionCards: boolean;
   showHotkeysOnSessionCards: boolean;
   showLastInteractionTimeOnSessionCards: boolean;
+  settings?: zmuxSettings;
   theme: SidebarHydrateMessage["hud"]["theme"];
 };
 
@@ -57,9 +60,13 @@ type SidebarSessionDecoration = Pick<
 >;
 
 export type SidebarStoryWorkspace = {
+  groupMetadataById: Readonly<
+    Record<string, Pick<SidebarHydrateMessage["groups"][number], "kind" | "projectContext">>
+  >;
   options: SidebarStoryWorkspaceOptions;
   pinnedPrompts: SidebarHydrateMessage["pinnedPrompts"];
   previousSessions: SidebarHydrateMessage["previousSessions"];
+  projectHeader: SidebarHydrateMessage["hud"]["projectHeader"];
   sessionDecorationsById: Readonly<Record<string, SidebarSessionDecoration>>;
   snapshot: GroupedSessionWorkspaceSnapshot;
 };
@@ -75,14 +82,26 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
       completionBellEnabled: message.hud.completionBellEnabled,
       completionSound: message.hud.completionSound,
       debuggingMode: message.hud.debuggingMode,
+      recentProjects: message.hud.recentProjects,
       scratchPadContent: message.scratchPadContent,
       showCloseButtonOnSessionCards: message.hud.showCloseButtonOnSessionCards,
       showHotkeysOnSessionCards: message.hud.showHotkeysOnSessionCards,
       showLastInteractionTimeOnSessionCards: message.hud.showLastInteractionTimeOnSessionCards,
+      settings: message.hud.settings,
       theme: message.hud.theme,
     },
+    groupMetadataById: Object.fromEntries(
+      message.groups.map((group) => [
+        group.groupId,
+        {
+          kind: group.kind,
+          projectContext: group.projectContext,
+        },
+      ]),
+    ),
     pinnedPrompts: message.pinnedPrompts.map((prompt) => ({ ...prompt })),
     previousSessions: message.previousSessions.map((session) => ({ ...session })),
+    projectHeader: message.hud.projectHeader,
     sessionDecorationsById: Object.fromEntries(
       message.groups.flatMap((group) =>
         group.sessions.map((session) => [
@@ -143,7 +162,9 @@ export function createSidebarStoryMessage(
       groupId: group.groupId,
       isActive: workspace.snapshot.activeGroupId === group.groupId,
       isFocusModeActive: isSessionGridFocusModeActive(group.snapshot),
+      kind: workspace.groupMetadataById[group.groupId]?.kind,
       layoutVisibleCount: getSessionGridLayoutVisibleCount(group.snapshot),
+      projectContext: workspace.groupMetadataById[group.groupId]?.projectContext,
       sessions: items,
       title: group.title,
       viewMode: group.snapshot.viewMode,
@@ -151,32 +172,39 @@ export function createSidebarStoryMessage(
     };
   });
 
+  const hud = createSidebarHudState(
+    activeGroup?.snapshot ?? workspace.snapshot.groups[0]?.snapshot,
+    workspace.options.theme,
+    workspace.options.agentManagerZoomPercent,
+    workspace.options.showCloseButtonOnSessionCards,
+    workspace.options.showHotkeysOnSessionCards,
+    workspace.options.showLastInteractionTimeOnSessionCards,
+    workspace.options.debuggingMode,
+    workspace.options.completionBellEnabled,
+    workspace.options.completionSound,
+    workspace.options.agents,
+    workspace.options.commands,
+    [],
+    undefined,
+    undefined,
+    undefined,
+    workspace.options.activeSessionsSortMode,
+    false,
+    false,
+    workspace.options.commandSessionIndicators.map((indicator) => ({
+      ...indicator,
+      isActive: indicator.sessionId === activeGroup?.snapshot.focusedSessionId,
+    })),
+  );
+
   return {
     groups,
-    hud: createSidebarHudState(
-      activeGroup?.snapshot ?? workspace.snapshot.groups[0]?.snapshot,
-      workspace.options.theme,
-      workspace.options.agentManagerZoomPercent,
-      workspace.options.showCloseButtonOnSessionCards,
-      workspace.options.showHotkeysOnSessionCards,
-      workspace.options.showLastInteractionTimeOnSessionCards,
-      workspace.options.debuggingMode,
-      workspace.options.completionBellEnabled,
-      workspace.options.completionSound,
-      workspace.options.agents,
-      workspace.options.commands,
-      [],
-      undefined,
-      undefined,
-      undefined,
-      workspace.options.activeSessionsSortMode,
-      false,
-      false,
-      workspace.options.commandSessionIndicators.map((indicator) => ({
-        ...indicator,
-        isActive: indicator.sessionId === activeGroup?.snapshot.focusedSessionId,
-      })),
-    ),
+    hud: {
+      ...hud,
+      projectHeader: workspace.projectHeader,
+      recentProjects: workspace.options.recentProjects,
+      settings: workspace.options.settings,
+    },
     pinnedPrompts: workspace.pinnedPrompts.map((prompt) => ({ ...prompt })),
     previousSessions: workspace.previousSessions.map((session) => ({ ...session })),
     revision: 1,

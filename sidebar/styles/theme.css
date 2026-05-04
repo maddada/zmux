@@ -413,8 +413,14 @@ button:disabled {
   opacity: 0;
   pointer-events: none;
   position: fixed;
-  right: 4px;
-  top: 4px;
+  /*
+   * CDXC:Sidebar-overflow-menu 2026-05-04-08:27
+   * Keep the overflow trigger inset 5px from the sidebar's top-right corner.
+   * The menu reads this button's live bounds, so its right edge stays aligned
+   * when the trigger moves.
+   */
+  right: 5px;
+  top: 5px;
   transition:
     opacity 120ms ease,
     visibility 0s linear 120ms;

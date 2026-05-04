@@ -305,6 +305,7 @@ function createReplayableSidebarMessage(
       highlightedVisibleCount: 1,
       isFocusModeActive: false,
       pendingAgentIds: [],
+      recentProjects: [],
       renameSessionOnDoubleClick: false,
       sectionVisibility: {
         actions: true,

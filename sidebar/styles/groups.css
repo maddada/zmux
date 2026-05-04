@@ -6,6 +6,7 @@
 }
 
 .group {
+  --sidebar-group-inline-padding: calc(3px * var(--sidebar-density-scale));
   --sidebar-section-expanded-spacing: calc(20px * var(--sidebar-density-scale));
   --sidebar-section-collapsed-spacing: calc(4px * var(--sidebar-density-scale));
   border: 1px solid transparent;
@@ -19,7 +20,7 @@
   margin-bottom: var(--sidebar-section-collapsed-spacing);
   max-width: calc(100% - var(--sidebar-session-column-offset));
   overflow: visible;
-  padding: 0 calc(4px * var(--sidebar-density-scale));
+  padding: 0 var(--sidebar-group-inline-padding);
   position: relative;
   transition:
     border-color 140ms ease,
@@ -53,18 +54,55 @@
 
 .group-head {
   border-radius: calc(10px * var(--sidebar-density-scale));
+  /*
+   * CDXC:SidebarHover 2026-05-04-07:00
+   * Group headers share the same surface style as Agents and Actions: keep the
+   * header box in normal flow, add only left content padding, and keep the
+   * right side flush for trailing controls.
+   */
+  margin-left: 0;
+  margin-right: 0;
   min-width: 0;
-  padding-bottom: calc(2px * var(--sidebar-density-scale));
-  padding-top: calc(2px * var(--sidebar-density-scale));
+  padding: calc(2px * var(--sidebar-density-scale)) 0
+    calc(2px * var(--sidebar-density-scale)) 6px;
   position: relative;
   transition: background-color 120ms ease;
   z-index: 4;
+}
+
+.group-head::before {
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  transition: background-color 120ms ease;
+}
+
+.native-sidebar-shell[data-sidebar-mode="combined"] .group-head {
+  /*
+   * CDXC:SidebarHover 2026-05-04-09:12
+   * Combined group headers should keep left padding before the project icon,
+   * and trailing controls must touch the hover surface's right edge. The last
+   * inset made the hover surface too narrow; show one more pixel on the right
+   * so the plus button has visible surface behind its border.
+   */
+  margin-right: calc(
+    -1 * ((var(--sidebar-session-column-offset) / 2) + var(--sidebar-group-inline-padding)) + 5px
+  );
 }
 
 .group-head:hover,
 .group-head:has(:focus-visible),
 .group:has(.group-session-connector-button:hover) .group-head,
 .group:has(.group-session-connector-button:focus-visible) .group-head {
+  background: transparent;
+}
+
+.group-head:hover::before,
+.group-head:has(:focus-visible)::before,
+.group:has(.group-session-connector-button:hover) .group-head::before,
+.group:has(.group-session-connector-button:focus-visible) .group-head::before {
   background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
 }
 
@@ -94,7 +132,9 @@
   align-items: center;
   display: flex;
   min-width: 0;
+  position: relative;
   width: 100%;
+  z-index: 1;
 }
 
 .group-title-row {
@@ -498,6 +538,45 @@
   padding-top: 0;
 }
 
+.group[data-empty-project="true"] {
+  /*
+   * CDXC:SidebarMode 2026-05-04-06:52
+   * Empty Combined-mode project groups act like collapsed project selectors:
+   * they keep compact spacing and hide the empty-session body while staying
+   * clickable so actions/agents target that project.
+   */
+  cursor: pointer;
+  margin-bottom: var(--sidebar-section-collapsed-spacing);
+}
+
+.group-collapse-button[data-empty-project="true"] .section-titlebar-toggle-chevron-icon,
+.group-head:hover
+  .group-collapse-button[data-empty-project="true"][data-has-idle-icon="true"]
+  .section-titlebar-toggle-chevron-icon,
+.group-head:has(.group-collapse-button[data-empty-project="true"]:focus-visible)
+  .group-collapse-button[data-empty-project="true"][data-has-idle-icon="true"]
+  .section-titlebar-toggle-chevron-icon {
+  opacity: 0;
+  transform: rotate(var(--section-titlebar-toggle-rotation)) scale(0.82);
+}
+
+.group-collapse-button[data-empty-project="true"] .section-titlebar-toggle-idle-icon,
+.group-head:hover
+  .group-collapse-button[data-empty-project="true"][data-has-idle-icon="true"]
+  .section-titlebar-toggle-idle-icon,
+.group-head:has(.group-collapse-button[data-empty-project="true"]:focus-visible)
+  .group-collapse-button[data-empty-project="true"][data-has-idle-icon="true"]
+  .section-titlebar-toggle-idle-icon {
+  opacity: 1;
+  transform: scale(1);
+  visibility: visible;
+}
+
+.group-title-button[data-empty-project="true"]:hover .group-title,
+.group-title-button[data-empty-project="true"]:focus-visible .group-title {
+  color: var(--app-foreground);
+}
+
 .group-head:hover .group-header-actions,
 .group-head:has(:focus-visible) .group-header-actions,
 .group-header-actions[data-open="true"],
@@ -505,8 +584,21 @@
 .group:hover .group-meta {
   gap: calc(6px * var(--sidebar-density-scale));
   margin-left: calc(6px * var(--sidebar-density-scale));
-  max-width: calc(56px * var(--sidebar-density-scale));
+  /*
+   * CDXC:SidebarHover 2026-05-04-07:00
+   * The group trailing controls should end flush with the header surface. The
+   * sidebar runs under CSS zoom, so a 56px cap resolves to about 50px visually:
+   * enough for two 22px controls plus the scaled inter-button gap.
+   */
+  max-width: 56px;
   opacity: 1;
+  /*
+   * CDXC:SidebarHover 2026-05-04-08:28
+   * The create button sits flush with the header edge. Keep the collapsed
+   * actions clipped, but stop clipping once visible so the antialiased circular
+   * button border is not cut off on the right side.
+   */
+  overflow: visible;
   pointer-events: auto;
   transition-delay: 0s;
   visibility: visible;

@@ -17,6 +17,16 @@ body.native-sidebar-body #root {
   overflow: hidden;
 }
 
+.native-sidebar-shell[data-sidebar-mode="combined"] {
+  /*
+   * CDXC:SidebarMode 2026-05-03-19:48
+   * Combined mode hides the workspace rail. Without collapsing the shell grid
+   * to one column, CSS Grid auto-places the sidebar into the old 54px rail
+   * track and clips project groups to a narrow strip.
+   */
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .native-sidebar-main {
   display: flex;
   flex-direction: column;
@@ -25,6 +35,16 @@ body.native-sidebar-body #root {
   min-width: 0;
   overflow: hidden;
   padding: calc(12px * var(--sidebar-density-scale));
+}
+
+.native-sidebar-shell[data-sidebar-mode="combined"] .native-sidebar-main {
+  /*
+   * CDXC:SidebarHover 2026-05-04-07:00
+   * Combined mode uses one column, so Agents, Actions, and project group
+   * headers share the same 8px edge inset from the native sidebar viewport.
+   */
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 /* CDXC:NativeSidebarChrome 2026-04-28-03:33: The native sidebar webview must
@@ -277,7 +297,7 @@ body.native-sidebar-body .stack {
 }
 
 .workspace-dock-context-menu {
-  min-width: 176px;
+  min-width: 196px;
   z-index: 50;
 }
 

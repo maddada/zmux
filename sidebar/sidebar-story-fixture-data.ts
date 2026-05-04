@@ -492,6 +492,84 @@ const EMPTY_GROUPS: SidebarStoryGroup[] = [
   },
 ];
 
+/*
+ * CDXC:SidebarHover 2026-05-04-08:11
+ * Reproduce the native Combined sidebar header-alignment surface. Project
+ * groups carry projectContext, Actions are hidden by combined settings, and
+ * the active project group exposes split/create controls on hover.
+ */
+const COMBINED_HEADER_ALIGNMENT_GROUPS: SidebarStoryGroup[] = [
+  {
+    groupId: "combined-chats",
+    isActive: true,
+    isChatCollection: true,
+    kind: "workspace",
+    sessions: [
+      createStorySession({
+        alias: "Refactor pricing notes",
+        agentIcon: "codex",
+        detail: "OpenAI Codex",
+        isFocused: true,
+        isVisible: true,
+        lastInteractionAt: secondsAgo(22),
+        sessionId: "combined-chat-pricing",
+        shortcutLabel: "⌘⌥1",
+      }),
+      createStorySession({
+        alias: "Trip brainstorm",
+        agentIcon: "claude",
+        detail: "Claude Code",
+        lastInteractionAt: minutesAgo(4),
+        sessionId: "combined-chat-trip",
+        shortcutLabel: "⌘⌥2",
+      }),
+    ],
+    title: "Chats",
+  },
+  {
+    groupId: "combined-project-root",
+    isActive: false,
+    kind: "workspace",
+    projectContext: {
+      canRemoveProject: true,
+      theme: "plain-dark",
+    },
+    sessions: [],
+    title: "/",
+  },
+  {
+    groupId: "combined-project-zmux",
+    isActive: false,
+    kind: "workspace",
+    projectContext: {
+      canRemoveProject: true,
+      theme: "plain-dark",
+    },
+    sessions: [
+      createStorySession({
+        alias: "Terminal Session",
+        agentIcon: "codex",
+        detail: "OpenAI Codex",
+        lastInteractionAt: secondsAgo(45),
+        sessionId: "combined-zmux-terminal",
+        shortcutLabel: "⌘⌥1",
+      }),
+    ],
+    title: "zmux",
+  },
+  {
+    groupId: "combined-project-agent-manager",
+    isActive: false,
+    kind: "workspace",
+    projectContext: {
+      canRemoveProject: true,
+      theme: "plain-dark",
+    },
+    sessions: [],
+    title: "agent-manager-x",
+  },
+];
+
 const THREE_GROUPS_STRESS: SidebarStoryGroup[] = [
   {
     groupId: "group-1",
@@ -561,6 +639,10 @@ const THREE_GROUPS_STRESS: SidebarStoryGroup[] = [
 export const GROUPS_BY_FIXTURE: Record<SidebarStoryFixture, SidebarStoryGroup[]> = {
   "agent-icon-render": AGENT_ICON_RENDER_GROUPS,
   "browser-groups": BROWSER_GROUPS,
+  "combined-header-alignment": COMBINED_HEADER_ALIGNMENT_GROUPS,
+  "combined-recent-projects": COMBINED_HEADER_ALIGNMENT_GROUPS.filter(
+    (group) => group.sessions.length > 0 || group.isChatCollection === true,
+  ),
   "command-indicator-active": COMMAND_INDICATOR_ACTIVE_GROUPS,
   default: DEFAULT_GROUPS,
   "empty-groups": EMPTY_GROUPS,

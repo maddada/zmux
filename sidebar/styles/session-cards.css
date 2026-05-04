@@ -823,9 +823,13 @@
 
 /*
  * CDXC:SidebarSessions 2026-04-28-05:18
- * The overflow menu has two card trailing modes: Agent Icon and Last Active.
+ * Settings has two card trailing modes: Agent Icon and Last Active.
  * Hovering anywhere on a session card frame must reveal the other mode, not
  * only when the pointer is exactly over the inner button element.
+ *
+ * CDXC:Sidebar-overflow-menu 2026-05-04-03:54
+ * Agent Icon/Last Active no longer appears in the overflow menu; this CSS
+ * keeps the setting's card-hover behavior intact after that move.
  */
 
 @keyframes session-agent-icon-spin {

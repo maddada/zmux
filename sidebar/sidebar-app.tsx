@@ -7,6 +7,8 @@ import {
   IconBellOff,
   IconArrowsSort,
   IconBookmark,
+  IconChevronDown,
+  IconChevronRight,
   IconDeviceMobile,
   IconEye,
   IconHelpCircle,
@@ -82,6 +84,7 @@ import { useScrollGlowState } from "./use-scroll-glow-state";
 import type { WebviewApi } from "./webview-api";
 import { createDisplaySessionLayout } from "../shared/active-sessions-sort";
 import { filterPreviousSessions, filterSidebarSessionItems } from "./previous-session-search";
+import { filterRecentProjects } from "./recent-project-search";
 import { isEmptySidebarDoubleClick } from "./empty-sidebar-double-click";
 import { closeAppModal, openAppModal } from "./app-modal-host-bridge";
 
@@ -92,7 +95,7 @@ export type SidebarAppProps = {
 
 type SessionIdsByGroup = Record<string, string[]>;
 type FloatingMenuPosition = {
-  left: number;
+  right: number;
   top: number;
 };
 
@@ -159,6 +162,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   const [isDaemonSessionsOpen, setIsDaemonSessionsOpen] = useState(false);
   const [isPinnedPromptsOpen, setIsPinnedPromptsOpen] = useState(false);
   const [isPreviousSessionsOpen, setIsPreviousSessionsOpen] = useState(false);
+  const [isRecentProjectsOpen, setIsRecentProjectsOpen] = useState(false);
   const [isScratchPadOpen, setIsScratchPadOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
@@ -166,6 +170,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     Record<string, number>
   >({});
   const [collapsedGroupsById, setCollapsedGroupsById] = useState<Record<string, true>>({});
+  const [recentProjectsQuery, setRecentProjectsQuery] = useState("");
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
   const [sessionDropIndicatorGroupId, setSessionDropIndicatorGroupId] = useState<string>();
   const [overflowMenuAnchor, setOverflowMenuAnchor] = useState<HTMLElement>();
@@ -225,6 +230,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     debuggingMode,
     groupOrder,
     previousSessions,
+    recentProjects,
     sectionVisibility,
     settings,
     projectHeader,
@@ -245,6 +251,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       debuggingMode: state.hud.debuggingMode,
       groupOrder: state.groupOrder,
       previousSessions: state.previousSessions,
+      recentProjects: state.hud.recentProjects,
       projectHeader: state.hud.projectHeader,
       revision: state.revision,
       sectionVisibility: state.hud.sectionVisibility,
@@ -761,8 +768,14 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
         return;
       }
 
+      /*
+       * CDXC:Sidebar-overflow-menu 2026-05-04-07:47
+       * The overflow menu's right edge must sit directly below the overflow
+       * trigger's right edge. Fixed right positioning avoids transform/width
+       * rounding drift and preserves the sidebar-width cap from CSS.
+       */
       setOverflowMenuPosition({
-        left: triggerBounds.right,
+        right: Math.max(0, window.innerWidth - triggerBounds.right),
         top: triggerBounds.bottom + 6,
       });
     };
@@ -782,9 +795,23 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     setIsOverflowMenuOpen((previous) => !previous);
   };
 
+  /**
+   * CDXC:SidebarMode 2026-05-03-10:42
+   * Combined mode is only active when the host sends persisted settings. That
+   * keeps the extension/sidebar hydrate path on the existing Separated behavior
+   * while the native app can default new installs to Combined.
+   */
+  const isCombinedSidebarMode = settings?.sidebarMode === "combined";
   const isManualActiveSessionsSort = activeSessionsSortMode === "manual";
-  const visibleBrowserGroupIds = sectionVisibility.browsers ? browserGroupIds : [];
-  const shouldShowActionsPanel = sectionVisibility.actions;
+  const visibleBrowserGroupIds =
+    !isCombinedSidebarMode && sectionVisibility.browsers ? browserGroupIds : [];
+  const shouldShowActionsPanel = !isCombinedSidebarMode && sectionVisibility.actions;
+  /**
+   * CDXC:SidebarMode 2026-05-04-07:00
+   * Combined mode hides Actions but keeps the current-project header. The
+   * Agents section remains governed by the normal sidebar setting so agent
+   * sessions stay reachable while scanning all project groups.
+   */
   const shouldShowAgentsPanel = sectionVisibility.agents;
 
   const { groupIds: effectiveGroupIds, sessionIdsByGroup: effectiveSessionIdsByGroup } = useMemo(
@@ -861,6 +888,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
         ? []
         : filterPreviousSessions(previousSessions, normalizedSessionSearchQuery),
     [isSessionSearchFiltering, normalizedSessionSearchQuery, previousSessions],
+  );
+  const filteredRecentProjects = useMemo(
+    () => filterRecentProjects(recentProjects, recentProjectsQuery),
+    [recentProjects, recentProjectsQuery],
   );
   const focusedSessionId = useMemo(
     () => Object.values(sessionsById).find((session) => session.isFocused)?.sessionId,
@@ -1540,9 +1571,13 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     vscode.postMessage({ type: "toggleCompletionBell" });
   };
 
-  const toggleShowLastInteractionTimeOnSessionCards = () => {
-    setIsOverflowMenuOpen(false);
-    vscode.postMessage({ type: "toggleShowLastInteractionTimeOnSessionCards" });
+  const restoreRecentProject = (projectId: string) => {
+    setRecentProjectsQuery("");
+    setIsRecentProjectsOpen(false);
+    vscode.postMessage({
+      projectId,
+      type: "restoreRecentProject",
+    });
   };
 
   const toggleActiveSessionsSortMode = () => {
@@ -1586,6 +1621,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     completionBellEnabled,
     isManualActiveSessionsSort,
     isOverflowMenuOpen,
+    isPinnedPromptsOpen,
     isPreviousSessionsOpen,
     isScratchPadOpen,
     isSessionSearchOpen,
@@ -1601,7 +1637,9 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     onOpenHotkeys: openHotkeys,
     onOpenSettings: openSidebarSettings,
     onShowRunning: openRunningSessions,
+    onTogglePinnedPrompts: togglePinnedPrompts,
     onTogglePreviousSessions: () => {
+      setIsOverflowMenuOpen(false);
       setIsPinnedPromptsOpen(false);
       setIsDaemonSessionsOpen(false);
       setIsScratchPadOpen(false);
@@ -1610,19 +1648,23 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       setSessionSearchQuery("");
       openAppModal({ modal: "previousSessions", type: "open" });
     },
-    onToggleSessionSearch: toggleSessionSearch,
+    onToggleSessionSearch: () => {
+      setIsOverflowMenuOpen(false);
+      toggleSessionSearch();
+    },
     onToggleActiveSessionsSortMode: toggleActiveSessionsSortMode,
     onToggleBell: toggleCompletionBell,
-    onToggleShowLastInteractionTimeOnSessionCards: toggleShowLastInteractionTimeOnSessionCards,
     onToggleMenu: toggleOverflowMenu,
     onToggleScratchPad: openScratchPad,
     overflowMenuPosition,
     overflowMenuRef,
-    showLastInteractionTimeOnSessionCards,
   } satisfies RenderSidebarTopControlsOptions;
 
   return (
     <Tooltip.Provider delay={TOOLTIP_DELAY_MS}>
+      {/* CDXC:SidebarMode 2026-05-04-07:00: Combined mode still shows the
+          current-project header because empty project groups act as project
+          selectors for subsequent agent/action launches. */}
       <SidebarProjectHeader projectHeader={projectHeader} />
       {renderFloatingOverflowMenu(topControlOptions)}
       <div
@@ -1632,19 +1674,12 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
         onDoubleClick={handleSidebarDoubleClick}
       >
         <div className="sidebar-top-panels">
+          {/* CDXC:SidebarMode 2026-05-03-19:46: Previous sessions, pinned
+              prompts, search, and completion sound live only in the overflow
+              menu now, so section titlebars do not render duplicate buttons. */}
           <CommandsPanel
             createActionType={commandCreateActionType}
             createRequestId={commandCreateRequestId}
-            titlebarActions={
-              shouldShowActionsPanel
-                ? renderSidebarTopControls({
-                    ...topControlOptions,
-                    isPinnedPromptsOpen,
-                    onTogglePinnedPrompts: togglePinnedPrompts,
-                    showSearch: !shouldShowAgentsPanel,
-                  })
-                : undefined
-            }
             isCollapsed={collapsedSections.actions}
             isVisible={shouldShowActionsPanel}
             onBrowserCommandRun={() => prepareBrowserGroupsForOpen(browserGroupIds)}
@@ -1657,16 +1692,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
           />
           <AgentsPanel
             createRequestId={agentCreateRequestId}
-            titlebarActions={
-              shouldShowAgentsPanel
-                ? renderAgentsHeaderControls({
-                    ...topControlOptions,
-                    isPinnedPromptsOpen,
-                    onTogglePinnedPrompts: togglePinnedPrompts,
-                    showMenu: !shouldShowActionsPanel,
-                  })
-                : undefined
-            }
             isCollapsed={collapsedSections.agents}
             isVisible={shouldShowAgentsPanel}
             onToggleCollapsed={(collapsed) => {
@@ -1678,13 +1703,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
         </div>
         <section className="session-groups-panel" ref={sessionGroupsPanelRef}>
           <div className="session-groups-top">
-            {!shouldShowActionsPanel && !shouldShowAgentsPanel
-              ? renderSidebarTopControls({
-                  ...topControlOptions,
-                  isPinnedPromptsOpen,
-                  onTogglePinnedPrompts: togglePinnedPrompts,
-                })
-              : null}
             {isSessionSearchOpen ? (
               <SidebarSessionSearchField
                 inputRef={searchInputRef}
@@ -1762,8 +1780,10 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
                           : undefined
                       }
                       sessionDropIndicatorGroupId={sessionDropIndicatorGroupId}
+                      sessionDraggingDisabled={isCombinedSidebarMode}
+                      showHeaderActions={true}
                       showSessionDropPositionIndicators={
-                        !isSessionSearchOpen && isManualActiveSessionsSort
+                        !isCombinedSidebarMode && !isSessionSearchOpen && isManualActiveSessionsSort
                       }
                       vscode={vscode}
                     />
@@ -1785,7 +1805,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
                   showHotkeys={showHotkeysOnSessionCards}
                 />
               ) : null}
-              {!isSessionSearchOpen ? (
+              {!isCombinedSidebarMode && !isSessionSearchOpen ? (
                 <div className="group-list group-create-list">
                   <div className="group group-create-shell" data-empty-space-blocking="true">
                     <div className="group-head">
@@ -1841,6 +1861,68 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
             />
           </div>
         </section>
+        {isCombinedSidebarMode && recentProjects.length > 0 ? (
+          <section
+            aria-label="Recent Projects"
+            className="recent-projects-drawer"
+            data-open={String(isRecentProjectsOpen)}
+          >
+            {/*
+             * CDXC:RecentProjects 2026-05-04-14:25
+             * Combined mode parks projects without surfaced sessions in a
+             * bottom drawer. Clicking a row asks native to restore the full
+             * project and only create a blank terminal when no sessions were
+             * preserved.
+             */}
+            <button
+              aria-expanded={isRecentProjectsOpen}
+              className="recent-projects-drawer-toggle"
+              onClick={() => setIsRecentProjectsOpen((previous) => !previous)}
+              type="button"
+            >
+              {isRecentProjectsOpen ? (
+                <IconChevronDown aria-hidden="true" size={14} stroke={2} />
+              ) : (
+                <IconChevronRight aria-hidden="true" size={14} stroke={2} />
+              )}
+              <span className="recent-projects-drawer-title">Recent Projects</span>
+              <span className="recent-projects-drawer-count">{recentProjects.length}</span>
+            </button>
+            {isRecentProjectsOpen ? (
+              <div className="recent-projects-drawer-body">
+                <label className="recent-projects-search">
+                  <IconSearch aria-hidden="true" size={14} stroke={1.8} />
+                  <input
+                    autoComplete="off"
+                    onChange={(event) => setRecentProjectsQuery(event.currentTarget.value)}
+                    placeholder="Search projects"
+                    type="search"
+                    value={recentProjectsQuery}
+                  />
+                </label>
+                <div className="recent-projects-list">
+                  {filteredRecentProjects.length > 0 ? (
+                    filteredRecentProjects.map((project) => (
+                      <button
+                        className="recent-projects-row"
+                        key={project.projectId}
+                        onClick={() => restoreRecentProject(project.projectId)}
+                        title={project.path}
+                        type="button"
+                      >
+                        <span className="recent-projects-row-title">
+                          [{project.sessionCount}] {project.title}
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="recent-projects-empty">No projects match that search.</div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
         <GitCommitModal
           draft={
             gitCommitDraft ?? {
@@ -2015,15 +2097,12 @@ function getScratchPadMenuLabel(isScratchPadOpen: boolean): string {
   return isScratchPadOpen ? "Hide Scratch Pad" : "Scratch Pad";
 }
 
-function getSessionCardTimeToggleLabel(showLastInteractionTimeOnSessionCards: boolean): string {
-  return showLastInteractionTimeOnSessionCards ? "Last Active" : "Agent Icon";
-}
-
 type RenderSidebarTopControlsOptions = {
   browserAccessSessionId?: string;
   completionBellEnabled: boolean;
   isManualActiveSessionsSort: boolean;
   isOverflowMenuOpen: boolean;
+  isPinnedPromptsOpen: boolean;
   isPreviousSessionsOpen: boolean;
   isScratchPadOpen: boolean;
   isSessionSearchOpen: boolean;
@@ -2033,186 +2112,26 @@ type RenderSidebarTopControlsOptions = {
   onOpenHotkeys: () => void;
   onOpenSettings: () => void;
   onShowRunning: () => void;
+  onTogglePinnedPrompts: () => void;
   onTogglePreviousSessions: () => void;
   onToggleSessionSearch: () => void;
   onToggleActiveSessionsSortMode: () => void;
   onToggleBell: () => void;
-  onToggleShowLastInteractionTimeOnSessionCards: () => void;
   onToggleMenu: (trigger: HTMLElement) => void;
   onToggleScratchPad: () => void;
   overflowMenuPosition?: FloatingMenuPosition;
   overflowMenuRef: RefObject<HTMLDivElement | null>;
-  showLastInteractionTimeOnSessionCards: boolean;
-  showMenu?: boolean;
-  showSearch?: boolean;
 };
-
-type RenderAgentsHeaderControlsOptions = RenderSidebarTopControlsOptions & {
-  isPinnedPromptsOpen: boolean;
-  onTogglePinnedPrompts: () => void;
-};
-
-function renderSidebarTopControls({
-  isPinnedPromptsOpen,
-  onTogglePinnedPrompts,
-  showMenu = true,
-  showSearch = true,
-  ...options
-}: RenderAgentsHeaderControlsOptions) {
-  if (!showMenu) {
-    return undefined;
-  }
-
-  return (
-    <div
-      className="sidebar-titlebar-controls"
-      data-controls-visible={String(
-        isPinnedPromptsOpen ||
-          options.isOverflowMenuOpen ||
-          options.isPreviousSessionsOpen ||
-          options.isSessionSearchOpen,
-      )}
-      data-empty-space-blocking="true"
-      data-menu-open={String(options.isOverflowMenuOpen)}
-    >
-      {showSearch ? renderSearchToolbarButton(options) : null}
-      {showSearch ? renderPreviousSessionsToolbarButton(options) : null}
-      <ToolbarIconButton
-        ariaExpanded={isPinnedPromptsOpen}
-        ariaHasPopup="dialog"
-        ariaLabel="Show pinned prompts"
-        className="floating-toolbar-button section-titlebar-action-button"
-        isSelected={isPinnedPromptsOpen}
-        onClick={() => {
-          onTogglePinnedPrompts();
-        }}
-        tooltip="Pinned Prompts"
-      >
-        <IconBookmark aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-      </ToolbarIconButton>
-      {renderCompletionBellToolbarButton(options)}
-    </div>
-  );
-}
-
-function renderAgentsHeaderControls({
-  isPinnedPromptsOpen,
-  onTogglePinnedPrompts,
-  showMenu = true,
-  ...options
-}: RenderAgentsHeaderControlsOptions) {
-  return (
-    <div
-      className="sidebar-titlebar-controls"
-      data-controls-visible={String(
-        isPinnedPromptsOpen ||
-          options.isOverflowMenuOpen ||
-          options.isPreviousSessionsOpen ||
-          options.isSessionSearchOpen,
-      )}
-      data-empty-space-blocking="true"
-      data-menu-open={String(options.isOverflowMenuOpen)}
-    >
-      {renderPreviousSessionsToolbarButton(options)}
-      {renderSearchToolbarButton(options)}
-      {showMenu ? (
-        <>
-          <ToolbarIconButton
-            ariaExpanded={isPinnedPromptsOpen}
-            ariaHasPopup="dialog"
-            ariaLabel="Show pinned prompts"
-            className="floating-toolbar-button section-titlebar-action-button"
-            isSelected={isPinnedPromptsOpen}
-            onClick={() => {
-              onTogglePinnedPrompts();
-            }}
-            tooltip="Pinned Prompts"
-          >
-            <IconBookmark aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-          </ToolbarIconButton>
-          {renderCompletionBellToolbarButton(options)}
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function renderCompletionBellToolbarButton({
-  completionBellEnabled,
-  onToggleBell,
-}: Pick<RenderSidebarTopControlsOptions, "completionBellEnabled" | "onToggleBell">) {
-  return (
-    <ToolbarIconButton
-      ariaLabel={completionBellEnabled ? "Disable completion sound" : "Enable completion sound"}
-      className={`floating-toolbar-button section-titlebar-action-button completion-bell-toolbar-button${
-        completionBellEnabled ? "" : " completion-bell-toolbar-button-disabled"
-      }`}
-      /*
-       * CDXC:Sidebar-controls 2026-04-25-10:08
-       * The completion bell's enabled state should be communicated by the bell
-       * glyph, not by a selected button background in the compact title controls.
-       */
-      isSelected={false}
-      onClick={() => {
-        onToggleBell();
-      }}
-      tooltip={completionBellEnabled ? "Completion Sound On" : "Completion Sound Off"}
-    >
-      {completionBellEnabled ? (
-        <IconBell aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-      ) : (
-        <IconBellOff aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-      )}
-    </ToolbarIconButton>
-  );
-}
-
-function renderSearchToolbarButton({
-  isSessionSearchOpen,
-  onToggleSessionSearch,
-}: Pick<RenderSidebarTopControlsOptions, "isSessionSearchOpen" | "onToggleSessionSearch">) {
-  return (
-    <ToolbarIconButton
-      ariaExpanded={isSessionSearchOpen}
-      ariaLabel="Search sessions"
-      className="floating-toolbar-button section-titlebar-action-button"
-      isSelected={isSessionSearchOpen}
-      onClick={() => {
-        onToggleSessionSearch();
-      }}
-      tooltip="Search"
-    >
-      <IconSearch aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-    </ToolbarIconButton>
-  );
-}
-
-function renderPreviousSessionsToolbarButton({
-  isPreviousSessionsOpen,
-  onTogglePreviousSessions,
-}: Pick<RenderSidebarTopControlsOptions, "isPreviousSessionsOpen" | "onTogglePreviousSessions">) {
-  return (
-    <ToolbarIconButton
-      ariaExpanded={isPreviousSessionsOpen}
-      ariaHasPopup="dialog"
-      ariaLabel="Show previous sessions"
-      className="floating-toolbar-button section-titlebar-action-button"
-      isSelected={isPreviousSessionsOpen}
-      onClick={() => {
-        onTogglePreviousSessions();
-      }}
-      tooltip="Previous Sessions"
-    >
-      <IconHistory aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-    </ToolbarIconButton>
-  );
-}
 
 function renderFloatingOverflowMenu({
   browserAccessSessionId,
+  completionBellEnabled,
   isManualActiveSessionsSort,
   isOverflowMenuOpen,
+  isPinnedPromptsOpen,
+  isPreviousSessionsOpen,
   isScratchPadOpen,
+  isSessionSearchOpen,
   onAccessT3FromBrowser,
   onMoveSidebar: _onMoveSidebar,
   onOpenHelp,
@@ -2220,12 +2139,14 @@ function renderFloatingOverflowMenu({
   onOpenSettings,
   onShowRunning,
   onToggleActiveSessionsSortMode,
-  onToggleShowLastInteractionTimeOnSessionCards,
+  onToggleBell,
+  onTogglePinnedPrompts,
+  onTogglePreviousSessions,
+  onToggleSessionSearch,
   onToggleMenu,
   onToggleScratchPad,
   overflowMenuPosition,
   overflowMenuRef,
-  showLastInteractionTimeOnSessionCards,
 }: RenderSidebarTopControlsOptions) {
   return (
     <>
@@ -2252,28 +2173,124 @@ function renderFloatingOverflowMenu({
         ? createPortal(
             <div
               aria-label="Sidebar actions"
-              className="session-context-menu"
+              className="session-context-menu sidebar-floating-menu"
               data-empty-space-blocking="true"
               id="sidebar-overflow-menu"
               ref={overflowMenuRef}
               role="menu"
               style={{
-                left: overflowMenuPosition.left,
+                right: overflowMenuPosition.right,
                 top: overflowMenuPosition.top,
-                transform: "translateX(-100%)",
                 zIndex: 250,
               }}
             >
               <div className="session-context-menu-group">
+                {/*
+                 * CDXC:SidebarMode 2026-05-03-17:34
+                 * Previous sessions, pinned prompts, search, and scratch pad
+                 * are permanent overflow-menu actions in both Combined and
+                 * Separated modes so the compact toolbar controls remain
+                 * reachable from one consistent menu.
+                 *
+                 * CDXC:Sidebar-overflow-menu 2026-05-04-03:09
+                 * The overflow menu order must match the grouped desktop menu:
+                 * primary navigation, session behavior, status/help, then
+                 * Settings as its own final action.
+                 */}
                 <button
-                  aria-checked={showLastInteractionTimeOnSessionCards}
+                  aria-checked={isSessionSearchOpen}
                   className="session-context-menu-item"
-                  onClick={onToggleShowLastInteractionTimeOnSessionCards}
+                  onClick={onToggleSessionSearch}
                   role="menuitemcheckbox"
                   type="button"
                 >
-                  <IconEye aria-hidden="true" className="session-context-menu-icon" size={14} />
-                  {getSessionCardTimeToggleLabel(showLastInteractionTimeOnSessionCards)}
+                  <IconSearch
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={14}
+                    stroke={1.8}
+                  />
+                  Search
+                </button>
+                <button
+                  aria-checked={isPreviousSessionsOpen}
+                  className="session-context-menu-item"
+                  onClick={onTogglePreviousSessions}
+                  role="menuitemcheckbox"
+                  type="button"
+                >
+                  <IconHistory aria-hidden="true" className="session-context-menu-icon" size={14} />
+                  Previous Sessions
+                </button>
+                <button
+                  aria-checked={isPinnedPromptsOpen}
+                  className="session-context-menu-item"
+                  onClick={onTogglePinnedPrompts}
+                  role="menuitemcheckbox"
+                  type="button"
+                >
+                  <IconBookmark
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={14}
+                    stroke={1.8}
+                  />
+                  Pinned Prompts
+                </button>
+                <button
+                  className="session-context-menu-item"
+                  onClick={onToggleScratchPad}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconPencil
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={14}
+                    stroke={1.8}
+                  />
+                  {getScratchPadMenuLabel(isScratchPadOpen)}
+                </button>
+              </div>
+              <div className="session-context-menu-divider" role="separator" />
+              <div className="session-context-menu-group">
+                <button
+                  aria-checked={completionBellEnabled}
+                  className="session-context-menu-item"
+                  onClick={onToggleBell}
+                  role="menuitemcheckbox"
+                  type="button"
+                >
+                  {completionBellEnabled ? (
+                    <IconBell
+                      aria-hidden="true"
+                      className="session-context-menu-icon"
+                      size={14}
+                      stroke={1.8}
+                    />
+                  ) : (
+                    <IconBellOff
+                      aria-hidden="true"
+                      className="session-context-menu-icon"
+                      size={14}
+                      stroke={1.8}
+                    />
+                  )}
+                  {completionBellEnabled ? "Completion Sound On" : "Completion Sound Off"}
+                </button>
+                <button
+                  className="session-context-menu-item"
+                  onClick={onToggleActiveSessionsSortMode}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconArrowsSort
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={14}
+                    stroke={1.8}
+                  />
+                  {getActiveSessionsSortMenuLabel(isManualActiveSessionsSort)}
                 </button>
               </div>
               <div className="session-context-menu-divider" role="separator" />
@@ -2296,57 +2313,12 @@ function renderFloatingOverflowMenu({
                 ) : null}
                 <button
                   className="session-context-menu-item"
-                  onClick={onToggleActiveSessionsSortMode}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconArrowsSort
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  {getActiveSessionsSortMenuLabel(isManualActiveSessionsSort)}
-                </button>
-                <button
-                  className="session-context-menu-item"
-                  onClick={onToggleScratchPad}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconPencil
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  {getScratchPadMenuLabel(isScratchPadOpen)}
-                </button>
-              </div>
-              <div className="session-context-menu-divider" role="separator" />
-              <div className="session-context-menu-group">
-                <button
-                  className="session-context-menu-item"
                   onClick={onShowRunning}
                   role="menuitem"
                   type="button"
                 >
                   <IconHistory aria-hidden="true" className="session-context-menu-icon" size={14} />
                   Running
-                </button>
-                <button
-                  className="session-context-menu-item"
-                  onClick={onOpenHelp}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconHelpCircle
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  Tips &amp; Tricks
                 </button>
                 <button
                   className="session-context-menu-item"
@@ -2364,6 +2336,23 @@ function renderFloatingOverflowMenu({
                 </button>
                 <button
                   className="session-context-menu-item"
+                  onClick={onOpenHelp}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconHelpCircle
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={14}
+                    stroke={1.8}
+                  />
+                  Tips &amp; Tricks
+                </button>
+              </div>
+              <div className="session-context-menu-divider" role="separator" />
+              <div className="session-context-menu-group">
+                <button
+                  className="session-context-menu-item"
                   onClick={onOpenSettings}
                   role="menuitem"
                   type="button"
@@ -2374,7 +2363,7 @@ function renderFloatingOverflowMenu({
                     size={14}
                     stroke={1.8}
                   />
-                  zmux Settings
+                  Settings
                 </button>
               </div>
             </div>,

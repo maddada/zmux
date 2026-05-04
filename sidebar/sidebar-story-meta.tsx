@@ -30,6 +30,8 @@ export const SIDEBAR_STORY_ARG_TYPES: NonNullable<Meta<SidebarStoryArgs>["argTyp
     options: [
       "agent-icon-render",
       "browser-groups",
+      "combined-header-alignment",
+      "combined-recent-projects",
       "command-indicator-active",
       "default",
       "sort-toggle-demo",

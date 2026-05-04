@@ -98,6 +98,7 @@ export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
       highlightedVisibleCount: 1,
       isFocusModeActive: false,
       pendingAgentIds: [],
+      recentProjects: [],
       sectionVisibility: createDefaultSidebarSectionVisibility(),
       settings: DEFAULT_zmux_SETTINGS,
       createSessionOnSidebarDoubleClick: false,
@@ -267,6 +268,7 @@ function applySidebarMessageState(
     hud: {
       ...message.hud,
       collapsedSections,
+      recentProjects: message.hud.recentProjects ?? [],
     },
     pendingFocusedSessionId: reconciledGroups.pendingFocusedSessionId,
     pinnedPrompts: message.pinnedPrompts,
@@ -532,6 +534,7 @@ function toSidebarGroupRecord(group: SidebarSessionGroup): SidebarGroupRecord {
     isFocusModeActive: group.isFocusModeActive,
     kind: group.kind,
     layoutVisibleCount: group.layoutVisibleCount,
+    projectContext: group.projectContext,
     title: group.title,
     viewMode: group.viewMode,
     visibleCount: group.visibleCount,
@@ -545,10 +548,22 @@ function haveSameSidebarGroupRecord(left: SidebarGroupRecord, right: SidebarGrou
     left.isFocusModeActive === right.isFocusModeActive &&
     left.kind === right.kind &&
     left.layoutVisibleCount === right.layoutVisibleCount &&
+    haveSameSidebarProjectContext(left.projectContext, right.projectContext) &&
     left.title === right.title &&
     left.viewMode === right.viewMode &&
     left.visibleCount === right.visibleCount
   );
+}
+
+function haveSameSidebarProjectContext(
+  left: SidebarGroupRecord["projectContext"],
+  right: SidebarGroupRecord["projectContext"],
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+
+  return left.canRemoveProject === right.canRemoveProject && left.theme === right.theme;
 }
 
 function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSessionItem): boolean {

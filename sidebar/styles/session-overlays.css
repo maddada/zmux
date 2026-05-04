@@ -20,6 +20,12 @@
 }
 
 .session-context-menu-item {
+  /*
+   * CDXC:WorkspaceActions 2026-05-04-08:22
+   * Project context menus include selected-IDE labels such as "VS Code
+   * Insiders"; keep command labels on one line so menu sizing and pointer
+   * targeting remain predictable.
+   */
   display: flex;
   align-items: center;
   gap: 8px;
@@ -30,6 +36,7 @@
   background: transparent;
   color: inherit;
   text-align: left;
+  white-space: nowrap;
 }
 
 .session-context-menu-group {
@@ -99,11 +106,15 @@
 }
 
 .session-context-menu.sidebar-floating-menu {
-  min-width: 160px;
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 20;
+  /*
+   * CDXC:Sidebar-overflow-menu 2026-05-04-04:30
+   * The sidebar overflow menu should be 40px narrower than the previous 230px
+   * width and must never render wider than the sidebar webview itself.
+   */
+  box-sizing: border-box;
+  max-width: calc(100vw - 8px);
+  min-width: 0;
+  width: min(190px, calc(100vw - 8px));
 }
 
 .tooltip-positioner {

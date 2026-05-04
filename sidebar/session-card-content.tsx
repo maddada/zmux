@@ -70,9 +70,13 @@ export function SessionCardContent({
       : undefined;
   /**
    * CDXC:SidebarSessions 2026-04-28-05:18
-   * The overflow menu selects the default trailing mode. Agent Icon mode must
+   * Settings selects the default trailing mode. Agent Icon mode must
    * not fall back to showing Last Active for iconless sessions; keep the default
    * slot blank and reveal the timestamp only on hover.
+   *
+   * CDXC:Sidebar-overflow-menu 2026-05-04-03:54
+   * Agent Icon/Last Active is a settings preference, not an overflow-menu
+   * shortcut, because it changes the default display behavior for all cards.
    */
   const defaultTrailingDisplay = !showLastInteractionTime
     ? "icon"

@@ -174,6 +174,7 @@ function createT3WorkspaceMessage(): SidebarHydrateMessage {
       highlightedVisibleCount: 1,
       isFocusModeActive: false,
       pendingAgentIds: [],
+      recentProjects: [],
       sectionVisibility: {
         actions: true,
         agents: true,

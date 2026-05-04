@@ -104,8 +104,19 @@ export type SidebarSessionGroup = {
   kind?: "browser" | "workspace";
   groupId: string;
   isActive: boolean;
+  /**
+   * CDXC:Chats 2026-05-04-09:41
+   * Native Combined mode renders all chat folders under one synthetic Chats
+   * header. Mark it explicitly so the React sidebar can keep it non-draggable
+   * and route its add button to creating a new chat folder.
+   */
+  isChatCollection?: boolean;
   isFocusModeActive: boolean;
   layoutVisibleCount: VisibleSessionCount;
+  projectContext?: {
+    canRemoveProject: boolean;
+    theme?: SidebarTheme;
+  };
   sessions: SidebarSessionItem[];
   title: string;
   viewMode: TerminalViewMode;
@@ -123,6 +134,17 @@ export type SidebarProjectWorktree = {
   branch?: string;
   directory: string;
   name: string;
+};
+
+export type SidebarRecentProject = {
+  icon?: WorkspaceDockIcon;
+  iconDataUrl?: string;
+  path: string;
+  projectId: string;
+  recentClosedAt?: string;
+  sessionCount: number;
+  theme?: SidebarTheme;
+  title: string;
 };
 
 export type SidebarCommandSessionIndicator = {
@@ -150,6 +172,14 @@ export type SidebarHudState = {
   isFocusModeActive: boolean;
   pendingAgentIds: string[];
   projectHeader?: SidebarProjectHeader;
+  /**
+   * CDXC:RecentProjects 2026-05-04-14:25
+   * Combined sidebar hides projects without active/sleeping sessions in a
+   * bottom Recent Projects drawer. The drawer receives a compact, sorted
+   * projection so React can restore projects without owning native session
+   * storage.
+   */
+  recentProjects: SidebarRecentProject[];
   projectWorktrees?: SidebarProjectWorktree[];
   sectionVisibility: SidebarSectionVisibility;
   settings?: zmuxSettings;
@@ -404,6 +434,16 @@ export type SidebarToExtensionMessage =
       type: "createSession";
     }
   | {
+      /**
+       * CDXC:Chats 2026-05-04-09:30
+       * Chats are projectless AI work areas. The native sidebar owns chat
+       * folder creation and then opens a normal empty terminal there so agent
+       * title/icon detection stays identical to project sessions.
+       */
+      title?: string;
+      type: "createChat";
+    }
+  | {
       type: "openBrowser";
     }
   | {
@@ -446,6 +486,43 @@ export type SidebarToExtensionMessage =
       type: "renameGroup";
       groupId: string;
       title: string;
+    }
+  | {
+      type: "openWorkspaceConfigForGroup";
+      groupId: string;
+    }
+  | {
+      type: "copyWorkspaceProjectPathForGroup";
+      groupId: string;
+    }
+  | {
+      type: "restoreRecentProject";
+      projectId: string;
+    }
+  | {
+      /**
+       * CDXC:WorkspaceActions 2026-05-04-08:22
+       * Combined-mode project cards expose native open actions from the
+       * right-click menu. The native sidebar resolves the group id to its
+       * trusted stored workspace path instead of accepting a client path.
+       */
+      type: "openWorkspaceProjectInFinderForGroup" | "openWorkspaceProjectInIdeForGroup";
+      groupId: string;
+    }
+  | {
+      type: "setWorkspaceProjectThemeForGroup";
+      groupId: string;
+      theme: SidebarTheme;
+    }
+  | {
+      /**
+       * CDXC:RecentProjects 2026-05-04-14:25
+       * Combined project context menus close projects into the Recent Projects
+       * drawer instead of deleting their stored sessions. Native keeps the
+       * legacy remove message for the workspace dock path.
+       */
+      type: "closeWorkspaceProjectForGroup" | "removeWorkspaceProjectForGroup";
+      groupId: string;
     }
   | {
       type: "closeGroup";

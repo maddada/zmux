@@ -2,6 +2,9 @@ import { createRoot } from "react-dom/client";
 import {
   IconChevronLeft,
   IconChevronRight,
+  IconCode,
+  IconFolderOpen,
+  IconMessageCirclePlus,
   IconSettings,
   IconPlus,
   IconPalette,
@@ -57,6 +60,7 @@ import {
   type SidebarT3SessionItem,
   type SidebarHydrateMessage,
   type SidebarPreviousSessionItem,
+  type SidebarRecentProject,
   type SidebarSectionCollapseState,
   type SidebarSessionGroup,
   type SidebarSessionItem,
@@ -137,6 +141,17 @@ import {
 } from "../../shared/sidebar-command-icons";
 import { SidebarCommandIconGlyph } from "../../sidebar/sidebar-command-icon";
 import {
+  createCombinedProjectGroupId,
+  createCombinedProjectSessionId,
+  parseCombinedProjectGroupId,
+  parseCombinedProjectSessionId,
+} from "./combined-sidebar-mode";
+import {
+  compareRecentProjectsByClosedAt,
+  countRecentProjectSessions,
+  normalizeStartupRecentProjects,
+} from "./recent-projects";
+import {
   normalizeWorkspaceDockIcon,
   normalizeWorkspaceDockIconDataUrl,
   type WorkspaceDockIcon,
@@ -144,6 +159,7 @@ import {
 } from "../../shared/workspace-dock-icons";
 import {
   DEFAULT_zmux_SETTINGS,
+  getZedOverlayTargetAppLabel,
   normalizezmuxSettings,
   type ZedOverlayTargetApp,
   type zmuxSettings,
@@ -163,6 +179,7 @@ import "../../sidebar/styles.css";
 
 type NativeHostCommand =
   | {
+      activateOnCreate?: boolean;
       cwd: string;
       env?: Record<string, string>;
       initialInput?: string;
@@ -246,6 +263,12 @@ type NativeHostCommand =
     }
   | { type: "openGhosttyConfigFile" }
   | { type: "openExternalUrl"; url: string }
+  | { type: "openWorkspaceInFinder"; workspacePath: string }
+  | {
+      targetApp: ZedOverlayTargetApp;
+      type: "openWorkspaceInIde";
+      workspacePath: string;
+    }
   | { type: "openBrowserWindow"; url: string }
   | { type: "showBrowserWindow" }
   | { sessionId: string; type: "openBrowserDevTools" }
@@ -271,6 +294,7 @@ export type WorkspaceBarProject = {
   icon?: WorkspaceDockIcon;
   iconDataUrl?: string;
   isActive: boolean;
+  isChat?: boolean;
   path: string;
   projectId: string;
   /**
@@ -292,6 +316,7 @@ export type WorkspaceBarProject = {
 export type WorkspaceBarStateMessage = {
   activeProjectId: string;
   projects: WorkspaceBarProject[];
+  sidebarMode: zmuxSettings["sidebarMode"];
   type: "workspaceBarState";
 };
 
@@ -328,6 +353,7 @@ type NativeHostEvent =
       type: "t3ThreadReady";
       workspaceRoot: string;
     }
+  | { sessionId: string; threadId: string; title?: string; type: "t3ThreadChanged" }
   | { exitCode: number; requestId: string; stderr: string; stdout: string; type: "processResult" }
   | { actionId: zmuxHotkeyActionId; type: "nativeHotkey" }
   | { protocolVersion: 1; type: "hostReady" };
@@ -439,9 +465,18 @@ const CHROME_CANARY_PROCESS_NAME = "Google Chrome Canary";
 const CHROME_CANARY_RUNNING_POLL_MS = 2_000;
 const CHROME_CANARY_BROWSER_GROUP_ID = "browser-chrome-canary";
 const CHROME_CANARY_BROWSER_SESSION_ID = "browser-chrome-canary-window";
+const COMBINED_CHATS_GROUP_ID = "combined-chats";
 const NATIVE_T3_REMOTE_ACCESS_ORIGIN = "http://127.0.0.1:3774";
 const NATIVE_T3_REMOTE_ACCESS_AUTH_ATTEMPTS = 30;
 const NATIVE_T3_REMOTE_ACCESS_AUTH_RETRY_MS = 500;
+/**
+ * CDXC:T3Code 2026-05-04-04:41
+ * T3 can emit a thread-change event before the sidebar summary title has caught
+ * up. Keep new zmux T3 cards responsive by creating them immediately, then
+ * retry the snapshot-backed title sync a few times so the card title converges
+ * to the title visible inside T3.
+ */
+const NATIVE_T3_TITLE_SYNC_RETRY_DELAYS_MS = [500, 1_500, 3_000] as const;
 const FIRST_PROMPT_AUTO_RENAME_POLL_MS = 2_000;
 const SYNC_OPEN_PROJECT_WITH_ZED_DEBOUNCE_MS = 2_000;
 /**
@@ -479,7 +514,14 @@ const WORKSPACE_DOCK_THEME_OPTIONS: ReadonlyArray<{ label: string; value: Sideba
  * Native first-prompt title generation must match zmux's Codex `/rename`
  * path, including the 39-character generated title cap and 250-character
  * prompt sample used before asking Codex for a short session name.
+ *
+ * CDXC:SessionNaming 2026-05-04-14:57
+ * Pasting more than 50 characters into the rename modal is a request to name
+ * the session from the pasted text. Native rename handling must generate the
+ * title before persisting or staging `/rename` so the full paste never becomes
+ * the thread name.
  */
+const SESSION_RENAME_SUMMARY_THRESHOLD = 50;
 const GENERATED_SESSION_TITLE_MAX_LENGTH = 39;
 const GENERATED_SESSION_TITLE_SOURCE_MAX_LENGTH = 250;
 let storedAgents: StoredSidebarAgent[] = [];
@@ -520,9 +562,12 @@ const pendingGitCommitRequests = new Map<
 type NativeProject = {
   icon?: WorkspaceDockIcon;
   iconDataUrl?: string;
+  isChat?: boolean;
+  isRecentProject?: boolean;
   name: string;
   path: string;
   projectId: string;
+  recentClosedAt?: string;
   theme?: SidebarTheme;
   workspace: GroupedSessionWorkspaceSnapshot;
 };
@@ -705,6 +750,7 @@ const sidebarCommandCommandIdBySessionId = new Map<string, string>();
  */
 const nativeSessionIdBySidebarSessionId = new Map<string, string>();
 const sidebarSessionIdByNativeSessionId = new Map<string, string>();
+const nativeT3ThreadChangeInFlightBySessionId = new Set<string>();
 /**
  * CDXC:AgentManagerXBridge 2026-04-27-20:34
  * Agent Manager X reads live mux sessions from a localhost WebSocket. The
@@ -863,6 +909,44 @@ function appendTerminalFocusDebugLog(event: string, details?: unknown): void {
   });
 }
 
+function appendTerminalLaunchDebugLog(event: string, details?: unknown): void {
+  /**
+   * CDXC:CrashDiagnostics 2026-05-04-09:10
+   * Rapid agent-button clicks can crash during terminal creation. Persist the
+   * sidebar launch order before native Ghostty receives each create/focus/layout
+   * command so the failing boundary is visible after the process exits.
+   */
+  appendTerminalFocusDebugLog(event, details);
+}
+
+const AGENT_COLOR_ENVIRONMENT_KEYS = [
+  "ANSI_COLORS_DISABLED",
+  "CI",
+  "CLICOLOR",
+  "CLICOLOR_FORCE",
+  "COLORTERM",
+  "FORCE_COLOR",
+  "NO_COLOR",
+  "NODE_DISABLE_COLORS",
+  "TERM",
+  "TERM_PROGRAM",
+  "TERM_PROGRAM_VERSION",
+] as const;
+
+function readAgentColorEnvironmentSnapshot(
+  environment: Record<string, string | undefined>,
+): Record<string, string | null> {
+  /**
+   * CDXC:AgentCliColorDiagnostics 2026-05-04-15:39
+   * Native Ghostty receives a session env overlay from the sidebar before the
+   * agent wrapper starts. Log color-affecting keys here so restored and newly
+   * opened agent terminals can be compared against the wrapper's inherited env.
+   */
+  return Object.fromEntries(
+    AGENT_COLOR_ENVIRONMENT_KEYS.map((key) => [key, environment[key] ?? null]),
+  ) as Record<string, string | null>;
+}
+
 function appendRestoreDebugLog(event: string, details?: unknown): void {
   if (!isNativeSidebarDebugLoggingEnabled()) {
     return;
@@ -962,6 +1046,24 @@ function safeSerializeForNativeLog(details: unknown): string {
 
 function openNativeExternalUrl(url: string): void {
   postNative({ type: "openExternalUrl", url });
+}
+
+function openNativeWorkspaceInFinder(workspacePath: string): void {
+  postNative({ type: "openWorkspaceInFinder", workspacePath });
+}
+
+function openNativeWorkspaceInSelectedIde(workspacePath: string): void {
+  /**
+   * CDXC:WorkspaceActions 2026-05-04-08:22
+   * Project right-click IDE opens are explicit user commands. They use the
+   * Settings-selected IDE target directly and do not require IDE attachment or
+   * sync-open settings to be enabled first.
+   */
+  postNative({
+    targetApp: settings.zedOverlayTargetApp,
+    type: "openWorkspaceInIde",
+    workspacePath,
+  });
 }
 
 function openChromeCanaryBrowserWindow(url: string): void {
@@ -1205,8 +1307,11 @@ function startFirstPromptAutoRenameMonitor(): void {
 function readStoredSettings(): zmuxSettings {
   try {
     const sharedSettingsJson = window.__zmux_NATIVE_HOST__?.sharedSidebarStorage?.settings;
+    const storedSettingsSource = JSON.parse(
+      sharedSettingsJson || localStorage.getItem(SETTINGS_STORAGE_KEY) || "null",
+    );
     const storedSettings = normalizezmuxSettings(
-      JSON.parse(sharedSettingsJson || localStorage.getItem(SETTINGS_STORAGE_KEY) || "null"),
+      normalizeStoredSettingsSidebarMode(storedSettingsSource),
     );
     if (!sharedSettingsJson) {
       persistSharedSettingsSnapshot(storedSettings);
@@ -1227,6 +1332,29 @@ function readStoredSettings(): zmuxSettings {
   } catch {
     return DEFAULT_zmux_SETTINGS;
   }
+}
+
+function normalizeStoredSettingsSidebarMode(candidate: unknown): unknown {
+  if (
+    !candidate ||
+    typeof candidate !== "object" ||
+    Array.isArray(candidate) ||
+    "sidebarMode" in candidate
+  ) {
+    return candidate;
+  }
+
+  /**
+   * CDXC:SidebarMode 2026-05-03-10:42
+   * Combined is the default for first installs with no settings object. Existing
+   * installs that already persisted settings before sidebarMode existed should
+   * remain on the previous Separated presentation until the user changes the
+   * new settings dropdown.
+   */
+  return {
+    ...candidate,
+    sidebarMode: "separated",
+  };
 }
 
 function saveSettings(nextSettings: zmuxSettings): void {
@@ -1439,14 +1567,32 @@ function readStoredProjects(): { activeProjectId: string; projects: NativeProjec
       ? candidate.projects.flatMap((project: unknown) => normalizeStoredNativeProject(project))
       : [];
     const projects = candidateProjects.length > 0 ? candidateProjects : [fallbackProject];
-    const activeProjectId =
+    const restoredActiveProjectId =
       typeof candidate?.activeProjectId === "string" &&
       projects.some((project) => project.projectId === candidate.activeProjectId)
         ? candidate.activeProjectId
         : projects[0]!.projectId;
-    const startupProjects = normalizeStartupTerminalSleepState(projects, activeProjectId);
+    /**
+     * CDXC:RecentProjects 2026-05-04-14:25
+     * Combined-mode installs keep the sidebar clean by moving only empty
+     * non-chat startup projects into the bottom Recent Projects drawer. Stored
+     * sleeping sessions still count, so restart does not hide parked work.
+     */
+    const startupRecentProjects =
+      settings.sidebarMode === "combined"
+        ? normalizeStartupRecentProjects(projects, new Date().toISOString())
+        : { changed: false, projects };
+    const activeProjectId = resolveStartupActiveProjectId(
+      startupRecentProjects.projects,
+      restoredActiveProjectId,
+      settings.sidebarMode === "combined",
+    );
+    const startupProjects = normalizeStartupTerminalSleepState(
+      startupRecentProjects.projects,
+      activeProjectId,
+    );
     if (candidateProjects.length > 0) {
-      persistSharedProjectsSnapshot(activeProjectId, projects);
+      persistSharedProjectsSnapshot(activeProjectId, startupProjects);
     }
     appendRestoreDebugLog("nativeSidebar.projects.read", {
       activeProjectId,
@@ -1467,6 +1613,27 @@ function readStoredProjects(): { activeProjectId: string; projects: NativeProjec
     });
     return { activeProjectId: fallbackProject.projectId, projects: [fallbackProject] };
   }
+}
+
+function resolveStartupActiveProjectId(
+  startupProjects: readonly NativeProject[],
+  restoredActiveProjectId: string,
+  shouldSkipRecentProjects: boolean,
+): string {
+  const restoredActiveProject = startupProjects.find(
+    (project) => project.projectId === restoredActiveProjectId,
+  );
+  if (
+    restoredActiveProject &&
+    (!shouldSkipRecentProjects || restoredActiveProject.isRecentProject !== true)
+  ) {
+    return restoredActiveProjectId;
+  }
+
+  const fallbackProject = shouldSkipRecentProjects
+    ? startupProjects.find((project) => project.isRecentProject !== true)
+    : startupProjects[0];
+  return fallbackProject?.projectId ?? restoredActiveProjectId;
 }
 
 function normalizeStartupTerminalSleepState(
@@ -1551,9 +1718,16 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
     {
       icon: normalizeWorkspaceDockIcon(project.icon) ?? normalizeLegacyWorkspaceDockIcon(project),
       iconDataUrl: normalizeWorkspaceDockIconDataUrl(project.iconDataUrl),
+      isChat: project.isChat === true,
+      isRecentProject: project.isRecentProject === true,
       name: project.name?.trim() || projectNameFromPath(path),
       path,
       projectId,
+      recentClosedAt:
+        typeof project.recentClosedAt === "string" &&
+        !Number.isNaN(Date.parse(project.recentClosedAt))
+          ? project.recentClosedAt
+          : undefined,
       theme: normalizeWorkspaceDockTheme(project.theme),
       workspace: normalizeSimpleGroupedSessionWorkspaceSnapshot(project.workspace),
     },
@@ -1562,6 +1736,7 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
 
 function createInitialProject(): NativeProject {
   return {
+    isChat: false,
     name: initialWorkspaceName,
     path: initialWorkspacePath,
     projectId: createProjectId(initialWorkspacePath),
@@ -1601,9 +1776,12 @@ function summarizeNativeProject(project: NativeProject) {
       title: group.title,
       visibleSessionIds: group.snapshot.visibleSessionIds,
     })),
+    isChat: project.isChat === true,
+    isRecentProject: project.isRecentProject === true,
     name: project.name,
     path: project.path,
     projectId: project.projectId,
+    recentClosedAt: project.recentClosedAt,
     theme: project.theme,
   };
 }
@@ -2028,8 +2206,8 @@ function writePreviousSessions(nextSessions: readonly SidebarPreviousSessionItem
   postNative({ key: "previousSessions", payloadJson, type: "persistSharedSidebarStorage" });
 }
 
-function rememberPreviousSession(sessionId: string): void {
-  const previousItem = createPreviousSessionItem(sessionId);
+function rememberPreviousSession(sessionId: string, project = activeProject()): void {
+  const previousItem = createPreviousSessionItem(sessionId, project);
   if (!previousItem) {
     return;
   }
@@ -2039,8 +2217,11 @@ function rememberPreviousSession(sessionId: string): void {
   ]);
 }
 
-function createPreviousSessionItem(sessionId: string): SidebarPreviousSessionItem | undefined {
-  for (const group of activeProject().workspace.groups) {
+function createPreviousSessionItem(
+  sessionId: string,
+  project: NativeProject,
+): SidebarPreviousSessionItem | undefined {
+  for (const group of project.workspace.groups) {
     const sidebarSession = createSidebarSessionItems(group.snapshot, "mac").find(
       (session) => session.sessionId === sessionId,
     );
@@ -2212,30 +2393,132 @@ function projectNameFromPath(path: string): string {
   return normalizedPath.split("/").filter(Boolean).pop() || normalizedPath || "Project";
 }
 
+function nativeChatTitleFromDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `Chat ${year}-${month}-${day} ${hour}:${minute}`;
+}
+
+function nativeChatsRootDirectory(): string {
+  return `${nativeHomeDirectory()}/zmux/chats`;
+}
+
+function createNativeChatDirectoryPath(title: string, date = new Date()): string {
+  const normalizedTitle = sanitizeNativePathPart(title || "chat").toLowerCase();
+  return `${nativeChatsRootDirectory()}/${formatNativeChatTimestamp(date)}-${normalizedTitle}`;
+}
+
+function formatNativeChatTimestamp(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  const second = String(date.getSeconds()).padStart(2, "0");
+  const millisecond = String(date.getMilliseconds()).padStart(3, "0");
+  return `${year}-${month}-${day}-${hour}${minute}${second}${millisecond}`;
+}
+
+function orderNativeProjectsForSidebar(projectsToOrder: readonly NativeProject[]): NativeProject[] {
+  /**
+   * CDXC:Chats 2026-05-04-09:30
+   * Chat workspaces are intentionally projectless, so they must remain above
+   * code projects in the rail and Combined project list while preserving the
+   * user's relative order inside each category.
+   */
+  return [
+    ...projectsToOrder.filter((project) => project.isChat === true),
+    ...projectsToOrder.filter((project) => project.isChat !== true),
+  ];
+}
+
 function activeProject(): NativeProject {
   return projects.find((project) => project.projectId === activeProjectId) ?? projects[0]!;
+}
+
+function findProject(projectId: string): NativeProject | undefined {
+  return projects.find((project) => project.projectId === projectId);
+}
+
+function updateProjectWorkspace(
+  projectId: string,
+  updater: (workspace: GroupedSessionWorkspaceSnapshot) => GroupedSessionWorkspaceSnapshot,
+): void {
+  projects = projects.map((project) =>
+    project.projectId === projectId ? { ...project, workspace: updater(project.workspace) } : project,
+  );
+  writeStoredProjects("updateProjectWorkspace");
 }
 
 function updateActiveProjectWorkspace(
   updater: (workspace: GroupedSessionWorkspaceSnapshot) => GroupedSessionWorkspaceSnapshot,
 ): void {
   const currentProjectId = activeProject().projectId;
-  projects = projects.map((project) =>
-    project.projectId === currentProjectId
-      ? { ...project, workspace: updater(project.workspace) }
-      : project,
-  );
-  writeStoredProjects("updateActiveProjectWorkspace");
+  updateProjectWorkspace(currentProjectId, updater);
 }
 
 function findSessionRecord(sessionId: string): SessionRecord | undefined {
-  for (const group of activeProject().workspace.groups) {
+  const reference = resolveSidebarSessionReference(sessionId);
+  for (const group of reference.project.workspace.groups) {
+    const session = group.snapshot.sessions.find(
+      (candidate) => candidate.sessionId === reference.sessionId,
+    );
+    if (session) {
+      return session;
+    }
+  }
+  return undefined;
+}
+
+function findSessionRecordInProject(
+  project: NativeProject,
+  sessionId: string,
+): SessionRecord | undefined {
+  for (const group of project.workspace.groups) {
     const session = group.snapshot.sessions.find((candidate) => candidate.sessionId === sessionId);
     if (session) {
       return session;
     }
   }
   return undefined;
+}
+
+function resolveSidebarSessionReference(sessionId: string): {
+  project: NativeProject;
+  sessionId: string;
+} {
+  const combinedReference = parseCombinedProjectSessionId(sessionId);
+  const project = combinedReference ? findProject(combinedReference.projectId) : undefined;
+  return {
+    project: project ?? activeProject(),
+    sessionId: combinedReference?.sessionId ?? sessionId,
+  };
+}
+
+function resolveSidebarGroupReference(groupId: string): {
+  isChatCollection?: boolean;
+  groupId?: string;
+  project: NativeProject;
+} {
+  if (groupId === COMBINED_CHATS_GROUP_ID) {
+    return {
+      isChatCollection: true,
+      project:
+        projects.find((project) => project.isChat === true && project.projectId === activeProjectId) ??
+        projects.find((project) => project.isChat === true) ??
+        activeProject(),
+    };
+  }
+
+  const combinedProjectId = parseCombinedProjectGroupId(groupId);
+  const project = combinedProjectId ? findProject(combinedProjectId) : undefined;
+  return {
+    groupId: combinedProjectId ? undefined : groupId,
+    project: project ?? activeProject(),
+  };
 }
 
 function setTerminalSessionAgentName(sessionId: string, agentName: string | undefined): void {
@@ -2246,7 +2529,12 @@ function setTerminalSessionAgentName(sessionId: string, agentName: string | unde
 }
 
 function nativeSessionIdForSidebarSession(sessionId: string): string {
-  return nativeSessionIdBySidebarSessionId.get(sessionId) ?? sessionId;
+  const reference = resolveSidebarSessionReference(sessionId);
+  return nativeSessionIdForProjectSidebarSession(reference.project.projectId, reference.sessionId);
+}
+
+function nativeSessionIdForProjectSidebarSession(projectId: string, sessionId: string): string {
+  return createDurableNativeSessionId(projectId, sessionId);
 }
 
 function sidebarSessionIdForNativeSession(sessionId: string): string {
@@ -2254,8 +2542,15 @@ function sidebarSessionIdForNativeSession(sessionId: string): string {
 }
 
 function forgetNativeSessionMapping(sidebarSessionId: string): string {
-  const nativeSessionId = nativeSessionIdForSidebarSession(sidebarSessionId);
-  nativeSessionIdBySidebarSessionId.delete(sidebarSessionId);
+  const reference = resolveSidebarSessionReference(sidebarSessionId);
+  return forgetNativeSessionMappingForProject(reference.project.projectId, reference.sessionId);
+}
+
+function forgetNativeSessionMappingForProject(projectId: string, sidebarSessionId: string): string {
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(projectId, sidebarSessionId);
+  if (nativeSessionIdBySidebarSessionId.get(sidebarSessionId) === nativeSessionId) {
+    nativeSessionIdBySidebarSessionId.delete(sidebarSessionId);
+  }
   sidebarSessionIdByNativeSessionId.delete(nativeSessionId);
   return nativeSessionId;
 }
@@ -2339,6 +2634,123 @@ function createProjectedSidebarGroupsForProject(project: NativeProject): Sidebar
     viewMode: group.snapshot.viewMode,
     visibleCount: group.snapshot.visibleCount,
   }));
+}
+
+function createCombinedSidebarGroups(): SidebarSessionGroup[] {
+  /**
+   * CDXC:Chats 2026-05-04-14:49
+   * The sidebar must always show one Chats header, even before any chat exists.
+   * Users create chats through that group's plus button; standalone New Chat
+   * buttons are intentionally omitted so there is one obvious creation path.
+   *
+   * CDXC:Chats 2026-05-04-09:41
+   * Combined mode groups all projectless chat folders under one Chats header.
+   * Each chat still owns exactly one project-scoped terminal session so the
+   * native terminal title/agent-icon detection path stays unchanged.
+   *
+   * CDXC:SidebarMode 2026-05-03-10:42
+   * Non-chat projects still render as one draggable group per project. The
+   * underlying separated workspace groups stay intact, so switching back to
+   * Separated restores the existing group layout.
+   */
+  const orderedProjects = orderNativeProjectsForSidebar(projects);
+  const chatProjects = orderedProjects.filter((project) => project.isChat === true);
+  const projectGroups = orderedProjects
+    .filter((project) => project.isChat !== true && project.isRecentProject !== true)
+    .map((project) => createCombinedProjectSidebarGroup(project));
+
+  const activeChatProject = chatProjects.find((project) => project.projectId === activeProjectId);
+  const chatSessions = chatProjects.flatMap((project) => {
+    const session = createProjectedSidebarGroupsForProject(project).flatMap(
+      (group) => group.sessions,
+    )[0];
+    return session
+      ? [
+          {
+            ...session,
+            isFocused: project.projectId === activeProjectId && session.isFocused,
+            isVisible: project.projectId === activeProjectId && session.isVisible,
+            sessionId: createCombinedProjectSessionId(project.projectId, session.sessionId),
+          },
+        ]
+      : [];
+  });
+  const activeChatGroup = activeChatProject
+    ? createProjectedSidebarGroupsForProject(activeChatProject).find(
+        (group) => group.groupId === activeChatProject.workspace.activeGroupId,
+      )
+    : undefined;
+
+  return [
+    {
+      groupId: COMBINED_CHATS_GROUP_ID,
+      isActive: Boolean(activeChatProject),
+      isChatCollection: true,
+      isFocusModeActive: activeChatGroup?.isFocusModeActive ?? false,
+      kind: "workspace",
+      layoutVisibleCount: 1,
+      sessions: chatSessions,
+      title: "Chats",
+      viewMode: activeChatGroup?.viewMode ?? "grid",
+      visibleCount: 1,
+    },
+    ...projectGroups,
+  ];
+}
+
+function createSidebarRecentProjects(): SidebarRecentProject[] {
+  /**
+   * CDXC:RecentProjects 2026-05-04-14:25
+   * Recent Projects are full native projects parked out of the main Combined
+   * group list. Show them newest-closed first and include the preserved session
+   * count so restoring a closed project with sessions does not imply a blank
+   * terminal will be created.
+   */
+  return projects
+    .filter((project) => project.isChat !== true && project.isRecentProject === true)
+    .sort(compareRecentProjectsByClosedAt)
+    .map((project) => ({
+      icon: project.icon ?? normalizeLegacyWorkspaceDockIcon(project),
+      iconDataUrl: project.iconDataUrl,
+      path: project.path,
+      projectId: project.projectId,
+      recentClosedAt: project.recentClosedAt,
+      sessionCount: countRecentProjectSessions(project),
+      theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
+      title: project.name,
+    }));
+}
+
+function createCombinedProjectSidebarGroup(project: NativeProject): SidebarSessionGroup {
+  const projectedGroups = createProjectedSidebarGroupsForProject(project);
+  const activeGroup =
+    projectedGroups.find((group) => group.groupId === project.workspace.activeGroupId) ??
+    projectedGroups[0];
+  const isActiveProject = project.projectId === activeProjectId;
+  const sessions = projectedGroups.flatMap((group) =>
+    group.sessions.map((session) => ({
+      ...session,
+      isFocused: isActiveProject && session.isFocused,
+      isVisible: isActiveProject && session.isVisible,
+      sessionId: createCombinedProjectSessionId(project.projectId, session.sessionId),
+    })),
+  );
+
+  return {
+    groupId: createCombinedProjectGroupId(project.projectId),
+    isActive: isActiveProject,
+    isFocusModeActive: isActiveProject && activeGroup ? activeGroup.isFocusModeActive : false,
+    kind: "workspace",
+    layoutVisibleCount: activeGroup?.layoutVisibleCount ?? 1,
+    projectContext: {
+      canRemoveProject: true,
+      theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
+    },
+    sessions,
+    title: project.name,
+    viewMode: activeGroup?.viewMode ?? "grid",
+    visibleCount: activeGroup?.visibleCount ?? 1,
+  };
 }
 
 function createProjectedSidebarSessionsForGroup(group: SessionGroupRecord): SidebarSessionItem[] {
@@ -2480,6 +2892,7 @@ function getNativeSidebarCommandSessionIndicators(
 function buildSidebarMessage(): SidebarHydrateMessage {
   const project = activeProject();
   const snapshot = activeSnapshot();
+  const isCombinedSidebarMode = settings.sidebarMode === "combined";
   /**
    * CDXC:BrowserPanes 2026-05-02-06:35
    * Browser-pane mode hides the dedicated Chrome Canary Browsers section
@@ -2487,7 +2900,7 @@ function buildSidebarMessage(): SidebarHydrateMessage {
    * remains visible only while the Chrome Canary integration is selected.
    */
   const showChromeCanaryBrowserGroup =
-    settings.browserOpenMode === "chrome-canary" && isChromeCanaryRunning;
+    !isCombinedSidebarMode && settings.browserOpenMode === "chrome-canary" && isChromeCanaryRunning;
   const browserGroups = showChromeCanaryBrowserGroup ? [buildChromeCanaryBrowserGroup()] : [];
   /**
    * CDXC:NativeSidebar 2026-04-27-17:03
@@ -2496,7 +2909,9 @@ function buildSidebarMessage(): SidebarHydrateMessage {
    * passing them to shared sidebar HUD creation.
    */
   return {
-    groups: browserGroups.concat(createProjectedSidebarGroupsForProject(project)),
+    groups: isCombinedSidebarMode
+      ? createCombinedSidebarGroups()
+      : browserGroups.concat(createProjectedSidebarGroupsForProject(project)),
     hud: {
       ...createSidebarHudState(
         snapshot,
@@ -2513,7 +2928,13 @@ function buildSidebarMessage(): SidebarHydrateMessage {
         [],
         gitState,
         {
-          actions: settings.showSidebarActions,
+          /**
+           * CDXC:SidebarMode 2026-05-03-17:34
+           * Combined mode is for scanning project sessions, so the native
+           * sidebar suppresses Actions and the dedicated browser group while
+           * leaving Agents governed by the user's sidebar setting.
+           */
+          actions: !isCombinedSidebarMode && settings.showSidebarActions,
           agents: settings.showSidebarAgents,
           browsers: showChromeCanaryBrowserGroup,
           git: settings.showSidebarGitButton,
@@ -2524,10 +2945,17 @@ function buildSidebarMessage(): SidebarHydrateMessage {
         settings.renameSessionOnDoubleClick,
         getNativeSidebarCommandSessionIndicators(commands),
       ),
+      /**
+       * CDXC:SidebarMode 2026-05-04-07:00
+       * Combined mode still needs the top current-project header so users can
+       * see which project receives new agent/action launches after selecting a
+       * project group with no sessions.
+       */
       projectHeader: {
         directory: project.path,
         name: project.name,
       },
+      recentProjects: isCombinedSidebarMode ? createSidebarRecentProjects() : [],
       settings,
     },
     pinnedPrompts,
@@ -2540,7 +2968,9 @@ function buildSidebarMessage(): SidebarHydrateMessage {
 
 function createAgentManagerXWorkspaceSnapshots(): AgentManagerXWorkspaceSnapshotMessage[] {
   const updatedAt = new Date().toISOString();
-  return projects.map((project) => {
+  return projects
+    .filter((project) => project.isRecentProject !== true)
+    .map((project) => {
     const sessions = createProjectedSidebarGroupsForProject(project).flatMap((group) =>
       group.sessions.flatMap((session): AgentManagerXWorkspaceSession[] => {
         if (session.sessionKind === "browser") {
@@ -2579,7 +3009,7 @@ function createAgentManagerXWorkspaceSnapshots(): AgentManagerXWorkspaceSnapshot
       workspaceName: project.name,
       workspacePath: project.path,
     };
-  });
+    });
 }
 
 function handleAgentManagerXSessionCommand(rawData: unknown): void {
@@ -2722,14 +3152,31 @@ function restoreNativeTerminalSession(
     sessionStateFilePath,
     terminalTitle: session.title,
   });
+  const nativeEnvironment = createNativeAgentSessionEnvironment({
+    agentName: session.agentName,
+    project,
+    sessionId: session.sessionId,
+    sessionStateFilePath,
+  });
+  appendTerminalLaunchDebugLog("nativeSidebar.restoreTerminalState.colorEnv", {
+    agentName: session.agentName,
+    colorEnv: readAgentColorEnvironmentSnapshot(nativeEnvironment),
+    nativeSessionId,
+    reason,
+    sessionId: session.sessionId,
+  });
   postNative({
+    /**
+     * CDXC:CrashRootCause 2026-05-04-11:53
+     * Sleeping-session restore uses the same native creation path as new agent
+     * launches, so it must also mount inactive and wait for the sidebar's
+     * authoritative setActiveTerminalSet command. Otherwise rapidly clicking
+     * sleeping cards can transiently activate the previous and restored Ghostty
+     * surfaces and crash before layout sync reaches native.
+    */
+    activateOnCreate: false,
     cwd: project.path,
-    env: createNativeAgentSessionEnvironment({
-      agentName: session.agentName,
-      project,
-      sessionId: session.sessionId,
-      sessionStateFilePath,
-    }),
+    env: nativeEnvironment,
     initialInput,
     sessionId: nativeSessionId,
     title: session.title,
@@ -2752,18 +3199,30 @@ function createWorkspaceBarState(): WorkspaceBarStateMessage {
    * state path silent by default so routine spinner/status updates do not write
    * dock snapshots continuously.
    */
+  /**
+   * CDXC:RecentProjects 2026-05-04-14:25
+   * Recent Projects are hidden from Combined-mode native/status surfaces while
+   * Separated mode keeps the historical full workspace rail behavior.
+   */
+  const visibleProjects =
+    settings.sidebarMode === "combined"
+      ? projects.filter((project) => project.isRecentProject !== true)
+      : projects;
+
   return {
     activeProjectId,
-    projects: projects.map((project) => ({
+    projects: orderNativeProjectsForSidebar(visibleProjects).map((project) => ({
       icon: project.icon ?? normalizeLegacyWorkspaceDockIcon(project),
       iconDataUrl: project.iconDataUrl,
       isActive: project.projectId === activeProjectId,
+      isChat: project.isChat,
       path: project.path,
       projectId: project.projectId,
       sessionCounts: countWorkspaceBarSessions(project),
       theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
       title: project.name,
     })),
+    sidebarMode: settings.sidebarMode,
     type: "workspaceBarState",
   };
 }
@@ -3422,9 +3881,50 @@ function createTerminal(
   },
 ): TerminalSessionRecord | undefined {
   const project = activeProject();
+  if (project.isChat === true) {
+    const existingChatSession = findFirstTerminalSessionInProject(project);
+    if (existingChatSession) {
+      /**
+       * CDXC:Chats 2026-05-04-09:41
+       * Each chat folder is a single-terminal conversation container. Requests
+       * to create another terminal while a chat is active should select the
+       * existing chat terminal instead of adding a second session to that chat.
+       */
+      updateActiveProjectWorkspace(
+        (workspace) =>
+          focusSessionInSimpleWorkspace(workspace, existingChatSession.sessionId).snapshot,
+      );
+      publish();
+      if (options?.focusAfterCreate !== false) {
+        postNative({
+          sessionId: nativeSessionIdForProjectSidebarSession(
+            project.projectId,
+            existingChatSession.sessionId,
+          ),
+          type: "focusTerminal",
+        });
+      }
+      return existingChatSession;
+    }
+  }
   const targetWorkspace = groupId
     ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
     : project.workspace;
+  const beforeSnapshot = targetWorkspace.groups.find(
+    (group) => group.groupId === targetWorkspace.activeGroupId,
+  )?.snapshot;
+  appendTerminalLaunchDebugLog("nativeSidebar.createTerminal.request", {
+    activeProjectId,
+    agentName,
+    focusedSessionIdBefore: beforeSnapshot?.focusedSessionId,
+    groupId,
+    initialInputPreview: initialInput.trim().slice(0, 80),
+    initialPresentation: options?.initialPresentation ?? "focused",
+    projectId: project.projectId,
+    sessionCountBefore: beforeSnapshot?.sessions.length,
+    title,
+    visibleSessionIdsBefore: beforeSnapshot?.visibleSessionIds,
+  });
   const result = createSessionInSimpleWorkspace(targetWorkspace, {
     agentName,
     initialPresentation: options?.initialPresentation,
@@ -3433,6 +3933,12 @@ function createTerminal(
   });
   const generatedSession = result.session?.kind === "terminal" ? result.session : undefined;
   if (!generatedSession) {
+    appendTerminalLaunchDebugLog("nativeSidebar.createTerminal.noSession", {
+      agentName,
+      groupId,
+      projectId: project.projectId,
+      title,
+    });
     return undefined;
   }
   const nativeSessionId = rememberNativeSessionMapping(project.projectId, generatedSession.sessionId);
@@ -3456,6 +3962,21 @@ function createTerminal(
     sessionStateFilePath,
     terminalTitle: title,
   });
+  appendTerminalLaunchDebugLog("nativeSidebar.createTerminal.created", {
+    activateOnCreate: false,
+    agentName,
+    focusedSessionIdAfter: result.snapshot.groups.find(
+      (group) => group.groupId === result.snapshot.activeGroupId,
+    )?.snapshot.focusedSessionId,
+    focusAfterCreate: options?.focusAfterCreate !== false,
+    initialInputPreview: initialInput.trim().slice(0, 80),
+    nativeSessionId,
+    projectId: project.projectId,
+    sessionId: session.sessionId,
+    visibleSessionIdsAfter: result.snapshot.groups.find(
+      (group) => group.groupId === result.snapshot.activeGroupId,
+    )?.snapshot.visibleSessionIds,
+  });
   appendAgentDetectionDebugLog("nativeSidebar.terminalState.created", {
     agentName,
     initialActivity: initialInput.trim() && !agentName ? "working" : "idle",
@@ -3465,23 +3986,39 @@ function createTerminal(
     sessionStateFilePath,
     terminalTitle: title,
   });
+  const nativeEnvironment = createNativeAgentSessionEnvironment({
+    agentName,
+    project,
+    sessionId: session.sessionId,
+    sessionStateFilePath,
+  });
+  appendTerminalLaunchDebugLog("nativeSidebar.createTerminal.colorEnv", {
+    agentName,
+    colorEnv: readAgentColorEnvironmentSnapshot(nativeEnvironment),
+    nativeSessionId,
+    projectId: project.projectId,
+    sessionId: session.sessionId,
+  });
   postNative({
+    /**
+     * CDXC:CrashRootCause 2026-05-04-09:19
+     * Rapid agent launches must not let native createTerminal briefly activate
+     * and focus a new Ghostty surface before the sidebar publishes the current
+     * visible terminal set. The sidebar workspace snapshot is the source of
+     * truth for visibility, and focus is sent only after that layout command.
+    */
+    activateOnCreate: false,
     cwd: project.path,
-    env: createNativeAgentSessionEnvironment({
-      agentName,
-      project,
-      sessionId: session.sessionId,
-      sessionStateFilePath,
-    }),
+    env: nativeEnvironment,
     initialInput,
     sessionId: nativeSessionId,
     title,
     type: "createTerminal",
   });
+  publish();
   if (options?.focusAfterCreate !== false) {
     postNative({ sessionId: nativeSessionId, type: "focusTerminal" });
   }
-  publish();
   return session;
 }
 
@@ -3534,6 +4071,7 @@ function restoreNativeT3Session(
   project: NativeProject,
   session: T3SessionRecord,
   reason: string,
+  options: { focusAfterRestore?: boolean } = {},
 ): void {
   /**
    * CDXC:T3Code 2026-04-30-09:33
@@ -3557,13 +4095,440 @@ function restoreNativeT3Session(
     type: "createWebPane",
     url: serverOrigin,
   });
-  postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
+  if (options.focusAfterRestore !== false) {
+    postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
+  }
   appendAgentDetectionDebugLog("nativeSidebar.t3Session.restored", {
     nativeSessionId,
     reason,
     sessionId: session.sessionId,
     workspaceRoot,
   });
+}
+
+function findNativeT3SessionBoundToThread(
+  project: NativeProject,
+  threadId: string,
+  options: { excludeSessionId?: string } = {},
+): T3SessionRecord | undefined {
+  /**
+   * CDXC:T3Code 2026-05-04-03:06
+   * Native T3 sidebar cards are durable bindings to one T3 thread. When the
+   * embedded T3 UI navigates to a different thread, zmux must first look for an
+   * existing card bound to that thread instead of replacing the current card's
+   * stored thread metadata.
+   */
+  const normalizedThreadId = normalizeNativeT3ThreadId(threadId);
+  if (!normalizedThreadId) {
+    return undefined;
+  }
+
+  for (const group of project.workspace.groups) {
+    for (const session of group.snapshot.sessions) {
+      if (session.kind !== "t3" || session.sessionId === options.excludeSessionId) {
+        continue;
+      }
+      const sessionThreadId = normalizeNativeT3ThreadId(
+        session.t3.boundThreadId || session.t3.threadId,
+      );
+      if (sessionThreadId === normalizedThreadId) {
+        return session;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function createNativeT3SessionForBoundThread(
+  project: NativeProject,
+  sourceSession: T3SessionRecord,
+  threadId: string,
+  title?: string,
+): T3SessionRecord | undefined {
+  /**
+   * CDXC:T3Code 2026-05-04-03:06
+   * Opening a different T3 thread from inside an embedded pane should create a
+   * sibling T3 pane/card linked to the new thread. This preserves the original
+   * sidebar card as a stable shortcut to its bound thread while keeping multiple
+   * T3 threads visible in zmux at the same time.
+   */
+  const groupId = project.workspace.groups.find((group) =>
+    group.snapshot.sessions.some((session) => session.sessionId === sourceSession.sessionId),
+  )?.groupId;
+  const targetWorkspace = groupId
+    ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
+    : project.workspace;
+  const resolvedTitle = normalizeNativeT3ThreadTitle(title) ?? "T3 Code";
+  const result = createSessionInSimpleWorkspace(targetWorkspace, {
+    kind: "t3",
+    t3: {
+      ...sourceSession.t3,
+      boundThreadId: threadId,
+      threadId,
+    },
+    title: resolvedTitle,
+  });
+  const session = result.session?.kind === "t3" ? result.session : undefined;
+  if (!session) {
+    return undefined;
+  }
+
+  const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
+  updateProjectWorkspace(project.projectId, () => result.snapshot);
+  postNative({ cwd: session.t3.workspaceRoot || project.path, type: "startT3CodeRuntime" });
+  postNative({
+    cwd: session.t3.workspaceRoot || project.path,
+    projectId: session.t3.projectId,
+    sessionId: nativeSessionId,
+    threadId: session.t3.threadId,
+    title: resolvedTitle,
+    type: "createWebPane",
+    url: session.t3.serverOrigin || NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+  });
+  postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
+  return session;
+}
+
+function normalizeNativeT3ThreadId(threadId: string | undefined): string | undefined {
+  const normalized = threadId?.trim();
+  if (!normalized || normalized.startsWith("pending-")) {
+    return undefined;
+  }
+  return normalized.toLowerCase();
+}
+
+function normalizeNativeT3ThreadTitle(title: string | undefined): string | undefined {
+  const normalized = title?.replace(/\s+/g, " ").trim();
+  const lower = normalized?.toLowerCase();
+  if (
+    !normalized ||
+    lower === "t3 code" ||
+    lower === "t3 code (alpha)" ||
+    lower === "no active thread" ||
+    lower === "pick a thread to continue"
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function persistNativeT3SessionTitle(
+  projectId: string,
+  sessionId: string,
+  title: string | undefined,
+): boolean {
+  const normalizedTitle = normalizeNativeT3ThreadTitle(title);
+  if (!normalizedTitle) {
+    return false;
+  }
+
+  updateProjectWorkspace(
+    projectId,
+    (workspace) =>
+      setSessionTitleInSimpleWorkspace(workspace, sessionId, normalizedTitle, {
+        titleSource: "generated",
+      }).snapshot,
+  );
+  return true;
+}
+
+async function resolveNativeT3ThreadTitle(
+  threadId: string,
+  fallbackTitle?: string,
+): Promise<string | undefined> {
+  const normalizedFallback = normalizeNativeT3ThreadTitle(fallbackTitle);
+  if (normalizedFallback) {
+    return normalizedFallback;
+  }
+
+  try {
+    return await fetchNativeT3ThreadTitle(threadId);
+  } catch (error) {
+    appendAgentDetectionDebugLog("nativeSidebar.t3ThreadTitle.fetch.failed", {
+      error: error instanceof Error ? error.message : String(error),
+      threadId,
+    });
+    return undefined;
+  }
+}
+
+function findNativeT3ProjectSession(projectId: string, sessionId: string): T3SessionRecord | undefined {
+  const project = findProject(projectId);
+  const session = project ? findSessionRecordInProject(project, sessionId) : undefined;
+  return session?.kind === "t3" ? session : undefined;
+}
+
+async function syncNativeT3ProjectSessionTitleFromRuntime(
+  projectId: string,
+  sessionId: string,
+  threadId: string,
+  fallbackTitle?: string,
+): Promise<boolean> {
+  const title = await resolveNativeT3ThreadTitle(threadId, fallbackTitle);
+  if (!persistNativeT3SessionTitle(projectId, sessionId, title)) {
+    return false;
+  }
+  publish();
+  return true;
+}
+
+function scheduleNativeT3SessionTitleSync(
+  projectId: string,
+  sessionId: string,
+  threadId: string,
+  fallbackTitle?: string,
+): void {
+  /**
+   * CDXC:T3Code 2026-05-04-04:41
+   * Binding a newly opened T3 thread and naming its zmux sidebar card are
+   * separate concerns. If T3 has not projected the thread title yet, retry the
+   * snapshot lookup for the bound session without changing its thread binding.
+   */
+  const fallback = normalizeNativeT3ThreadTitle(fallbackTitle);
+  void (async () => {
+    for (const delayMs of NATIVE_T3_TITLE_SYNC_RETRY_DELAYS_MS) {
+      await delay(delayMs);
+      const session = findNativeT3ProjectSession(projectId, sessionId);
+      if (!session) {
+        return;
+      }
+      const boundThreadId = normalizeNativeT3ThreadId(session.t3.boundThreadId || session.t3.threadId);
+      if (boundThreadId !== normalizeNativeT3ThreadId(threadId)) {
+        return;
+      }
+      const synced = await syncNativeT3ProjectSessionTitleFromRuntime(
+        projectId,
+        sessionId,
+        threadId,
+        fallback,
+      );
+      if (synced) {
+        return;
+      }
+    }
+  })().catch((error) => {
+    appendAgentDetectionDebugLog("nativeSidebar.t3ThreadTitle.retry.failed", {
+      error: error instanceof Error ? error.message : String(error),
+      projectId,
+      sessionId,
+      threadId,
+    });
+  });
+}
+
+async function fetchNativeT3ThreadTitle(threadId: string): Promise<string | undefined> {
+  const normalizedThreadId = normalizeNativeT3ThreadId(threadId);
+  if (!normalizedThreadId) {
+    return undefined;
+  }
+
+  const ownerBearerToken = await waitForNativeT3OwnerBearerToken();
+  const result = await runNativeProcess(
+    "/bin/sh",
+    [
+      "-lc",
+      [
+        "/usr/bin/curl",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "5",
+        "-H",
+        '"authorization: Bearer $T3_OWNER_BEARER"',
+        '"$T3_ORIGIN/api/orchestration/snapshot"',
+      ].join(" "),
+    ],
+    {
+      env: {
+        T3_ORIGIN: NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+        T3_OWNER_BEARER: ownerBearerToken,
+      },
+    },
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr || result.stdout || "T3 snapshot request failed.");
+  }
+
+  const snapshot = JSON.parse(result.stdout) as {
+    threads?: Array<{ deletedAt?: unknown; id?: unknown; title?: unknown }>;
+  };
+  const thread = snapshot.threads?.find((candidate) => {
+    if (typeof candidate.id !== "string" || candidate.deletedAt != null) {
+      return false;
+    }
+    return normalizeNativeT3ThreadId(candidate.id) === normalizedThreadId;
+  });
+  return typeof thread?.title === "string" ? normalizeNativeT3ThreadTitle(thread.title) : undefined;
+}
+
+function handleNativeT3ThreadReady(
+  sidebarSessionId: string,
+  hostEvent: Extract<NativeHostEvent, { type: "t3ThreadReady" }>,
+): void {
+  const reference = resolveSidebarSessionReference(sidebarSessionId);
+  updateProjectWorkspace(
+    reference.project.projectId,
+    (workspace) =>
+      setT3SessionMetadataInSimpleWorkspace(workspace, reference.sessionId, {
+        boundThreadId: hostEvent.threadId,
+        projectId: hostEvent.projectId,
+        serverOrigin: hostEvent.serverOrigin,
+        threadId: hostEvent.threadId,
+        workspaceRoot: hostEvent.workspaceRoot,
+      }).snapshot,
+  );
+  publish();
+  void syncNativeT3SessionTitleFromRuntime(sidebarSessionId, hostEvent.threadId);
+}
+
+async function syncNativeT3SessionTitleFromRuntime(
+  sidebarSessionId: string,
+  threadId: string,
+  fallbackTitle?: string,
+): Promise<void> {
+  const reference = resolveSidebarSessionReference(sidebarSessionId);
+  const synced = await syncNativeT3ProjectSessionTitleFromRuntime(
+    reference.project.projectId,
+    reference.sessionId,
+    threadId,
+    fallbackTitle,
+  );
+  if (!synced) {
+    scheduleNativeT3SessionTitleSync(
+      reference.project.projectId,
+      reference.sessionId,
+      threadId,
+      fallbackTitle,
+    );
+  }
+}
+
+async function relinkNativeT3SessionThread(
+  sidebarSessionId: string,
+  threadId: string,
+): Promise<void> {
+  const normalizedThreadId = normalizeNativeT3ThreadId(threadId);
+  if (!normalizedThreadId) {
+    return;
+  }
+
+  const reference = resolveSidebarSessionReference(sidebarSessionId);
+  const session = findSessionRecordInProject(reference.project, reference.sessionId);
+  if (session?.kind !== "t3") {
+    return;
+  }
+
+  const title = await resolveNativeT3ThreadTitle(threadId);
+  updateProjectWorkspace(
+    reference.project.projectId,
+    (workspace) =>
+      setT3SessionMetadataInSimpleWorkspace(workspace, reference.sessionId, {
+        ...session.t3,
+        boundThreadId: threadId.trim(),
+        threadId: threadId.trim(),
+      }).snapshot,
+  );
+  persistNativeT3SessionTitle(reference.project.projectId, reference.sessionId, title);
+  const refreshedProject = findProject(reference.project.projectId) ?? reference.project;
+  const refreshedSession = findSessionRecordInProject(refreshedProject, reference.sessionId);
+  if (refreshedSession?.kind === "t3") {
+    restoreNativeT3Session(refreshedProject, refreshedSession, "manual-thread-link");
+  }
+  publish();
+}
+
+async function handleNativeT3ThreadChanged(
+  sidebarSessionId: string,
+  threadId: string,
+  title?: string,
+): Promise<void> {
+  /**
+   * CDXC:T3Code 2026-05-04-03:06
+   * T3's in-app navigation changes the web route inside one WKWebView. zmux keeps
+   * card identity stable by focusing/creating the card for the navigated thread,
+   * then re-routing the source WKWebView back to its bound thread without taking
+   * focus back from the user's selected target thread.
+   */
+  const normalizedThreadId = normalizeNativeT3ThreadId(threadId);
+  if (!normalizedThreadId || nativeT3ThreadChangeInFlightBySessionId.has(sidebarSessionId)) {
+    return;
+  }
+
+  const reference = resolveSidebarSessionReference(sidebarSessionId);
+  const session = findSessionRecordInProject(reference.project, reference.sessionId);
+  if (session?.kind !== "t3") {
+    return;
+  }
+
+  const currentBoundThreadId = session.t3.boundThreadId || session.t3.threadId;
+  if (normalizeNativeT3ThreadId(currentBoundThreadId) === normalizedThreadId) {
+    await syncNativeT3SessionTitleFromRuntime(sidebarSessionId, threadId, title);
+    return;
+  }
+
+  nativeT3ThreadChangeInFlightBySessionId.add(sidebarSessionId);
+  try {
+    const resolvedTitle = await resolveNativeT3ThreadTitle(threadId, title);
+    let targetSession = findNativeT3SessionBoundToThread(reference.project, threadId, {
+      excludeSessionId: reference.sessionId,
+    });
+
+    appendAgentDetectionDebugLog("nativeSidebar.t3ThreadChanged.bindingPreservationStart", {
+      currentSessionId: reference.sessionId,
+      currentThreadId: currentBoundThreadId,
+      nextThreadId: threadId,
+      reusedSessionId: targetSession?.sessionId,
+      title: resolvedTitle,
+    });
+
+    if (targetSession) {
+      if (
+        !persistNativeT3SessionTitle(reference.project.projectId, targetSession.sessionId, resolvedTitle)
+      ) {
+        scheduleNativeT3SessionTitleSync(
+          reference.project.projectId,
+          targetSession.sessionId,
+          threadId,
+          title,
+        );
+      }
+    } else {
+      targetSession = createNativeT3SessionForBoundThread(
+        reference.project,
+        session,
+        threadId.trim(),
+        resolvedTitle,
+      );
+      if (targetSession && !normalizeNativeT3ThreadTitle(resolvedTitle)) {
+        scheduleNativeT3SessionTitleSync(
+          reference.project.projectId,
+          targetSession.sessionId,
+          threadId,
+          title,
+        );
+      }
+    }
+
+    const refreshedSource = findSessionRecordInProject(reference.project, reference.sessionId);
+    if (refreshedSource?.kind === "t3") {
+      restoreNativeT3Session(reference.project, refreshedSource, "thread-switch-restored-binding", {
+        focusAfterRestore: false,
+      });
+    }
+
+    if (targetSession) {
+      if (activeProjectId !== reference.project.projectId) {
+        focusProject(reference.project.projectId);
+      }
+      focusTerminal(targetSession.sessionId);
+    } else {
+      publish();
+    }
+  } finally {
+    nativeT3ThreadChangeInFlightBySessionId.delete(sidebarSessionId);
+  }
 }
 
 function restoreNativeBrowserSession(
@@ -4156,19 +5121,22 @@ function getNativePromptPreview(prompt: string | undefined): string | undefined 
 }
 
 function closeTerminal(sessionId: string): void {
-  const sessionRecord = activeSnapshot().sessions.find(
-    (candidate) => candidate.sessionId === sessionId,
+  const reference = resolveSidebarSessionReference(sessionId);
+  const sessionRecord = findSessionRecordInProject(reference.project, reference.sessionId);
+  const nativeSessionId = forgetNativeSessionMappingForProject(
+    reference.project.projectId,
+    reference.sessionId,
   );
-  const nativeSessionId = forgetNativeSessionMapping(sessionId);
-  clearNativeSidebarCommandSessionBySessionId(sessionId);
-  rememberPreviousSession(sessionId);
-  updateActiveProjectWorkspace(
-    (workspace) => removeSessionInSimpleWorkspace(workspace, sessionId).snapshot,
+  clearNativeSidebarCommandSessionBySessionId(reference.sessionId);
+  rememberPreviousSession(reference.sessionId, reference.project);
+  updateProjectWorkspace(
+    reference.project.projectId,
+    (workspace) => removeSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot,
   );
-  terminalStateById.delete(sessionId);
-  titleDerivedActivityBySessionId.delete(sessionId);
-  nativeActivitySuppressedUntilBySessionId.delete(sessionId);
-  nativeWorkingStartedAtBySessionId.delete(sessionId);
+  terminalStateById.delete(reference.sessionId);
+  titleDerivedActivityBySessionId.delete(reference.sessionId);
+  nativeActivitySuppressedUntilBySessionId.delete(reference.sessionId);
+  nativeWorkingStartedAtBySessionId.delete(reference.sessionId);
   postNative({
     sessionId: nativeSessionId,
     type:
@@ -4180,12 +5148,16 @@ function closeTerminal(sessionId: string): void {
 }
 
 function focusTerminal(sessionId: string): void {
+  const reference = resolveSidebarSessionReference(sessionId);
+  if (activeProjectId !== reference.project.projectId) {
+    focusProject(reference.project.projectId);
+  }
   updateActiveProjectWorkspace(
-    (workspace) => focusSessionInSimpleWorkspace(workspace, sessionId).snapshot,
+    (workspace) => focusSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot,
   );
-  const sessionRecord = findSessionRecord(sessionId);
+  const sessionRecord = findSessionRecord(reference.sessionId);
   if (sessionRecord?.kind === "t3" || sessionRecord?.kind === "browser") {
-    if (!nativeSessionIdBySidebarSessionId.has(sessionId)) {
+    if (!nativeSessionIdBySidebarSessionId.has(reference.sessionId)) {
       if (sessionRecord.kind === "t3") {
         restoreNativeT3Session(activeProject(), sessionRecord, "focus-restored-session");
       } else {
@@ -4193,28 +5165,52 @@ function focusTerminal(sessionId: string): void {
       }
     }
     postNative({
-      sessionId: nativeSessionIdForSidebarSession(sessionId),
+      sessionId: nativeSessionIdForProjectSidebarSession(
+        reference.project.projectId,
+        reference.sessionId,
+      ),
       type: "focusWebPane",
     });
     publish();
     return;
   }
-  const session = findTerminalSession(sessionId);
+  const session = findTerminalSession(reference.sessionId);
   /**
    * CDXC:SessionSleep 2026-04-27-09:09
    * Sleeping a native Ghostty session destroys its terminal surface. Activating
    * that card must first recreate the terminal and run the agent resume command
    * before sending native focus, matching agent-tiler's detached-session wake.
+   * CDXC:CrashRootCause 2026-05-04-11:53
+   * Restored sleeping terminals mount inactive, so the focused sidebar snapshot
+   * must be published to native before the explicit focus command. This keeps
+   * restore ordering aligned with new terminal launches and prevents a
+   * previous+restored active-surface window during rapid card clicks.
    */
-  if (session && !terminalStateById.has(sessionId)) {
+  let restoredSleepingTerminal = false;
+  if (session && !terminalStateById.has(reference.sessionId)) {
     restoreNativeTerminalSession(activeProject(), session, "focus-sleeping-session");
+    restoredSleepingTerminal = true;
   }
-  acknowledgeNativeTerminalAttention(sessionId, "sidebar-focus");
+  acknowledgeNativeTerminalAttention(reference.sessionId, "sidebar-focus");
+  if (restoredSleepingTerminal) {
+    publish();
+    postNative({
+      sessionId: nativeSessionIdForProjectSidebarSession(
+        reference.project.projectId,
+        reference.sessionId,
+      ),
+      type: "focusTerminal",
+    });
+    return;
+  }
   postNative({
-    sessionId: nativeSessionIdForSidebarSession(sessionId),
+    sessionId: nativeSessionIdForProjectSidebarSession(
+      reference.project.projectId,
+      reference.sessionId,
+    ),
     type: activeSnapshot().sessions.some(
       (candidate) =>
-        candidate.sessionId === sessionId &&
+        candidate.sessionId === reference.sessionId &&
         (candidate.kind === "t3" || candidate.kind === "browser"),
     )
       ? "focusWebPane"
@@ -4257,7 +5253,11 @@ function runNativeHotkeyAction(actionId: zmuxHotkeyActionId): void {
    */
   switch (action.kind) {
     case "createSession":
-      createTerminal();
+      if (activeProject().isChat === true) {
+        void createNativeChat();
+      } else {
+        createTerminal();
+      }
       return;
     case "focusDirection":
       focusNativeHotkeyDirection(action.direction);
@@ -4549,14 +5549,25 @@ function acknowledgeNativeTerminalAttention(
 }
 
 function findSessionGroupId(sessionId: string): string | undefined {
-  return activeProject().workspace.groups.find((group) =>
-    group.snapshot.sessions.some((session) => session.sessionId === sessionId),
+  const reference = resolveSidebarSessionReference(sessionId);
+  return reference.project.workspace.groups.find((group) =>
+    group.snapshot.sessions.some((session) => session.sessionId === reference.sessionId),
   )?.groupId;
 }
 
 function findTerminalSession(sessionId: string): TerminalSessionRecord | undefined {
-  for (const group of activeProject().workspace.groups) {
-    const session = group.snapshot.sessions.find((candidate) => candidate.sessionId === sessionId);
+  const reference = resolveSidebarSessionReference(sessionId);
+  return findTerminalSessionInProject(reference.project, reference.sessionId);
+}
+
+function findTerminalSessionInProject(
+  project: NativeProject,
+  sessionId: string,
+): TerminalSessionRecord | undefined {
+  for (const group of project.workspace.groups) {
+    const session = group.snapshot.sessions.find(
+      (candidate) => candidate.sessionId === sessionId,
+    );
     if (session?.kind === "terminal") {
       return session;
     }
@@ -4564,24 +5575,89 @@ function findTerminalSession(sessionId: string): TerminalSessionRecord | undefin
   return undefined;
 }
 
-function renameNativeSidebarTerminalSession(
+function findFirstTerminalSessionInProject(
+  project: NativeProject,
+): TerminalSessionRecord | undefined {
+  for (const group of project.workspace.groups) {
+    const session = group.snapshot.sessions.find(
+      (candidate): candidate is TerminalSessionRecord => candidate.kind === "terminal",
+    );
+    if (session) {
+      return session;
+    }
+  }
+  return undefined;
+}
+
+async function renameNativeSidebarTerminalSession(
   sessionId: string,
   title: string,
   source: string,
-): void {
-  if (!findTerminalSession(sessionId)) {
+): Promise<void> {
+  const reference = resolveSidebarSessionReference(sessionId);
+  if (!findTerminalSessionInProject(reference.project, reference.sessionId)) {
     return;
   }
 
-  const requestedTitle = title.trim();
-  if (!requestedTitle) {
+  const requestedTitleInput = title.trim();
+  if (!requestedTitleInput) {
     return;
   }
 
-  updateActiveProjectWorkspace(
-    (workspace) => setSessionTitleInSimpleWorkspace(workspace, sessionId, requestedTitle).snapshot,
+  const shouldGenerateTitle =
+    requestedTitleInput.length > SESSION_RENAME_SUMMARY_THRESHOLD;
+  const terminalState = terminalStateById.get(reference.sessionId);
+  let requestedTitle = requestedTitleInput;
+  if (shouldGenerateTitle) {
+    if (terminalState) {
+      terminalState.firstPromptAutoRenameInProgress = true;
+      publish();
+    }
+    appendSessionTitleDebugLog("nativeSidebar.renameSession.generateTitle.started", {
+      pastedTextLength: requestedTitleInput.length,
+      sessionId: reference.sessionId,
+      source,
+    });
+    try {
+      requestedTitle = await generateNativeSessionTitleFromPrompt(
+        reference.project.path,
+        requestedTitleInput,
+      );
+      appendSessionTitleDebugLog("nativeSidebar.renameSession.generateTitle.completed", {
+        pastedTextLength: requestedTitleInput.length,
+        sessionId: reference.sessionId,
+        source,
+        title: requestedTitle,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      appendSessionTitleDebugLog("nativeSidebar.renameSession.generateTitle.failed", {
+        error: message,
+        pastedTextLength: requestedTitleInput.length,
+        sessionId: reference.sessionId,
+        source,
+      });
+      showNativeMessage("error", message);
+      return;
+    } finally {
+      if (terminalState) {
+        terminalState.firstPromptAutoRenameInProgress = false;
+        publish();
+      }
+    }
+  }
+
+  updateProjectWorkspace(
+    reference.project.projectId,
+    (workspace) =>
+      setSessionTitleInSimpleWorkspace(workspace, reference.sessionId, requestedTitle, {
+        titleSource: shouldGenerateTitle ? "generated" : "user",
+      }).snapshot,
   );
-  const nativeSessionId = nativeSessionIdForSidebarSession(sessionId);
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(
+    reference.project.projectId,
+    reference.sessionId,
+  );
   const normalizedRenameTitle = normalizeTerminalTitle(requestedTitle) ?? requestedTitle;
   const commandText = `/rename ${normalizedRenameTitle}`;
   /**
@@ -4598,15 +5674,15 @@ function renameNativeSidebarTerminalSession(
       commandText,
       nativeSessionId,
       requestedTitle,
-      sessionId,
+      sessionId: reference.sessionId,
       source,
     });
   }, AUTO_SUBMIT_STAGED_RENAME_DELAY_MS);
   publish();
 }
 
-function disposeNativeSleepingSessionSurface(sessionId: string): void {
-  const nativeSessionId = forgetNativeSessionMapping(sessionId);
+function disposeNativeSleepingSessionSurface(sessionId: string, project = activeProject()): void {
+  const nativeSessionId = forgetNativeSessionMappingForProject(project.projectId, sessionId);
   clearNativeSidebarCommandSessionBySessionId(sessionId);
   terminalStateById.delete(sessionId);
   titleDerivedActivityBySessionId.delete(sessionId);
@@ -4616,19 +5692,22 @@ function disposeNativeSleepingSessionSurface(sessionId: string): void {
 }
 
 function setNativeSessionSleeping(sessionId: string, sleeping: boolean): void {
-  const session = findTerminalSession(sessionId);
+  const reference = resolveSidebarSessionReference(sessionId);
+  const session = findTerminalSessionInProject(reference.project, reference.sessionId);
   if (!session) {
     return;
   }
-  updateActiveProjectWorkspace(
-    (workspace) => setSessionSleepingInSimpleWorkspace(workspace, sessionId, sleeping).snapshot,
+  updateProjectWorkspace(
+    reference.project.projectId,
+    (workspace) =>
+      setSessionSleepingInSimpleWorkspace(workspace, reference.sessionId, sleeping).snapshot,
   );
   if (sleeping) {
-    disposeNativeSleepingSessionSurface(sessionId);
-  } else if (!terminalStateById.has(sessionId)) {
-    const nextSession = findTerminalSession(sessionId);
+    disposeNativeSleepingSessionSurface(reference.sessionId, reference.project);
+  } else if (!terminalStateById.has(reference.sessionId)) {
+    const nextSession = findTerminalSessionInProject(reference.project, reference.sessionId);
     if (nextSession) {
-      restoreNativeTerminalSession(activeProject(), nextSession, "wake-session");
+      restoreNativeTerminalSession(reference.project, nextSession, "wake-session");
     }
   }
   publish();
@@ -4672,7 +5751,8 @@ function setNativeGroupSleeping(groupId: string, sleeping: boolean): void {
 }
 
 function restartNativeSession(sessionId: string): void {
-  const session = findTerminalSession(sessionId);
+  const reference = resolveSidebarSessionReference(sessionId);
+  const session = findTerminalSessionInProject(reference.project, reference.sessionId);
   const groupId = findSessionGroupId(sessionId);
   if (!session) {
     return;
@@ -4691,7 +5771,10 @@ function restartNativeSession(sessionId: string): void {
    * recreate the terminal as the same agent type, then immediately send the
    * agent-specific resume command instead of opening a fresh shell.
    */
-  closeTerminal(sessionId);
+  if (activeProjectId !== reference.project.projectId) {
+    focusProject(reference.project.projectId);
+  }
+  closeTerminal(reference.sessionId);
   createTerminal(
     session.title || DEFAULT_TERMINAL_SESSION_TITLE,
     initialInput,
@@ -4701,10 +5784,14 @@ function restartNativeSession(sessionId: string): void {
 }
 
 function forkNativeSession(sessionId: string): void {
-  const session = findTerminalSession(sessionId);
+  const reference = resolveSidebarSessionReference(sessionId);
+  const session = findTerminalSessionInProject(reference.project, reference.sessionId);
   const groupId = findSessionGroupId(sessionId);
   if (!session) {
     return;
+  }
+  if (activeProjectId !== reference.project.projectId) {
+    focusProject(reference.project.projectId);
   }
   createTerminal(`${session.title || DEFAULT_TERMINAL_SESSION_TITLE} Fork`, "", groupId);
 }
@@ -4801,7 +5888,8 @@ function summarizeCliState() {
 
 function assertCliSidebarCard(payload: Record<string, unknown>) {
   const session = requireCliSession(payload);
-  const terminalState = terminalStateById.get(session.sessionId);
+  const sessionReference = resolveSidebarSessionReference(session.sessionId);
+  const terminalState = terminalStateById.get(sessionReference.sessionId);
   const failures: string[] = [];
   const expectedAgentIcon = typeof payload.agentIcon === "string" ? payload.agentIcon : undefined;
   const expectedAgentName = typeof payload.agentName === "string" ? payload.agentName : undefined;
@@ -5158,13 +6246,21 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       case "dumpState":
         return { ok: true, state: summarizeCliState() };
       case "createSession": {
+        const groupId = typeof payload.groupId === "string" ? payload.groupId : undefined;
+        if (groupId === COMBINED_CHATS_GROUP_ID || (!groupId && activeProject().isChat === true)) {
+          await createNativeChat(typeof payload.title === "string" ? payload.title : undefined);
+          return { ok: true, state: summarizeCliState() };
+        }
         const session = createTerminal(
           typeof payload.title === "string" ? payload.title : DEFAULT_TERMINAL_SESSION_TITLE,
           typeof payload.input === "string" ? payload.input : "",
-          typeof payload.groupId === "string" ? payload.groupId : undefined,
+          groupId,
         );
         return { ok: true, session, state: summarizeCliState() };
       }
+      case "createChat":
+        await createNativeChat(typeof payload.title === "string" ? payload.title : undefined);
+        return { ok: true, state: summarizeCliState() };
       case "createAgentSession":
       case "runAgent": {
         const agentId = typeof payload.agentId === "string" ? payload.agentId : "";
@@ -5199,12 +6295,20 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         focusSidebarSession(session.sessionId);
         return { ok: true, session, state: summarizeCliState() };
       }
-      case "focusGroup":
-        updateActiveProjectWorkspace(
-          (workspace) => focusGroupInSimpleWorkspace(workspace, String(payload.groupId)).snapshot,
+      case "focusGroup": {
+        const groupReference = resolveSidebarGroupReference(String(payload.groupId));
+        const groupId = groupReference.groupId;
+        if (!groupId) {
+          focusProject(groupReference.project.projectId);
+          return { ok: true, state: summarizeCliState() };
+        }
+        updateProjectWorkspace(
+          groupReference.project.projectId,
+          (workspace) => focusGroupInSimpleWorkspace(workspace, groupId).snapshot,
         );
         publish();
         return { ok: true, state: summarizeCliState() };
+      }
       case "switchProject": {
         const project = projects.find(
           (candidate) =>
@@ -5246,15 +6350,11 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       }
       case "renameSession": {
         const session = requireCliSession(payload);
-        updateActiveProjectWorkspace(
-          (workspace) =>
-            setSessionTitleInSimpleWorkspace(
-              workspace,
-              session.sessionId,
-              String(payload.title ?? ""),
-            ).snapshot,
+        await renameNativeSidebarTerminalSession(
+          session.sessionId,
+          String(payload.title ?? ""),
+          "native-cli-rename-session",
         );
-        publish();
         return { ok: true, state: summarizeCliState() };
       }
       case "sleepSession": {
@@ -5264,11 +6364,13 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       }
       case "favoriteSession": {
         const session = requireCliSession(payload);
-        updateActiveProjectWorkspace(
+        const reference = resolveSidebarSessionReference(session.sessionId);
+        updateProjectWorkspace(
+          reference.project.projectId,
           (workspace) =>
             setSessionFavoriteInSimpleWorkspace(
               workspace,
-              session.sessionId,
+              reference.sessionId,
               payload.favorite !== false,
             ).snapshot,
         );
@@ -5372,7 +6474,8 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
 }
 
 function copyResumeCommand(sessionId: string): void {
-  const session = findTerminalSession(sessionId);
+  const reference = resolveSidebarSessionReference(sessionId);
+  const session = findTerminalSessionInProject(reference.project, reference.sessionId);
   if (!session) {
     return;
   }
@@ -5381,30 +6484,34 @@ function copyResumeCommand(sessionId: string): void {
     showNativeMessage("info", "No resume command is available for this session.");
     return;
   }
-  const text = `cd ${quoteNativeShellArg(activeProject().path)} && ${resumeCommand}`;
+  const text = `cd ${quoteNativeShellArg(reference.project.path)} && ${resumeCommand}`;
   void navigator.clipboard?.writeText(text).catch(() => undefined);
 }
 
 function resolveNativeBrowserAccessT3Session(preferredSessionId?: string): T3SessionRecord | undefined {
+  const preferredReference = preferredSessionId
+    ? resolveSidebarSessionReference(preferredSessionId)
+    : undefined;
+  const project = preferredReference?.project ?? activeProject();
   const candidateSessionIds = new Set<string>();
-  if (preferredSessionId) {
-    candidateSessionIds.add(preferredSessionId);
+  if (preferredReference) {
+    candidateSessionIds.add(preferredReference.sessionId);
   }
 
-  for (const group of activeProject().workspace.groups) {
+  for (const group of project.workspace.groups) {
     if (group.snapshot.focusedSessionId) {
       candidateSessionIds.add(group.snapshot.focusedSessionId);
     }
   }
 
   for (const sessionId of candidateSessionIds) {
-    const sessionRecord = findSessionRecord(sessionId);
+    const sessionRecord = findSessionRecordInProject(project, sessionId);
     if (sessionRecord?.kind === "t3") {
       return sessionRecord;
     }
   }
 
-  for (const group of activeProject().workspace.groups) {
+  for (const group of project.workspace.groups) {
     const sessionRecord = group.snapshot.sessions.find(
       (candidate): candidate is T3SessionRecord => candidate.kind === "t3",
     );
@@ -5424,6 +6531,12 @@ function resolveOrCreateNativeBrowserAccessT3Session(
     return existingSession;
   }
 
+  const preferredReference = preferredSessionId
+    ? resolveSidebarSessionReference(preferredSessionId)
+    : undefined;
+  if (preferredReference && activeProjectId !== preferredReference.project.projectId) {
+    focusProject(preferredReference.project.projectId);
+  }
   return createNativeT3Session();
 }
 
@@ -5777,6 +6890,48 @@ function addProject(path: string, name = projectNameFromPath(path)): void {
   publish();
 }
 
+async function createNativeChat(title = "chat"): Promise<void> {
+  /**
+   * CDXC:Chats 2026-05-04-09:30
+   * A chat is not tied to an existing code project. Starting one must create a
+   * real folder under ~/zmux/chats/<date>-title and then launch a normal empty
+   * terminal in that directory so the user can choose any agent from the shell.
+   */
+  const createdAt = new Date();
+  const chatTitle = title.trim() || "chat";
+  const chatPath = createNativeChatDirectoryPath(chatTitle, createdAt);
+  const result = await runNativeProcess("/bin/mkdir", ["-p", chatPath]);
+  if (result.exitCode !== 0) {
+    showNativeMessage(
+      "error",
+      result.stderr.trim() || result.stdout.trim() || `Unable to create chat folder: ${chatPath}`,
+    );
+    return;
+  }
+
+  const projectId = createProjectId(chatPath);
+  if (!projects.some((project) => project.projectId === projectId)) {
+    projects = orderNativeProjectsForSidebar([
+      ...projects,
+      {
+        isChat: true,
+        name: nativeChatTitleFromDate(createdAt),
+        path: chatPath,
+        projectId,
+        theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+        workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
+      },
+    ]);
+    writeStoredProjects("createChat");
+  }
+  focusProject(projectId);
+  if (activeSnapshot().sessions.length === 0) {
+    createTerminal(DEFAULT_TERMINAL_SESSION_TITLE);
+    return;
+  }
+  publish();
+}
+
 function removeProject(projectId: string): void {
   if (projects.length <= 1) {
     showNativeMessage("warning", "Keep at least one workspace in zmux.");
@@ -5825,6 +6980,194 @@ function removeProject(projectId: string): void {
   publish();
 }
 
+function closeProjectToRecent(projectId: string): void {
+  const projectIndex = projects.findIndex((project) => project.projectId === projectId);
+  if (projectIndex < 0) {
+    return;
+  }
+  const project = projects[projectIndex]!;
+  if (project.isChat === true) {
+    return;
+  }
+
+  /**
+   * CDXC:RecentProjects 2026-05-04-14:25
+   * Closing a Combined project parks it in Recent Projects instead of deleting
+   * sessions. All native surfaces are torn down and records are marked
+   * sleeping so restoring can bring back the saved split/group state.
+   */
+  for (const group of project.workspace.groups) {
+    for (const session of group.snapshot.sessions) {
+      disposeNativeRecentProjectSessionSurface(project, session);
+    }
+  }
+
+  const nextProjects = projects.map((candidate) =>
+    candidate.projectId === projectId
+      ? {
+          ...candidate,
+          isRecentProject: true,
+          recentClosedAt: new Date().toISOString(),
+          workspace: setProjectSessionsSleeping(candidate.workspace, true),
+        }
+      : candidate,
+  );
+  projects = nextProjects;
+
+  const didCloseActiveProject = activeProjectId === projectId;
+  if (didCloseActiveProject) {
+    const nextVisibleProject = findNearestVisibleProjectAfterClose(projectIndex, projectId);
+    if (nextVisibleProject) {
+      activeProjectId = nextVisibleProject.projectId;
+      postZedOverlaySettings("workspace-focus");
+      scheduleSyncOpenProjectWithZed("closeProjectToRecent");
+      void refreshGitState();
+    }
+  }
+
+  writeStoredProjects("closeProjectToRecent");
+  publish();
+}
+
+function restoreRecentProject(projectId: string): void {
+  const project = findProject(projectId);
+  if (!project || project.isRecentProject !== true) {
+    return;
+  }
+
+  const sessionCount = countRecentProjectSessions(project);
+  const didSwitchProject = activeProjectId !== projectId;
+  projects = projects.map((candidate) =>
+    candidate.projectId === projectId
+      ? {
+          ...candidate,
+          isRecentProject: false,
+          recentClosedAt: undefined,
+          workspace:
+            sessionCount > 0
+              ? wakeVisibleProjectSessions(candidate.workspace)
+              : candidate.workspace,
+        }
+      : candidate,
+  );
+  activeProjectId = projectId;
+  writeStoredProjects("restoreRecentProject");
+  postZedOverlaySettings("workspace-focus");
+  if (didSwitchProject) {
+    scheduleSyncOpenProjectWithZed("restoreRecentProject");
+  }
+  void refreshGitState();
+
+  if (sessionCount === 0) {
+    createTerminal(DEFAULT_TERMINAL_SESSION_TITLE);
+    return;
+  }
+
+  publish();
+}
+
+function disposeNativeRecentProjectSessionSurface(
+  project: NativeProject,
+  session: SessionRecord,
+): void {
+  const nativeSessionId = forgetNativeSessionMappingForProject(
+    project.projectId,
+    session.sessionId,
+  );
+  clearNativeSidebarCommandSessionBySessionId(session.sessionId);
+  terminalStateById.delete(session.sessionId);
+  titleDerivedActivityBySessionId.delete(session.sessionId);
+  nativeActivitySuppressedUntilBySessionId.delete(session.sessionId);
+  nativeWorkingStartedAtBySessionId.delete(session.sessionId);
+  postNative({
+    sessionId: nativeSessionId,
+    type: session.kind === "t3" || session.kind === "browser" ? "closeWebPane" : "closeTerminal",
+  });
+}
+
+function setProjectSessionsSleeping(
+  workspace: GroupedSessionWorkspaceSnapshot,
+  sleeping: boolean,
+): GroupedSessionWorkspaceSnapshot {
+  return normalizeSimpleGroupedSessionWorkspaceSnapshot({
+    ...workspace,
+    groups: workspace.groups.map((group) => ({
+      ...group,
+      snapshot: {
+        ...group.snapshot,
+        sessions: group.snapshot.sessions.map((session) => ({
+          ...session,
+          isSleeping: sleeping,
+        })),
+      },
+    })),
+  });
+}
+
+function wakeVisibleProjectSessions(
+  workspace: GroupedSessionWorkspaceSnapshot,
+): GroupedSessionWorkspaceSnapshot {
+  const activeGroup =
+    workspace.groups.find((group) => group.groupId === workspace.activeGroupId) ??
+    workspace.groups[0];
+  if (!activeGroup) {
+    return workspace;
+  }
+
+  const visibleSessionIds = activeGroup.snapshot.visibleSessionIds.filter((sessionId) =>
+    activeGroup.snapshot.sessions.some((session) => session.sessionId === sessionId),
+  );
+  const sessionIdsToWake =
+    visibleSessionIds.length > 0
+      ? visibleSessionIds
+      : activeGroup.snapshot.focusedSessionId
+        ? [activeGroup.snapshot.focusedSessionId]
+        : activeGroup.snapshot.sessions[0]
+          ? [activeGroup.snapshot.sessions[0].sessionId]
+          : [];
+  const wakeIds = new Set(sessionIdsToWake);
+
+  return normalizeSimpleGroupedSessionWorkspaceSnapshot({
+    ...workspace,
+    groups: workspace.groups.map((group) => ({
+      ...group,
+      snapshot: {
+        ...group.snapshot,
+        sessions: group.snapshot.sessions.map((session) =>
+          wakeIds.has(session.sessionId) ? { ...session, isSleeping: false } : session,
+        ),
+        visibleSessionIds:
+          group.groupId === activeGroup.groupId && visibleSessionIds.length === 0
+            ? sessionIdsToWake
+            : group.snapshot.visibleSessionIds,
+      },
+    })),
+  });
+}
+
+function findNearestVisibleProjectAfterClose(
+  closedProjectIndex: number,
+  closedProjectId: string,
+): NativeProject | undefined {
+  const visibleProjects = projects.filter(
+    (project) => project.projectId !== closedProjectId && project.isRecentProject !== true,
+  );
+  if (visibleProjects.length === 0) {
+    return undefined;
+  }
+
+  return (
+    projects
+      .slice(closedProjectIndex + 1)
+      .find((project) => project.projectId !== closedProjectId && project.isRecentProject !== true) ??
+    projects
+      .slice(0, closedProjectIndex)
+      .reverse()
+      .find((project) => project.projectId !== closedProjectId && project.isRecentProject !== true) ??
+    visibleProjects[0]
+  );
+}
+
 function setProjectIcon(projectId: string, iconDataUrl: string | undefined): void {
   /**
    * CDXC:WorkspaceDock 2026-04-27-08:48
@@ -5865,6 +7208,29 @@ function setProjectConfig(projectId: string, draft: WorkspaceProjectConfigDraft)
   );
   writeStoredProjects("setProjectConfig");
   publish();
+}
+
+function openWorkspaceConfigModal(projectId: string): void {
+  /**
+   * CDXC:SidebarMode 2026-05-03-19:19
+   * In Combined mode the workspace dock is hidden, so project configuration
+   * opens from the combined project group's context menu using the same modal
+   * payload as the dock button menu.
+   */
+  const project = projects.find((candidate) => candidate.projectId === projectId);
+  if (!project) {
+    return;
+  }
+  openAppModal({
+    modal: "workspaceConfig",
+    projectConfigDraft: {
+      icon: project.icon ?? normalizeLegacyWorkspaceDockIcon(project),
+      name: project.name,
+      projectId: project.projectId,
+      theme: project.theme,
+    },
+    type: "open",
+  });
 }
 
 function saveWorkspaceConfig(
@@ -5920,7 +7286,7 @@ function reorderProjects(projectIds: string[]): void {
     .map((projectId) => projects.find((project) => project.projectId === projectId))
     .filter((project): project is NativeProject => Boolean(project));
   const remainingProjects = projects.filter((project) => !requestedIdSet.has(project.projectId));
-  const nextProjects = [...orderedProjects, ...remainingProjects];
+  const nextProjects = orderNativeProjectsForSidebar([...orderedProjects, ...remainingProjects]);
   if (
     nextProjects.length === projects.length &&
     nextProjects.every((project, index) => project.projectId === projects[index]?.projectId)
@@ -6165,11 +7531,31 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
    */
   switch (message.type) {
     case "createSession":
-      createTerminal();
+      if (activeProject().isChat === true) {
+        void createNativeChat();
+      } else {
+        createTerminal();
+      }
       return;
-    case "createSessionInGroup":
+    case "createChat":
+      void createNativeChat(message.title);
+      return;
+    case "createSessionInGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      if (groupReference.isChatCollection) {
+        void createNativeChat();
+        return;
+      }
+      if (!groupReference.groupId) {
+        if (activeProjectId !== groupReference.project.projectId) {
+          focusProject(groupReference.project.projectId);
+        }
+        createTerminal();
+        return;
+      }
       createTerminal(DEFAULT_TERMINAL_SESSION_TITLE, "", message.groupId);
       return;
+    }
     case "openBrowser":
       openNativeBrowserWindow(DEFAULT_BROWSER_LAUNCH_URL);
       return;
@@ -6232,12 +7618,18 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       publish();
       return;
     }
-    case "focusGroup":
+    case "focusGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      if (!groupReference.groupId) {
+        focusProject(groupReference.project.projectId);
+        return;
+      }
       updateActiveProjectWorkspace(
         (workspace) => focusGroupInSimpleWorkspace(workspace, message.groupId).snapshot,
       );
       publish();
       return;
+    }
     case "focusSession":
       focusSidebarSession(message.sessionId);
       return;
@@ -6254,7 +7646,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     }
     case "renameSession":
-      renameNativeSidebarTerminalSession(
+      void renameNativeSidebarTerminalSession(
         message.sessionId,
         message.title,
         "native-sidebar-rename-session",
@@ -6267,6 +7659,50 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       );
       publish();
       return;
+    case "openWorkspaceConfigForGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      openWorkspaceConfigModal(groupReference.project.projectId);
+      return;
+    }
+    case "copyWorkspaceProjectPathForGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      /*
+       * CDXC:SidebarMode 2026-05-04-07:00
+       * Combined-mode project groups need to copy the owning project's path
+       * from the group context menu, so resolve the group id server-side
+       * instead of trusting client-provided path text.
+       */
+      void navigator.clipboard?.writeText(groupReference.project.path).catch(() => undefined);
+      return;
+    }
+    case "restoreRecentProject":
+      restoreRecentProject(message.projectId);
+      return;
+    case "openWorkspaceProjectInFinderForGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      openNativeWorkspaceInFinder(groupReference.project.path);
+      return;
+    }
+    case "openWorkspaceProjectInIdeForGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      openNativeWorkspaceInSelectedIde(groupReference.project.path);
+      return;
+    }
+    case "setWorkspaceProjectThemeForGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      setProjectTheme(groupReference.project.projectId, message.theme);
+      return;
+    }
+    case "closeWorkspaceProjectForGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      closeProjectToRecent(groupReference.project.projectId);
+      return;
+    }
+    case "removeWorkspaceProjectForGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      removeProject(groupReference.project.projectId);
+      return;
+    }
     case "closeSession":
       closeTerminal(message.sessionId);
       return;
@@ -6328,40 +7764,85 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       setNativeSessionSleeping(message.sessionId, message.sleeping);
       return;
     case "setSessionFavorite":
-      updateActiveProjectWorkspace(
-        (workspace) =>
-          setSessionFavoriteInSimpleWorkspace(workspace, message.sessionId, message.favorite)
-            .snapshot,
-      );
+      {
+        const reference = resolveSidebarSessionReference(message.sessionId);
+        updateProjectWorkspace(
+          reference.project.projectId,
+          (workspace) =>
+            setSessionFavoriteInSimpleWorkspace(workspace, reference.sessionId, message.favorite)
+              .snapshot,
+        );
+      }
       publish();
       return;
-    case "setGroupSleeping":
-      setNativeGroupSleeping(message.groupId, message.sleeping);
+    case "setGroupSleeping": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      if (!groupReference.groupId) {
+        return;
+      }
+      setNativeGroupSleeping(groupReference.groupId, message.sleeping);
       return;
-    case "moveSessionToGroup":
-      updateActiveProjectWorkspace(
+    }
+    case "moveSessionToGroup": {
+      const sessionReference = resolveSidebarSessionReference(message.sessionId);
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      if (
+        !groupReference.groupId ||
+        groupReference.project.projectId !== sessionReference.project.projectId
+      ) {
+        return;
+      }
+      const targetGroupId = groupReference.groupId;
+      updateProjectWorkspace(
+        sessionReference.project.projectId,
         (workspace) =>
           moveSessionToGroupInSimpleWorkspace(
             workspace,
-            message.sessionId,
-            message.groupId,
+            sessionReference.sessionId,
+            targetGroupId,
             message.targetIndex,
           ).snapshot,
       );
       publish();
       return;
+    }
     case "toggleFullscreenSession":
       updateActiveProjectWorkspace((workspace) =>
         toggleFullscreenSessionInSimpleWorkspace(workspace),
       );
       publish();
       return;
-    case "syncGroupOrder":
+    case "syncGroupOrder": {
+      const combinedProjectIds = message.groupIds
+        .filter((groupId) => groupId !== COMBINED_CHATS_GROUP_ID)
+        .map((groupId) => parseCombinedProjectGroupId(groupId));
+      if (
+        combinedProjectIds.length > 0 &&
+        combinedProjectIds.every((projectId): projectId is string => projectId !== undefined)
+      ) {
+        /**
+         * CDXC:Chats 2026-05-04-09:41
+         * The synthetic Chats group is pinned above projects and excluded from
+         * drag persistence. Reorder only concrete project groups from Combined
+         * mode so chats stay under one stable top header.
+         *
+         * CDXC:SidebarMode 2026-05-03-10:42
+         * Combined-mode group dragging reorders projects, not the separated
+         * groups inside one project. Session drag is disabled in the React
+         * view, so this path cannot move sessions across projects.
+         */
+        reorderProjects(combinedProjectIds);
+        return;
+      }
+      if (message.groupIds.includes(COMBINED_CHATS_GROUP_ID)) {
+        return;
+      }
       updateActiveProjectWorkspace(
         (workspace) => syncGroupOrderInSimpleWorkspace(workspace, message.groupIds).snapshot,
       );
       publish();
       return;
+    }
     case "toggleActiveSessionsSortMode":
       toggleActiveSessionsSortMode();
       return;
@@ -6388,6 +7869,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       }
       return;
     case "setT3SessionThreadId":
+      void relinkNativeT3SessionThread(message.sessionId, message.threadId);
       return;
     case "runSidebarGitAction":
       void runSidebarGitAction(message.action);
@@ -6418,11 +7900,15 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       openNativeExternalUrl(message.url);
       return;
     case "runBrowserPaneAction": {
-      const sessionRecord = findSessionRecord(message.sessionId);
+      const reference = resolveSidebarSessionReference(message.sessionId);
+      const sessionRecord = findSessionRecordInProject(reference.project, reference.sessionId);
       if (sessionRecord?.kind !== "browser") {
         return;
       }
-      const nativeSessionId = nativeSessionIdForSidebarSession(message.sessionId);
+      const nativeSessionId = nativeSessionIdForProjectSidebarSession(
+        reference.project.projectId,
+        reference.sessionId,
+      );
       switch (message.action) {
         case "devtools":
           postNative({ sessionId: nativeSessionId, type: "openBrowserDevTools" });
@@ -6535,14 +8021,20 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       );
       publish();
       return;
-    case "syncSessionOrder":
-      updateActiveProjectWorkspace(
+    case "syncSessionOrder": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      if (!groupReference.groupId) {
+        return;
+      }
+      const groupId = groupReference.groupId;
+      updateProjectWorkspace(
+        groupReference.project.projectId,
         (workspace) =>
-          syncSessionOrderInSimpleWorkspace(workspace, message.groupId, message.sessionIds)
-            .snapshot,
+          syncSessionOrderInSimpleWorkspace(workspace, groupId, message.sessionIds).snapshot,
       );
       publish();
       return;
+    }
     default:
       return;
   }
@@ -6722,17 +8214,11 @@ window.addEventListener("zmux-native-host-event", (event) => {
      * its bound thread and only creates a replacement thread when that bound
      * thread no longer exists.
      */
-    updateActiveProjectWorkspace(
-      (workspace) =>
-        setT3SessionMetadataInSimpleWorkspace(workspace, sidebarSessionId, {
-          boundThreadId: hostEvent.threadId,
-          projectId: hostEvent.projectId,
-          serverOrigin: hostEvent.serverOrigin,
-          threadId: hostEvent.threadId,
-          workspaceRoot: hostEvent.workspaceRoot,
-        }).snapshot,
-    );
-    publish();
+    handleNativeT3ThreadReady(sidebarSessionId, hostEvent);
+    return;
+  }
+  if (hostEvent.type === "t3ThreadChanged") {
+    void handleNativeT3ThreadChanged(sidebarSessionId, hostEvent.threadId, hostEvent.title);
     return;
   }
   if (hostEvent.type === "terminalTitleChanged") {
@@ -7141,8 +8627,16 @@ function NativeSidebarRoot() {
   }, []);
 
   return (
-    <div className="native-sidebar-shell">
-      <WorkspaceDock state={workspaceDockState} />
+    <div className="native-sidebar-shell" data-sidebar-mode={workspaceDockState.sidebarMode}>
+      {/*
+       * CDXC:SidebarMode 2026-05-03-19:19
+       * Combined mode already shows every project as a draggable sidebar
+       * group, so the separate workspace rail is redundant and should be
+       * hidden until the user returns to Separated mode.
+       */}
+      {workspaceDockState.sidebarMode === "combined" ? null : (
+        <WorkspaceDock state={workspaceDockState} />
+      )}
       <main className="native-sidebar-main">
         <SidebarApp messageSource={sidebarBus} vscode={vscode} />
       </main>
@@ -7152,6 +8646,8 @@ function NativeSidebarRoot() {
 
 type WorkspaceDockActions = {
   focusProject: (projectId: string) => void;
+  openProjectInFinder: (projectId: string) => void;
+  openProjectInIde: (projectId: string) => void;
   pickWorkspaceFolder: () => void;
   pickWorkspaceIcon: (projectId: string) => void;
   removeProject: (projectId: string) => void;
@@ -7183,8 +8679,21 @@ export function WorkspaceDock({
   const [menu, setMenu] = useState<WorkspaceDockMenuState>();
   const dockRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<WorkspaceDockDragState | undefined>(undefined);
+  const selectedIdeLabel = getZedOverlayTargetAppLabel(settings.zedOverlayTargetApp);
   const workspaceActions: WorkspaceDockActions = {
     focusProject,
+    openProjectInFinder: (projectId) => {
+      const project = state.projects.find((candidate) => candidate.projectId === projectId);
+      if (project) {
+        openNativeWorkspaceInFinder(project.path);
+      }
+    },
+    openProjectInIde: (projectId) => {
+      const project = state.projects.find((candidate) => candidate.projectId === projectId);
+      if (project) {
+        openNativeWorkspaceInSelectedIde(project.path);
+      }
+    },
     pickWorkspaceFolder: () => postNative({ type: "pickWorkspaceFolder" }),
     pickWorkspaceIcon: (projectId) => postNative({ projectId, type: "pickWorkspaceIcon" }),
     removeProject,
@@ -7358,8 +8867,8 @@ export function WorkspaceDock({
   const openMenu = (event: ReactMouseEvent<HTMLButtonElement>, projectId: string) => {
     event.preventDefault();
     const offset = 8;
-    const menuWidth = 184;
-    const rootMenuHeight = 112;
+    const menuWidth = 196;
+    const rootMenuHeight = 196;
     /**
      * CDXC:WorkspaceDock 2026-04-27-09:40
      * Opening the workspace context menu directly under the right-click point
@@ -7522,6 +9031,40 @@ export function WorkspaceDock({
                   size={14}
                 />
               </button>
+              <button
+                className="session-context-menu-item"
+                onClick={() => {
+                  workspaceActions.openProjectInFinder(menu.projectId);
+                  setMenu(undefined);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <IconFolderOpen
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                />
+                Open in Finder
+              </button>
+              {/*
+               * CDXC:WorkspaceActions 2026-05-04-08:22
+               * Right-clicking a project in the workspace dock must expose the
+               * same direct open actions as combined project cards. The IDE
+               * action names and targets the Settings-selected IDE.
+               */}
+              <button
+                className="session-context-menu-item"
+                onClick={() => {
+                  workspaceActions.openProjectInIde(menu.projectId);
+                  setMenu(undefined);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <IconCode aria-hidden="true" className="session-context-menu-icon" size={14} />
+                Open in {selectedIdeLabel}
+              </button>
               <div className="session-context-menu-divider" role="separator" />
               <button
                 className="session-context-menu-item session-context-menu-item-danger"
@@ -7600,6 +9143,9 @@ function WorkspaceDockProjectIcon({
         stroke={1.9}
       />
     );
+  }
+  if (project.isChat) {
+    return <IconMessageCirclePlus aria-hidden="true" size={21} stroke={2} />;
   }
   return (
     <span className="workspace-dock-initials">

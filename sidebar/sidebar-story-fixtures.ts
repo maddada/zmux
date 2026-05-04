@@ -2,6 +2,7 @@ import { DEFAULT_COMPLETION_SOUND, getCompletionSoundLabel } from "../shared/com
 import { createDefaultSidebarAgentButtons } from "../shared/sidebar-agents";
 import { createDefaultSidebarCommandButtons } from "../shared/sidebar-commands";
 import { createDefaultSidebarGitState } from "../shared/sidebar-git";
+import { DEFAULT_zmux_SETTINGS } from "../shared/zmux-settings";
 import type {
   SidebarHydrateMessage,
   SidebarHudState,
@@ -25,6 +26,8 @@ import {
 export type SidebarStoryFixture =
   | "agent-icon-render"
   | "browser-groups"
+  | "combined-header-alignment"
+  | "combined-recent-projects"
   | "command-indicator-active"
   | "default"
   | "sort-toggle-demo"
@@ -113,7 +116,35 @@ export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrat
     highlightedVisibleCount: args.highlightedVisibleCount,
     isFocusModeActive: args.isFocusModeActive,
     pendingAgentIds: [],
+    recentProjects:
+      args.fixture === "combined-recent-projects"
+        ? [
+            {
+              path: "/Users/story/dev/shortpoint",
+              projectId: "recent-shortpoint",
+              recentClosedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+              sessionCount: 3,
+              title: "shortpoint",
+            },
+            {
+              path: "/Users/story/dev/open-design",
+              projectId: "recent-open-design",
+              recentClosedAt: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
+              sessionCount: 0,
+              title: "open-design",
+            },
+          ]
+        : [],
     sectionVisibility: createDefaultSidebarSectionVisibility(),
+    settings:
+      args.fixture === "combined-header-alignment" || args.fixture === "combined-recent-projects"
+        ? {
+            ...DEFAULT_zmux_SETTINGS,
+            sidebarMode: "combined",
+            showSidebarActions: false,
+            showSidebarAgents: true,
+          }
+        : undefined,
     createSessionOnSidebarDoubleClick: args.createSessionOnSidebarDoubleClick,
     renameSessionOnDoubleClick: args.renameSessionOnDoubleClick,
     showCloseButtonOnSessionCards: args.showCloseButtonOnSessionCards,
@@ -124,6 +155,13 @@ export function createSidebarStoryMessage(args: SidebarStoryArgs): SidebarHydrat
     visibleCount: args.visibleCount,
     visibleSlotLabels: getVisibleSlotLabels(groups),
   };
+
+  if (args.fixture === "combined-header-alignment" || args.fixture === "combined-recent-projects") {
+    hud.projectHeader = {
+      directory: "/Users/story/dev/zmux",
+      name: "zmux",
+    };
+  }
 
   return {
     groups,

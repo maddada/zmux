@@ -5,9 +5,12 @@ import {
   useId,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+
+const SESSION_RENAME_PASTE_SUMMARY_THRESHOLD = 50;
 
 export type SessionRenameModalProps = {
   initialTitle: string;
@@ -84,6 +87,24 @@ export function SessionRenameModal({
     confirmTitle(title);
   };
 
+  const handleInputPaste = (event: ReactClipboardEvent<HTMLInputElement>) => {
+    const pastedTitle = event.clipboardData.getData("text").trim();
+    if (pastedTitle.length <= SESSION_RENAME_PASTE_SUMMARY_THRESHOLD) {
+      return;
+    }
+
+    /**
+     * CDXC:SidebarRename 2026-05-04-14:57
+     * Pasting more than 50 characters is an explicit auto-name request. Submit
+     * the full pasted text immediately through the normal renameSession command
+     * so the extension/native backend generates the concise thread title before
+     * syncing `/rename` into the agent CLI.
+     */
+    event.preventDefault();
+    setTitle(pastedTitle);
+    confirmTitle(pastedTitle);
+  };
+
   const handleInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key !== "Enter" || event.nativeEvent.isComposing) {
       return;
@@ -135,6 +156,7 @@ export function SessionRenameModal({
             className="group-title-input command-config-input"
             onChange={(event) => setTitle(event.currentTarget.value)}
             onKeyDown={handleInputKeyDown}
+            onPaste={handleInputPaste}
             ref={inputRef}
             value={title}
           />

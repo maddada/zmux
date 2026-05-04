@@ -82,6 +82,7 @@ export function createSidebarHudState(
     highlightedVisibleCount: getSessionGridLayoutVisibleCount(snapshot),
     isFocusModeActive: isSessionGridFocusModeActive(snapshot),
     pendingAgentIds,
+    recentProjects: [],
     sectionVisibility,
     createSessionOnSidebarDoubleClick,
     renameSessionOnDoubleClick,

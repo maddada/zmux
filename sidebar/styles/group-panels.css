@@ -10,6 +10,144 @@
   width: calc(100% + (24px * var(--sidebar-density-scale)));
 }
 
+.recent-projects-drawer {
+  /*
+   * CDXC:RecentProjects 2026-05-04-14:25
+   * Recent Projects is a bottom drawer in Combined mode, separate from the
+   * draggable group list so parked projects cannot become cross-project drop
+   * targets or affect project-group ordering.
+   */
+  border-top: 1px solid color-mix(in srgb, var(--app-border) 56%, transparent);
+  display: grid;
+  gap: calc(8px * var(--sidebar-density-scale));
+  margin-left: calc(-12px * var(--sidebar-density-scale));
+  margin-right: calc(-12px * var(--sidebar-density-scale));
+  padding: calc(8px * var(--sidebar-density-scale)) calc(12px * var(--sidebar-density-scale))
+    calc(10px * var(--sidebar-density-scale));
+  position: relative;
+}
+
+.recent-projects-drawer-toggle {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: calc(8px * var(--sidebar-density-scale));
+  color: color-mix(in srgb, var(--app-foreground) 74%, var(--app-muted) 26%);
+  display: flex;
+  gap: calc(7px * var(--sidebar-density-scale));
+  min-width: 0;
+  padding: calc(3px * var(--sidebar-density-scale)) 0
+    calc(3px * var(--sidebar-density-scale)) 3px;
+  text-align: left;
+  width: 100%;
+}
+
+.recent-projects-drawer-toggle:hover,
+.recent-projects-drawer-toggle:focus-visible {
+  background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
+  color: var(--app-foreground);
+  outline: none;
+}
+
+.recent-projects-drawer-title {
+  flex: 1 1 auto;
+  font-size: calc(11px * var(--sidebar-density-scale));
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.recent-projects-drawer-count {
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--app-border) 76%, transparent);
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--app-foreground) 58%, transparent);
+  display: inline-flex;
+  flex: none;
+  font-size: calc(10px * var(--sidebar-density-scale));
+  height: 18px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 calc(5px * var(--sidebar-density-scale));
+}
+
+.recent-projects-drawer-body {
+  display: grid;
+  gap: calc(8px * var(--sidebar-density-scale));
+}
+
+.recent-projects-search {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-foreground) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 58%, transparent);
+  border-radius: calc(8px * var(--sidebar-density-scale));
+  color: color-mix(in srgb, var(--app-foreground) 62%, transparent);
+  display: flex;
+  gap: calc(7px * var(--sidebar-density-scale));
+  min-width: 0;
+  padding: calc(5px * var(--sidebar-density-scale)) calc(7px * var(--sidebar-density-scale));
+}
+
+.recent-projects-search:focus-within {
+  border-color: color-mix(in srgb, var(--app-button-background) 46%, var(--app-border));
+}
+
+.recent-projects-search input {
+  background: transparent;
+  border: none;
+  color: var(--app-foreground);
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: calc(12px * var(--sidebar-density-scale));
+  min-width: 0;
+  outline: none;
+  padding: 0;
+}
+
+.recent-projects-list {
+  display: grid;
+  gap: calc(2px * var(--sidebar-density-scale));
+  max-height: min(220px, 35vh);
+  overflow: hidden auto;
+}
+
+.recent-projects-row {
+  background: transparent;
+  border: none;
+  border-radius: calc(8px * var(--sidebar-density-scale));
+  color: color-mix(in srgb, var(--app-foreground) 72%, var(--app-muted) 28%);
+  min-width: 0;
+  padding: calc(5px * var(--sidebar-density-scale)) calc(6px * var(--sidebar-density-scale));
+  text-align: left;
+}
+
+.recent-projects-row:hover,
+.recent-projects-row:focus-visible {
+  background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
+  color: var(--app-foreground);
+  outline: none;
+}
+
+.recent-projects-row-title {
+  display: block;
+  font-size: calc(12px * var(--sidebar-density-scale));
+  line-height: 1.25;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-projects-empty {
+  color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
+  font-size: calc(12px * var(--sidebar-density-scale));
+  padding: calc(8px * var(--sidebar-density-scale)) calc(6px * var(--sidebar-density-scale));
+}
+
 .session-groups-top {
   display: grid;
   gap: calc(10px * var(--sidebar-density-scale));
@@ -44,21 +182,36 @@
   display: flex;
   gap: calc(10px * var(--sidebar-density-scale));
   justify-content: space-between;
-  margin-left: calc(2px * var(--sidebar-density-scale));
+  /*
+   * CDXC:SidebarHover 2026-05-04-07:00
+   * Section headers and chat/browser group headers share one surface style:
+   * no extra margins, 3px left content padding, and no right content padding.
+   */
+  margin-left: 0;
+  margin-right: 0;
   min-width: 0;
-  padding-bottom: calc(2px * var(--sidebar-density-scale));
-  padding-top: calc(2px * var(--sidebar-density-scale));
+  padding: calc(2px * var(--sidebar-density-scale)) 0
+    calc(2px * var(--sidebar-density-scale)) 3px;
   position: relative;
   transition: background-color 120ms ease;
   z-index: 4;
+}
+
+.section-titlebar::before {
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  transition: background-color 120ms ease;
 }
 
 .section-titlebar[data-collapsible="true"] {
   cursor: pointer;
 }
 
-.section-titlebar[data-collapsible="true"]:hover,
-.section-titlebar[data-collapsible="true"]:has(:focus-visible) {
+.section-titlebar[data-collapsible="true"]:hover::before,
+.section-titlebar[data-collapsible="true"]:has(:focus-visible)::before {
   background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
 }
 
@@ -68,6 +221,8 @@
   flex: 1 1 auto;
   gap: calc(8px * var(--sidebar-density-scale));
   min-width: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .section-titlebar-toggle {
@@ -332,7 +487,9 @@ body[data-sidebar-theme^="light-"]
   max-width: 0;
   min-width: 0;
   overflow: hidden;
+  position: relative;
   transition: max-width 160ms ease;
+  z-index: 1;
 }
 
 .stack:hover .section-titlebar-actions:has(.sidebar-titlebar-controls),
@@ -348,7 +505,14 @@ body[data-sidebar-theme^="light-"]
 
 .sidebar-collapse-shell {
   margin-top: 0;
-  max-height: var(--sidebar-collapse-content-height);
+  /*
+   * CDXC:SidebarAgents 2026-05-04-07:00
+   * Agent launcher buttons can render a few device pixels taller than their
+   * measured CSS height after density scaling and icon rasterization. Keep a
+   * small expanded-state cushion so the collapsible shell does not crop the
+   * bottom edge of the agent row.
+   */
+  max-height: calc(var(--sidebar-collapse-content-height) + 4px);
   opacity: 1;
   overflow: hidden;
   transition:

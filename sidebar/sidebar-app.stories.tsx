@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { SidebarStoryArgs } from "./sidebar-story-fixtures";
+import { createSidebarStoryMessage } from "./sidebar-story-fixtures";
+import { SidebarStoryHarness } from "./sidebar-story-harness";
 import {
   DEFAULT_SIDEBAR_STORY_ARGS,
   SIDEBAR_STORY_ARG_TYPES,
@@ -99,4 +101,44 @@ export const EmptyGroups: Story = {
     viewMode: "horizontal",
     visibleCount: 1,
   },
+};
+
+export const CombinedHeaderAlignment: Story = {
+  args: {
+    fixture: "combined-header-alignment",
+    highlightedVisibleCount: 1,
+    showCloseButtonOnSessionCards: false,
+    showHotkeysOnSessionCards: false,
+    showLastInteractionTimeOnSessionCards: false,
+    theme: "plain-dark",
+    viewMode: "grid",
+    visibleCount: 1,
+  },
+  render: (args) => (
+    <div className="native-sidebar-shell" data-sidebar-mode="combined">
+      <main className="native-sidebar-main">
+        <SidebarStoryHarness message={createSidebarStoryMessage(args)} />
+      </main>
+    </div>
+  ),
+};
+
+export const CombinedRecentProjects: Story = {
+  args: {
+    fixture: "combined-recent-projects",
+    highlightedVisibleCount: 1,
+    showCloseButtonOnSessionCards: false,
+    showHotkeysOnSessionCards: false,
+    showLastInteractionTimeOnSessionCards: false,
+    theme: "plain-dark",
+    viewMode: "grid",
+    visibleCount: 1,
+  },
+  render: (args) => (
+    <div className="native-sidebar-shell" data-sidebar-mode="combined">
+      <main className="native-sidebar-main">
+        <SidebarStoryHarness message={createSidebarStoryMessage(args)} />
+      </main>
+    </div>
+  ),
 };

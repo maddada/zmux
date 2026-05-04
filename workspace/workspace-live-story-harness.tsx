@@ -243,6 +243,9 @@ function createLiveStoryWorkspace(
   };
 
   return {
+    groupMetadataById: {
+      "group-live": {},
+    },
     options: {
       activeSessionsSortMode: "manual",
       agentManagerZoomPercent: 100,
@@ -252,6 +255,7 @@ function createLiveStoryWorkspace(
       completionBellEnabled: false,
       completionSound: "arcade",
       debuggingMode: false,
+      recentProjects: [],
       scratchPadContent: "",
       showCloseButtonOnSessionCards: true,
       showHotkeysOnSessionCards: false,
@@ -260,6 +264,7 @@ function createLiveStoryWorkspace(
     },
     pinnedPrompts: [],
     previousSessions: [],
+    projectHeader: undefined,
     sessionDecorationsById: Object.fromEntries(
       sessions.map((session) => [
         session.sessionId,

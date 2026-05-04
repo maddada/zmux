@@ -23,6 +23,7 @@ const state: WorkspaceBarStateMessage = {
       title: "agent-tiler",
     },
   ],
+  sidebarMode: "separated",
   type: "workspaceBarState",
 };
 

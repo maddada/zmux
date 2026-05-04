@@ -1,12 +1,21 @@
 import { Tooltip } from "@base-ui/react/tooltip";
 import {
   IconCaretRightFilled,
+  IconChevronLeft,
+  IconChevronRight,
+  IconCode,
+  IconCopy,
+  IconFolder,
+  IconFolderOpen,
   IconMessageCircle,
   IconMoon,
+  IconPalette,
   IconPencil,
   IconPlayerPlay,
   IconPlus,
   IconRefresh,
+  IconSettings,
+  IconTrash,
   IconWorld,
   IconX,
 } from "@tabler/icons-react";
@@ -28,8 +37,13 @@ import {
 } from "react";
 import {
   getSidebarSessionLifecycleState,
+  type SidebarTheme,
   type VisibleSessionCount,
 } from "../shared/session-grid-contract";
+import {
+  DEFAULT_zmux_SETTINGS,
+  getZedOverlayTargetAppLabel,
+} from "../shared/zmux-settings";
 import { ConfirmationModal } from "./confirmation-modal";
 import {
   createGroupDropData,
@@ -45,7 +59,7 @@ import { useCollapsibleHeight } from "./use-collapsible-height";
 import type { WebviewApi } from "./webview-api";
 
 const CONTEXT_MENU_MARGIN_PX = 12;
-const CONTEXT_MENU_WIDTH_PX = 164;
+const CONTEXT_MENU_WIDTH_PX = 196;
 const CONTEXT_MENU_ITEM_HEIGHT_PX = 34;
 const CONTEXT_MENU_VERTICAL_PADDING_PX = 12;
 const COUNT_OPTIONS: VisibleSessionCount[] = [1, 2, 3, 4, 6, 9];
@@ -54,6 +68,18 @@ const GROUP_DRAG_HOLD_DELAY_MS = 130;
 const GROUP_DRAG_HOLD_TOLERANCE_PX = 12;
 const TOUCH_GROUP_DRAG_HOLD_DELAY_MS = 180;
 const TOUCH_GROUP_DRAG_HOLD_TOLERANCE_PX = 12;
+const PROJECT_CONTEXT_THEME_OPTIONS: ReadonlyArray<{ label: string; value: SidebarTheme }> = [
+  { label: "Dark Gray", value: "plain-dark" },
+  { label: "Dark Green", value: "dark-green" },
+  { label: "Dark Blue", value: "dark-blue" },
+  { label: "Dark Red", value: "dark-red" },
+  { label: "Dark Pink", value: "dark-pink" },
+  { label: "Dark Orange", value: "dark-orange" },
+  { label: "Light Blue", value: "light-blue" },
+  { label: "Light Green", value: "light-green" },
+  { label: "Light Pink", value: "light-pink" },
+  { label: "Light Orange", value: "light-orange" },
+];
 
 function getAnchoredSessionStatusStyle(sessionId: string): CSSProperties {
   return {
@@ -99,6 +125,10 @@ type ContextMenuPosition = {
   y: number;
 };
 
+type GroupContextMenuPosition = ContextMenuPosition & {
+  view: "group" | "project-themes";
+};
+
 type GroupControlMenu = "visible-count";
 
 export function getEmptyBrowserGroupExpandTooltip({
@@ -136,6 +166,8 @@ export type SessionGroupSectionProps = {
   orderedSessionIds?: readonly string[];
   selectedSearchSessionId?: string;
   sessionDropIndicatorGroupId?: string;
+  sessionDraggingDisabled?: boolean;
+  showHeaderActions?: boolean;
   showSessionDropPositionIndicators?: boolean;
   vscode: WebviewApi;
 };
@@ -144,9 +176,10 @@ function clampContextMenuPosition(
   clientX: number,
   clientY: number,
   itemCount: number,
-): ContextMenuPosition {
+): GroupContextMenuPosition {
   const menuHeight = CONTEXT_MENU_VERTICAL_PADDING_PX + itemCount * CONTEXT_MENU_ITEM_HEIGHT_PX;
   return {
+    view: "group",
     x: Math.max(
       CONTEXT_MENU_MARGIN_PX,
       Math.min(clientX, window.innerWidth - CONTEXT_MENU_WIDTH_PX - CONTEXT_MENU_MARGIN_PX),
@@ -195,6 +228,8 @@ export function SessionGroupSection({
   orderedSessionIds: orderedSessionIdsProp,
   selectedSearchSessionId,
   sessionDropIndicatorGroupId,
+  sessionDraggingDisabled = false,
+  showHeaderActions = true,
   showSessionDropPositionIndicators = true,
   vscode,
 }: SessionGroupSectionProps) {
@@ -202,7 +237,7 @@ export function SessionGroupSection({
   const storedSessionIds = useSidebarStore((state) => state.sessionIdsByGroup[groupId] ?? []);
   const sessionsById = useSidebarStore((state) => state.sessionsById);
   const orderedSessionIds = orderedSessionIdsProp ?? storedSessionIds;
-  const [contextMenuPosition, setContextMenuPosition] = useState<ContextMenuPosition>();
+  const [contextMenuPosition, setContextMenuPosition] = useState<GroupContextMenuPosition>();
   const [draftTitle, setDraftTitle] = useState(group?.title ?? "");
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -213,7 +248,31 @@ export function SessionGroupSection({
   const visibleCountButtonRef = useRef<HTMLButtonElement>(null);
   const debugInstanceIdRef = useRef(createSessionGroupDebugInstanceId());
   const isBrowserGroup = group?.kind === "browser";
+  /**
+   * CDXC:Projects 2026-05-04-14:49
+   * Project group headers use folder metaphors: closed folder when collapsed
+   * and open folder when expanded. The synthetic Chats group keeps the chat
+   * glyph so users can distinguish projectless conversations from projects.
+   *
+   * CDXC:Chats 2026-05-04-09:41
+   * The Combined-mode Chats header is a synthetic collection, not one mutable
+   * project group. It can create new chat folders, but it must not accept
+   * session drops, group dragging, or project/group context-menu mutations.
+   */
+  const isChatCollection = group?.isChatCollection === true;
+  const projectContext = group?.projectContext;
+  /**
+   * CDXC:SidebarMode 2026-05-03-10:42
+   * Combined mode keeps project groups draggable while disabling session drag
+   * targets. That prevents session moves across project boundaries without
+   * taking away the requested project-group reordering.
+   */
+  const areSessionDropTargetsDisabled = draggingDisabled || sessionDraggingDisabled;
   const debuggingMode = useSidebarStore((state) => state.hud.debuggingMode);
+  const selectedIdeTarget = useSidebarStore(
+    (state) => state.hud.settings?.zedOverlayTargetApp ?? DEFAULT_zmux_SETTINGS.zedOverlayTargetApp,
+  );
+  const selectedIdeLabel = getZedOverlayTargetAppLabel(selectedIdeTarget);
   const postGroupDebugLog = useEffectEvent((event: string, details: Record<string, unknown>) => {
     if (!debuggingMode) {
       return;
@@ -233,7 +292,7 @@ export function SessionGroupSection({
     accept: ["group", "session"],
     collisionPriority: CollisionPriority.Low,
     data: createGroupDropData(groupId),
-    disabled: isBrowserGroup || draggingDisabled,
+    disabled: isBrowserGroup || isChatCollection || draggingDisabled,
     id: groupId,
     index,
     plugins: [SortableKeyboardPlugin],
@@ -247,7 +306,7 @@ export function SessionGroupSection({
       kind: "group",
       position: "start",
     }),
-    disabled: isBrowserGroup || draggingDisabled,
+    disabled: isBrowserGroup || isChatCollection || areSessionDropTargetsDisabled,
     id: createSessionDropTargetId({
       groupId,
       kind: "group",
@@ -289,6 +348,7 @@ export function SessionGroupSection({
     sessions: groupSessions,
   });
   const emptyStateLabel = isBrowserGroup ? "No browsers" : "No sessions";
+  const shouldSelectEmptyProject = Boolean(projectContext && orderedSessionIds.length === 0);
 
   useEffect(() => {
     postGroupDebugLog("group.sectionMounted", {
@@ -547,6 +607,71 @@ export function SessionGroupSection({
     });
   };
 
+  const openProjectConfig = () => {
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "openWorkspaceConfigForGroup",
+    });
+  };
+
+  const openProjectThemeMenu = () => {
+    setContextMenuPosition((currentPosition) =>
+      currentPosition ? { ...currentPosition, view: "project-themes" } : currentPosition,
+    );
+  };
+
+  const openProjectRootMenu = () => {
+    setContextMenuPosition((currentPosition) =>
+      currentPosition ? { ...currentPosition, view: "group" } : currentPosition,
+    );
+  };
+
+  const copyProjectPath = () => {
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "copyWorkspaceProjectPathForGroup",
+    });
+  };
+
+  const openProjectInFinder = () => {
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "openWorkspaceProjectInFinderForGroup",
+    });
+  };
+
+  const openProjectInIde = () => {
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "openWorkspaceProjectInIdeForGroup",
+    });
+  };
+
+  const chooseProjectTheme = (theme: SidebarTheme) => {
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      groupId: group.groupId,
+      theme,
+      type: "setWorkspaceProjectThemeForGroup",
+    });
+  };
+
+  const closeProject = () => {
+    if (!projectContext?.canRemoveProject) {
+      return;
+    }
+
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "closeWorkspaceProjectForGroup",
+    });
+  };
+
   const handleTitleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -571,6 +696,21 @@ export function SessionGroupSection({
     onCollapsedChange(group.groupId, !isCollapsed);
   };
 
+  const toggleCollapsedOrSelectEmptyProject = () => {
+    if (shouldSelectEmptyProject) {
+      /**
+       * CDXC:SidebarMode 2026-05-04-06:52
+       * Empty Combined-mode project groups are project selectors, not empty
+       * session buckets. Selecting one makes the next agent/action launch use
+       * that project, and the placeholder stays hidden.
+       */
+      requestFocusGroup();
+      return;
+    }
+
+    toggleCollapsed();
+  };
+
   const handleGroupHeaderClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (isEditing || emptyBrowserExpandTooltip) {
       return;
@@ -582,7 +722,7 @@ export function SessionGroupSection({
 
     event.preventDefault();
     event.stopPropagation();
-    toggleCollapsed();
+    toggleCollapsedOrSelectEmptyProject();
   };
 
   return (
@@ -594,6 +734,7 @@ export function SessionGroupSection({
         data-dragging={String(Boolean(sortable.isDragging))}
         data-drop-target={String(isGroupDropTarget)}
         data-empty-space-blocking="true"
+        data-empty-project={String(shouldSelectEmptyProject)}
         data-session-connector={String(showSessionGroupConnector)}
         data-sidebar-group-id={group.groupId}
         onClick={() => {
@@ -604,14 +745,18 @@ export function SessionGroupSection({
           requestFocusGroup();
         }}
         onContextMenu={(event: ReactMouseEvent<HTMLElement>) => {
-          if (isBrowserGroup) {
+          if (isBrowserGroup || isChatCollection || (!showHeaderActions && !projectContext)) {
             return;
           }
 
           event.preventDefault();
           event.stopPropagation();
           setContextMenuPosition(
-            clampContextMenuPosition(event.clientX, event.clientY, 3 + Number(canFullReloadGroup)),
+            clampContextMenuPosition(
+              event.clientX,
+              event.clientY,
+              projectContext ? 6 : 3 + Number(canFullReloadGroup),
+            ),
           );
         }}
         ref={sortable.ref}
@@ -652,7 +797,7 @@ export function SessionGroupSection({
                             onClick={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
-                              toggleCollapsed();
+                              toggleCollapsedOrSelectEmptyProject();
                             }}
                             type="button"
                           >
@@ -689,11 +834,12 @@ export function SessionGroupSection({
                           aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${group.title}`}
                           className="group-collapse-button section-titlebar-toggle"
                           data-collapsed={String(isCollapsed)}
+                          data-empty-project={String(shouldSelectEmptyProject)}
                           data-has-idle-icon="true"
                           onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            toggleCollapsed();
+                            toggleCollapsedOrSelectEmptyProject();
                           }}
                           type="button"
                         >
@@ -703,8 +849,12 @@ export function SessionGroupSection({
                           >
                             {isBrowserGroup ? (
                               <IconWorld size={16} stroke={1.8} />
-                            ) : (
+                            ) : isChatCollection ? (
                               <IconMessageCircle size={16} stroke={1.8} />
+                            ) : isCollapsed ? (
+                              <IconFolder size={16} stroke={1.8} />
+                            ) : (
+                              <IconFolderOpen size={16} stroke={1.8} />
                             )}
                           </span>
                           <IconCaretRightFilled
@@ -719,8 +869,8 @@ export function SessionGroupSection({
                 )}
                 <div
                   className="group-title-handle"
-                  data-draggable={String(!isBrowserGroup)}
-                  ref={isBrowserGroup ? undefined : sortable.handleRef}
+                  data-draggable={String(!isBrowserGroup && !isChatCollection)}
+                  ref={isBrowserGroup || isChatCollection ? undefined : sortable.handleRef}
                 >
                   <button
                     aria-controls={isCollapsed ? undefined : sessionsRegionId}
@@ -732,10 +882,11 @@ export function SessionGroupSection({
                     }
                     className="group-title-button"
                     data-empty-browser-group={String(emptyBrowserExpandTooltip !== undefined)}
+                    data-empty-project={String(shouldSelectEmptyProject)}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      toggleCollapsed();
+                      toggleCollapsedOrSelectEmptyProject();
                     }}
                     title={
                       emptyBrowserExpandTooltip ??
@@ -753,68 +904,74 @@ export function SessionGroupSection({
                  * render the live tab-count badge next to "Browsers". Keep the
                  * count only for empty-state and collapse behavior.
                  */}
-                <div
-                  className="group-header-actions"
-                  data-open={String(openControlMenu !== undefined)}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                >
-                  {group.isActive && !isBrowserGroup ? (
-                    <div className="group-layout-controls">
-                      <div className="group-control-anchor">
-                        <button
-                          aria-expanded={openControlMenu === "visible-count"}
-                          aria-haspopup="menu"
-                          aria-label={`Select split count for ${group.title}`}
-                          className="group-add-button group-control-button"
-                          data-open={String(openControlMenu === "visible-count")}
-                          onClick={() => {
-                            setOpenControlMenu((previous) =>
-                              previous === "visible-count" ? undefined : "visible-count",
-                            );
-                          }}
-                          onContextMenu={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            setOpenControlMenu((previous) =>
-                              previous === "visible-count" ? undefined : "visible-count",
-                            );
-                          }}
-                          ref={visibleCountButtonRef}
-                          title={`Select split count for ${group.title}`}
-                          type="button"
-                        >
-                          <span className="group-control-count-value">
-                            {String(group.layoutVisibleCount)}
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                  <button
-                    aria-label={
-                      isBrowserGroup
-                        ? `Open a browser in ${group.title}`
-                        : `Create a session in ${group.title}`
-                    }
-                    className="group-add-button"
+                {showHeaderActions ? (
+                  <div
+                    className="group-header-actions"
+                    data-open={String(openControlMenu !== undefined)}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      requestCreateSession();
                     }}
-                    title={
-                      isBrowserGroup
-                        ? `Open a browser in ${group.title}`
-                        : `Create a session in ${group.title}`
-                    }
-                    type="button"
                   >
-                    <IconPlus aria-hidden="true" className="group-add-icon" size={14} stroke={2} />
-                  </button>
-                </div>
+                    {group.isActive && !isBrowserGroup && !isChatCollection ? (
+                      <div className="group-layout-controls">
+                        <div className="group-control-anchor">
+                          <button
+                            aria-expanded={openControlMenu === "visible-count"}
+                            aria-haspopup="menu"
+                            aria-label={`Select split count for ${group.title}`}
+                            className="group-add-button group-control-button"
+                            data-open={String(openControlMenu === "visible-count")}
+                            onClick={() => {
+                              setOpenControlMenu((previous) =>
+                                previous === "visible-count" ? undefined : "visible-count",
+                              );
+                            }}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setOpenControlMenu((previous) =>
+                                previous === "visible-count" ? undefined : "visible-count",
+                              );
+                            }}
+                            ref={visibleCountButtonRef}
+                            title={`Select split count for ${group.title}`}
+                            type="button"
+                          >
+                            <span className="group-control-count-value">
+                              {String(group.layoutVisibleCount)}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    <button
+                      aria-label={
+                        isBrowserGroup
+                          ? `Open a browser in ${group.title}`
+                          : isChatCollection
+                            ? `Create a chat in ${group.title}`
+                          : `Create a session in ${group.title}`
+                      }
+                      className="group-add-button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        requestCreateSession();
+                      }}
+                      title={
+                        isBrowserGroup
+                          ? `Open a browser in ${group.title}`
+                          : isChatCollection
+                            ? `Create a chat in ${group.title}`
+                          : `Create a session in ${group.title}`
+                      }
+                      type="button"
+                    >
+                      <IconPlus aria-hidden="true" className="group-add-icon" size={14} stroke={2} />
+                    </button>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
@@ -860,7 +1017,7 @@ export function SessionGroupSection({
               orderedSessionIds.map((sessionId, sessionIndex) => (
                 <SortableSessionCard
                   completionFlashNonce={completionFlashNonceBySessionId?.[sessionId] ?? 0}
-                  dragDisabled={draggingDisabled}
+                  dragDisabled={areSessionDropTargetsDisabled}
                   groupId={group.groupId}
                   index={sessionIndex}
                   isSearchSelected={selectedSearchSessionId === sessionId}
@@ -872,7 +1029,7 @@ export function SessionGroupSection({
                   vscode={vscode}
                 />
               ))
-            ) : (
+            ) : shouldSelectEmptyProject ? null : (
               <div
                 className="group-empty-drop-target"
                 data-drop-position={emptyGroupDropTarget.isDropTarget ? "start" : undefined}
@@ -914,57 +1071,208 @@ export function SessionGroupSection({
                 width: `${CONTEXT_MENU_WIDTH_PX}px`,
               }}
             >
-              <button
-                className="session-context-menu-item"
-                onClick={() => {
-                  setContextMenuPosition(undefined);
-                  setIsEditing(true);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <IconPencil aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Rename
-              </button>
-              {canFullReloadGroup ? (
-                <button
-                  className="session-context-menu-item"
-                  onClick={requestFullReloadGroup}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconRefresh aria-hidden="true" className="session-context-menu-icon" size={14} />
-                  Full reload
-                </button>
-              ) : null}
-              <button
-                className="session-context-menu-item"
-                onClick={() => requestSetGroupSleeping(!allSessionsSleeping)}
-                role="menuitem"
-                type="button"
-              >
-                {allSessionsSleeping ? (
-                  <IconPlayerPlay
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                  />
+              {projectContext ? (
+                contextMenuPosition.view === "project-themes" ? (
+                  <>
+                    <button
+                      className="session-context-menu-item"
+                      onClick={openProjectRootMenu}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconChevronLeft
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Back
+                    </button>
+                    <div className="session-context-menu-divider" role="separator" />
+                    {PROJECT_CONTEXT_THEME_OPTIONS.map((theme) => (
+                      <button
+                        className="session-context-menu-item workspace-dock-theme-menu-item"
+                        data-selected={String(projectContext.theme === theme.value)}
+                        key={theme.value}
+                        onClick={() => chooseProjectTheme(theme.value)}
+                        role="menuitemradio"
+                        type="button"
+                      >
+                        <span
+                          className="workspace-dock-theme-swatch"
+                          data-workspace-theme={theme.value}
+                        />
+                        {theme.label}
+                      </button>
+                    ))}
+                  </>
                 ) : (
-                  <IconMoon aria-hidden="true" className="session-context-menu-icon" size={14} />
-                )}
-                {allSessionsSleeping ? "Wake" : "Sleep"}
-              </button>
-              <div className="session-context-menu-divider" role="separator" />
-              <button
-                className="session-context-menu-item session-context-menu-item-danger"
-                disabled={!canClose}
-                onClick={requestCloseGroup}
-                role="menuitem"
-                type="button"
-              >
-                <IconX aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Close
-              </button>
+                  <>
+                    {/*
+                     * CDXC:SidebarMode 2026-05-03-19:19
+                     * Combined mode hides the workspace rail, so the project
+                     * group's right-click menu owns the Configure, Theme,
+                     * Copy Path, and Close Project actions for that project.
+                     * Close Project parks the project in Recent Projects
+                     * without deleting saved sessions.
+                     * CDXC:WorkspaceActions 2026-05-04-08:22
+                     * Project cards must also expose direct "open project"
+                     * commands: Finder reveals the workspace folder, while
+                     * the IDE action targets the selected IDE from Settings.
+                     */}
+                    <button
+                      className="session-context-menu-item"
+                      onClick={openProjectConfig}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconSettings
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Configure
+                    </button>
+                    <button
+                      className="session-context-menu-item"
+                      onClick={openProjectThemeMenu}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconPalette
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Theme
+                      <IconChevronRight
+                        aria-hidden="true"
+                        className="session-context-menu-trailing-icon"
+                        size={14}
+                      />
+                    </button>
+                    <button
+                      className="session-context-menu-item"
+                      onClick={copyProjectPath}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconCopy
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Copy Path
+                    </button>
+                    <button
+                      className="session-context-menu-item"
+                      onClick={openProjectInFinder}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconFolderOpen
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Open in Finder
+                    </button>
+                    <button
+                      className="session-context-menu-item"
+                      onClick={openProjectInIde}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconCode
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Open in {selectedIdeLabel}
+                    </button>
+                    <div className="session-context-menu-divider" role="separator" />
+                    <button
+                      className="session-context-menu-item session-context-menu-item-danger"
+                      disabled={!projectContext.canRemoveProject}
+                      onClick={closeProject}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconTrash
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Close Project
+                    </button>
+                  </>
+                )
+              ) : (
+                <>
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => {
+                      setContextMenuPosition(undefined);
+                      setIsEditing(true);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconPencil
+                      aria-hidden="true"
+                      className="session-context-menu-icon"
+                      size={14}
+                    />
+                    Rename
+                  </button>
+                  {canFullReloadGroup ? (
+                    <button
+                      className="session-context-menu-item"
+                      onClick={requestFullReloadGroup}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconRefresh
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Full reload
+                    </button>
+                  ) : null}
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() => requestSetGroupSleeping(!allSessionsSleeping)}
+                    role="menuitem"
+                    type="button"
+                  >
+                    {allSessionsSleeping ? (
+                      <IconPlayerPlay
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                    ) : (
+                      <IconMoon
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                    )}
+                    {allSessionsSleeping ? "Wake" : "Sleep"}
+                  </button>
+                  <div className="session-context-menu-divider" role="separator" />
+                  <button
+                    className="session-context-menu-item session-context-menu-item-danger"
+                    disabled={!canClose}
+                    onClick={requestCloseGroup}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconX aria-hidden="true" className="session-context-menu-icon" size={14} />
+                    Close
+                  </button>
+                </>
+              )}
             </div>,
             document.body,
           )
