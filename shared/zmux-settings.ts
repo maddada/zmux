@@ -27,6 +27,7 @@ import {
 
 export type TerminalCursorStyle = "bar" | "block" | "underline";
 export type BrowserOpenMode = "chrome-canary" | "browser-pane";
+export type SidebarMode = "combined" | "separated";
 export type ZedOverlayTargetApp = "zed" | "zed-preview" | "vscode" | "vscode-insiders";
 const MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 0.25;
 const MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 8;
@@ -52,6 +53,7 @@ export type zmuxSettings = {
   showSidebarActions: boolean;
   showSidebarAgents: boolean;
   showSidebarGitButton: boolean;
+  sidebarMode: SidebarMode;
   sidebarTheme: SidebarThemeSetting;
   terminalCursorStyle: TerminalCursorStyle;
   terminalEngine: TerminalEngine;
@@ -104,6 +106,14 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   showSidebarActions: true,
   showSidebarAgents: true,
   showSidebarGitButton: true,
+  /**
+   * CDXC:SidebarMode 2026-05-03-10:42
+   * New installs should start in Combined mode so the native sidebar presents
+   * one project group per project and can show sessions from every project at
+   * once. Separated remains an explicit mode for the previous per-project,
+   * multi-group behavior.
+   */
+  sidebarMode: "combined",
   sidebarTheme: "auto",
   terminalCursorStyle: "bar",
   terminalEngine: "ghostty-native",
@@ -160,6 +170,14 @@ export const BROWSER_OPEN_MODE_OPTIONS: ReadonlyArray<{
   { label: "Browser Panes", value: "browser-pane" },
 ];
 
+export const SIDEBAR_MODE_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: SidebarMode;
+}> = [
+  { label: "Combined", value: "combined" },
+  { label: "Separated", value: "separated" },
+];
+
 export const ZED_OVERLAY_TARGET_APP_OPTIONS: ReadonlyArray<{
   label: string;
   value: ZedOverlayTargetApp;
@@ -174,6 +192,19 @@ export const ZED_OVERLAY_TARGET_APP_OPTIONS: ReadonlyArray<{
   { label: "VS Code", value: "vscode" },
   { label: "VS Code Insiders", value: "vscode-insiders" },
 ];
+
+export function getZedOverlayTargetAppLabel(targetApp: ZedOverlayTargetApp): string {
+  /**
+   * CDXC:WorkspaceActions 2026-05-04-08:22
+   * Project context menus must name the IDE selected in Settings before
+   * opening a workspace there, so the menu label and native command target
+   * are derived from the same persisted target value.
+   */
+  return (
+    ZED_OVERLAY_TARGET_APP_OPTIONS.find((option) => option.value === targetApp)?.label ??
+    ZED_OVERLAY_TARGET_APP_OPTIONS[0]!.label
+  );
+}
 
 export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
   const source = isRecord(candidate) ? candidate : {};
@@ -241,6 +272,15 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
       source,
       "showSidebarGitButton",
       DEFAULT_zmux_SETTINGS.showSidebarGitButton,
+    ),
+    /**
+     * CDXC:SidebarMode 2026-05-03-10:42
+     * Persist only the two supported sidebar presentation modes. Unknown or
+     * missing values normalize to Combined because that is the first-install
+     * default requested for the native app.
+     */
+    sidebarMode: normalizeSidebarMode(
+      readString(source, "sidebarMode", DEFAULT_zmux_SETTINGS.sidebarMode),
     ),
     sidebarTheme: clampSidebarThemeSetting(
       readString(source, "sidebarTheme", DEFAULT_zmux_SETTINGS.sidebarTheme),
@@ -377,6 +417,10 @@ function normalizeTerminalCursorStyle(value: string | undefined): TerminalCursor
 
 function normalizeBrowserOpenMode(value: string | undefined): BrowserOpenMode {
   return value === "browser-pane" ? "browser-pane" : DEFAULT_zmux_SETTINGS.browserOpenMode;
+}
+
+function normalizeSidebarMode(value: string | undefined): SidebarMode {
+  return value === "separated" ? "separated" : DEFAULT_zmux_SETTINGS.sidebarMode;
 }
 
 function normalizeZedOverlayTargetApp(value: string | undefined): ZedOverlayTargetApp {

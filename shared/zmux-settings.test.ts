@@ -3,6 +3,7 @@ import {
   BROWSER_OPEN_MODE_OPTIONS,
   DEFAULT_zmux_SETTINGS,
   normalizezmuxSettings,
+  SIDEBAR_MODE_OPTIONS,
   ZED_OVERLAY_TARGET_APP_OPTIONS,
 } from "./zmux-settings";
 
@@ -62,6 +63,29 @@ describe("normalizezmuxSettings", () => {
       label: "Browser Panes",
       value: "browser-pane",
     });
+  });
+
+  test("defaults new installs to Combined sidebar mode and keeps Separated selectable", () => {
+    /**
+     * CDXC:SidebarMode 2026-05-03-10:42
+     * Combined mode is the first-install default so native zmux shows one
+     * group per project across all projects. Separated remains a valid setting
+     * so the previous per-project, multi-group sidebar behavior is preserved.
+     */
+    expect(DEFAULT_zmux_SETTINGS.sidebarMode).toBe("combined");
+    expect(normalizezmuxSettings({})).toMatchObject({
+      sidebarMode: "combined",
+    });
+    expect(normalizezmuxSettings({ sidebarMode: "separated" })).toMatchObject({
+      sidebarMode: "separated",
+    });
+    expect(normalizezmuxSettings({ sidebarMode: "invalid" })).toMatchObject({
+      sidebarMode: "combined",
+    });
+    expect(SIDEBAR_MODE_OPTIONS).toEqual([
+      { label: "Combined", value: "combined" },
+      { label: "Separated", value: "separated" },
+    ]);
   });
 
   test("keeps the workspace background color setting", () => {
