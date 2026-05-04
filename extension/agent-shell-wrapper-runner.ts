@@ -29,6 +29,19 @@ type CodexWatcherHandle = {
 };
 
 const CODEX_LOG_POLL_INTERVAL_MS = 200;
+const AGENT_COLOR_ENVIRONMENT_KEYS = [
+  "ANSI_COLORS_DISABLED",
+  "CI",
+  "CLICOLOR",
+  "CLICOLOR_FORCE",
+  "COLORTERM",
+  "FORCE_COLOR",
+  "NO_COLOR",
+  "NODE_DISABLE_COLORS",
+  "TERM",
+  "TERM_PROGRAM",
+  "TERM_PROGRAM_VERSION",
+] as const;
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
@@ -111,6 +124,7 @@ async function main(): Promise<void> {
   await appendAgentShellDebugLog("wrapper.launch.spawn", {
     agent: options.agent,
     args,
+    colorEnv: readAgentColorEnvironmentSnapshot(environment),
     codexHome: environment.CODEX_HOME,
     detached: shouldSpawnAgentInDetachedGroup(),
     notifyRunnerPath: options.notifyRunnerPath,
@@ -143,6 +157,19 @@ export function createAgentEnvironment(
   };
 
   return environment;
+}
+
+function readAgentColorEnvironmentSnapshot(environment: NodeJS.ProcessEnv): Record<string, string | null> {
+  /**
+   * CDXC:AgentCliColorDiagnostics 2026-05-04-15:39
+   * Claude/Codex color output is controlled by the child process environment,
+   * not only by Ghostty rendering. Persist these exact inherited values so rare
+   * monochrome agent launches can be tied to NO_COLOR, TERM=dumb, CI, or forced
+   * color flags without changing runtime behavior.
+   */
+  return Object.fromEntries(
+    AGENT_COLOR_ENVIRONMENT_KEYS.map((key) => [key, environment[key] ?? null]),
+  ) as Record<string, string | null>;
 }
 
 function parseArgs(argv: readonly string[]): WrapperRunnerOptions {
