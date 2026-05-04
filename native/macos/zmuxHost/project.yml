@@ -61,6 +61,14 @@ targets:
     sources:
       - path: Sources/Shared
       - path: Sources/zmuxHost
+        excludes:
+          # CDXC:NativeBuild 2026-05-04-18:21: Optional CEF prototype files
+          # can exist locally without the Chromium SDK. The default WKWebView
+          # browser path must keep `bun run start` buildable by excluding those
+          # files until the CEF target has explicit headers/framework inputs.
+          - ZmuxCEFBridge.h
+          - ZmuxCEFBridge.mm
+          - ZmuxHost-Bridging-Header.h
       - path: ${GHOSTTY_ROOT}/macos/Sources/Ghostty
         excludes:
           - Surface View/SurfaceView_UIKit.swift
