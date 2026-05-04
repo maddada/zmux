@@ -97,6 +97,32 @@ function getCollapsedGroupStatusStyle(groupId: string): CSSProperties {
   } as CSSProperties;
 }
 
+/**
+ * CDXC:WorkspaceTheme 2026-05-05-02:58
+ * Combined-mode project headers consume the persisted workspace theme color
+ * through one CSS variable so folder icons, titles, and hover surfaces can
+ * share the same tint without changing chat or browser group styling.
+ */
+function getProjectThemeStyle(themeColor: string | undefined): CSSProperties | undefined {
+  if (!themeColor) {
+    return undefined;
+  }
+
+  return {
+    "--workspace-project-theme-color": themeColor,
+  } as CSSProperties;
+}
+
+function getProjectThemeSwatchStyle(themeColor: string | undefined): CSSProperties | undefined {
+  if (!themeColor) {
+    return undefined;
+  }
+
+  return {
+    "--workspace-dock-button-background": themeColor,
+  } as CSSProperties;
+}
+
 const groupSensors = [
   PointerSensor.configure({
     activationConstraints(event) {
@@ -338,6 +364,10 @@ export function SessionGroupSection({
   const groupHeaderAnchorStyle = {
     anchorName: getGroupStatusAnchorName(group.groupId),
   } as CSSProperties;
+  const projectThemeStyle = getProjectThemeStyle(projectContext?.themeColor);
+  const groupHeaderStyle = projectThemeStyle
+    ? ({ ...groupHeaderAnchorStyle, ...projectThemeStyle } as CSSProperties)
+    : groupHeaderAnchorStyle;
 
   const isGroupDropTarget =
     sortable.isDropTarget ||
@@ -737,6 +767,7 @@ export function SessionGroupSection({
         data-empty-project={String(shouldSelectEmptyProject)}
         data-session-connector={String(showSessionGroupConnector)}
         data-sidebar-group-id={group.groupId}
+        data-workspace-custom-theme={String(Boolean(projectContext?.themeColor))}
         onClick={() => {
           if (isBrowserGroup || isCollapsed) {
             return;
@@ -765,7 +796,7 @@ export function SessionGroupSection({
           className="group-head"
           data-collapsible="true"
           onClick={handleGroupHeaderClick}
-          style={groupHeaderAnchorStyle}
+          style={groupHeaderStyle}
         >
           <div className="group-title-wrap">
             {isEditing ? (
@@ -1088,10 +1119,27 @@ export function SessionGroupSection({
                       Back
                     </button>
                     <div className="session-context-menu-divider" role="separator" />
+                    {projectContext.themeColor ? (
+                      <button
+                        className="session-context-menu-item workspace-dock-theme-menu-item"
+                        data-selected="true"
+                        onClick={openProjectConfig}
+                        role="menuitemradio"
+                        type="button"
+                      >
+                        <span
+                          className="workspace-dock-theme-swatch"
+                          style={getProjectThemeSwatchStyle(projectContext.themeColor)}
+                        />
+                        Custom Color
+                      </button>
+                    ) : null}
                     {PROJECT_CONTEXT_THEME_OPTIONS.map((theme) => (
                       <button
                         className="session-context-menu-item workspace-dock-theme-menu-item"
-                        data-selected={String(projectContext.theme === theme.value)}
+                        data-selected={String(
+                          !projectContext.themeColor && projectContext.theme === theme.value,
+                        )}
                         key={theme.value}
                         onClick={() => chooseProjectTheme(theme.value)}
                         role="menuitemradio"

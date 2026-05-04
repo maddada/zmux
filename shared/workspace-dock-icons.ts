@@ -14,7 +14,18 @@ export type WorkspaceProjectConfigDraft = {
   name: string;
   projectId: string;
   theme?: SidebarTheme;
+  themeColor?: string;
 };
+
+/**
+ * CDXC:WorkspaceTheme 2026-05-05-02:58
+ * Workspaces can carry an optional custom theme color that tints their dock
+ * button and Combined-mode project header. Keep it as a validated hex color so
+ * persisted project config cannot inject arbitrary CSS values.
+ */
+export function normalizeWorkspaceThemeColor(value: unknown): string | undefined {
+  return normalizeSidebarCommandIconColor(value);
+}
 
 export function normalizeWorkspaceDockIcon(value: unknown): WorkspaceDockIcon | undefined {
   if (!value || typeof value !== "object") {

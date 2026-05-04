@@ -20,6 +20,7 @@ const state: WorkspaceBarStateMessage = {
       projectId: "project-agent-tiler",
       sessionCounts: { done: 0, running: 1, working: 0 },
       theme: "dark-green",
+      themeColor: "#d17b2f",
       title: "agent-tiler",
     },
   ],
@@ -90,7 +91,9 @@ export const Default: Story = {
             setCurrentState((previous) => ({
               ...previous,
               projects: previous.projects.map((project) =>
-                project.projectId === projectId ? { ...project, theme } : project,
+                project.projectId === projectId
+                  ? { ...project, theme, themeColor: undefined }
+                  : project,
               ),
             }));
           },

@@ -9,10 +9,13 @@ import {
 import type { SidebarTheme } from "../shared/session-grid-contract";
 import {
   normalizeWorkspaceDockIconDataUrl,
+  normalizeWorkspaceThemeColor,
   type WorkspaceDockIcon,
   type WorkspaceProjectConfigDraft,
 } from "../shared/workspace-dock-icons";
 import { CommandIconPicker } from "./command-icon-picker";
+
+const DEFAULT_WORKSPACE_THEME_COLOR = "#2f6feb";
 
 export type WorkspaceConfigModalProps = {
   draft: WorkspaceProjectConfigDraft;
@@ -42,6 +45,10 @@ export function WorkspaceConfigModal({
   );
   const [name, setName] = useState(draft.name);
   const [theme, setTheme] = useState(draft.theme ?? themeOptions[0]?.value ?? "dark-blue");
+  const [themeColor, setThemeColor] = useState(
+    draft.themeColor ?? DEFAULT_WORKSPACE_THEME_COLOR,
+  );
+  const [usesCustomThemeColor, setUsesCustomThemeColor] = useState(Boolean(draft.themeColor));
   const descriptionId = useId();
   const titleId = useId();
 
@@ -59,6 +66,8 @@ export function WorkspaceConfigModal({
     );
     setName(draft.name);
     setTheme(draft.theme ?? themeOptions[0]?.value ?? "dark-blue");
+    setThemeColor(draft.themeColor ?? DEFAULT_WORKSPACE_THEME_COLOR);
+    setUsesCustomThemeColor(Boolean(draft.themeColor));
   }, [draft, isOpen, themeOptions]);
 
   useEffect(() => {
@@ -204,6 +213,51 @@ export function WorkspaceConfigModal({
               ))}
             </select>
           </label>
+          <div className="command-config-field workspace-theme-color-field">
+            <span className="command-config-label">Theme Color</span>
+            {/*
+             * CDXC:WorkspaceTheme 2026-05-05-02:58
+             * Custom theme color is opt-in so existing preset themes stay the
+             * default. When enabled, the validated hex color tints both the
+             * workspace dock button and Combined-mode project group header.
+             */}
+            <label className="command-config-toggle workspace-theme-color-toggle">
+              <input
+                checked={usesCustomThemeColor}
+                className="command-config-checkbox"
+                onChange={(event) => setUsesCustomThemeColor(event.currentTarget.checked)}
+                type="checkbox"
+              />
+              <span className="command-config-toggle-copy">Use custom theme color</span>
+            </label>
+            <div className="command-icon-color-row workspace-theme-color-row">
+              <input
+                aria-label="Workspace theme color"
+                className="command-icon-color-swatch"
+                disabled={!usesCustomThemeColor}
+                onChange={(event) => {
+                  setThemeColor(
+                    normalizeWorkspaceThemeColor(event.currentTarget.value) ??
+                      DEFAULT_WORKSPACE_THEME_COLOR,
+                  );
+                }}
+                type="color"
+                value={themeColor}
+              />
+              <input
+                aria-label="Workspace theme color hex value"
+                className="group-title-input command-config-input command-icon-color-text"
+                disabled={!usesCustomThemeColor}
+                onChange={(event) => {
+                  const nextColor = normalizeWorkspaceThemeColor(event.currentTarget.value);
+                  if (nextColor) {
+                    setThemeColor(nextColor);
+                  }
+                }}
+                value={themeColor}
+              />
+            </div>
+          </div>
         </div>
         <div className="confirm-modal-actions">
           <button className="secondary confirm-modal-button" onClick={onCancel} type="button">
@@ -213,7 +267,15 @@ export function WorkspaceConfigModal({
             className="primary confirm-modal-button"
             disabled={trimmedName.length === 0}
             onClick={() =>
-              onSave({ icon: draftIcon, name: trimmedName, projectId: draft.projectId, theme })
+              onSave({
+                icon: draftIcon,
+                name: trimmedName,
+                projectId: draft.projectId,
+                theme,
+                themeColor: usesCustomThemeColor
+                  ? (normalizeWorkspaceThemeColor(themeColor) ?? DEFAULT_WORKSPACE_THEME_COLOR)
+                  : undefined,
+              })
             }
             type="button"
           >

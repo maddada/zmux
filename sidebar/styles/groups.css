@@ -106,6 +106,27 @@
   background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
 }
 
+/* CDXC:WorkspaceTheme 2026-05-05-02:58: Custom workspace theme colors tint
+   Combined-mode project headers only. The synthetic Chats group keeps its
+   normal chat styling because it has no project theme color. */
+.group[data-workspace-custom-theme="true"] .group-head:hover::before,
+.group[data-workspace-custom-theme="true"] .group-head:has(:focus-visible)::before,
+.group[data-workspace-custom-theme="true"]:has(.group-session-connector-button:hover)
+  .group-head::before,
+.group[data-workspace-custom-theme="true"]:has(.group-session-connector-button:focus-visible)
+  .group-head::before {
+  background: color-mix(in srgb, var(--workspace-project-theme-color) 12%, transparent);
+}
+
+.group[data-workspace-custom-theme="true"] .group-collapse-button,
+.group[data-workspace-custom-theme="true"] .group-title {
+  color: color-mix(
+    in srgb,
+    var(--workspace-project-theme-color) 74%,
+    var(--app-foreground) 26%
+  );
+}
+
 .group[data-session-connector="true"][data-collapsed="false"] .group-head::after {
   background: #444c56;
   border-radius: 999px;
