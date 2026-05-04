@@ -249,6 +249,180 @@
   }
 }
 
+/*
+ * CDXC:SidebarActions 2026-05-05-02:47
+ * The Actions section hosts three compact React split dropdowns under the
+ * sidebar header. The left segment runs the promoted option; the chevron opens
+ * a React menu aligned under the trigger, matching the native-looking segmented
+ * controls without depending on AppKit titlebar buttons.
+ */
+.quick-actions-row {
+  display: grid;
+  gap: calc(8px * var(--sidebar-density-scale));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.quick-action-split-button {
+  display: grid;
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr) calc(30px * var(--sidebar-density-scale));
+  min-width: 0;
+}
+
+.quick-action-main-button,
+.quick-action-toggle-button {
+  align-items: center;
+  background: var(--sidebar-tile-background);
+  border-color: var(--sidebar-tile-border);
+  color: var(--sidebar-tile-foreground);
+  display: inline-flex;
+  min-height: calc(38px * var(--sidebar-density-scale));
+  min-width: 0;
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+}
+
+.quick-action-main-button:hover,
+.quick-action-main-button:focus-visible,
+.quick-action-toggle-button:hover,
+.quick-action-toggle-button:focus-visible {
+  background: var(--sidebar-tile-hover-background);
+  border-color: var(--sidebar-tile-hover-border);
+  outline: none;
+}
+
+.quick-action-main-button {
+  border-radius: calc(12px * var(--sidebar-density-scale)) 0 0
+    calc(12px * var(--sidebar-density-scale));
+  justify-content: center;
+  padding: 0 calc(8px * var(--sidebar-density-scale));
+  width: 100%;
+}
+
+.quick-action-toggle-button {
+  border-left-width: 0;
+  border-radius: 0 calc(12px * var(--sidebar-density-scale))
+    calc(12px * var(--sidebar-density-scale)) 0;
+  justify-content: center;
+  padding: 0;
+}
+
+.quick-action-main-icon-shell,
+.quick-action-toggle-icon,
+.quick-action-icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.quick-action-agent-icon {
+  height: calc(18px * var(--sidebar-density-scale));
+  object-fit: contain;
+  width: calc(18px * var(--sidebar-density-scale));
+}
+
+body[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="codex"],
+body[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="opencode"],
+body[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="t3"],
+body[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="browser"],
+.zmux-root[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="codex"],
+.zmux-root[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="opencode"],
+.zmux-root[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="t3"],
+.zmux-root[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="browser"],
+body[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="codex"],
+body[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="opencode"],
+body[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="t3"],
+body[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="browser"],
+.zmux-root[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="codex"],
+.zmux-root[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="opencode"],
+.zmux-root[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="t3"],
+.zmux-root[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="browser"] {
+  filter: brightness(0) invert(1);
+}
+
+.quick-action-menu {
+  background: color-mix(in srgb, var(--app-card) 96%, black 4%);
+  border: 1px solid color-mix(in srgb, var(--app-border) 94%, transparent);
+  border-radius: calc(14px * var(--sidebar-density-scale));
+  box-shadow: 0 16px 40px color-mix(in srgb, black 28%, transparent);
+  display: grid;
+  gap: calc(4px * var(--sidebar-density-scale));
+  max-height: calc(100vh - 24px);
+  max-width: calc(100vw - 24px);
+  min-width: 0;
+  overflow: auto;
+  padding: calc(8px * var(--sidebar-density-scale));
+  position: fixed;
+  z-index: 44;
+}
+
+.quick-action-menu-label {
+  color: color-mix(in srgb, var(--app-muted) 80%, var(--app-foreground) 20%);
+  font-size: calc(11px * var(--sidebar-density-scale));
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: calc(4px * var(--sidebar-density-scale)) calc(8px * var(--sidebar-density-scale))
+    calc(2px * var(--sidebar-density-scale));
+  text-transform: lowercase;
+}
+
+.quick-action-menu-divider {
+  background: color-mix(in srgb, var(--app-border) 88%, transparent);
+  block-size: 1px;
+  inline-size: 100%;
+  margin: calc(3px * var(--sidebar-density-scale)) 0;
+}
+
+.quick-action-menu-item {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: calc(10px * var(--sidebar-density-scale));
+  color: color-mix(in srgb, var(--app-foreground) 92%, var(--app-muted) 8%);
+  display: inline-flex;
+  gap: calc(10px * var(--sidebar-density-scale));
+  justify-content: flex-start;
+  min-height: calc(36px * var(--sidebar-density-scale));
+  padding: 0 calc(10px * var(--sidebar-density-scale));
+  text-align: left;
+  width: 100%;
+}
+
+.quick-action-menu-item:hover,
+.quick-action-menu-item:focus-visible,
+.quick-action-menu-item[data-selected="true"] {
+  background: color-mix(in srgb, var(--app-button-background) 14%, var(--app-card-active) 86%);
+  outline: none;
+}
+
+.quick-action-menu-item-icon,
+.quick-action-menu-item-check {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+}
+
+.quick-action-menu-item-label {
+  flex: 1 1 auto;
+  font-size: calc(12px * var(--sidebar-density-scale));
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-action-menu-item-check {
+  color: color-mix(in srgb, var(--app-muted) 82%, var(--app-foreground) 18%);
+}
+
+.quick-action-menu-empty {
+  color: color-mix(in srgb, var(--app-muted) 82%, var(--app-foreground) 18%);
+  font-size: calc(11px * var(--sidebar-density-scale));
+  font-weight: 600;
+  padding: calc(9px * var(--sidebar-density-scale)) calc(10px * var(--sidebar-density-scale));
+}
+
 .agents-grid,
 .commands-grid {
   display: grid;

@@ -116,6 +116,7 @@ export type SidebarSessionGroup = {
   projectContext?: {
     canRemoveProject: boolean;
     theme?: SidebarTheme;
+    themeColor?: string;
   };
   sessions: SidebarSessionItem[];
   title: string;
@@ -144,6 +145,7 @@ export type SidebarRecentProject = {
   recentClosedAt?: string;
   sessionCount: number;
   theme?: SidebarTheme;
+  themeColor?: string;
   title: string;
 };
 
@@ -511,17 +513,12 @@ export type SidebarToExtensionMessage =
     }
   | {
       /**
-       * CDXC:NativeWindowChrome 2026-05-04-16:24
-       * Title-bar Open In menus render from the full-window React modal host,
-       * which knows the active project but not a sidebar group id. Route these
-       * commands through the native sidebar so stored workspace paths remain
-       * trusted on the app side instead of being accepted from menu DOM.
+       * CDXC:SidebarActions 2026-05-05-02:47
+       * Sidebar Open In dropdowns know the active project but not a group id.
+       * Route these commands through the native sidebar so stored workspace
+       * paths remain trusted on the app side instead of being accepted from DOM.
        */
       type: "openActiveWorkspaceProjectInFinder" | "openActiveWorkspaceProjectInIde";
-    }
-  | {
-      target: "finder" | "ide";
-      type: "setTitlebarPrimaryOpenInTarget";
     }
   | {
       type: "setWorkspaceProjectThemeForGroup";
@@ -741,6 +738,7 @@ export type SidebarToExtensionMessage =
       name: string;
       projectId: string;
       theme?: SidebarTheme;
+      themeColor?: string;
     }
   | {
       type: "deleteSidebarCommand";

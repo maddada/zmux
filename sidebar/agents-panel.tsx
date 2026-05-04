@@ -2,15 +2,20 @@ import { Tooltip } from "@base-ui/react/tooltip";
 import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
 import { isSortableOperation, useSortable } from "@dnd-kit/react/sortable";
 import {
+  IconCheck,
+  IconChevronDown,
   IconCodeDots,
   IconFlare,
+  IconFolderOpen,
   IconLoader2,
   IconPencil,
+  IconPlayerPlay,
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import {
+  forwardRef,
   useEffect,
   useMemo,
   useRef,
@@ -20,8 +25,11 @@ import {
 } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { SidebarAgentButton } from "../shared/sidebar-agents";
+import type { SidebarCommandButton } from "../shared/sidebar-commands";
+import { DEFAULT_zmux_SETTINGS, getZedOverlayTargetAppLabel } from "../shared/zmux-settings";
 import { AGENT_LOGOS } from "./agent-logos";
 import { getSidebarButtonGridColumnCount } from "./button-grid";
+import { SidebarCommandIconGlyph } from "./sidebar-command-icon";
 import { postSidebarOrderReproLog } from "./sidebar-order-repro-log";
 import { SectionHeader } from "./section-header";
 import { useSidebarStore } from "./sidebar-store";
@@ -34,7 +42,12 @@ import type { WebviewApi } from "./webview-api";
 const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 180;
 const CONTEXT_MENU_HEIGHT_PX = 166;
+const QUICK_ACTION_MENU_MARGIN_PX = 12;
+const QUICK_ACTION_MENU_WIDTH_PX = 220;
 const REORDER_SYNC_TIMEOUT_MS = 3_000;
+const PRIMARY_AGENT_STORAGE_KEY = "zmux-sidebar-primary-agent";
+const PRIMARY_COMMAND_STORAGE_KEY = "zmux-sidebar-primary-command";
+const PRIMARY_OPEN_IN_STORAGE_KEY = "zmux-sidebar-primary-open-in";
 
 type AgentsPanelProps = {
   createRequestId: number;
@@ -52,6 +65,13 @@ type ContextMenuPosition = {
 
 type AgentMenuState = {
   agent: SidebarAgentButton;
+  position: ContextMenuPosition;
+};
+
+type QuickActionMenuKind = "agent" | "command" | "openIn";
+
+type QuickActionMenuState = {
+  kind: QuickActionMenuKind;
   position: ContextMenuPosition;
 };
 
@@ -120,14 +140,27 @@ export function AgentsPanel({
   titlebarActions,
   vscode,
 }: AgentsPanelProps) {
-  const { agents, pendingAgentIds } = useSidebarStore(
+  const { agents, commands, pendingAgentIds, selectedIdeTarget } = useSidebarStore(
     useShallow((state) => ({
       agents: state.hud.agents,
+      commands: state.hud.commands,
       pendingAgentIds: state.hud.pendingAgentIds,
+      selectedIdeTarget:
+        state.hud.settings?.zedOverlayTargetApp ?? DEFAULT_zmux_SETTINGS.zedOverlayTargetApp,
     })),
   );
   const latestAgentOrderSyncResult = useSidebarStore((state) => state.latestAgentOrderSyncResult);
   const [contextMenu, setContextMenu] = useState<AgentMenuState>();
+  const [quickActionMenu, setQuickActionMenu] = useState<QuickActionMenuState>();
+  const [primaryAgentId, setPrimaryAgentId] = useState(
+    () => localStorage.getItem(PRIMARY_AGENT_STORAGE_KEY)?.trim() || undefined,
+  );
+  const [primaryCommandId, setPrimaryCommandId] = useState(
+    () => localStorage.getItem(PRIMARY_COMMAND_STORAGE_KEY)?.trim() || undefined,
+  );
+  const [primaryOpenInTarget, setPrimaryOpenInTarget] = useState<"finder" | "ide">(() =>
+    localStorage.getItem(PRIMARY_OPEN_IN_STORAGE_KEY)?.trim() === "finder" ? "finder" : "ide",
+  );
   const [draftAgentIds, setDraftAgentIds] = useState<string[] | undefined>();
   const gridRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -137,7 +170,7 @@ export function AgentsPanel({
   const { collapsibleStyle, contentRef } = useCollapsibleHeight<HTMLDivElement>();
 
   useEffect(() => {
-    if (!contextMenu) {
+    if (!contextMenu && !quickActionMenu) {
       return;
     }
 
@@ -147,6 +180,7 @@ export function AgentsPanel({
       }
 
       setContextMenu(undefined);
+      setQuickActionMenu(undefined);
     };
     const handleContextMenu = (event: MouseEvent) => {
       if (isNode(event.target) && menuRef.current?.contains(event.target)) {
@@ -154,18 +188,22 @@ export function AgentsPanel({
       }
 
       setContextMenu(undefined);
+      setQuickActionMenu(undefined);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setContextMenu(undefined);
+        setQuickActionMenu(undefined);
       }
     };
     const handleBlur = () => {
       setContextMenu(undefined);
+      setQuickActionMenu(undefined);
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState !== "visible") {
         setContextMenu(undefined);
+        setQuickActionMenu(undefined);
       }
     };
 
@@ -182,7 +220,7 @@ export function AgentsPanel({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [contextMenu]);
+  }, [contextMenu, quickActionMenu]);
 
   const openAgentEditor = (agent: SidebarAgentButton) => {
     const draft: AgentConfigDraft = {
@@ -202,6 +240,20 @@ export function AgentsPanel({
   const openCreateAgentEditor = () => {
     const draft = createAgentDraft();
     openAppModal({ agentDraft: draft, modal: "agentConfig", type: "open" });
+  };
+
+  const openCreateCommandEditor = () => {
+    openAppModal({
+      commandDraft: {
+        actionType: "terminal",
+        closeTerminalOnExit: false,
+        name: "",
+        playCompletionSound: false,
+      },
+      lockedActionType: "terminal",
+      modal: "commandConfig",
+      type: "open",
+    });
   };
 
   useEffect(() => {
@@ -278,6 +330,85 @@ export function AgentsPanel({
   }, [agents, draftAgentIds]);
   const gridColumnCount = getSidebarButtonGridColumnCount(orderedAgents.length);
   const shouldShowEmptyState = orderedAgents.length === 0;
+  const runnableCommands = commands.filter(isRunnableSidebarCommand);
+  const primaryAgent = resolvePrimaryAgent(orderedAgents, primaryAgentId);
+  const primaryCommand = resolvePrimaryCommand(runnableCommands, primaryCommandId);
+  const selectedIdeLabel = getZedOverlayTargetAppLabel(selectedIdeTarget);
+
+  const persistPrimaryAgent = (agentId: string) => {
+    setPrimaryAgentId(agentId);
+    localStorage.setItem(PRIMARY_AGENT_STORAGE_KEY, agentId);
+  };
+
+  const persistPrimaryCommand = (commandId: string) => {
+    setPrimaryCommandId(commandId);
+    localStorage.setItem(PRIMARY_COMMAND_STORAGE_KEY, commandId);
+  };
+
+  const persistPrimaryOpenIn = (target: "finder" | "ide") => {
+    setPrimaryOpenInTarget(target);
+    localStorage.setItem(PRIMARY_OPEN_IN_STORAGE_KEY, target);
+  };
+
+  const runAgent = (agent: SidebarAgentButton | undefined) => {
+    if (!agent) {
+      openCreateAgentEditor();
+      return;
+    }
+    persistPrimaryAgent(agent.agentId);
+    if (!agent.command) {
+      openAgentEditor(agent);
+      return;
+    }
+    vscode.postMessage({
+      agentId: agent.agentId,
+      type: "runSidebarAgent",
+    });
+  };
+
+  const runCommand = (command: SidebarCommandButton | undefined) => {
+    if (!command) {
+      openCreateCommandEditor();
+      return;
+    }
+    persistPrimaryCommand(command.commandId);
+    vscode.postMessage({
+      commandId: command.commandId,
+      type: "runSidebarCommand",
+    });
+  };
+
+  const runOpenIn = (target: "finder" | "ide") => {
+    persistPrimaryOpenIn(target);
+    vscode.postMessage({
+      type:
+        target === "finder" ? "openActiveWorkspaceProjectInFinder" : "openActiveWorkspaceProjectInIde",
+    });
+  };
+
+  const openQuickActionMenu = (
+    kind: QuickActionMenuKind,
+    event: ReactMouseEvent<HTMLButtonElement>,
+  ) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setContextMenu(undefined);
+    setQuickActionMenu({
+      kind,
+      position: {
+        x: Math.max(
+          QUICK_ACTION_MENU_MARGIN_PX,
+          Math.min(
+            rect.right - QUICK_ACTION_MENU_WIDTH_PX,
+            window.innerWidth - QUICK_ACTION_MENU_WIDTH_PX - QUICK_ACTION_MENU_MARGIN_PX,
+          ),
+        ),
+        y: Math.max(
+          QUICK_ACTION_MENU_MARGIN_PX,
+          Math.min(rect.bottom + 8, window.innerHeight - QUICK_ACTION_MENU_MARGIN_PX),
+        ),
+      },
+    });
+  };
 
   useEffect(() => {
     const payload = {
@@ -443,7 +574,7 @@ export function AgentsPanel({
             isCollapsed={isCollapsed}
             isCollapsible
             onToggleCollapsed={() => onToggleCollapsed(!isCollapsed)}
-            title="Agents"
+            title="Actions"
           />
           <div
             aria-hidden={isCollapsed}
@@ -456,6 +587,47 @@ export function AgentsPanel({
               data-empty-space-blocking="true"
               ref={contentRef}
             >
+              {/*
+               * CDXC:SidebarActions 2026-05-05-02:47
+               * Agents moved from a standalone "Agents" title to an Actions
+               * surface with three React-owned split dropdowns: agent, project
+               * action, and Open In. Selecting a dropdown option immediately
+               * runs it and promotes it to the primary left-side action.
+               */}
+              <div className="quick-actions-row" data-empty-space-blocking="true">
+                <QuickActionSplitButton
+                  ariaLabel={primaryAgent ? `Launch ${primaryAgent.name}` : "Choose agent"}
+                  icon={<AgentQuickActionIcon agent={primaryAgent} />}
+                  menuLabel="Choose agent"
+                  onPrimaryClick={() => runAgent(primaryAgent)}
+                  onToggleClick={(event) => openQuickActionMenu("agent", event)}
+                  title={primaryAgent?.name ?? "Agent"}
+                />
+                <QuickActionSplitButton
+                  ariaLabel={
+                    primaryCommand ? `Run ${quickCommandLabel(primaryCommand)}` : "Choose action"
+                  }
+                  icon={<CommandQuickActionIcon command={primaryCommand} />}
+                  menuLabel="Choose action"
+                  onPrimaryClick={() => runCommand(primaryCommand)}
+                  onToggleClick={(event) => openQuickActionMenu("command", event)}
+                  title={primaryCommand ? quickCommandLabel(primaryCommand) : "Action"}
+                />
+                <QuickActionSplitButton
+                  ariaLabel={`Open in ${primaryOpenInTarget === "finder" ? "Finder" : selectedIdeLabel}`}
+                  icon={
+                    primaryOpenInTarget === "finder" ? (
+                      <IconFolderOpen aria-hidden="true" size={18} stroke={1.8} />
+                    ) : (
+                      <IconCodeDots aria-hidden="true" size={18} stroke={1.8} />
+                    )
+                  }
+                  menuLabel="Choose open target"
+                  onPrimaryClick={() => runOpenIn(primaryOpenInTarget)}
+                  onToggleClick={(event) => openQuickActionMenu("openIn", event)}
+                  title={primaryOpenInTarget === "finder" ? "Finder" : selectedIdeLabel}
+                />
+              </div>
               {shouldShowEmptyState ? (
                 <button
                   className="sidebar-empty-create-button"
@@ -479,7 +651,9 @@ export function AgentsPanel({
                     <div
                       className="agents-grid"
                       ref={gridRef}
-                      style={{ gridTemplateColumns: `repeat(${gridColumnCount}, minmax(0, 1fr))` }}
+                      style={{
+                        gridTemplateColumns: `repeat(${gridColumnCount}, minmax(0, 1fr))`,
+                      }}
                     >
                       {orderedAgents.map((agent, index) => (
                         <SortableAgentButton
@@ -497,15 +671,7 @@ export function AgentsPanel({
                             });
                           }}
                           onRun={() => {
-                            if (!agent.command) {
-                              openAgentEditor(agent);
-                              return;
-                            }
-
-                            vscode.postMessage({
-                              agentId: agent.agentId,
-                              type: "runSidebarAgent",
-                            });
+                            runAgent(agent);
                           }}
                         />
                       ))}
@@ -578,8 +744,295 @@ export function AgentsPanel({
             document.body,
           )
         : null}
+      {quickActionMenu
+        ? createPortal(
+            <QuickActionMenu
+              agents={orderedAgents}
+              commands={runnableCommands}
+              menu={quickActionMenu}
+              onAddAgent={() => {
+                setQuickActionMenu(undefined);
+                openCreateAgentEditor();
+              }}
+              onAddCommand={() => {
+                setQuickActionMenu(undefined);
+                openCreateCommandEditor();
+              }}
+              onRunAgent={(agent) => {
+                setQuickActionMenu(undefined);
+                runAgent(agent);
+              }}
+              onRunCommand={(command) => {
+                setQuickActionMenu(undefined);
+                runCommand(command);
+              }}
+              onRunOpenIn={(target) => {
+                setQuickActionMenu(undefined);
+                runOpenIn(target);
+              }}
+              primaryAgentId={primaryAgent?.agentId}
+              primaryCommandId={primaryCommand?.commandId}
+              primaryOpenInTarget={primaryOpenInTarget}
+              ref={menuRef}
+              selectedIdeLabel={selectedIdeLabel}
+            />,
+            document.body,
+          )
+        : null}
     </>
   );
+}
+
+type QuickActionSplitButtonProps = {
+  ariaLabel: string;
+  icon: ReactNode;
+  menuLabel: string;
+  onPrimaryClick: () => void;
+  onToggleClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  title: string;
+};
+
+function QuickActionSplitButton({
+  ariaLabel,
+  icon,
+  menuLabel,
+  onPrimaryClick,
+  onToggleClick,
+  title,
+}: QuickActionSplitButtonProps) {
+  return (
+    <div className="quick-action-split-button">
+      <button
+        aria-label={ariaLabel}
+        className="quick-action-main-button"
+        onClick={onPrimaryClick}
+        title={title}
+        type="button"
+      >
+        <span className="quick-action-main-icon-shell">{icon}</span>
+      </button>
+      <button
+        aria-label={menuLabel}
+        className="quick-action-toggle-button"
+        onClick={onToggleClick}
+        title={menuLabel}
+        type="button"
+      >
+        <IconChevronDown aria-hidden="true" className="quick-action-toggle-icon" size={16} />
+      </button>
+    </div>
+  );
+}
+
+type QuickActionMenuProps = {
+  agents: readonly SidebarAgentButton[];
+  commands: readonly SidebarCommandButton[];
+  menu: QuickActionMenuState;
+  onAddAgent: () => void;
+  onAddCommand: () => void;
+  onRunAgent: (agent: SidebarAgentButton) => void;
+  onRunCommand: (command: SidebarCommandButton) => void;
+  onRunOpenIn: (target: "finder" | "ide") => void;
+  primaryAgentId: string | undefined;
+  primaryCommandId: string | undefined;
+  primaryOpenInTarget: "finder" | "ide";
+  selectedIdeLabel: string;
+};
+
+const QuickActionMenu = forwardRef<HTMLDivElement, QuickActionMenuProps>(function QuickActionMenu(
+  {
+    agents,
+    commands,
+    menu,
+    onAddAgent,
+    onAddCommand,
+    onRunAgent,
+    onRunCommand,
+    onRunOpenIn,
+    primaryAgentId,
+    primaryCommandId,
+    primaryOpenInTarget,
+    selectedIdeLabel,
+  },
+  ref,
+) {
+  return (
+    <div
+      className="quick-action-menu"
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      ref={ref}
+      role="menu"
+      style={{
+        left: `${menu.position.x}px`,
+        top: `${menu.position.y}px`,
+        width: `${QUICK_ACTION_MENU_WIDTH_PX}px`,
+      }}
+    >
+      {menu.kind === "agent" ? (
+        <>
+          <div className="quick-action-menu-label">agents</div>
+          {agents.length > 0 ? (
+            agents.map((agent) => (
+              <QuickActionMenuItem
+                icon={<AgentQuickActionIcon agent={agent} />}
+                isSelected={agent.agentId === primaryAgentId}
+                key={agent.agentId}
+                label={agent.name}
+                onClick={() => onRunAgent(agent)}
+              />
+            ))
+          ) : (
+            <div className="quick-action-menu-empty">No agents configured</div>
+          )}
+          <div className="quick-action-menu-divider" role="separator" />
+          <QuickActionMenuItem
+            icon={<IconPlus aria-hidden="true" size={18} stroke={1.8} />}
+            label="Add agent"
+            onClick={onAddAgent}
+          />
+        </>
+      ) : null}
+      {menu.kind === "command" ? (
+        <>
+          <div className="quick-action-menu-label">actions</div>
+          {commands.length > 0 ? (
+            commands.map((command) => (
+              <QuickActionMenuItem
+                icon={<CommandQuickActionIcon command={command} />}
+                isSelected={command.commandId === primaryCommandId}
+                key={command.commandId}
+                label={quickCommandLabel(command)}
+                onClick={() => onRunCommand(command)}
+              />
+            ))
+          ) : (
+            <div className="quick-action-menu-empty">No actions configured</div>
+          )}
+          <div className="quick-action-menu-divider" role="separator" />
+          <QuickActionMenuItem
+            icon={<IconPlus aria-hidden="true" size={18} stroke={1.8} />}
+            label="Add action"
+            onClick={onAddCommand}
+          />
+        </>
+      ) : null}
+      {menu.kind === "openIn" ? (
+        <>
+          <div className="quick-action-menu-label">open in</div>
+          <QuickActionMenuItem
+            icon={<IconCodeDots aria-hidden="true" size={18} stroke={1.8} />}
+            isSelected={primaryOpenInTarget === "ide"}
+            label={selectedIdeLabel}
+            onClick={() => onRunOpenIn("ide")}
+          />
+          <QuickActionMenuItem
+            icon={<IconFolderOpen aria-hidden="true" size={18} stroke={1.8} />}
+            isSelected={primaryOpenInTarget === "finder"}
+            label="Finder"
+            onClick={() => onRunOpenIn("finder")}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+});
+
+type QuickActionMenuItemProps = {
+  icon: ReactNode;
+  isSelected?: boolean;
+  label: string;
+  onClick: () => void;
+};
+
+function QuickActionMenuItem({
+  icon,
+  isSelected = false,
+  label,
+  onClick,
+}: QuickActionMenuItemProps) {
+  return (
+    <button
+      className="quick-action-menu-item"
+      data-selected={String(isSelected)}
+      onClick={onClick}
+      role="menuitem"
+      type="button"
+    >
+      <span aria-hidden="true" className="quick-action-menu-item-icon">
+        {icon}
+      </span>
+      <span className="quick-action-menu-item-label">{label}</span>
+      {isSelected ? (
+        <IconCheck
+          aria-hidden="true"
+          className="quick-action-menu-item-check"
+          size={18}
+          stroke={1.9}
+        />
+      ) : null}
+    </button>
+  );
+}
+
+function AgentQuickActionIcon({ agent }: { agent: SidebarAgentButton | undefined }) {
+  if (agent?.icon) {
+    return (
+      <img
+        alt=""
+        aria-hidden="true"
+        className="quick-action-icon quick-action-agent-icon"
+        data-agent-icon={agent.icon}
+        draggable={false}
+        src={AGENT_LOGOS[agent.icon]}
+      />
+    );
+  }
+
+  return <IconCodeDots aria-hidden="true" className="quick-action-icon" size={18} stroke={1.8} />;
+}
+
+function CommandQuickActionIcon({ command }: { command: SidebarCommandButton | undefined }) {
+  if (command?.icon) {
+    return (
+      <SidebarCommandIconGlyph
+        className="quick-action-icon"
+        color={command.iconColor}
+        icon={command.icon}
+        size={18}
+        stroke={1.8}
+      />
+    );
+  }
+
+  return <IconPlayerPlay aria-hidden="true" className="quick-action-icon" size={18} stroke={1.8} />;
+}
+
+function isRunnableSidebarCommand(command: SidebarCommandButton): boolean {
+  return command.actionType === "browser"
+    ? Boolean(command.url?.trim())
+    : Boolean(command.command?.trim());
+}
+
+function resolvePrimaryAgent(
+  agents: readonly SidebarAgentButton[],
+  primaryAgentId: string | undefined,
+): SidebarAgentButton | undefined {
+  return agents.find((agent) => agent.agentId === primaryAgentId) ?? agents[0];
+}
+
+function resolvePrimaryCommand(
+  commands: readonly SidebarCommandButton[],
+  primaryCommandId: string | undefined,
+): SidebarCommandButton | undefined {
+  return commands.find((command) => command.commandId === primaryCommandId) ?? commands[0];
+}
+
+function quickCommandLabel(command: SidebarCommandButton): string {
+  return command.name.trim() || command.commandId;
 }
 
 type SortableAgentButtonProps = {

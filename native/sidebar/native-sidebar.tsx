@@ -15,6 +15,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -26,17 +27,17 @@ import {
   explainFirstPromptAutoRenameDecision,
   resolveFirstPromptAutoRenameStrategy,
   type FirstPromptAutoRenameStrategy,
-} from "../../extension/first-prompt-session-title";
+} from "../../shared/first-prompt-session-title";
 import {
   DEFAULT_FIND_PREVIOUS_SESSION_PROMPT_TEMPLATE,
   renderFindPreviousSessionPrompt,
-} from "../../extension/find-previous-session-prompt";
+} from "../../shared/find-previous-session-prompt";
 import {
   acknowledgeTitleDerivedSessionActivity,
   getTitleDerivedSessionActivityFromTransition,
   haveSameTitleDerivedSessionActivity,
   type TitleDerivedSessionActivity,
-} from "../../extension/session-title-activity";
+} from "../../shared/session-title-activity";
 import {
   clampVisibleSessionCount,
   createAgentSessionDefaultTitle,
@@ -154,6 +155,7 @@ import {
 import {
   normalizeWorkspaceDockIcon,
   normalizeWorkspaceDockIconDataUrl,
+  normalizeWorkspaceThemeColor,
   type WorkspaceDockIcon,
   type WorkspaceProjectConfigDraft,
 } from "../../shared/workspace-dock-icons";
@@ -311,6 +313,7 @@ export type WorkspaceBarProject = {
     working: number;
   };
   theme?: SidebarTheme;
+  themeColor?: string;
   title: string;
 };
 
@@ -332,15 +335,6 @@ type NativeTerminalLayout =
 
 type NativeHostEvent =
   | { foregroundPid?: number; sessionId: string; ttyName?: string; type: "terminalReady" }
-  | {
-      action: "menu" | "primary";
-      height?: number;
-      kind: "actions" | "openIn";
-      left?: number;
-      top?: number;
-      type: "titleBarControlClicked";
-      width?: number;
-    }
   | { sessionId: string; title: string; type: "terminalTitleChanged" }
   | { faviconDataUrl?: string; sessionId: string; type: "browserFaviconChanged" }
   | { sessionId: string; type: "browserUrlChanged"; url: string }
@@ -460,8 +454,6 @@ const AGENT_ORDER_STORAGE_KEY = "zmux-native-agent-order";
 const COMMANDS_STORAGE_KEY = "zmux-native-commands";
 const COMMAND_ORDER_STORAGE_KEY = "zmux-native-command-order";
 const DELETED_DEFAULT_COMMANDS_STORAGE_KEY = "zmux-native-deleted-default-commands";
-const TITLEBAR_PRIMARY_ACTION_STORAGE_KEY = "zmux-native-titlebar-primary-action";
-const TITLEBAR_PRIMARY_OPEN_IN_STORAGE_KEY = "zmux-native-titlebar-primary-open-in";
 const PROJECTS_STORAGE_KEY = "zmux-native-projects";
 const SCRATCH_PAD_STORAGE_KEY = "zmux-native-scratch-pad";
 const PINNED_PROMPTS_STORAGE_KEY = "zmux-native-pinned-prompts";
@@ -581,6 +573,7 @@ type NativeProject = {
   projectId: string;
   recentClosedAt?: string;
   theme?: SidebarTheme;
+  themeColor?: string;
   workspace: GroupedSessionWorkspaceSnapshot;
 };
 
@@ -758,12 +751,6 @@ type NativeSidebarCommandSession = {
  */
 const sidebarCommandSessionByCommandId = new Map<string, NativeSidebarCommandSession>();
 const sidebarCommandCommandIdBySessionId = new Map<string, string>();
-let titlebarPrimaryActionCommandId =
-  localStorage.getItem(TITLEBAR_PRIMARY_ACTION_STORAGE_KEY)?.trim() || undefined;
-let titlebarPrimaryOpenInTarget =
-  localStorage.getItem(TITLEBAR_PRIMARY_OPEN_IN_STORAGE_KEY)?.trim() === "finder"
-    ? "finder"
-    : "ide";
 /**
  * CDXC:NativeTerminals 2026-04-26-06:45
  * Sidebar workspace snapshots normalize terminal ids back to canonical display
@@ -1760,6 +1747,7 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
           ? project.recentClosedAt
           : undefined,
       theme: normalizeWorkspaceDockTheme(project.theme),
+      themeColor: normalizeWorkspaceThemeColor(project.themeColor),
       workspace: normalizeSimpleGroupedSessionWorkspaceSnapshot(project.workspace),
     },
   ];
@@ -1814,6 +1802,7 @@ function summarizeNativeProject(project: NativeProject) {
     projectId: project.projectId,
     recentClosedAt: project.recentClosedAt,
     theme: project.theme,
+    themeColor: project.themeColor,
   };
 }
 
@@ -2748,6 +2737,7 @@ function createSidebarRecentProjects(): SidebarRecentProject[] {
       recentClosedAt: project.recentClosedAt,
       sessionCount: countRecentProjectSessions(project),
       theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
+      themeColor: project.themeColor,
       title: project.name,
     }));
 }
@@ -2776,6 +2766,7 @@ function createCombinedProjectSidebarGroup(project: NativeProject): SidebarSessi
     projectContext: {
       canRemoveProject: true,
       theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
+      themeColor: project.themeColor,
     },
     sessions,
     title: project.name,
@@ -3251,6 +3242,7 @@ function createWorkspaceBarState(): WorkspaceBarStateMessage {
       projectId: project.projectId,
       sessionCounts: countWorkspaceBarSessions(project),
       theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
+      themeColor: project.themeColor,
       title: project.name,
     })),
     sidebarMode: settings.sidebarMode,
@@ -6265,90 +6257,6 @@ function runNativeSidebarCommand(
   return session;
 }
 
-function isRunnableNativeSidebarCommand(command: SidebarCommandButton): boolean {
-  return command.actionType === "browser" ? Boolean(command.url) : Boolean(command.command);
-}
-
-function resolveTitlebarPrimaryActionCommand(): SidebarCommandButton | undefined {
-  const selectedCommand = commands.find(
-    (command) =>
-      command.commandId === titlebarPrimaryActionCommandId &&
-      isRunnableNativeSidebarCommand(command),
-  );
-  if (selectedCommand) {
-    return selectedCommand;
-  }
-  return commands.find(isRunnableNativeSidebarCommand);
-}
-
-function setTitlebarPrimaryActionCommand(commandId: string): void {
-  /**
-   * CDXC:NativeWindowChrome 2026-05-04-16:24
-   * The native Actions title-bar button must run the last action the user
-   * clicked, whether that click came from the sidebar Actions grid or the
-   * title-bar React dropdown. Persist only the command id; command definitions
-   * remain owned by the existing project action data.
-   */
-  titlebarPrimaryActionCommandId = commandId;
-  localStorage.setItem(TITLEBAR_PRIMARY_ACTION_STORAGE_KEY, commandId);
-}
-
-function setTitlebarPrimaryOpenInTarget(target: "finder" | "ide"): void {
-  titlebarPrimaryOpenInTarget = target;
-  localStorage.setItem(TITLEBAR_PRIMARY_OPEN_IN_STORAGE_KEY, target);
-}
-
-function runTitlebarPrimaryAction(): void {
-  const command = resolveTitlebarPrimaryActionCommand();
-  if (!command) {
-    showNativeMessage("warning", "Configure an action before using the title bar Actions button.");
-    return;
-  }
-  setTitlebarPrimaryActionCommand(command.commandId);
-  runNativeSidebarCommand(command);
-}
-
-function runTitlebarPrimaryOpenIn(): void {
-  const project = activeProject();
-  if (titlebarPrimaryOpenInTarget === "finder") {
-    openNativeWorkspaceInFinder(project.path);
-    return;
-  }
-  openNativeWorkspaceInSelectedIde(project.path);
-}
-
-function handleTitlebarControlClicked(
-  hostEvent: Extract<NativeHostEvent, { type: "titleBarControlClicked" }>,
-): void {
-  if (hostEvent.action === "primary") {
-    if (hostEvent.kind === "actions") {
-      runTitlebarPrimaryAction();
-      return;
-    }
-    runTitlebarPrimaryOpenIn();
-    return;
-  }
-
-  /**
-   * CDXC:NativeWindowChrome 2026-05-04-16:24
-   * Native title-bar dropdown clicks are rendered by the full-window React
-   * modal host. Forward the AppKit anchor and current primary selections so
-   * the menu aligns under the native button and marks the next primary action.
-   */
-  postAppModalHost({
-    anchor: {
-      height: hostEvent.height ?? 0,
-      left: hostEvent.left ?? 0,
-      top: hostEvent.top ?? 8,
-      width: hostEvent.width ?? 0,
-    },
-    kind: hostEvent.kind,
-    primaryCommandId: resolveTitlebarPrimaryActionCommand()?.commandId,
-    primaryOpenInTarget: titlebarPrimaryOpenInTarget,
-    type: "titleBarMenu",
-  });
-}
-
 async function handleNativeCliCommand(action: string, payload: Record<string, unknown>) {
   /**
    * CDXC:DebugCli 2026-04-27-07:18
@@ -7303,6 +7211,11 @@ function setProjectIcon(projectId: string, iconDataUrl: string | undefined): voi
 
 function setProjectConfig(projectId: string, draft: WorkspaceProjectConfigDraft): void {
   /**
+   * CDXC:WorkspaceTheme 2026-05-05-02:58
+   * Workspace configuration now includes a custom theme color. Persist only a
+   * normalized hex color and let preset themes remain the fallback when the
+   * custom color is empty.
+   *
    * CDXC:WorkspaceConfig 2026-04-28-01:19
    * The workspace configure modal saves name, theme, and either a Tabler icon,
    * an uploaded image, or no icon in one transaction so Cancel never applies a
@@ -7311,6 +7224,7 @@ function setProjectConfig(projectId: string, draft: WorkspaceProjectConfigDraft)
   const name = draft.name.trim();
   const icon = normalizeWorkspaceDockIcon(draft.icon);
   const theme = normalizeWorkspaceDockTheme(draft.theme);
+  const themeColor = normalizeWorkspaceThemeColor(draft.themeColor);
   projects = projects.map((project) =>
     project.projectId === projectId
       ? {
@@ -7319,6 +7233,7 @@ function setProjectConfig(projectId: string, draft: WorkspaceProjectConfigDraft)
           iconDataUrl: icon?.kind === "image" ? icon.dataUrl : undefined,
           name: name || project.name,
           theme: theme ?? project.theme,
+          themeColor,
         }
       : project,
   );
@@ -7344,6 +7259,7 @@ function openWorkspaceConfigModal(projectId: string): void {
       name: project.name,
       projectId: project.projectId,
       theme: project.theme,
+      themeColor: project.themeColor,
     },
     type: "open",
   });
@@ -7357,12 +7273,13 @@ function saveWorkspaceConfig(
     name: message.name,
     projectId: message.projectId,
     theme: message.theme,
+    themeColor: message.themeColor,
   });
 }
 
 function setProjectTheme(projectId: string, theme: SidebarTheme): void {
   projects = projects.map((project) =>
-    project.projectId === projectId ? { ...project, theme } : project,
+    project.projectId === projectId ? { ...project, theme, themeColor: undefined } : project,
   );
   writeStoredProjects("setProjectTheme");
   publish();
@@ -7809,15 +7726,10 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     }
     case "openActiveWorkspaceProjectInFinder":
-      setTitlebarPrimaryOpenInTarget("finder");
       openNativeWorkspaceInFinder(activeProject().path);
       return;
     case "openActiveWorkspaceProjectInIde":
-      setTitlebarPrimaryOpenInTarget("ide");
       openNativeWorkspaceInSelectedIde(activeProject().path);
-      return;
-    case "setTitlebarPrimaryOpenInTarget":
-      setTitlebarPrimaryOpenInTarget(message.target);
       return;
     case "setWorkspaceProjectThemeForGroup": {
       const groupReference = resolveSidebarGroupReference(message.groupId);
@@ -8093,7 +8005,6 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "runSidebarCommand": {
       const command = commands.find((candidate) => candidate.commandId === message.commandId);
       if (command) {
-        setTitlebarPrimaryActionCommand(command.commandId);
         runNativeSidebarCommand(command, message.runMode);
       }
       return;
@@ -8346,10 +8257,6 @@ window.addEventListener("zmux-native-host-event", (event) => {
       actionId: hostEvent.actionId,
     });
     runNativeHotkeyAction(hostEvent.actionId);
-    return;
-  }
-  if (hostEvent.type === "titleBarControlClicked") {
-    handleTitlebarControlClicked(hostEvent);
     return;
   }
   if (hostEvent.type === "paneReorderRequested") {
@@ -9057,6 +8964,7 @@ export function WorkspaceDock({
         name: project.title,
         projectId: project.projectId,
         theme: project.theme,
+        themeColor: project.themeColor,
       },
       type: "open",
     });
@@ -9106,6 +9014,7 @@ export function WorkspaceDock({
             onPointerDown={(event) => handlePointerDown(event, project)}
             onPointerMove={handlePointerMove}
             onPointerUp={(event) => handlePointerUp(event, project.projectId)}
+            style={getWorkspaceDockThemeStyle(project.themeColor)}
             title={workspaceDockTitle(project)}
             type="button"
           >
@@ -9361,6 +9270,34 @@ function workspaceDockTitle(project: WorkspaceBarProject): string {
     .filter(Boolean)
     .join(", ");
   return summary ? `${project.path || project.title} - ${summary}` : project.path || project.title;
+}
+
+/**
+ * CDXC:WorkspaceTheme 2026-05-05-02:58
+ * Custom workspace theme colors should tint the same dock button variables as
+ * preset themes. Compute the contrast foreground once in React so CSS can keep
+ * using the existing workspace-dock variable contract.
+ */
+function getWorkspaceDockThemeStyle(themeColor: string | undefined): CSSProperties | undefined {
+  const normalizedColor = normalizeWorkspaceThemeColor(themeColor);
+  if (!normalizedColor) {
+    return undefined;
+  }
+
+  return {
+    "--workspace-dock-button-background": normalizedColor,
+    "--workspace-dock-button-border": `color-mix(in srgb, ${normalizedColor} 68%, white 32%)`,
+    "--workspace-dock-button-foreground": getWorkspaceDockThemeForeground(normalizedColor),
+  } as CSSProperties;
+}
+
+function getWorkspaceDockThemeForeground(themeColor: string): "#111111" | "#ffffff" {
+  const hex = themeColor.replace("#", "");
+  const red = Number.parseInt(hex.slice(0, 2), 16);
+  const green = Number.parseInt(hex.slice(2, 4), 16);
+  const blue = Number.parseInt(hex.slice(4, 6), 16);
+  const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
+  return luminance > 154 ? "#111111" : "#ffffff";
 }
 
 function formatWorkspaceDockCount(count: number): string {
