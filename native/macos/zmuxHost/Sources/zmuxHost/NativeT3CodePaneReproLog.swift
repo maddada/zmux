@@ -175,7 +175,7 @@ enum NativeT3RuntimeLauncher {
    only that T3-looking listener before launching so the pane does not attach to
    stale unauthenticated UI and new launches do not fail with EADDRINUSE.
    */
-  static func clearStaleRuntimeIfNeeded(logPrefix: String) {
+  static func clearStaleRuntimeIfNeeded(logPrefix: String, forceOwnedRuntimeStop: Bool = false) {
     let listeners = listeningProcesses(onPort: port)
     if listeners.isEmpty {
       NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.port.available", [
@@ -183,6 +183,9 @@ enum NativeT3RuntimeLauncher {
       ])
       return
     }
+
+    let heartbeatAgeSeconds = appHeartbeatAgeSeconds()
+    let shouldRetainOwnedRuntime = !forceOwnedRuntimeStop && isAppHeartbeatFresh(ageSeconds: heartbeatAgeSeconds)
 
     for listener in listeners {
       guard isAnyT3RuntimeCommand(listener.command) else {
@@ -194,8 +197,29 @@ enum NativeT3RuntimeLauncher {
         continue
       }
 
+      if shouldRetainOwnedRuntime {
+        /**
+         CDXC:T3Code 2026-05-04-09:00
+         A zmux-started T3 runtime must stay alive while zmux is open and across
+         quick app restarts. Health probes can fail while the server is warming or
+         owner auth is being restored; do not classify a fresh-heartbeat runtime
+         as stale unless the user explicitly kills it from the Running modal.
+         */
+        NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.freshHeartbeatRetained", [
+          "command": listener.command,
+          "heartbeatAgeSeconds": heartbeatAgeSeconds ?? NSNull(),
+          "parentCommand": listener.parentCommand,
+          "parentPid": listener.parentPid,
+          "pid": listener.pid,
+          "port": port,
+        ])
+        continue
+      }
+
       NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.staleProcess.terminate", [
         "command": listener.command,
+        "forceOwnedRuntimeStop": forceOwnedRuntimeStop,
+        "heartbeatAgeSeconds": heartbeatAgeSeconds ?? NSNull(),
         "parentCommand": listener.parentCommand,
         "parentPid": listener.parentPid,
         "pid": listener.pid,
@@ -215,10 +239,15 @@ enum NativeT3RuntimeLauncher {
      replacement runtime or resolve a thread URL. Escalate only still-listening
      owned T3 runtime processes after the graceful timeout expires.
      */
-    let remainingOwnedListeners = listeningProcesses(onPort: port).filter { isOwnedT3RuntimeProcess($0) }
+    let remainingOwnedListeners =
+      forceOwnedRuntimeStop || !shouldRetainOwnedRuntime
+      ? listeningProcesses(onPort: port).filter { isOwnedT3RuntimeProcess($0) }
+      : []
     for listener in remainingOwnedListeners {
       NativeT3CodePaneReproLog.append("\(logPrefix).t3Runtime.staleProcess.forceKill", [
         "command": listener.command,
+        "forceOwnedRuntimeStop": forceOwnedRuntimeStop,
+        "heartbeatAgeSeconds": heartbeatAgeSeconds ?? NSNull(),
         "parentCommand": listener.parentCommand,
         "parentPid": listener.parentPid,
         "pid": listener.pid,
@@ -236,6 +265,10 @@ enum NativeT3RuntimeLauncher {
 
   static func hasManagedRuntimeListener() -> Bool {
     listeningProcesses(onPort: port).contains { isOwnedT3RuntimeProcess($0) }
+  }
+
+  static func hasFreshAppHeartbeat() -> Bool {
+    isAppHeartbeatFresh(ageSeconds: appHeartbeatAgeSeconds())
   }
 
   /**
@@ -378,6 +411,24 @@ enum NativeT3RuntimeLauncher {
         "reason": reason,
       ])
     }
+  }
+
+  private static func appHeartbeatAgeSeconds() -> Int? {
+    guard
+      let text = try? String(contentsOf: appHeartbeatURL(), encoding: .utf8)
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+      let timestamp = TimeInterval(text)
+    else {
+      return nil
+    }
+    return max(0, Int(Date().timeIntervalSince1970 - timestamp))
+  }
+
+  private static func isAppHeartbeatFresh(ageSeconds: Int?) -> Bool {
+    guard let ageSeconds else {
+      return false
+    }
+    return ageSeconds < appClosedRuntimeShutdownTimeoutSeconds
   }
 
   static func currentBootstrapCredential() -> String? {

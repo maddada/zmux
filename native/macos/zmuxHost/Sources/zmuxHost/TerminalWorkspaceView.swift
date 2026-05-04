@@ -44,6 +44,35 @@ private func nativePaneColor(fromHex hex: String?) -> NSColor? {
   )
 }
 
+private let nativeTerminalColorEnvironmentKeys = [
+  "ANSI_COLORS_DISABLED",
+  "CI",
+  "CLICOLOR",
+  "CLICOLOR_FORCE",
+  "COLORTERM",
+  "FORCE_COLOR",
+  "NO_COLOR",
+  "NODE_DISABLE_COLORS",
+  "TERM",
+  "TERM_PROGRAM",
+  "TERM_PROGRAM_VERSION",
+]
+
+private func nativeTerminalColorEnvironmentSnapshot(_ environment: [String: String]) -> [String: Any] {
+  /**
+   CDXC:AgentCliColorDiagnostics 2026-05-04-15:39
+   Agent CLIs can render without color when their PTY process inherits
+   color-disabling environment values. Capture both the app process env and the
+   sidebar-provided Ghostty env overlay at surface creation without changing
+   launch behavior.
+   */
+  var snapshot: [String: Any] = [:]
+  for key in nativeTerminalColorEnvironmentKeys {
+    snapshot[key] = environment[key] ?? NSNull()
+  }
+  return snapshot
+}
+
 @MainActor
 final class TerminalWorkspaceView: NSView {
   private struct TerminalSession {
@@ -104,7 +133,6 @@ final class TerminalWorkspaceView: NSView {
   private static let terminalTitleBarHeight: CGFloat = 33
   private static let defaultPaneGap: CGFloat = 12
   private static let singlePaneInset: CGFloat = 1
-  private static let paneResizeHitSize: CGFloat = 4
   private static let paneResizeMinimumHeight: CGFloat = 160
   private static let paneResizeMinimumWidth: CGFloat = 220
   private static let paneHeaderDragThreshold: CGFloat = 6
@@ -134,6 +162,7 @@ final class TerminalWorkspaceView: NSView {
   private var paneResizeHits: [PaneResizeHit] = []
   private var paneResizeRatiosByPath: [String: [CGFloat]] = [:]
   private var paneResizeDrag: PaneResizeDrag?
+  private var paneResizeHandleViews: [TerminalWorkspacePaneResizeHandleView] = []
   private var paneHeaderDrag: PaneHeaderDrag?
   private var paneHeaderActionPress: (sessionId: String, action: TerminalTitleBarAction)?
   private var paneHeaderEventMonitor: Any?
@@ -175,7 +204,30 @@ final class TerminalWorkspaceView: NSView {
   }
 
   func createTerminal(_ command: CreateTerminal) {
+    let activateOnCreate = command.activateOnCreate ?? true
+    /**
+     CDXC:CrashDiagnostics 2026-05-04-09:10
+     Rapid sidebar agent launches must identify whether the crash happens
+     before Ghostty surface allocation, during mount, or after ready events.
+     Keep these breadcrumbs in the native focus log alongside layout sync.
+     */
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.createTerminal.received",
+      details: [
+        "activateOnCreate": activateOnCreate,
+        "activeSessionIds": Array(activeSessionIds).sorted(),
+        "hasInitialInput": command.initialInput?.isEmpty == false,
+        "knownSessionIds": Array(sessions.keys).sorted(),
+        "requestedSessionId": command.sessionId,
+        "title": command.title ?? "",
+      ])
     if sessions[command.sessionId] != nil {
+      TerminalFocusDebugLog.append(
+        event: "nativeWorkspace.createTerminal.existing",
+        details: [
+          "activeSessionIds": Array(activeSessionIds).sorted(),
+          "requestedSessionId": command.sessionId,
+        ])
       focusTerminal(sessionId: command.sessionId, reason: "createTerminalExisting")
       if let initialInput = command.initialInput, !initialInput.isEmpty {
         writeTerminalText(sessionId: command.sessionId, text: initialInput)
@@ -184,6 +236,12 @@ final class TerminalWorkspaceView: NSView {
     }
 
     guard let app = ghostty.app else {
+      TerminalFocusDebugLog.append(
+        event: "nativeWorkspace.createTerminal.ghosttyMissing",
+        details: [
+          "requestedSessionId": command.sessionId,
+          "title": command.title ?? "",
+        ])
       sendEvent(
         .terminalError(sessionId: command.sessionId, message: "Ghostty runtime is not ready"))
       return
@@ -193,7 +251,24 @@ final class TerminalWorkspaceView: NSView {
     config.workingDirectory = command.cwd
     config.environmentVariables = command.env ?? [:]
     config.initialInput = command.initialInput
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.createTerminal.surfaceInit.start",
+      details: [
+        "commandColorEnv": nativeTerminalColorEnvironmentSnapshot(config.environmentVariables),
+        "envCount": config.environmentVariables.count,
+        "hasInitialInput": command.initialInput?.isEmpty == false,
+        "processColorEnv": nativeTerminalColorEnvironmentSnapshot(ProcessInfo.processInfo.environment),
+        "requestedSessionId": command.sessionId,
+        "title": command.title ?? "",
+        "workingDirectory": command.cwd,
+      ])
     let surfaceView = ZmuxGhosttySurfaceView(app, baseConfig: config)
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.createTerminal.surfaceInit.completed",
+      details: [
+        "hasSurfaceModel": surfaceView.surfaceModel != nil,
+        "requestedSessionId": command.sessionId,
+      ])
     surfaceView.translatesAutoresizingMaskIntoConstraints = false
     /**
      CDXC:NativeTerminals 2026-04-28-03:09
@@ -288,14 +363,34 @@ final class TerminalWorkspaceView: NSView {
       .store(in: &session.cancellables)
 
     sessions[command.sessionId] = session
-    activeSessionIds.insert(command.sessionId)
     addSubview(scrollView)
     addSubview(searchBarView)
     addSubview(titleBarView)
     addSubview(borderView)
-    terminalLayout = terminalLayout ?? .leaf(sessionId: command.sessionId)
+    if activateOnCreate {
+      activeSessionIds.insert(command.sessionId)
+      terminalLayout = terminalLayout ?? .leaf(sessionId: command.sessionId)
+    } else {
+      /**
+       CDXC:CrashRootCause 2026-05-04-09:19
+       Sidebar-created terminals are mounted inactive because the sidebar sends
+       setActiveTerminalSet immediately after creation. This prevents rapid
+       launches from transiently laying out and focusing both the previous and
+       new Ghostty surfaces before the authoritative visible-session snapshot
+       arrives.
+       */
+      moveOffscreen(scrollView)
+      moveOffscreen(searchBarView)
+      moveOffscreen(titleBarView)
+      moveOffscreen(borderView)
+      searchBarView.isHidden = true
+      titleBarView.isHidden = true
+      borderView.isHidden = true
+    }
     needsLayout = true
-    focusTerminal(sessionId: command.sessionId, reason: "createTerminalNew")
+    if activateOnCreate {
+      focusTerminal(sessionId: command.sessionId, reason: "createTerminalNew")
+    }
 
     let ttyName = surfaceView.surfaceModel?.ttyName
     let foregroundPid = surfaceView.surfaceModel?.foregroundPID
@@ -309,6 +404,16 @@ final class TerminalWorkspaceView: NSView {
       ))
     sendEvent(.terminalCwdChanged(sessionId: command.sessionId, cwd: command.cwd))
     startExitPollingIfNeeded()
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.createTerminal.completed",
+      details: [
+        "activateOnCreate": activateOnCreate,
+        "activeSessionIds": Array(activeSessionIds).sorted(),
+        "foregroundPid": foregroundPid ?? 0,
+        "requestedSessionId": command.sessionId,
+        "ttyName": ttyName ?? "",
+        "visibleSessionIds": orderedVisibleSessionIds(),
+      ])
   }
 
   func closeTerminal(sessionId: String) {
@@ -350,11 +455,36 @@ final class TerminalWorkspaceView: NSView {
   func createWebPane(_ command: CreateWebPane) {
     let initialUrl = URL(string: command.url)
     let isManagedT3Pane = initialUrl.map(NativeT3RuntimeLauncher.isManagedRuntimeURL) ?? false
-    if webPaneSessions[command.sessionId] != nil {
+    if let existingSession = webPaneSessions[command.sessionId] {
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.create.reused", [
         "sessionId": command.sessionId,
+        "threadId": command.threadId ?? NSNull(),
         "url": command.url,
       ])
+      if existingSession.isManagedT3Pane, isManagedT3Pane {
+        webPaneSessions[command.sessionId] = WebPaneSession(
+          browserTitleObservation: existingSession.browserTitleObservation,
+          diagnosticsBridge: existingSession.diagnosticsBridge,
+          hostView: existingSession.hostView,
+          isManagedT3Pane: existingSession.isManagedT3Pane,
+          projectId: command.projectId,
+          sessionId: existingSession.sessionId,
+          threadId: command.threadId,
+          title: command.title,
+          workspaceRoot: command.cwd ?? existingSession.workspaceRoot,
+          browserProfileID: existingSession.browserProfileID,
+          webView: existingSession.webView,
+          titleBarView: existingSession.titleBarView,
+          borderView: existingSession.borderView
+        )
+        existingSession.titleBarView.setTitle(
+          normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId))
+        if let url = initialUrl {
+          completedWebPaneLoadSessionIds.remove(command.sessionId)
+          pendingAuthenticatedWebPaneLoadSessionIds.remove(command.sessionId)
+          loadWebPane(sessionId: command.sessionId, url: url, reason: "createWebPaneExistingReroute")
+        }
+      }
       focusWebPane(sessionId: command.sessionId, reason: "createWebPaneExisting")
       return
     }
@@ -382,7 +512,11 @@ final class TerminalWorkspaceView: NSView {
     configuration.websiteDataStore = browserProfileID.map {
       NativeBrowserProfileStore.shared.websiteDataStore(for: $0)
     } ?? .default()
-    let diagnosticsBridge = T3CodePaneDiagnosticsBridge(sessionId: command.sessionId)
+    let diagnosticsBridge = T3CodePaneDiagnosticsBridge(
+      sessionId: command.sessionId,
+      onThreadChanged: { [weak self] sessionId, threadId, title in
+        self?.sendEvent(.t3ThreadChanged(sessionId: sessionId, threadId: threadId, title: title))
+      })
     configuration.userContentController.add(
       diagnosticsBridge,
       name: T3CodePaneDiagnosticsBridge.messageHandlerName
@@ -951,6 +1085,7 @@ final class TerminalWorkspaceView: NSView {
     paneResizeHits.removeAll()
     let visibleSessionIds = orderedVisibleSessionIds()
     guard !visibleSessionIds.isEmpty else {
+      hidePaneResizeHandleViews()
       discardCursorRects()
       return
     }
@@ -959,7 +1094,105 @@ final class TerminalWorkspaceView: NSView {
     } else {
       layoutGrid(visibleSessionIds, in: layoutBounds(forVisibleCount: visibleSessionIds.count))
     }
+    updateBottomRightPaneBorderCorner()
+    syncPaneResizeHandleViews()
     window?.invalidateCursorRects(for: self)
+  }
+
+  private func hidePaneResizeHandleViews() {
+    for handleView in paneResizeHandleViews {
+      handleView.isHidden = true
+      handleView.frame = .zero
+    }
+  }
+
+  private func syncPaneResizeHandleViews() {
+    /**
+     CDXC:NativePaneResize 2026-05-04-08:21
+     The transparent splitter must own hover cursor feedback from a native
+     AppKit handle view, while leaving the existing layout math and drag
+     behavior in TerminalWorkspaceView.
+     CDXC:NativePaneResize 2026-05-04-08:27
+     The resize target must be large enough to acquire intentionally while still
+     staying transparent and layout-neutral.
+     CDXC:NativePaneResize 2026-05-04-08:41
+     AppKit layout must not remove and re-add resize handle views, so layout
+     only resizes persistent handles and hides unused ones.
+     CDXC:NativePaneResize 2026-05-04-08:52
+     Splitter handles must live in the actual native pane gap and match the
+     configured gap size. Do not overlap terminal or web pane content to force
+     cursor precedence; the gap itself is the drag target.
+     */
+    while paneResizeHandleViews.count < paneResizeHits.count {
+      let handleView = TerminalWorkspacePaneResizeHandleView()
+      handleView.onMouseDown = { [weak self] event in
+        _ = self?.beginPaneResize(with: event)
+      }
+      handleView.onMouseDragged = { [weak self] event in
+        _ = self?.continuePaneResize(with: event)
+      }
+      handleView.onMouseUp = { [weak self] event in
+        _ = self?.endPaneResize(with: event)
+      }
+      paneResizeHandleViews.append(handleView)
+    }
+
+    for (index, handleView) in paneResizeHandleViews.enumerated() {
+      guard index < paneResizeHits.count else {
+        handleView.isHidden = true
+        handleView.frame = .zero
+        continue
+      }
+      let hit = paneResizeHits[index]
+      handleView.configure(cursor: paneResizeCursor(for: hit.direction))
+      handleView.frame = hit.rect
+      handleView.isHidden = false
+      handleView.layer?.zPosition = 210
+      if handleView.superview == nil {
+        addSubview(handleView)
+      }
+      window?.invalidateCursorRects(for: handleView)
+    }
+  }
+
+  private func bringPaneResizeHandleViewsToFront() {
+    for handleView in paneResizeHandleViews where handleView.superview === self {
+      handleView.layer?.zPosition = 210
+      window?.invalidateCursorRects(for: handleView)
+    }
+  }
+
+  private func updateBottomRightPaneBorderCorner() {
+    /**
+     CDXC:NativePaneChrome 2026-05-04-02:36
+     The visible bottom-right pane should always preserve a rounded bottom-right
+     active/done border corner in native AppKit layout. Apply the radius to the
+     border overlay after split/grid frames are assigned so the rule follows
+     pane reorders, split resizing, web panes, and terminal panes uniformly.
+     */
+    var visibleBorders: [(sessionId: String, borderView: TerminalPaneBorderView)] = []
+    for (sessionId, session) in sessions where activeSessionIds.contains(sessionId) {
+      visibleBorders.append((sessionId: sessionId, borderView: session.borderView))
+    }
+    for (sessionId, session) in webPaneSessions where activeSessionIds.contains(sessionId) {
+      visibleBorders.append((sessionId: sessionId, borderView: session.borderView))
+    }
+
+    let bottomRightSessionId = visibleBorders.max { left, right in
+      let leftFrame = left.borderView.frame
+      let rightFrame = right.borderView.frame
+      if abs(leftFrame.maxX - rightFrame.maxX) > 0.5 {
+        return leftFrame.maxX < rightFrame.maxX
+      }
+      if abs(leftFrame.minY - rightFrame.minY) > 0.5 {
+        return leftFrame.minY > rightFrame.minY
+      }
+      return left.sessionId < right.sessionId
+    }?.sessionId
+
+    for (sessionId, borderView) in visibleBorders {
+      borderView.setBottomRightCornerRounded(sessionId == bottomRightSessionId)
+    }
   }
 
   private func layoutBounds(forVisibleCount visibleCount: Int) -> CGRect {
@@ -1067,10 +1300,10 @@ final class TerminalWorkspaceView: NSView {
   /**
    CDXC:NativePaneResize 2026-05-02-16:44
    Native Ghostty and WKWebView panes sit above the React workspace DOM, so
-   split resizing must be owned by AppKit. The workspace view records 4px
-   cursor/mouse bands in real pane gaps, clamps panes to terminal-usable
-   dimensions, and double-click equalizes only split groups matching the
-   clicked orientation.
+   split resizing must be owned by AppKit. The workspace view records cursor
+   and mouse bands in the actual configured pane gaps, clamps panes to
+   terminal-usable dimensions, and double-click equalizes only split groups
+   matching the clicked orientation.
    */
   private func defaultPaneResizeRatios(childCount: Int, firstRatio: CGFloat?) -> [CGFloat] {
     guard childCount > 0 else { return [] }
@@ -1099,6 +1332,8 @@ final class TerminalWorkspaceView: NSView {
     rect: CGRect
   ) {
     guard childRects.count > 1 else { return }
+    let hitSize = splitGap(forChildCount: childRects.count)
+    guard hitSize > 0 else { return }
     for boundaryIndex in 1..<childRects.count {
       let previous = childRects[boundaryIndex - 1]
       let next = childRects[boundaryIndex]
@@ -1107,18 +1342,18 @@ final class TerminalWorkspaceView: NSView {
       case .horizontal:
         let centerX = (previous.maxX + next.minX) / 2
         hitRect = CGRect(
-          x: centerX - Self.paneResizeHitSize / 2,
+          x: centerX - hitSize / 2,
           y: max(previous.minY, next.minY),
-          width: Self.paneResizeHitSize,
+          width: hitSize,
           height: min(previous.maxY, next.maxY) - max(previous.minY, next.minY)
         )
       case .vertical:
         let centerY = (previous.minY + next.maxY) / 2
         hitRect = CGRect(
           x: rect.minX,
-          y: centerY - Self.paneResizeHitSize / 2,
+          y: centerY - hitSize / 2,
           width: rect.width,
-          height: Self.paneResizeHitSize
+          height: hitSize
         )
       }
       if hitRect.width > 0, hitRect.height > 0 {
@@ -1165,15 +1400,23 @@ final class TerminalWorkspaceView: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
-    let point = convert(event.locationInWindow, from: nil)
-    guard let hit = paneResizeHit(at: point) else {
+    guard beginPaneResize(with: event) else {
       super.mouseDown(with: event)
       return
+    }
+  }
+
+  @discardableResult
+  private func beginPaneResize(with event: NSEvent) -> Bool {
+    let point = convert(event.locationInWindow, from: nil)
+    guard let hit = paneResizeHit(at: point) else {
+      return false
     }
 
     if event.clickCount >= 2 {
       equalizePaneResizeRatios(matching: hit.direction)
-      return
+      paneResizeCursor(for: hit.direction).set()
+      return true
     }
 
     let currentRatios =
@@ -1191,12 +1434,20 @@ final class TerminalWorkspaceView: NSView {
       startRatios: currentRatios
     )
     paneResizeCursor(for: hit.direction).set()
+    return true
   }
 
   override func mouseDragged(with event: NSEvent) {
-    guard let drag = paneResizeDrag else {
+    guard continuePaneResize(with: event) else {
       super.mouseDragged(with: event)
       return
+    }
+  }
+
+  @discardableResult
+  private func continuePaneResize(with event: NSEvent) -> Bool {
+    guard let drag = paneResizeDrag else {
+      return false
     }
 
     let point = convert(event.locationInWindow, from: nil)
@@ -1214,18 +1465,27 @@ final class TerminalWorkspaceView: NSView {
       minimumAfter: drag.minimumAfter)
     needsLayout = true
     layoutSubtreeIfNeeded()
+    return true
   }
 
   override func mouseUp(with event: NSEvent) {
-    if paneResizeDrag != nil {
-      paneResizeDrag = nil
-      let point = convert(event.locationInWindow, from: nil)
-      paneResizeCursor(at: point)?.set()
+    if endPaneResize(with: event) {
       return
     }
     paneHeaderDrag = nil
     endPaneHeaderDragFeedback()
     super.mouseUp(with: event)
+  }
+
+  @discardableResult
+  private func endPaneResize(with event: NSEvent) -> Bool {
+    guard paneResizeDrag != nil else {
+      return false
+    }
+    paneResizeDrag = nil
+    let point = convert(event.locationInWindow, from: nil)
+    paneResizeCursor(at: point)?.set()
+    return true
   }
 
   /**
@@ -1333,13 +1593,18 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func paneResizeHit(at point: CGPoint) -> PaneResizeHit? {
-    paneResizeHits
-      .filter { $0.rect.contains(point) }
+    paneResizeHitRecord(at: point)?.hit
+  }
+
+  private func paneResizeHitRecord(at point: CGPoint) -> (index: Int, hit: PaneResizeHit)? {
+    paneResizeHits.enumerated()
+      .filter { $0.element.rect.contains(point) }
       .min { left, right in
-        let leftDistance = paneResizeDistance(from: point, to: left)
-        let rightDistance = paneResizeDistance(from: point, to: right)
+        let leftDistance = paneResizeDistance(from: point, to: left.element)
+        let rightDistance = paneResizeDistance(from: point, to: right.element)
         return leftDistance < rightDistance
       }
+      .map { (index: $0.offset, hit: $0.element) }
   }
 
   private func paneResizeDistance(from point: CGPoint, to hit: PaneResizeHit) -> CGFloat {
@@ -1809,6 +2074,7 @@ final class TerminalWorkspaceView: NSView {
     }
     addSubview(session.borderView)
     session.borderView.layer?.zPosition = 120
+    bringPaneResizeHandleViewsToFront()
   }
 
   private func scheduleWebPaneReload(sessionId: String, url: URL, remainingAttempts: Int) {
@@ -2346,12 +2612,120 @@ final class TerminalWorkspaceView: NSView {
         const sessionId = \(encodedSessionId);
         const sessionTitle = \(encodedTitle);
         const workspaceRoot = \(encodedWorkspaceRoot);
+        const handler = window.webkit?.messageHandlers?.\(T3CodePaneDiagnosticsBridge.messageHandlerName);
         const threadIdFromPath = () => {
           const parts = location.pathname.split("/").filter(Boolean);
           return parts.length >= 2 ? parts[1] : "";
         };
         const wsUrl = () => `${location.origin.replace(/^http/i, "ws")}/ws`;
         const currentThreadId = () => threadIdFromPath();
+        let lastReportedThreadId = "";
+        let lastReportedThreadTitle = "";
+        const normalizeThreadTitle = (value) =>
+          typeof value === "string" ? value.replace(/\\s+/g, " ").trim() : "";
+        const isUsableThreadTitle = (value) => {
+          const title = normalizeThreadTitle(value);
+          if (!title) {
+            return false;
+          }
+          const lower = title.toLowerCase();
+          return lower !== "t3 code" &&
+            lower !== "t3 code (alpha)" &&
+            lower !== "no active thread" &&
+            lower !== "pick a thread to continue";
+        };
+        const visibleThreadTitle = () => {
+          const candidates = [
+            window.__VSMUX_T3_ACTIVE_THREAD_TITLE__,
+            document.querySelector("header h2[title]")?.getAttribute("title"),
+            document.querySelector("header h2")?.textContent,
+            document.querySelector("header [title]")?.getAttribute("title")
+          ];
+          for (const candidate of candidates) {
+            if (isUsableThreadTitle(candidate)) {
+              return normalizeThreadTitle(candidate);
+            }
+          }
+          return "";
+        };
+        const reportThreadChange = (payload, reason) => {
+          const threadId = String(payload?.threadId || "").trim();
+          const title =
+            (isUsableThreadTitle(payload?.title) ? normalizeThreadTitle(payload?.title) : "") ||
+            visibleThreadTitle() ||
+            String(document.title || "");
+          const normalizedTitle = normalizeThreadTitle(title);
+          if (
+            !threadId ||
+            (threadId === lastReportedThreadId && normalizedTitle === lastReportedThreadTitle)
+          ) {
+            return;
+          }
+          lastReportedThreadId = threadId;
+          lastReportedThreadTitle = normalizedTitle;
+          try {
+            handler?.postMessage({
+              href: String(location.href || ""),
+              reason,
+              threadId,
+              title,
+              type: "thread-changed"
+            });
+          } catch {}
+        };
+        /**
+         * CDXC:T3Code 2026-05-04-03:06
+         * The embedded T3 app performs client-side thread navigation, so native
+         * zmux must observe route changes inside the WKWebView and let the
+         * sidebar preserve one zmux card per T3 thread instead of silently
+         * rebinding the currently visible card.
+         *
+         * CDXC:T3Code 2026-05-04-04:03
+         * T3's own sidebar emits `vsmuxT3ThreadChanged` via postMessage when a
+         * user clicks another thread. WKWebView hosts the app as the top-level
+         * page, so the bridge listens for that same-window message in addition
+         * to URL/history changes; sidebar-thread clicks must create/focus a
+         * sibling zmux card just like route changes.
+         *
+         * CDXC:T3Code 2026-05-04-04:41
+         * Thread titles can arrive after the route/thread id event. De-dupe by
+         * thread id plus normalized title so later same-thread title updates
+         * still reach the sidebar card title sync path.
+         *
+         * CDXC:T3Code 2026-05-04-06:23
+         * The title shown in the T3 header is the user-facing thread title. Use
+         * T3's `__VSMUX_T3_ACTIVE_THREAD_TITLE__` bridge value and the visible
+         * header `<h2>` as title sources because `document.title` remains the
+         * generic app label and early postMessage payloads may omit the title.
+         */
+        const reportActiveThread = (reason) => {
+          const threadId = currentThreadId();
+          reportThreadChange({ threadId, title: document.title }, reason);
+        };
+        window.addEventListener("message", (event) => {
+          const data = event?.data;
+          if (!data || typeof data !== "object" || data.type !== "vsmuxT3ThreadChanged") {
+            return;
+          }
+          reportThreadChange(data, "vsmux-message");
+        });
+        const wrapHistoryMethod = (method) => {
+          const original = history[method];
+          if (typeof original !== "function") {
+            return;
+          }
+          history[method] = function(...args) {
+            const result = original.apply(this, args);
+            setTimeout(() => reportActiveThread(method), 0);
+            return result;
+          };
+        };
+        wrapHistoryMethod("pushState");
+        wrapHistoryMethod("replaceState");
+        window.addEventListener("popstate", () => setTimeout(() => reportActiveThread("popstate"), 0));
+        window.addEventListener("hashchange", () => setTimeout(() => reportActiveThread("hashchange"), 0));
+        setTimeout(() => reportActiveThread("bootstrap"), 0);
+        setInterval(() => reportActiveThread("poll"), 1000);
         window.__VSMUX_T3_ACTIVE_THREAD_ID__ = currentThreadId();
         window.__VSMUX_T3_COMPOSER_FOCUS_ENABLED__ = false;
         window.__VSMUX_T3_BOOTSTRAP__ = {
@@ -3124,9 +3498,11 @@ extension TerminalWorkspaceView: WKUIDelegate {
 private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandler {
   static let messageHandlerName = "zmuxT3CodePaneDiagnostics"
 
+  private let onThreadChanged: (String, String, String?) -> Void
   private let sessionId: String
 
-  init(sessionId: String) {
+  init(sessionId: String, onThreadChanged: @escaping (String, String, String?) -> Void) {
+    self.onThreadChanged = onThreadChanged
     self.sessionId = sessionId
   }
 
@@ -3137,6 +3513,15 @@ private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandle
     let type = (details["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
     details["frameInfoIsMainFrame"] = message.frameInfo.isMainFrame
     details["sessionId"] = sessionId
+    if type == "thread-changed", message.frameInfo.isMainFrame {
+      let threadId = (details["threadId"] as? String)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      let title = (details["title"] as? String)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      if !threadId.isEmpty {
+        onThreadChanged(sessionId, threadId, title?.isEmpty == false ? title : nil)
+      }
+    }
     NativeT3CodePaneReproLog.append(
       "nativeWorkspace.t3WebPane.javascript.\(type?.isEmpty == false ? type! : "message")",
       details
@@ -3913,10 +4298,10 @@ private final class TerminalSessionTitleBarView: NSView {
     super.resetCursorRects()
     /**
      CDXC:NativePaneResize 2026-05-03-05:06
-     The 4px native resize bands can overlap title-bar hit testing when pane
+     Gap-sized native resize bands can border title-bar hit testing when pane
      gaps are small. Cursor precedence must favor split resizing at the pane
-     boundary, so the title bar registers resize cursor rects for any overlap
-     before falling back to the pane-reorder hand cursor.
+     boundary, so the title bar registers resize cursor rects for any boundary
+     overlap before falling back to the pane-reorder hand cursor.
      */
     let firstActionButtonX = actionButtons.map(\.button.frame.minX).min() ?? bounds.maxX
     let probeStep: CGFloat = 2
@@ -4809,6 +5194,83 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   }
 }
 
+private final class TerminalWorkspacePaneResizeHandleView: NSView {
+  var onMouseDown: ((NSEvent) -> Void)?
+  var onMouseDragged: ((NSEvent) -> Void)?
+  var onMouseUp: ((NSEvent) -> Void)?
+  private var cursor: NSCursor = .arrow
+  private var hoverTrackingArea: NSTrackingArea?
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layer?.backgroundColor = NSColor.clear.cgColor
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
+  func configure(cursor: NSCursor) {
+    if self.cursor !== cursor {
+      self.cursor = cursor
+      window?.invalidateCursorRects(for: self)
+    }
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    bounds.contains(point) ? self : nil
+  }
+
+  override func resetCursorRects() {
+    super.resetCursorRects()
+    addCursorRect(bounds, cursor: cursor)
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let hoverTrackingArea {
+      removeTrackingArea(hoverTrackingArea)
+    }
+    let trackingArea = NSTrackingArea(
+      rect: .zero,
+      options: [.activeInKeyWindow, .cursorUpdate, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved],
+      owner: self,
+      userInfo: nil
+    )
+    hoverTrackingArea = trackingArea
+    addTrackingArea(trackingArea)
+  }
+
+  override func cursorUpdate(with event: NSEvent) {
+    cursor.set()
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    cursor.set()
+  }
+
+  override func mouseMoved(with event: NSEvent) {
+    cursor.set()
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    NSCursor.arrow.set()
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    onMouseDown?(event)
+  }
+
+  override func mouseDragged(with event: NSEvent) {
+    onMouseDragged?(event)
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    onMouseUp?(event)
+  }
+}
+
 final class TerminalPaneBorderView: NSView {
   private enum BorderState: Equatable {
     case attention
@@ -4816,7 +5278,6 @@ final class TerminalPaneBorderView: NSView {
     case none
   }
 
-  private static let pulseAnimationKey = "zmux-terminal-attention-border-pulse"
   private static let focusedBorderColor = NSColor(
     calibratedRed: 0x5A / 255,
     green: 0x86 / 255,
@@ -4829,13 +5290,10 @@ final class TerminalPaneBorderView: NSView {
     blue: 0x8A / 255,
     alpha: 1
   ).cgColor
-  private static let attentionDimBorderColor = NSColor(
-    calibratedRed: 0x65 / 255,
-    green: 0xE5 / 255,
-    blue: 0x8A / 255,
-    alpha: 0.34
-  ).cgColor
+  private static let bottomRightCornerRadius: CGFloat = 12
+  private static let borderWidth: CGFloat = 2
 
+  private var isBottomRightCornerRounded = false
   private var state: BorderState = .none
 
   override init(frame frameRect: NSRect) {
@@ -4858,12 +5316,40 @@ final class TerminalPaneBorderView: NSView {
     nil
   }
 
+  override func draw(_ dirtyRect: NSRect) {
+    super.draw(dirtyRect)
+    guard let borderColor = currentBorderColor() else {
+      return
+    }
+
+    let path = borderPath(in: bounds)
+    borderColor.setStroke()
+    path.lineWidth = Self.borderWidth
+    path.stroke()
+  }
+
+  func setBottomRightCornerRounded(_ isRounded: Bool) {
+    /**
+     CDXC:NativePaneChrome 2026-05-04-06:26
+     The active/done pane border must have a real rounded visual bottom-right
+     corner. Draw the transparent native overlay's border path directly instead
+     of relying on CALayer's single-corner border masking. In this unflipped
+     AppKit view, the visible bottom-right border corner is max-X/min-Y.
+     Use a larger radius so the corner is visibly rounded at the pane edge.
+     */
+    guard isBottomRightCornerRounded != isRounded else {
+      return
+    }
+    isBottomRightCornerRounded = isRounded
+    needsDisplay = true
+  }
+
   func setState(isFocused: Bool, isAttention: Bool) {
     /**
      CDXC:NativeSessionStatus 2026-04-27-08:02
      Native Ghostty panes are outside the React workspace DOM. Mirror the
-     existing workspace UX with a blue selected border and a pulsing green
-     border for done/attention sessions, without stealing terminal input.
+     existing workspace UX with a blue selected border and a green border for
+     done/attention sessions, without stealing terminal input.
      */
     let nextState: BorderState = isAttention ? .attention : isFocused ? .focused : .none
     guard nextState != state else {
@@ -4872,40 +5358,47 @@ final class TerminalPaneBorderView: NSView {
     state = nextState
     switch nextState {
     case .attention:
-      layer?.borderWidth = 2
-      layer?.borderColor = Self.attentionBorderColor
       layer?.shadowColor = Self.attentionBorderColor
       layer?.shadowOpacity = 0.28
-      startAttentionPulse()
     case .focused:
-      stopAttentionPulse()
-      layer?.borderWidth = 2
-      layer?.borderColor = Self.focusedBorderColor
       layer?.shadowColor = Self.focusedBorderColor
       layer?.shadowOpacity = 0.18
     case .none:
-      stopAttentionPulse()
-      layer?.borderWidth = 0
-      layer?.borderColor = NSColor.clear.cgColor
       layer?.shadowOpacity = 0
     }
+    needsDisplay = true
   }
 
-  private func startAttentionPulse() {
-    guard layer?.animation(forKey: Self.pulseAnimationKey) == nil else {
-      return
+  private func currentBorderColor() -> NSColor? {
+    switch state {
+    case .attention:
+      return NSColor(cgColor: Self.attentionBorderColor)
+    case .focused:
+      return NSColor(cgColor: Self.focusedBorderColor)
+    case .none:
+      return nil
     }
-    let animation = CABasicAnimation(keyPath: "borderColor")
-    animation.fromValue = Self.attentionDimBorderColor
-    animation.toValue = Self.attentionBorderColor
-    animation.duration = 0.72
-    animation.autoreverses = true
-    animation.repeatCount = .infinity
-    animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-    layer?.add(animation, forKey: Self.pulseAnimationKey)
   }
 
-  private func stopAttentionPulse() {
-    layer?.removeAnimation(forKey: Self.pulseAnimationKey)
+  private func borderPath(in bounds: CGRect) -> NSBezierPath {
+    let inset = Self.borderWidth / 2
+    let rect = bounds.insetBy(dx: inset, dy: inset)
+    let radius = isBottomRightCornerRounded
+      ? min(Self.bottomRightCornerRadius, rect.width / 2, rect.height / 2)
+      : 0
+    let path = NSBezierPath()
+    path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+    path.line(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+    if radius > 0 {
+      path.curve(
+        to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+        controlPoint1: CGPoint(x: rect.maxX - radius * 0.4477, y: rect.minY),
+        controlPoint2: CGPoint(x: rect.maxX, y: rect.minY + radius * 0.4477)
+      )
+    }
+    path.line(to: CGPoint(x: rect.maxX, y: rect.maxY))
+    path.line(to: CGPoint(x: rect.minX, y: rect.maxY))
+    path.close()
+    return path
   }
 }

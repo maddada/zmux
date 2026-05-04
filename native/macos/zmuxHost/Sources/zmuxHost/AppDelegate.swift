@@ -654,6 +654,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       openZedWorkspace: { [weak self] command in
         self?.handle(.openZedWorkspace(command))
       },
+      openWorkspaceInFinder: { [weak self] command in
+        self?.handle(.openWorkspaceInFinder(command))
+      },
+      openWorkspaceInIde: { [weak self] command in
+        self?.handle(.openWorkspaceInIde(command))
+      },
       showBrowserWindow: { [weak self] in
         self?.handle(.showBrowserWindow)
       }
@@ -866,6 +872,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     } catch {
       workspaceView?.createTerminal(
         CreateTerminal(
+          activateOnCreate: true,
           cwd: FileManager.default.currentDirectoryPath,
           env: nil,
           initialInput: "printf 'Failed to start zmux bridge: \(error.localizedDescription)\\n'\r",
@@ -940,6 +947,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       openGhosttyConfigFile()
     case .openExternalUrl(let command):
       openExternalUrl(command)
+    case .openWorkspaceInFinder(let command):
+      openWorkspaceInFinder(command)
+    case .openWorkspaceInIde(let command):
+      openWorkspaceInIde(command)
     case .openBrowserWindow(let command):
       browserOverlayController?.open(command)
     case .showBrowserWindow:
@@ -1024,6 +1035,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
    */
   @MainActor
   private func startT3CodeRuntime(_ command: StartT3CodeRuntime) {
+    NativeT3RuntimeLauncher.touchAppHeartbeat(reason: "nativeHost.startT3CodeRuntime")
     if let process = t3CodeRuntimeProcess, process.isRunning {
       /**
        CDXC:T3Code 2026-05-02-00:48
@@ -1033,6 +1045,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
        the handle only after the same health probe used for listener adoption.
        */
       guard NativeT3RuntimeLauncher.hasResponsiveManagedRuntimeListener() else {
+        if NativeT3RuntimeLauncher.hasFreshAppHeartbeat() {
+          /**
+           CDXC:T3Code 2026-05-04-09:00
+           A tracked T3 runtime with a fresh zmux heartbeat must not be killed
+           just because startup/auth health probes are not ready yet. Keep the
+           server alive while zmux is open; explicit Running-modal kill remains
+           the recovery path for genuinely wedged providers.
+           */
+          NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.runningUnhealthyRetained", [
+            "cwd": command.cwd,
+            "pid": process.processIdentifier,
+          ])
+          return
+        }
         NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.runningUnhealthy", [
           "cwd": command.cwd,
           "pid": process.processIdentifier,
@@ -1064,6 +1090,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     }
 
     NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "nativeHost")
+    if NativeT3RuntimeLauncher.hasManagedRuntimeListener() {
+      NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.retainedExistingUnresponsive", [
+        "cwd": command.cwd,
+        "port": NativeT3RuntimeLauncher.port,
+      ])
+      return
+    }
     NativeT3CodePaneReproLog.append("nativeHost.t3Runtime.start.spawn", [
       "cwd": command.cwd,
       "mode": "desktop-bootstrap",
@@ -1113,7 +1146,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       }
       t3CodeRuntimeProcess = nil
     }
-    NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "\(logPrefix).stop")
+    NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(
+      logPrefix: "\(logPrefix).stop",
+      forceOwnedRuntimeStop: true)
   }
 
   /**
@@ -1127,12 +1162,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   private func startT3RuntimeAppHeartbeat() {
     NativeT3RuntimeLauncher.touchAppHeartbeat(reason: "applicationDidFinishLaunching")
     t3RuntimeHeartbeatTimer?.invalidate()
-    t3RuntimeHeartbeatTimer = Timer.scheduledTimer(
-      withTimeInterval: NativeT3RuntimeLauncher.appHeartbeatInterval,
+    let timer = Timer(
+      timeInterval: NativeT3RuntimeLauncher.appHeartbeatInterval,
       repeats: true
     ) { _ in
       NativeT3RuntimeLauncher.touchAppHeartbeat(reason: "timer")
     }
+    t3RuntimeHeartbeatTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
   }
 
   @MainActor private func activateAppWindow() {
@@ -1569,6 +1606,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     NSWorkspace.shared.open(url)
   }
 
+  @MainActor private func openWorkspaceInFinder(_ command: OpenWorkspaceInFinder) {
+    let path = command.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
+      showMessage(.init(level: .warning, message: "Workspace folder does not exist."))
+      return
+    }
+
+    /**
+     CDXC:WorkspaceActions 2026-05-04-08:22
+     Project right-click "Open in Finder" should reveal the actual stored
+     workspace folder through Finder instead of routing through a URL opener or
+     creating a fallback path when the project record is wrong.
+     */
+    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path, isDirectory: true)])
+  }
+
+  @MainActor private func openWorkspaceInIde(_ command: OpenWorkspaceInIde) {
+    let path = command.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !path.isEmpty else {
+      return
+    }
+
+    /**
+     CDXC:WorkspaceActions 2026-05-04-08:22
+     Project right-click "Open in IDE" is an explicit command and must use the
+     IDE selected in Settings even when IDE attachment or sync-open is disabled.
+     Reuse the native IDE launcher so Zed, Zed Preview, VS Code, and Insiders
+     keep their existing command-line workspace behavior.
+     */
+    zedOverlayController?.openWorkspace(targetApp: command.targetApp, workspacePath: path)
+  }
+
   private func openGhosttyConfigFile() {
     /**
      CDXC:GhosttySettings 2026-04-30-01:48
@@ -1651,6 +1720,11 @@ private struct NativeZedOverlaySettings {
 
 private struct NativeSidebarChromeSettings {
   let width: CGFloat?
+}
+
+private enum NativeSidebarMode: String {
+  case combined
+  case separated
 }
 
 private struct NativeMainWindowChromeSettings {
@@ -1742,6 +1816,16 @@ private final class NativeSettingsStore {
       return NativeSidebarChromeSettings(width: nil)
     }
     return NativeSidebarChromeSettings(width: Self.readCGFloat(settings["sidebarWidth"]))
+  }
+
+  func readSidebarMode() -> NativeSidebarMode {
+    guard let settings = readSharedSidebarSettingsDictionary() else {
+      return .combined
+    }
+    if let mode = settings["sidebarMode"] as? String {
+      return NativeSidebarMode(rawValue: mode) ?? .combined
+    }
+    return .separated
   }
 
   func readHotkeys() -> [String: String] {
@@ -1893,6 +1977,7 @@ final class zmuxRootView: NSView {
 
   private static let workspaceBarWidth: CGFloat = 54
   private static let sidebarMinWidth: CGFloat = 220
+  private static let combinedSidebarMinWidthReduction: CGFloat = 70
   private static let sidebarMaxWidth: CGFloat = 520
   private static let dividerWidth: CGFloat = 6
   private static let defaultSidebarWidth: CGFloat = 260
@@ -1912,6 +1997,8 @@ final class zmuxRootView: NSView {
   private let openGhosttyConfigFile: () -> Void
   private let openBrowserWindow: (OpenBrowserWindow) -> Void
   private let openZedWorkspace: (OpenZedWorkspace) -> Void
+  private let openWorkspaceInFinder: (OpenWorkspaceInFinder) -> Void
+  private let openWorkspaceInIde: (OpenWorkspaceInIde) -> Void
   private let showBrowserWindow: () -> Void
   private let sendHostEvent: (HostEvent) -> Void
   private let nativeSettingsStore = NativeSettingsStore()
@@ -1946,6 +2033,8 @@ final class zmuxRootView: NSView {
     openGhosttyConfigFile: @escaping () -> Void,
     openBrowserWindow: @escaping (OpenBrowserWindow) -> Void,
     openZedWorkspace: @escaping (OpenZedWorkspace) -> Void,
+    openWorkspaceInFinder: @escaping (OpenWorkspaceInFinder) -> Void,
+    openWorkspaceInIde: @escaping (OpenWorkspaceInIde) -> Void,
     showBrowserWindow: @escaping () -> Void
   ) {
     self.workspaceView = TerminalWorkspaceView(
@@ -1959,6 +2048,8 @@ final class zmuxRootView: NSView {
     self.openGhosttyConfigFile = openGhosttyConfigFile
     self.openBrowserWindow = openBrowserWindow
     self.openZedWorkspace = openZedWorkspace
+    self.openWorkspaceInFinder = openWorkspaceInFinder
+    self.openWorkspaceInIde = openWorkspaceInIde
     self.showBrowserWindow = showBrowserWindow
     self.sendHostEvent = sendEvent
     self.sidebarWidth = nativeSettingsStore.readSidebarChrome().width ?? Self.defaultSidebarWidth
@@ -2181,6 +2272,10 @@ final class zmuxRootView: NSView {
       openGhosttyConfigFile()
     case .openExternalUrl(let command):
       openExternalUrl(command)
+    case .openWorkspaceInFinder(let command):
+      openWorkspaceInFinder(command)
+    case .openWorkspaceInIde(let command):
+      openWorkspaceInIde(command)
     case .openBrowserWindow(let command):
       /**
        CDXC:BrowserOverlay 2026-04-26-05:14
@@ -2242,6 +2337,7 @@ final class zmuxRootView: NSView {
    the reference pane model instead of launching an external browser window.
    */
   private func startT3CodeRuntime(_ command: StartT3CodeRuntime) {
+    NativeT3RuntimeLauncher.touchAppHeartbeat(reason: "nativeSidebar.startT3CodeRuntime")
     if let process = t3CodeRuntimeProcess, process.isRunning {
       /**
        CDXC:T3Code 2026-05-02-00:48
@@ -2251,6 +2347,22 @@ final class zmuxRootView: NSView {
        WKWebView.
        */
       guard NativeT3RuntimeLauncher.hasResponsiveManagedRuntimeListener() else {
+        if NativeT3RuntimeLauncher.hasFreshAppHeartbeat() {
+          /**
+           CDXC:T3Code 2026-05-04-09:00
+           Sidebar-driven T3 starts can race with the provider finishing startup
+           or auth bootstrap. A fresh heartbeat means zmux is still supervising
+           the runtime, so keep it alive instead of replacing it underneath the
+           active pane.
+           */
+          NativeT3CodePaneReproLog.append(
+            "nativeSidebar.t3Runtime.start.runningUnhealthyRetained",
+            [
+              "cwd": command.cwd,
+              "pid": process.processIdentifier,
+            ])
+          return
+        }
         NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.runningUnhealthy", [
           "cwd": command.cwd,
           "pid": process.processIdentifier,
@@ -2282,6 +2394,15 @@ final class zmuxRootView: NSView {
     }
 
     NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "nativeSidebar")
+    if NativeT3RuntimeLauncher.hasManagedRuntimeListener() {
+      NativeT3CodePaneReproLog.append(
+        "nativeSidebar.t3Runtime.start.retainedExistingUnresponsive",
+        [
+          "cwd": command.cwd,
+          "port": NativeT3RuntimeLauncher.port,
+        ])
+      return
+    }
     NativeT3CodePaneReproLog.append("nativeSidebar.t3Runtime.start.spawn", [
       "cwd": command.cwd,
       "mode": "desktop-bootstrap",
@@ -2330,7 +2451,9 @@ final class zmuxRootView: NSView {
       }
       t3CodeRuntimeProcess = nil
     }
-    NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(logPrefix: "\(logPrefix).stop")
+    NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(
+      logPrefix: "\(logPrefix).stop",
+      forceOwnedRuntimeStop: true)
   }
 
   private func activateAppWindow() {
@@ -2543,9 +2666,11 @@ final class zmuxRootView: NSView {
   override func layout() {
     super.layout()
     let maxSidebarWidth = currentMaxSidebarWidth()
-    let sidebarWidth = min(max(self.sidebarWidth, Self.sidebarMinWidth), maxSidebarWidth)
+    let minSidebarWidth = currentSidebarMinWidth()
+    let sidebarWidth = min(max(self.sidebarWidth, minSidebarWidth), maxSidebarWidth)
     self.sidebarWidth = sidebarWidth
-    let chromeWidth = Self.workspaceBarWidth + sidebarWidth + Self.dividerWidth
+    let workspaceBarWidth = currentWorkspaceBarWidth()
+    let chromeWidth = workspaceBarWidth + sidebarWidth + Self.dividerWidth
     let chromeX: CGFloat = sidebarSide == .left ? 0 : max(bounds.width - chromeWidth, 0)
     let workspaceX: CGFloat = sidebarSide == .left ? chromeWidth : 0
     let workspaceWidth = max(bounds.width - chromeWidth, 1)
@@ -2553,11 +2678,11 @@ final class zmuxRootView: NSView {
     sidebarView.frame = CGRect(
       x: chromeX,
       y: 0,
-      width: Self.workspaceBarWidth + sidebarWidth,
+      width: workspaceBarWidth + sidebarWidth,
       height: bounds.height
     )
     divider.frame = CGRect(
-      x: chromeX + Self.workspaceBarWidth + sidebarWidth,
+      x: chromeX + workspaceBarWidth + sidebarWidth,
       y: 0,
       width: Self.dividerWidth,
       height: bounds.height
@@ -2574,20 +2699,44 @@ final class zmuxRootView: NSView {
   private func resizeSidebar(by deltaX: CGFloat) {
     let maxSidebarWidth = currentMaxSidebarWidth()
     let effectiveDelta = sidebarSide == .left ? deltaX : -deltaX
-    sidebarWidth = min(max(sidebarWidth + effectiveDelta, Self.sidebarMinWidth), maxSidebarWidth)
+    sidebarWidth = min(
+      max(sidebarWidth + effectiveDelta, currentSidebarMinWidth()),
+      maxSidebarWidth
+    )
     needsLayout = true
   }
 
   private func resetSidebarWidth() {
-    sidebarWidth = min(max(Self.sidebarResetWidth, Self.sidebarMinWidth), currentMaxSidebarWidth())
+    sidebarWidth = min(
+      max(Self.sidebarResetWidth, currentSidebarMinWidth()),
+      currentMaxSidebarWidth()
+    )
     needsLayout = true
     persistSidebarWidth()
   }
 
   private func currentMaxSidebarWidth() -> CGFloat {
-    max(
-      Self.sidebarMinWidth,
-      min(Self.sidebarMaxWidth, bounds.width - Self.workspaceBarWidth - Self.dividerWidth - 240))
+    let minSidebarWidth = currentSidebarMinWidth()
+    return max(
+      minSidebarWidth,
+      min(Self.sidebarMaxWidth, bounds.width - currentWorkspaceBarWidth() - Self.dividerWidth - 240))
+  }
+
+  private func currentSidebarMinWidth() -> CGFloat {
+    /**
+     CDXC:SidebarMode 2026-05-03-19:46
+     Combined mode removes the workspace rail and duplicate compact controls,
+     so the native resize floor can be 70px narrower than Separated mode while
+     Separated keeps the original rail-aware minimum.
+     */
+    if nativeSettingsStore.readSidebarMode() == .combined {
+      return Self.sidebarMinWidth - Self.combinedSidebarMinWidthReduction
+    }
+    return Self.sidebarMinWidth
+  }
+
+  private func currentWorkspaceBarWidth() -> CGFloat {
+    nativeSettingsStore.readSidebarMode() == .combined ? 0 : Self.workspaceBarWidth
   }
 
   private func persistSidebarWidth() {
@@ -3454,7 +3603,7 @@ final class PaneResizeHandleView: NSView {
   var onDrag: ((CGFloat) -> Void)?
   var onDragEnded: (() -> Void)?
   var onDoubleClick: (() -> Void)?
-  private var lastDragX: CGFloat = 0
+  private var lastDragWindowX: CGFloat = 0
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -3492,13 +3641,20 @@ final class PaneResizeHandleView: NSView {
       onDoubleClick?()
       return
     }
-    lastDragX = convert(event.locationInWindow, from: nil).x
+    lastDragWindowX = event.locationInWindow.x
   }
 
   override func mouseDragged(with event: NSEvent) {
-    let currentX = convert(event.locationInWindow, from: nil).x
-    let deltaX = currentX - lastDragX
-    lastDragX = currentX
+    /**
+     CDXC:NativeSidebarChrome 2026-05-04-08:19
+     Sidebar resize drags must track the pointer in stable window coordinates.
+     The handle's local coordinate space moves after each width update, so
+     local deltas can invert during a continuous drag and make the sidebar jump
+     between widths until the user releases the handle.
+     */
+    let currentWindowX = event.locationInWindow.x
+    let deltaX = currentWindowX - lastDragWindowX
+    lastDragWindowX = currentWindowX
     onDrag?(deltaX)
   }
 

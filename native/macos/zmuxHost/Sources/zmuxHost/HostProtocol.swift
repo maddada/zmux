@@ -31,6 +31,8 @@ enum HostCommand: Decodable {
   case applyGhosttyConfigSettings(ApplyGhosttyConfigSettings)
   case openGhosttyConfigFile
   case openExternalUrl(OpenExternalUrl)
+  case openWorkspaceInFinder(OpenWorkspaceInFinder)
+  case openWorkspaceInIde(OpenWorkspaceInIde)
   case openBrowserWindow(OpenBrowserWindow)
   case showBrowserWindow
   case openBrowserDevTools(SessionCommand)
@@ -77,6 +79,8 @@ enum HostCommand: Decodable {
     case applyGhosttyConfigSettings
     case openGhosttyConfigFile
     case openExternalUrl
+    case openWorkspaceInFinder
+    case openWorkspaceInIde
     case openBrowserWindow
     case showBrowserWindow
     case openBrowserDevTools
@@ -153,6 +157,10 @@ enum HostCommand: Decodable {
       self = .openGhosttyConfigFile
     case .openExternalUrl:
       self = .openExternalUrl(try OpenExternalUrl(from: decoder))
+    case .openWorkspaceInFinder:
+      self = .openWorkspaceInFinder(try OpenWorkspaceInFinder(from: decoder))
+    case .openWorkspaceInIde:
+      self = .openWorkspaceInIde(try OpenWorkspaceInIde(from: decoder))
     case .openBrowserWindow:
       self = .openBrowserWindow(try OpenBrowserWindow(from: decoder))
     case .showBrowserWindow:
@@ -178,6 +186,7 @@ enum HostCommand: Decodable {
 }
 
 struct CreateTerminal: Decodable {
+  let activateOnCreate: Bool?
   let cwd: String
   let env: [String: String]?
   let initialInput: String?
@@ -314,6 +323,25 @@ struct OpenExternalUrl: Decodable {
   let url: String
 }
 
+struct OpenWorkspaceInFinder: Decodable {
+  /**
+   CDXC:WorkspaceActions 2026-05-04-08:22
+   Project context-menu open commands cross the WKWebView/AppKit bridge with
+   only the trusted native-sidebar workspace path needed by Finder.
+   */
+  let workspacePath: String
+}
+
+struct OpenWorkspaceInIde: Decodable {
+  /**
+   CDXC:WorkspaceActions 2026-05-04-08:22
+   Opening a project in an IDE must carry the Settings-selected target app so
+   Swift can reuse the existing native launcher for Zed and VS Code variants.
+   */
+  let targetApp: ZedOverlayTargetApp
+  let workspacePath: String
+}
+
 struct OpenBrowserWindow: Decodable {
   let url: String
 }
@@ -399,6 +427,7 @@ enum HostEvent: Encodable {
   case terminalError(sessionId: String, message: String)
   case t3ThreadReady(
     sessionId: String, projectId: String, threadId: String, serverOrigin: String, workspaceRoot: String)
+  case t3ThreadChanged(sessionId: String, threadId: String, title: String?)
   case processResult(requestId: String, exitCode: Int32, stdout: String, stderr: String)
   case sidebarCliResult(requestId: String, ok: Bool, payloadJson: String)
 
@@ -495,6 +524,11 @@ enum HostEvent: Encodable {
       try container.encode(threadId, forKey: .threadId)
       try container.encode(serverOrigin, forKey: .serverOrigin)
       try container.encode(workspaceRoot, forKey: .workspaceRoot)
+    case .t3ThreadChanged(let sessionId, let threadId, let title):
+      try container.encode("t3ThreadChanged", forKey: .type)
+      try container.encode(sessionId, forKey: .sessionId)
+      try container.encode(threadId, forKey: .threadId)
+      try container.encodeIfPresent(title, forKey: .title)
     case .processResult(let requestId, let exitCode, let stdout, let stderr):
       try container.encode("processResult", forKey: .type)
       try container.encode(requestId, forKey: .requestId)

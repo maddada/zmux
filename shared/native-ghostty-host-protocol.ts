@@ -14,6 +14,7 @@ export type NativeTerminalLayout =
 
 export type NativeGhosttyHostCommand =
   | {
+      activateOnCreate?: boolean;
       cwd: string;
       env?: Record<string, string>;
       initialInput?: string;
