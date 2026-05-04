@@ -73,7 +73,7 @@ private func nativeGhosttyTerminalEnvironment(
    Embedded Ghostty terminals are interactive color-capable PTYs. Agent-managed
    launch environments can carry NO_COLOR into zmux; strip color-disabling keys
    at the native Ghostty boundary and set non-forcing color opt-in without
-   changing the xterm.js terminal path.
+   forcing ANSI output in non-Ghostty child processes.
    */
   var result = environment ?? [:]
   for key in nativeGhosttyTerminalColorDisablingEnvironmentKeys {

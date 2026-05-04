@@ -21,15 +21,13 @@
     "target": "ES2023",
     "types": ["node"]
   },
-  "include": ["src/**/*", "shared/**/*", "workspace/**/*", "sidebar/**/*", "native/sidebar/**/*"],
+  "include": ["src/**/*", "shared/**/*", "sidebar/**/*", "native/sidebar/**/*"],
   "exclude": [
     "node_modules",
     "build",
     "dist",
     "out",
-    "extension",
     "**/*.test.ts",
-    "**/*.test.tsx",
-    "shared/vscode-workspace-log-context.ts"
+    "**/*.test.tsx"
   ]
 }

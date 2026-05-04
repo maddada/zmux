@@ -1,0 +1,441 @@
+import type { SidebarSessionActivityState } from "./session-grid-contract";
+
+/**
+ * CDXC:NativeOnlyCleanup 2026-05-05-02:22
+ * Native Ghostty panes still derive agent activity from Claude/Codex/Gemini
+ * terminal titles. Keep that runtime logic in shared code after removing the
+ * unused VS Code extension and Node wrapper sources.
+ */
+
+const CLAUDE_CODE_IDLE_MARKERS = ["✳", "*"] as const;
+/**
+ * CDXC:Claude-session-status 2026-04-25-08:29
+ * Claude Code terminal titles drive zmux running/done indicators. Claude uses
+ * braille glyphs such as `⠐` while running; keep star-glyph support scoped here
+ * for title variants while `✳` remains the idle/done marker.
+ */
+const CLAUDE_CODE_WORKING_MARKERS = [
+  "⠐",
+  "⠂",
+  "·",
+  "✶",
+  "✻",
+  "✽",
+  "✸",
+  "✹",
+  "✺",
+  "✷",
+  "✴",
+] as const;
+const CLAUDE_CODE_TITLE = "Claude Code";
+const CLAUDE_TITLE_KEYWORD = "claude";
+const CODEX_TITLE_KEYWORD = "codex";
+const CODEX_WORKING_MARKERS = ["⠸", "⠴", "⠼", "⠧", "⠦", "⠏", "⠋", "⠇", "⠙", "⠹"] as const;
+const GEMINI_WORKING_MARKER = "✦";
+const GEMINI_IDLE_MARKER = "◇";
+const COPILOT_WORKING_MARKER = "🤖";
+const COPILOT_IDLE_MARKER = "🔔";
+const OPENCODE_TITLE_PREFIX_PATTERN = /^[\s\u2800-\u28ff·•⋅◦✳*✦◇🤖🔔]*OC\s*\|/iu;
+export const TITLE_ACTIVITY_WINDOW_MS = 1_000;
+export const SLOW_SPINNER_ACTIVITY_WINDOW_MS = 3_000;
+
+export type TitleDerivedSessionActivity = {
+  activity: SidebarSessionActivityState;
+  agentName: string;
+  hasSeenWorking?: boolean;
+  isAcknowledged?: boolean;
+  lastTitleChangeAt?: number;
+};
+
+const ASCII_SYMBOL_LOG_ALLOWLIST = new Set(["*"]);
+
+export function getTitleDerivedSessionActivity(
+  title: string,
+  previousDerivedActivity?: TitleDerivedSessionActivity,
+  knownAgentName?: string,
+): TitleDerivedSessionActivity | undefined {
+  const titleState = getTitleState(title, knownAgentName ?? previousDerivedActivity?.agentName);
+  if (!titleState) {
+    return getFallbackActivity(previousDerivedActivity);
+  }
+
+  const sameAgent = previousDerivedActivity?.agentName === titleState.agentName;
+  const hasSeenWorking = sameAgent
+    ? (previousDerivedActivity?.hasSeenWorking ?? false) ||
+      previousDerivedActivity?.activity === "working" ||
+      previousDerivedActivity?.activity === "attention"
+    : false;
+  const isAcknowledged = sameAgent ? (previousDerivedActivity?.isAcknowledged ?? false) : false;
+  const lastTitleChangeAt = sameAgent ? previousDerivedActivity?.lastTitleChangeAt : undefined;
+  if (titleState.state === "idle") {
+    return {
+      activity: hasSeenWorking && !isAcknowledged ? "attention" : "idle",
+      agentName: titleState.agentName,
+      hasSeenWorking,
+      isAcknowledged,
+      lastTitleChangeAt,
+    };
+  }
+
+  const effectiveLastTitleChangeAt =
+    lastTitleChangeAt ??
+    (requiresObservedTitleTransitions(titleState.agentName) ? undefined : Date.now());
+  if (effectiveLastTitleChangeAt === undefined) {
+    return {
+      activity: hasSeenWorking && !isAcknowledged ? "attention" : "idle",
+      agentName: titleState.agentName,
+      hasSeenWorking,
+      isAcknowledged,
+      lastTitleChangeAt: undefined,
+    };
+  }
+  return {
+    activity:
+      Date.now() - effectiveLastTitleChangeAt <= getTitleActivityWindowMs(titleState.agentName)
+        ? "working"
+        : isAcknowledged
+          ? "idle"
+          : "attention",
+    agentName: titleState.agentName,
+    hasSeenWorking: true,
+    isAcknowledged,
+    lastTitleChangeAt: effectiveLastTitleChangeAt,
+  };
+}
+
+export function getTitleDerivedSessionActivityFromTransition(
+  previousTitle: string | undefined,
+  nextTitle: string,
+  previousDerivedActivity?: TitleDerivedSessionActivity,
+  knownAgentName?: string,
+): TitleDerivedSessionActivity | undefined {
+  const nextTitleState = getTitleState(
+    nextTitle,
+    knownAgentName ?? previousDerivedActivity?.agentName,
+  );
+  if (nextTitleState) {
+    const sameAgent = previousDerivedActivity?.agentName === nextTitleState.agentName;
+    const hasSeenWorking = sameAgent
+      ? (previousDerivedActivity?.hasSeenWorking ?? false) ||
+        previousDerivedActivity?.activity === "working" ||
+        previousDerivedActivity?.activity === "attention"
+      : false;
+    const isAcknowledged = sameAgent ? (previousDerivedActivity?.isAcknowledged ?? false) : false;
+    return {
+      activity:
+        nextTitleState.state === "working"
+          ? "working"
+          : hasSeenWorking && !isAcknowledged
+            ? "attention"
+            : "idle",
+      agentName: nextTitleState.agentName,
+      hasSeenWorking: nextTitleState.state === "working" ? true : hasSeenWorking,
+      isAcknowledged: nextTitleState.state === "working" ? false : isAcknowledged,
+      lastTitleChangeAt:
+        nextTitleState.state === "working"
+          ? previousDerivedActivity?.agentName === nextTitleState.agentName &&
+            previousTitle?.trim() === nextTitle.trim()
+            ? (previousDerivedActivity.lastTitleChangeAt ?? Date.now())
+            : Date.now()
+          : previousDerivedActivity?.agentName === nextTitleState.agentName
+            ? previousDerivedActivity.lastTitleChangeAt
+            : undefined,
+    };
+  }
+
+  return getFallbackActivity(previousDerivedActivity);
+}
+
+export function haveSameTitleDerivedSessionActivity(
+  left: TitleDerivedSessionActivity | undefined,
+  right: TitleDerivedSessionActivity | undefined,
+): boolean {
+  return (
+    left?.activity === right?.activity &&
+    left?.agentName === right?.agentName &&
+    left?.isAcknowledged === right?.isAcknowledged
+  );
+}
+
+export function acknowledgeTitleDerivedSessionActivity(
+  activity: TitleDerivedSessionActivity | undefined,
+): TitleDerivedSessionActivity | undefined {
+  if (!activity || activity.activity !== "attention") {
+    return activity;
+  }
+
+  return {
+    ...activity,
+    activity: "idle",
+    isAcknowledged: true,
+  };
+}
+
+export function getInterestingTitleSymbols(title: string): string[] {
+  const symbols: string[] = [];
+
+  for (const character of title) {
+    if (/\s/u.test(character) || /[\p{L}\p{N}]/u.test(character)) {
+      continue;
+    }
+
+    if (character.codePointAt(0)! <= 0x7f && !ASCII_SYMBOL_LOG_ALLOWLIST.has(character)) {
+      continue;
+    }
+
+    if (!symbols.includes(character)) {
+      symbols.push(character);
+    }
+  }
+
+  return symbols;
+}
+
+function getTitleState(
+  title: string,
+  knownAgentName?: string,
+):
+  | { agentName: "claude" | "codex" | "copilot" | "gemini" | "opencode"; state: "idle" | "working" }
+  | undefined {
+  const normalizedAgentName = normalizeKnownAgentName(knownAgentName);
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  if (hasOpenCodeTitlePrefix(normalizedTitle)) {
+    return undefined;
+  }
+
+  const claudeCodeTitleState = getClaudeCodeTitleState(title, normalizedAgentName === "claude");
+  if (claudeCodeTitleState) {
+    return {
+      agentName: "claude",
+      state: claudeCodeTitleState,
+    };
+  }
+
+  const codexTitleState = getCodexTitleState(title, normalizedAgentName === "codex");
+  if (codexTitleState) {
+    return {
+      agentName: "codex",
+      state: codexTitleState,
+    };
+  }
+
+  const geminiTitleState = getGeminiTitleState(title, normalizedAgentName === "gemini");
+  if (geminiTitleState) {
+    return {
+      agentName: "gemini",
+      state: geminiTitleState,
+    };
+  }
+
+  const copilotTitleState = getCopilotTitleState(title, normalizedAgentName === "copilot");
+  if (copilotTitleState) {
+    return {
+      agentName: "copilot",
+      state: copilotTitleState,
+    };
+  }
+
+  return undefined;
+}
+
+export function hasOpenCodeTitlePrefix(title: string): boolean {
+  return OPENCODE_TITLE_PREFIX_PATTERN.test(title);
+}
+
+export function hasClaudeCodeWorkingTitleMarker(title: string | undefined): boolean {
+  return title !== undefined && getClaudeCodeTitleState(title, true) === "working";
+}
+
+export function hasClaudeCodeIdleTitleMarker(title: string | undefined): boolean {
+  return title !== undefined && getClaudeCodeTitleState(title, true) === "idle";
+}
+
+function getClaudeCodeTitleState(
+  title: string,
+  allowAgentHintMatch = false,
+): "idle" | "working" | undefined {
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  const lowerTitle = normalizedTitle.toLowerCase();
+  const lowerClaudeCodeTitle = CLAUDE_CODE_TITLE.toLowerCase();
+
+  const hasClaudeKeyword =
+    lowerTitle.includes(lowerClaudeCodeTitle) || lowerTitle.includes(CLAUDE_TITLE_KEYWORD);
+  const hasClaudeInferenceMarker =
+    containsAnyMarker(normalizedTitle, CLAUDE_CODE_IDLE_MARKERS) ||
+    containsAnyMarker(normalizedTitle, CLAUDE_CODE_WORKING_MARKERS);
+  if (!allowAgentHintMatch && !hasClaudeKeyword && !hasClaudeInferenceMarker) {
+    return undefined;
+  }
+
+  if (
+    normalizedTitle.includes("✳") ||
+    allowAgentHintMatch ||
+    hasClaudeKeyword ||
+    normalizedTitle.includes("*")
+  ) {
+    if (containsAnyMarker(normalizedTitle, CLAUDE_CODE_IDLE_MARKERS)) {
+      return "idle";
+    }
+  }
+
+  if (
+    containsAnyMarker(normalizedTitle, CLAUDE_CODE_WORKING_MARKERS) ||
+    allowAgentHintMatch ||
+    hasClaudeKeyword
+  ) {
+    if (containsAnyMarker(normalizedTitle, CLAUDE_CODE_WORKING_MARKERS)) {
+      return "working";
+    }
+  }
+
+  if (allowAgentHintMatch || hasClaudeKeyword) {
+    if (containsAnyMarker(normalizedTitle, CLAUDE_CODE_IDLE_MARKERS)) {
+      return "idle";
+    }
+
+    if (containsAnyMarker(normalizedTitle, CLAUDE_CODE_WORKING_MARKERS)) {
+      return "working";
+    }
+
+    if (hasClaudeKeyword) {
+      return "idle";
+    }
+  }
+
+  return undefined;
+}
+
+function getCodexTitleState(
+  title: string,
+  allowAgentHintMatch = false,
+): "idle" | "working" | undefined {
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  const hasCodexKeyword = normalizedTitle.toLowerCase().includes(CODEX_TITLE_KEYWORD);
+  const hasCodexWorkingMarker = getCodexWorkingMarker(normalizedTitle) !== undefined;
+  if (!allowAgentHintMatch && !hasCodexKeyword && !hasCodexWorkingMarker) {
+    return undefined;
+  }
+
+  if (hasCodexWorkingMarker) {
+    return "working";
+  }
+
+  return "idle";
+}
+
+function getGeminiTitleState(
+  title: string,
+  allowAgentHintMatch = false,
+): "idle" | "working" | undefined {
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  const lowerTitle = normalizedTitle.toLowerCase();
+  if (
+    !allowAgentHintMatch &&
+    !lowerTitle.includes("gemini") &&
+    !normalizedTitle.includes(GEMINI_WORKING_MARKER) &&
+    !normalizedTitle.includes(GEMINI_IDLE_MARKER)
+  ) {
+    return undefined;
+  }
+
+  if (normalizedTitle.includes(GEMINI_WORKING_MARKER)) {
+    return "working";
+  }
+
+  if (normalizedTitle.includes(GEMINI_IDLE_MARKER)) {
+    return "idle";
+  }
+
+  return undefined;
+}
+
+function getCopilotTitleState(
+  title: string,
+  allowAgentHintMatch = false,
+): "idle" | "working" | undefined {
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  const lowerTitle = normalizedTitle.toLowerCase();
+  if (
+    !allowAgentHintMatch &&
+    !lowerTitle.includes("copilot") &&
+    !lowerTitle.includes("github copilot") &&
+    !normalizedTitle.includes(COPILOT_WORKING_MARKER) &&
+    !normalizedTitle.includes(COPILOT_IDLE_MARKER)
+  ) {
+    return undefined;
+  }
+
+  if (normalizedTitle.includes(COPILOT_WORKING_MARKER)) {
+    return "working";
+  }
+
+  if (normalizedTitle.includes(COPILOT_IDLE_MARKER)) {
+    return "idle";
+  }
+
+  return undefined;
+}
+
+function getCodexWorkingMarker(title: string): string | undefined {
+  return CODEX_WORKING_MARKERS.find((marker) => title.includes(marker));
+}
+
+function containsAnyMarker(title: string, markers: readonly string[]): boolean {
+  return markers.some((marker) => title.includes(marker));
+}
+
+function normalizeKnownAgentName(
+  knownAgentName: string | undefined,
+): "claude" | "codex" | "copilot" | "gemini" | "opencode" | undefined {
+  const normalizedAgentName = knownAgentName?.trim().toLowerCase();
+  if (normalizedAgentName === "claude code") {
+    return "claude";
+  }
+  if (normalizedAgentName === "codex cli") {
+    return "codex";
+  }
+  if (normalizedAgentName === "github copilot") {
+    return "copilot";
+  }
+  if (normalizedAgentName === "open code") {
+    return "opencode";
+  }
+  if (
+    normalizedAgentName === "claude" ||
+    normalizedAgentName === "codex" ||
+    normalizedAgentName === "gemini" ||
+    normalizedAgentName === "copilot" ||
+    normalizedAgentName === "opencode"
+  ) {
+    return normalizedAgentName;
+  }
+
+  return undefined;
+}
+
+function requiresObservedTitleTransitions(
+  agentName: TitleDerivedSessionActivity["agentName"],
+): boolean {
+  return agentName === "claude" || agentName === "codex";
+}
+
+export function getTitleActivityWindowMs(
+  agentName: TitleDerivedSessionActivity["agentName"],
+): number {
+  return requiresObservedTitleTransitions(agentName)
+    ? SLOW_SPINNER_ACTIVITY_WINDOW_MS
+    : TITLE_ACTIVITY_WINDOW_MS;
+}
+
+function getFallbackActivity(
+  previousDerivedActivity: TitleDerivedSessionActivity | undefined,
+): TitleDerivedSessionActivity | undefined {
+  if (!previousDerivedActivity?.hasSeenWorking) {
+    return undefined;
+  }
+
+  return {
+    ...previousDerivedActivity,
+    activity: previousDerivedActivity.isAcknowledged ? "idle" : "attention",
+  };
+}

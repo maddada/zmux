@@ -798,8 +798,8 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   /**
    * CDXC:SidebarMode 2026-05-03-10:42
    * Combined mode is only active when the host sends persisted settings. That
-   * keeps the extension/sidebar hydrate path on the existing Separated behavior
-   * while the native app can default new installs to Combined.
+   * keeps legacy sidebar hydration on the existing Separated behavior while
+   * the native app can default new installs to Combined.
    */
   const isCombinedSidebarMode = settings?.sidebarMode === "combined";
   const isManualActiveSessionsSort = activeSessionsSortMode === "manual";

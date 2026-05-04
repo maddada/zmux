@@ -97,7 +97,7 @@ export function SessionRenameModal({
      * CDXC:SidebarRename 2026-05-04-14:57
      * Pasting more than 50 characters is an explicit auto-name request. Submit
      * the full pasted text immediately through the normal renameSession command
-     * so the extension/native backend generates the concise thread title before
+     * so the active host backend generates the concise thread title before
      * syncing `/rename` into the agent CLI.
      */
     event.preventDefault();
