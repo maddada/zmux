@@ -1,6 +1,6 @@
 {
   "name": "zmux",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "private": true,
   "description": "zmux native macOS workarea and sessions UI.",
   "type": "module",

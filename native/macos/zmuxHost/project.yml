@@ -13,19 +13,19 @@ settings:
     # maintainer's Apple signing identity. Developers can set signing locally
     # in Xcode or with an untracked config.
     CODE_SIGN_STYLE: Automatic
-    # CDXC:AutoUpdate 2026-05-05-05:01: Sparkle compares CFBundleVersion, not
+    # CDXC:AutoUpdate 2026-05-06-03:12: Sparkle compares CFBundleVersion, not
     # only CFBundleShortVersionString. Release builds use semver-derived numeric
     # build values so each public update is greater than earlier installs.
-    CURRENT_PROJECT_VERSION: 10406
+    CURRENT_PROJECT_VERSION: 10407
     GENERATE_INFOPLIST_FILE: YES
     LD_RUNPATH_SEARCH_PATHS:
       - "$(inherited)"
       - "@executable_path/../Frameworks"
     MACOSX_DEPLOYMENT_TARGET: "13.0"
-    # CDXC:Distribution 2026-05-05-05:01: Homebrew and Sparkle release v1.4.6 must
+    # CDXC:Distribution 2026-05-06-03:12: Homebrew and Sparkle release v1.4.7 must
     # publish a notarized Developer ID app whose bundle metadata matches the
     # GitHub release, Sparkle appcast, and brew artifact version.
-    MARKETING_VERSION: "1.4.6"
+    MARKETING_VERSION: "1.4.7"
     SDKROOT: macosx
     SWIFT_VERSION: "5.0"
     # CDXC:ChromiumBrowserPanes 2026-05-04-16:38: Swift needs both Ghostty's
@@ -72,12 +72,10 @@ targets:
       - path: Sources/Shared
       - path: Sources/zmuxHost
         excludes:
-          # CDXC:NativeBuild 2026-05-04-18:21: Optional CEF prototype files
-          # can exist locally without the Chromium SDK. The default WKWebView
-          # browser path must keep `bun run start` buildable by excluding those
-          # files until the CEF target has explicit headers/framework inputs.
-          - ZmuxCEFBridge.h
-          - ZmuxCEFBridge.mm
+          # CDXC:NativeBuild 2026-05-06-01:05: Chromium browser panes now call
+          # the CEF bridge from Swift, and build-zmux-host vendors CEF before
+          # project generation. Keep only the bridging header out of sources so
+          # the ObjC++ bridge object links whenever `bun run start` rebuilds.
           - ZmuxHost-Bridging-Header.h
       - path: ${GHOSTTY_ROOT}/macos/Sources/Ghostty
         excludes:
