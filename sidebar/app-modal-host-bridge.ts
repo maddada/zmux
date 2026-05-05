@@ -9,6 +9,7 @@ type T3BrowserAccessMessage = Extract<ExtensionToSidebarMessage, { type: "showT3
 export type AppModalKind =
   | "agentConfig"
   | "commandConfig"
+  | "configureActions"
   | "daemonSessions"
   | "findPreviousSession"
   | "hotkeys"

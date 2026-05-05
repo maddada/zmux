@@ -134,6 +134,113 @@
   overflow: hidden;
 }
 
+.configure-actions-modal {
+  gap: 14px;
+  max-height: min(640px, calc(100vh - 24px));
+  max-width: min(560px, 100%);
+  overflow: hidden;
+  padding: 20px;
+  width: min(560px, 100%);
+}
+
+.configure-actions-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/**
+ * CDXC:SidebarActions 2026-05-06-04:36
+ * Configure Actions should fit its content and show readable action names.
+ * Keep it as a compact list manager instead of nesting the sidebar card/grid,
+ * and use direct row clicks for editing so context menus are not required.
+ */
+.configure-actions-add-button {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.configure-actions-list {
+  display: grid;
+  gap: 6px;
+  max-height: min(420px, calc(100vh - 190px));
+  min-height: 0;
+  overflow: auto;
+}
+
+.configure-actions-list-item {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-card-active) 68%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 90%, transparent);
+  border-radius: 12px;
+  color: color-mix(in srgb, var(--app-foreground) 94%, var(--app-muted) 6%);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  min-height: 52px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.configure-actions-list-item:hover,
+.configure-actions-list-item:focus-visible {
+  background: color-mix(in srgb, var(--app-button-background) 12%, var(--app-card-active) 88%);
+  border-color: color-mix(in srgb, var(--app-button-background) 42%, var(--app-border));
+  outline: none;
+}
+
+.configure-actions-list-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-card) 84%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 84%, transparent);
+  border-radius: 9px;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.configure-actions-list-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.configure-actions-list-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.configure-actions-list-meta {
+  color: color-mix(in srgb, var(--app-muted) 84%, var(--app-foreground) 16%);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.configure-actions-empty-state {
+  color: color-mix(in srgb, var(--app-muted) 86%, var(--app-foreground) 14%);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 10px 2px;
+}
+
+.app-modal-host-body .session-context-menu {
+  z-index: 70;
+}
+
 .previous-sessions-modal {
   gap: 14px;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -1200,6 +1307,26 @@
   flex: 1 1 112px;
   max-width: 100%;
   min-width: 112px;
+}
+
+.command-config-actions {
+  align-items: center;
+}
+
+.command-config-delete-button {
+  align-items: center;
+  border-color: color-mix(in srgb, #e05656 42%, var(--app-border));
+  color: color-mix(in srgb, #e05656 86%, var(--app-foreground) 14%);
+  display: inline-flex;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.command-config-delete-button:hover,
+.command-config-delete-button:focus-visible {
+  background: color-mix(in srgb, #e05656 15%, var(--app-card-active) 85%);
+  border-color: color-mix(in srgb, #e05656 68%, var(--app-border));
+  outline: none;
 }
 
 .confirm-modal-root-nested {

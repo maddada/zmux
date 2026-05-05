@@ -248,18 +248,14 @@ export function AgentsPanel({
     openAppModal({ agentDraft: draft, modal: "agentConfig", type: "open" });
   };
 
-  const openCreateCommandEditor = () => {
-    openAppModal({
-      commandDraft: {
-        actionType: "terminal",
-        closeTerminalOnExit: false,
-        name: "",
-        playCompletionSound: false,
-      },
-      lockedActionType: "terminal",
-      modal: "commandConfig",
-      type: "open",
-    });
+  const openConfigureActionsModal = () => {
+    /**
+     * CDXC:SidebarActions 2026-05-06-04:36
+     * Route full action management to a compact Configure Actions modal with
+     * readable rows and direct edit/delete flow. The dropdown stays optimized
+     * for quick run/remove, while the modal handles deeper configuration.
+     */
+    openAppModal({ modal: "configureActions", type: "open" });
   };
 
   useEffect(() => {
@@ -367,24 +363,13 @@ export function AgentsPanel({
 
   const runCommand = (command: SidebarCommandButton | undefined) => {
     if (!command) {
-      openCreateCommandEditor();
+      openConfigureActionsModal();
       return;
     }
     persistPrimaryCommand(command.commandId);
     vscode.postMessage({
       commandId: command.commandId,
       type: "runSidebarCommand",
-    });
-  };
-
-  const removeCommand = (command: SidebarCommandButton) => {
-    if (primaryCommandId === command.commandId) {
-      setPrimaryCommandId(undefined);
-      localStorage.removeItem(PRIMARY_COMMAND_STORAGE_KEY);
-    }
-    vscode.postMessage({
-      commandId: command.commandId,
-      type: "deleteSidebarCommand",
     });
   };
 
@@ -753,17 +738,13 @@ export function AgentsPanel({
             <QuickActionMenu
               commands={runnableCommands}
               menu={quickActionMenu}
-              onAddCommand={() => {
+              onConfigureActions={() => {
                 setQuickActionMenu(undefined);
-                openCreateCommandEditor();
+                openConfigureActionsModal();
               }}
               onRunCommand={(command) => {
                 setQuickActionMenu(undefined);
                 runCommand(command);
-              }}
-              onRemoveCommand={(command) => {
-                setQuickActionMenu(undefined);
-                removeCommand(command);
               }}
               onRunOpenIn={(target) => {
                 setQuickActionMenu(undefined);
@@ -824,8 +805,7 @@ function QuickActionSplitButton({
 type QuickActionMenuProps = {
   commands: readonly SidebarCommandButton[];
   menu: QuickActionMenuState;
-  onAddCommand: () => void;
-  onRemoveCommand: (command: SidebarCommandButton) => void;
+  onConfigureActions: () => void;
   onRunCommand: (command: SidebarCommandButton) => void;
   onRunOpenIn: (target: OpenInQuickActionTarget) => void;
   primaryCommandId: string | undefined;
@@ -836,8 +816,7 @@ const QuickActionMenu = forwardRef<HTMLDivElement, QuickActionMenuProps>(functio
   {
     commands,
     menu,
-    onAddCommand,
-    onRemoveCommand,
+    onConfigureActions,
     onRunCommand,
     onRunOpenIn,
     primaryCommandId,
@@ -866,12 +845,12 @@ const QuickActionMenu = forwardRef<HTMLDivElement, QuickActionMenuProps>(functio
           <div className="quick-action-menu-label">Actions</div>
           {commands.length > 0 ? (
             commands.map((command) => (
-              <QuickActionCommandMenuItem
-                command={command}
+              <QuickActionMenuItem
+                icon={<CommandQuickActionIcon command={command} />}
                 isSelected={command.commandId === primaryCommandId}
                 key={command.commandId}
-                onRemove={() => onRemoveCommand(command)}
-                onRun={() => onRunCommand(command)}
+                label={quickCommandLabel(command)}
+                onClick={() => onRunCommand(command)}
               />
             ))
           ) : (
@@ -879,9 +858,9 @@ const QuickActionMenu = forwardRef<HTMLDivElement, QuickActionMenuProps>(functio
           )}
           <div className="quick-action-menu-divider" role="separator" />
           <QuickActionMenuItem
-            icon={<IconPlus aria-hidden="true" size={18} stroke={1.8} />}
-            label="Add Action"
-            onClick={onAddCommand}
+            icon={<IconPencil aria-hidden="true" size={18} stroke={1.8} />}
+            label="Configure"
+            onClick={onConfigureActions}
           />
         </>
       ) : null}
@@ -902,64 +881,6 @@ const QuickActionMenu = forwardRef<HTMLDivElement, QuickActionMenuProps>(functio
     </div>
   );
 });
-
-type QuickActionCommandMenuItemProps = {
-  command: SidebarCommandButton;
-  isSelected: boolean;
-  onRemove: () => void;
-  onRun: () => void;
-};
-
-/**
- * CDXC:SidebarActions 2026-05-05-04:55
- * The Actions dropdown must support removal without making normal action
- * clicks destructive. Each row keeps the main click target for run/promote and
- * exposes a separate trailing remove button that uses the existing command
- * deletion path.
- */
-function QuickActionCommandMenuItem({
-  command,
-  isSelected,
-  onRemove,
-  onRun,
-}: QuickActionCommandMenuItemProps) {
-  const label = quickCommandLabel(command);
-
-  return (
-    <div className="quick-action-command-row" role="presentation">
-      <button
-        className="quick-action-menu-item quick-action-menu-command-run"
-        data-selected={String(isSelected)}
-        onClick={onRun}
-        role="menuitem"
-        type="button"
-      >
-        <span aria-hidden="true" className="quick-action-menu-item-icon">
-          <CommandQuickActionIcon command={command} />
-        </span>
-        <span className="quick-action-menu-item-label">{label}</span>
-        {isSelected ? (
-          <IconCheck
-            aria-hidden="true"
-            className="quick-action-menu-item-check"
-            size={18}
-            stroke={1.9}
-          />
-        ) : null}
-      </button>
-      <button
-        aria-label={`Remove ${label}`}
-        className="quick-action-menu-remove-button"
-        onClick={onRemove}
-        role="menuitem"
-        title={`Remove ${label}`}
-        type="button"
-      >
-        <IconTrash aria-hidden="true" size={16} stroke={1.8} />
-      </button>
-    </div>
-  );
-}
 
 type QuickActionMenuItemProps = {
   icon: ReactNode;

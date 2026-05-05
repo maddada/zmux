@@ -64,8 +64,11 @@ type CommandsPanelProps = {
   createActionType?: SidebarActionType;
   createRequestId: number;
   isCollapsed: boolean;
+  isCollapsible?: boolean;
   isVisible: boolean;
   onBrowserCommandRun?: () => void;
+  onCreateCommand?: (actionType: SidebarActionType) => void;
+  onEditCommand?: (command: SidebarCommandButton) => void;
   onToggleCollapsed: (collapsed: boolean) => void;
   showGitButton: boolean;
   titlebarActions?: ReactNode;
@@ -189,8 +192,11 @@ export function CommandsPanel({
   createActionType,
   createRequestId,
   isCollapsed,
+  isCollapsible = true,
   isVisible,
   onBrowserCommandRun,
+  onCreateCommand,
+  onEditCommand,
   onToggleCollapsed,
   showGitButton,
   titlebarActions,
@@ -281,6 +287,11 @@ export function CommandsPanel({
   }, [contextMenu]);
 
   const openCommandEditor = (command: SidebarCommandButton) => {
+    if (onEditCommand) {
+      onEditCommand(command);
+      return;
+    }
+
     const draft: CommandConfigDraft = {
       actionType: command.actionType,
       closeTerminalOnExit: command.closeTerminalOnExit,
@@ -302,6 +313,17 @@ export function CommandsPanel({
   };
 
   const openCreateCommandEditor = (actionType: SidebarActionType) => {
+    if (onCreateCommand) {
+      /**
+       * CDXC:SidebarActions 2026-05-06-01:44
+       * Configure Actions renders the existing action button grid inside a
+       * Settings-style modal. Let that modal own create/edit dialogs locally so
+       * right-click Configure and Add return users to the action manager.
+       */
+      onCreateCommand(actionType);
+      return;
+    }
+
     const draft = createCommandDraft(actionType);
     openAppModal({
       commandDraft: draft,
@@ -667,7 +689,7 @@ export function CommandsPanel({
             actions={titlebarActions}
             idleIcon={<IconBox size={18} stroke={1.8} />}
             isCollapsed={isCollapsed}
-            isCollapsible
+            isCollapsible={isCollapsible}
             onToggleCollapsed={() => onToggleCollapsed(!isCollapsed)}
             title="Actions"
           />

@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import { AgentConfigModal, type AgentConfigDraft } from "../../sidebar/agent-config-modal";
 import { CommandConfigModal, type CommandConfigDraft } from "../../sidebar/command-config-modal";
+import { ConfigureActionsModal } from "../../sidebar/configure-actions-modal";
 import { DaemonSessionsModal } from "../../sidebar/daemon-sessions-modal";
 import { FindPreviousSessionModal } from "../../sidebar/find-previous-session-modal";
 import { HotkeysModal } from "../../sidebar/hotkeys-modal";
@@ -31,6 +32,7 @@ import "../../sidebar/styles.css";
 type AppModalKind =
   | "agentConfig"
   | "commandConfig"
+  | "configureActions"
   | "daemonSessions"
   | "findPreviousSession"
   | "hotkeys"
@@ -244,6 +246,11 @@ function AppModalHost() {
         }}
         onClose={closeModal}
         settings={settings}
+      />
+      <ConfigureActionsModal
+        isOpen={activeModal === "configureActions"}
+        onClose={closeModal}
+        vscode={vscode}
       />
       <T3ThreadIdModal
         currentThreadId={t3ThreadId?.currentThreadId ?? ""}

@@ -1,4 +1,4 @@
-import { IconX } from "@tabler/icons-react";
+import { IconTrash, IconX } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useId, useState } from "react";
 import { DEFAULT_BROWSER_ACTION_URL, type SidebarActionType } from "../shared/sidebar-commands";
@@ -26,6 +26,13 @@ export type CommandConfigModalProps = {
   isOpen: boolean;
   lockedActionType?: SidebarActionType;
   onCancel: () => void;
+  /**
+   * CDXC:SidebarActions 2026-05-06-04:36
+   * Configure Actions opens this editor directly from a readable action row.
+   * Existing actions must expose deletion inside the editor so users can remove
+   * an action without relying on the old modal-embedded context menu.
+   */
+  onDelete?: (draft: CommandConfigDraft) => void;
   onSave: (draft: CommandConfigDraft) => void;
 };
 
@@ -34,6 +41,7 @@ export function CommandConfigModal({
   isOpen,
   lockedActionType,
   onCancel,
+  onDelete,
   onSave,
 }: CommandConfigModalProps) {
   const [actionType, setActionType] = useState<SidebarActionType>(draft.actionType);
@@ -229,7 +237,30 @@ export function CommandConfigModal({
             </span>
           </label>
         </div>
-        <div className="confirm-modal-actions">
+        <div className="confirm-modal-actions command-config-actions">
+          {onDelete && draft.commandId ? (
+            <button
+              className="secondary confirm-modal-button command-config-delete-button"
+              onClick={() =>
+                onDelete({
+                  actionType,
+                  closeTerminalOnExit: actionType === "terminal" ? closeTerminalOnExit : false,
+                  command: actionType === "terminal" ? command.trim() : undefined,
+                  commandId: draft.commandId,
+                  icon,
+                  iconColor: icon ? iconColor : undefined,
+                  isGlobal,
+                  name: trimmedName,
+                  playCompletionSound: actionType === "terminal" ? playCompletionSound : false,
+                  url: actionType === "browser" ? url.trim() : undefined,
+                })
+              }
+              type="button"
+            >
+              <IconTrash aria-hidden="true" size={15} stroke={1.8} />
+              Delete
+            </button>
+          ) : null}
           <button className="secondary confirm-modal-button" onClick={onCancel} type="button">
             Cancel
           </button>
