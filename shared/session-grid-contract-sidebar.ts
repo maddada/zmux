@@ -447,6 +447,15 @@ export type SidebarToExtensionMessage =
       type: "openBrowser";
     }
   | {
+      /**
+       * CDXC:ChromiumBrowserPanes 2026-05-04-17:00
+       * The sidebar Chromium test button must always create an in-workspace
+       * browser pane, independent of the legacy browserOpenMode setting that
+       * can still target Chrome Canary for other browser actions.
+       */
+      type: "openBrowserPane";
+    }
+  | {
       type: "openWorkspaceWelcome";
     }
   | {

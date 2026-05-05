@@ -13,6 +13,8 @@ AGENTS.md
 .agents/skills/zmux-release-to-brew/SKILL.md
 storybook-static/
 native/macos/zmuxHost/Web/
+native/macos/zmuxHost/Vendor/
+native/macos/zmuxHost/build/
 native/macos/zmuxHost/zmuxHost.xcodeproj/
 native/macos/zmuxHost/zmux.xcodeproj/
 

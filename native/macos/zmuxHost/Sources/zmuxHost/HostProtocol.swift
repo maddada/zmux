@@ -220,6 +220,7 @@ struct SetActiveTerminalSet: Decodable {
   let activeSessionIds: [String]
   let attentionSessionIds: [String]?
   let backgroundColor: String?
+  let focusRequestId: Int?
   let focusedSessionId: String?
   let layout: NativeTerminalLayout?
   let paneGap: Double?

@@ -56,13 +56,8 @@ enum NativeBrowserReactGrabScriptLoader {
 
 @MainActor
 enum NativeBrowserReactGrabInjector {
-  static func toggleOrInject(into webView: WKWebView) async {
-    guard let scriptSource = await NativeBrowserReactGrabScriptLoader.fetch() else {
-      NSSound.beep()
-      return
-    }
-
-    let combined = """
+  private static func combinedScript(scriptSource: String) -> String {
+    """
       (function() {
         if (window.__REACT_GRAB__) {
           window.__REACT_GRAB__.toggle();
@@ -76,6 +71,15 @@ enum NativeBrowserReactGrabInjector {
       })();
       \(scriptSource)
       """
+  }
+
+  static func toggleOrInject(into webView: WKWebView) async {
+    guard let scriptSource = await NativeBrowserReactGrabScriptLoader.fetch() else {
+      NSSound.beep()
+      return
+    }
+
+    let combined = combinedScript(scriptSource: scriptSource)
 
     do {
       _ = try await webView.evaluateJavaScript(combined)
@@ -83,5 +87,20 @@ enum NativeBrowserReactGrabInjector {
       NSLog("ReactGrab: injection failed: %@", error.localizedDescription)
       NSSound.beep()
     }
+  }
+
+  static func toggleOrInject(into chromiumView: ZmuxCEFBrowserView) async {
+    guard let scriptSource = await NativeBrowserReactGrabScriptLoader.fetch() else {
+      NSSound.beep()
+      return
+    }
+
+    /**
+     CDXC:ChromiumBrowserPanes 2026-05-04-16:51
+     Browser-pane tools must operate on the actual Chromium renderer. Execute
+     React Grab through CEF JavaScript evaluation instead of keeping a hidden
+     WebKit-only injection path for normal browser panes.
+     */
+    chromiumView.executeJavaScript(combinedScript(scriptSource: scriptSource))
   }
 }

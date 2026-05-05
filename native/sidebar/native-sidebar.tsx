@@ -210,6 +210,7 @@ type NativeHostCommand =
       activeSessionIds: string[];
       attentionSessionIds?: string[];
       backgroundColor?: string;
+      focusRequestId?: number;
       focusedSessionId?: string;
       layout?: NativeTerminalLayout;
       paneGap?: number;
@@ -707,6 +708,10 @@ const restoredProjectState = readStoredProjects();
 let projects: NativeProject[] = restoredProjectState.projects;
 let activeProjectId = restoredProjectState.activeProjectId;
 let revision = 0;
+let nextNativeLayoutFocusRequestId = 0;
+let pendingNativeLayoutFocusRequest:
+  | { reason: string; requestId: number; sessionId: string }
+  | undefined;
 let pendingZedProjectSyncTimeout: number | undefined;
 const sidebarBus = new SurfaceMessageBus<ExtensionToSidebarMessage>();
 const terminalStateById = new Map<
@@ -991,6 +996,7 @@ function summarizeNativeFocusCommand(command: NativeHostCommand): Record<string,
   return {
     activeSessionIds: "activeSessionIds" in command ? command.activeSessionIds : undefined,
     backgroundColor: "backgroundColor" in command ? command.backgroundColor : undefined,
+    focusRequestId: "focusRequestId" in command ? command.focusRequestId : undefined,
     focusedSessionId: "focusedSessionId" in command ? command.focusedSessionId : undefined,
     hasInitialInput: "initialInput" in command ? Boolean(command.initialInput) : undefined,
     layoutLeafSessionIds:
@@ -1002,6 +1008,14 @@ function summarizeNativeFocusCommand(command: NativeHostCommand): Record<string,
     title: "title" in command ? command.title : undefined,
     type: command.type,
     visible: "visible" in command ? command.visible : undefined,
+  };
+}
+
+function queueNativeLayoutFocusRequest(sessionId: string, reason: string): void {
+  pendingNativeLayoutFocusRequest = {
+    reason,
+    requestId: ++nextNativeLayoutFocusRequestId,
+    sessionId,
   };
 }
 
@@ -5155,6 +5169,7 @@ function focusTerminal(sessionId: string): void {
   updateActiveProjectWorkspace(
     (workspace) => focusSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot,
   );
+  queueNativeLayoutFocusRequest(reference.sessionId, "focusTerminal");
   const sessionRecord = findSessionRecord(reference.sessionId);
   if (sessionRecord?.kind === "t3" || sessionRecord?.kind === "browser") {
     if (!nativeSessionIdBySidebarSessionId.has(reference.sessionId)) {
@@ -6452,6 +6467,14 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
           typeof payload.url === "string" ? payload.url : DEFAULT_BROWSER_LAUNCH_URL,
         );
         return { ok: true };
+      case "openBrowserPane":
+        /**
+         * CDXC:ChromiumBrowserPanes 2026-05-04-17:04
+         * CEF pane testing needs a non-UI path that exercises the same
+         * in-workspace browser creation as the sidebar button when macOS
+         * accessibility automation is unavailable in local agent sessions.
+         */
+        return { ok: true, session: createNativeBrowserSession(DEFAULT_BROWSER_LAUNCH_URL) };
       case "showBrowser":
         showNativeBrowserWindow();
         return { ok: true };
@@ -7264,6 +7287,10 @@ function focusProject(projectId: string): void {
     scheduleSyncOpenProjectWithZed("focusProject");
   }
   void refreshGitState();
+  const focusedSessionId = activeSnapshot().focusedSessionId;
+  if (focusedSessionId) {
+    queueNativeLayoutFocusRequest(focusedSessionId, "focusProject");
+  }
   publish();
 }
 
@@ -7558,6 +7585,15 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     }
     case "openBrowser":
       openNativeBrowserWindow(DEFAULT_BROWSER_LAUNCH_URL);
+      return;
+    case "openBrowserPane":
+      /**
+       * CDXC:ChromiumBrowserPanes 2026-05-04-17:00
+       * The dedicated sidebar test button must create the Chromium pane
+       * directly, not route through browserOpenMode where legacy Canary remains
+       * a valid user setting for browser command actions.
+       */
+      createNativeBrowserSession(DEFAULT_BROWSER_LAUNCH_URL);
       return;
     case "openWorkspaceWelcome":
       openNativeExternalUrl("https://github.com/maddada/zmux");
@@ -8108,6 +8144,16 @@ function syncNativeLayout(): void {
     visibleSessionIds,
     snapshot.visibleCount,
   );
+  const focusedNativeSessionId = snapshot.focusedSessionId
+    ? nativeSessionIdForSidebarSession(snapshot.focusedSessionId)
+    : undefined;
+  const shouldConsumeFocusRequest =
+    pendingNativeLayoutFocusRequest !== undefined &&
+    pendingNativeLayoutFocusRequest.sessionId === snapshot.focusedSessionId &&
+    visibleSessions.some((session) => session.sessionId === pendingNativeLayoutFocusRequest?.sessionId);
+  const focusRequestId = shouldConsumeFocusRequest
+    ? pendingNativeLayoutFocusRequest?.requestId
+    : undefined;
   /**
    * CDXC:NativeTerminals 2026-04-28-03:37
    * Native title bars must mirror the same per-session state used by sidebar
@@ -8119,14 +8165,20 @@ function syncNativeLayout(): void {
    * Native pane title bars must render the full sidebar session title, not the
    * Ghostty window title. Agent terminal titles can already contain an
    * ellipsis, so the layout sync owns the display title used by AppKit chrome.
+   *
+   * CDXC:NativeTerminalFocus 2026-05-04-16:02
+   * A visible side terminal becoming done/green must not move keyboard focus
+   * away from the terminal the user is typing in. Treat focusedSessionId in
+   * passive status/layout sync as selection display only; Swift receives
+   * focusRequestId only for explicit user focus commands such as sidebar
+   * session focus, hotkeys, or project switching.
    */
   postNative({
     activeSessionIds: visibleSessionIds,
     attentionSessionIds,
     backgroundColor: settings.workspaceBackgroundColor,
-    focusedSessionId: snapshot.focusedSessionId
-      ? nativeSessionIdForSidebarSession(snapshot.focusedSessionId)
-      : undefined,
+    ...(focusRequestId !== undefined ? { focusRequestId } : {}),
+    focusedSessionId: focusedNativeSessionId,
     layout,
     /**
      * CDXC:WorkspaceLayout 2026-04-28-06:01
@@ -8141,6 +8193,9 @@ function syncNativeLayout(): void {
     sessionTitles,
     type: "setActiveTerminalSet",
   });
+  if (shouldConsumeFocusRequest) {
+    pendingNativeLayoutFocusRequest = undefined;
+  }
 }
 
 function buildLayout(

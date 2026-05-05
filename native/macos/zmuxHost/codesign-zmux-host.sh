@@ -42,10 +42,87 @@ fi
 echo "Signing $APP_PATH"
 echo "Identity: $CODE_SIGN_IDENTITY"
 
+FRAMEWORKS_PATH="$APP_PATH/Contents/Frameworks"
+CEF_ENTITLEMENTS="$(mktemp -t zmux-cef-entitlements.XXXXXX.plist)"
+trap 'rm -f "$CEF_ENTITLEMENTS"' EXIT
+cat >"$CEF_ENTITLEMENTS" <<'EOF_ENTITLEMENTS'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>
+EOF_ENTITLEMENTS
+
+if [[ -d "$FRAMEWORKS_PATH/Chromium Embedded Framework.framework" ]]; then
+	# CDXC:ChromiumBrowserPanes 2026-05-04-16:38
+	# CEF bundles nested dylibs and helper apps. Sign those concrete code
+	# objects before the outer app so Developer ID and notarization validation
+	# see a stable Chromium runtime instead of relying only on --deep traversal.
+	find "$FRAMEWORKS_PATH/Chromium Embedded Framework.framework/Libraries" \
+		-name '*.dylib' \
+		-type f \
+		-print0 2>/dev/null |
+		while IFS= read -r -d '' dylib_path; do
+			codesign \
+				--force \
+				--options runtime \
+				"$CODE_SIGN_TIMESTAMP_FLAG" \
+				--sign "$CODE_SIGN_IDENTITY" \
+				"$dylib_path"
+		done
+	codesign \
+		--force \
+		--options runtime \
+		"$CODE_SIGN_TIMESTAMP_FLAG" \
+		--sign "$CODE_SIGN_IDENTITY" \
+		"$FRAMEWORKS_PATH/Chromium Embedded Framework.framework"
+fi
+
+if [[ -d "$FRAMEWORKS_PATH" ]]; then
+	find "$FRAMEWORKS_PATH" \
+		-maxdepth 1 \
+		-name 'zmux Helper*.app' \
+		-type d \
+		-print0 |
+		while IFS= read -r -d '' helper_app; do
+			helper_name="$(basename "$helper_app" .app)"
+			helper_executable="$helper_app/Contents/MacOS/$helper_name"
+			if [[ -x "$helper_executable" ]]; then
+				# CDXC:ChromiumBrowserPanes 2026-05-04-17:01
+				# CEF renderer helpers run V8 JIT under the hardened runtime.
+				# Sign helpers with Chromium-safe entitlements, matching the
+				# Electrobun reference, so pages and DevTools do not fail with
+				# V8 CodeRange reservation errors after Developer ID signing.
+				codesign \
+					--force \
+					--options runtime \
+					--entitlements "$CEF_ENTITLEMENTS" \
+					"$CODE_SIGN_TIMESTAMP_FLAG" \
+					--sign "$CODE_SIGN_IDENTITY" \
+					"$helper_executable"
+			fi
+			codesign \
+				--force \
+				--options runtime \
+				--entitlements "$CEF_ENTITLEMENTS" \
+				"$CODE_SIGN_TIMESTAMP_FLAG" \
+				--sign "$CODE_SIGN_IDENTITY" \
+				"$helper_app"
+		done
+fi
+
 codesign \
 	--force \
 	--deep \
 	--options runtime \
+	--entitlements "$CEF_ENTITLEMENTS" \
 	"$CODE_SIGN_TIMESTAMP_FLAG" \
 	--sign "$CODE_SIGN_IDENTITY" \
 	"$APP_PATH"

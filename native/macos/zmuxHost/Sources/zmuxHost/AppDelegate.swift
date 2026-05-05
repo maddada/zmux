@@ -864,7 +864,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   @MainActor
   private func startBridge() {
     do {
-      let bridge = try NativeHostBridge { [weak self] command in
+      /**
+       CDXC:ChromiumBrowserPanes 2026-05-04-17:06
+       CEF browser-pane verification runs the zmux-dev app beside the installed
+       zmux app. Give the dev bundle a separate CLI bridge port so browser-pane
+       creation can be tested without stopping the user's normal zmux process.
+       */
+      let bridgePort: UInt16 = Bundle.main.bundleIdentifier == "com.madda.zmux-dev.host"
+        ? 58744
+        : 58743
+      let bridge = try NativeHostBridge(port: bridgePort) { [weak self] command in
         self?.handle(command)
       }
       self.bridge = bridge

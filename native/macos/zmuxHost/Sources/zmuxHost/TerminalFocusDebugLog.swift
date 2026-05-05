@@ -8,6 +8,7 @@ enum TerminalFocusDebugLog {
     "nativeWorkspace.focusTerminal.completed",
     "nativeWorkspace.sendTerminalEnter.sent",
     "nativeWorkspace.sendTerminalEnter.start",
+    "nativeWorkspace.setActiveTerminalSet.focusSkipped",
     "nativeWorkspace.setTerminalLayout",
     "nativeWorkspace.setTerminalVisibility",
     "nativeWorkspace.windowFirstResponderChanged.nil",

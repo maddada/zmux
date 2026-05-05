@@ -8,6 +8,7 @@ import WebSocket from "ws";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_PORT = 58743;
+const DEV_PORT = 58744;
 const ZMUX_HOME = path.join(homedir(), ".zmux");
 const LOG_DIR = path.join(ZMUX_HOME, "logs");
 const CLI_DIR = path.join(ZMUX_HOME, "cli");
@@ -39,6 +40,7 @@ const COMMANDS = new Map([
   ["set-visible-count", bridgeAction("setVisibleCount", parseVisibleCount)],
   ["set-view-mode", bridgeAction("setViewMode", parseViewMode)],
   ["open-browser", bridgeAction("openBrowser", parseUrl)],
+  ["open-browser-pane", bridgeAction("openBrowserPane")],
   ["show-browser", bridgeAction("showBrowser")],
   ["move-sidebar", bridgeAction("moveSidebar")],
   ["assert-card", bridgeAction("assertSidebarCard", parseAssertCard, { assertOk: true })],
@@ -77,7 +79,11 @@ function bridgeAction(action, parser = () => ({}), options = {}) {
 }
 
 async function sendSidebarCliCommand(action, payload, flags = {}) {
-  const port = Number(flags.port ?? process.env.ZMUX_CLI_PORT ?? DEFAULT_PORT);
+  const port = Number(
+    flags.port ??
+      process.env.ZMUX_CLI_PORT ??
+      (process.env.ZMUX_APP_VARIANT === "dev" ? DEV_PORT : DEFAULT_PORT),
+  );
   const requestId = `cli-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const socket = await connectBridge(port);
   try {
@@ -388,6 +394,7 @@ Core commands:
   set-visible-count <1|2|3|4|6|9>
   set-view-mode <grid|horizontal|vertical>
   open-browser [url]
+  open-browser-pane
   show-browser
   move-sidebar
 
