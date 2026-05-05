@@ -13,6 +13,7 @@ import type { SidebarPinnedPrompt } from "./sidebar-pinned-prompts";
 import type {
   SessionLifecycleState,
   SessionGridSnapshot,
+  SessionRecord,
   SidebarTheme,
   TerminalViewMode,
   VisibleSessionCount,
@@ -95,9 +96,21 @@ export function getSidebarSessionLifecycleState(
 
 export type SidebarPreviousSessionItem = SidebarSessionItem & {
   closedAt: string;
+  groupId?: string;
   historyId: string;
   isGeneratedName: boolean;
   isRestorable: boolean;
+  /**
+   * CDXC:PreviousSessions 2026-05-05-05:30
+   * Restoring from Previous Sessions must recreate the archived agent session,
+   * not only its card title. Store the normalized session record and source
+   * project/group metadata so native restore can preserve agent identity,
+   * first-message metadata, title provenance, and resumable session details.
+   */
+  projectId?: string;
+  projectName?: string;
+  projectPath?: string;
+  sessionRecord?: SessionRecord;
 };
 
 export type SidebarSessionGroup = {

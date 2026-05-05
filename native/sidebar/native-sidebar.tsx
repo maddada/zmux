@@ -2218,7 +2218,10 @@ function readPreviousSessions(): SidebarPreviousSessionItem[] {
     if (!Array.isArray(candidate)) {
       return [];
     }
-    const sessions = candidate.filter(isSidebarPreviousSessionItem).slice(0, 80);
+    const sessions = candidate
+      .filter(isSidebarPreviousSessionItem)
+      .filter(shouldKeepStoredPreviousSessionItem)
+      .slice(0, 80);
     if (!sharedPreviousSessionsJson && sessions.length > 0) {
       postNative({
         key: "previousSessions",
@@ -2255,24 +2258,166 @@ function createPreviousSessionItem(
   project: NativeProject,
 ): SidebarPreviousSessionItem | undefined {
   for (const group of project.workspace.groups) {
-    const sidebarSession = createSidebarSessionItems(group.snapshot, "mac").find(
-      (session) => session.sessionId === sessionId,
-    );
-    if (!sidebarSession) {
+    const sessionRecord = group.snapshot.sessions.find((session) => session.sessionId === sessionId);
+    if (!sessionRecord) {
       continue;
     }
     const terminalState = terminalStateById.get(sessionId);
+    const archivedSessionRecord = createArchivedPreviousSessionRecord(
+      sessionRecord,
+      terminalState,
+    );
+    if (!shouldRememberPreviousSessionRecord(archivedSessionRecord)) {
+      appendRestoreDebugLog("nativeSidebar.previousSession.skipped", {
+        agentName:
+          archivedSessionRecord.kind === "terminal" ? archivedSessionRecord.agentName : undefined,
+        reason: "default-or-untrusted-title",
+        sessionId,
+        title: archivedSessionRecord.title,
+        titleSource: archivedSessionRecord.titleSource,
+      });
+      return undefined;
+    }
+    const sidebarSession = createProjectedSidebarSessionsForGroup({
+      ...group,
+      snapshot: {
+        ...group.snapshot,
+        sessions: group.snapshot.sessions.map((session) =>
+          session.sessionId === archivedSessionRecord.sessionId ? archivedSessionRecord : session,
+        ),
+      },
+    }).find((session) => session.sessionId === sessionId);
+    if (!sidebarSession) {
+      continue;
+    }
     return {
       ...sidebarSession,
       activity: "idle",
       closedAt: new Date().toISOString(),
+      firstUserMessage: archivedSessionRecord.firstUserMessage ?? sidebarSession.firstUserMessage,
+      groupId: group.groupId,
       historyId: `native-history-${Date.now().toString(36)}-${sessionId}`,
       isGeneratedName: false,
-      isRestorable: sidebarSession.sessionKind === "terminal",
+      isRestorable: archivedSessionRecord.kind === "terminal",
       isRunning: false,
       lifecycleState: terminalState?.lifecycleState === "error" ? "error" : "done",
+      projectId: project.projectId,
+      projectName: project.name,
+      projectPath: project.path,
+      sessionRecord: archivedSessionRecord,
       terminalTitle: terminalState?.terminalTitle ?? sidebarSession.terminalTitle,
     };
+  }
+  return undefined;
+}
+
+function createArchivedPreviousSessionRecord(
+  session: SessionRecord,
+  terminalState: ReturnType<typeof terminalStateById.get>,
+): SessionRecord {
+  if (session.kind !== "terminal") {
+    return {
+      ...session,
+      isSleeping: false,
+    };
+  }
+
+  const archiveTitle = getNativePreviousSessionArchiveTitle(session, terminalState);
+  return {
+    ...session,
+    agentName: terminalState?.agentName ?? session.agentName,
+    firstUserMessage: session.firstUserMessage ?? terminalState?.firstUserMessage,
+    isSleeping: false,
+    title: archiveTitle.title ?? session.title,
+    titleSource: archiveTitle.title
+      ? (archiveTitle.titleSource ?? session.titleSource)
+      : session.titleSource,
+  };
+}
+
+function getNativePreviousSessionArchiveTitle(
+  session: TerminalSessionRecord,
+  terminalState: ReturnType<typeof terminalStateById.get>,
+): {
+  title?: string;
+  titleSource?: TerminalSessionRecord["titleSource"];
+} {
+  const storedTitle = getNativeStoredTrustedResumeTitle(session);
+  if (storedTitle.title) {
+    return { title: storedTitle.title, titleSource: session.titleSource };
+  }
+
+  const visibleTerminalTitle = getVisibleTerminalTitle(terminalState?.terminalTitle)?.trim();
+  const agentName = terminalState?.agentName ?? session.agentName;
+  if (visibleTerminalTitle && isValidNativeAgentTerminalTitle(visibleTerminalTitle, agentName)) {
+    return { title: visibleTerminalTitle, titleSource: "terminal-auto" };
+  }
+
+  return {};
+}
+
+function shouldRememberPreviousSessionRecord(session: SessionRecord): boolean {
+  if (session.kind !== "terminal") {
+    return true;
+  }
+
+  /**
+   * CDXC:PreviousSessions 2026-05-05-05:30
+   * Previous Sessions must only contain terminals with a real user/agent
+   * session name. Default creation titles such as `Terminal Session` and
+   * `Codex Session` are placeholders, so closing those terminals should remove
+   * the pane without adding a low-signal history card.
+   */
+  return getNativeStoredTrustedResumeTitle(session).title !== undefined;
+}
+
+function shouldKeepStoredPreviousSessionItem(session: SidebarPreviousSessionItem): boolean {
+  const archivedRecord = normalizePreviousSessionRecord(session.sessionRecord);
+  if (archivedRecord) {
+    return shouldRememberPreviousSessionRecord(archivedRecord);
+  }
+
+  if (!session.isRestorable) {
+    return true;
+  }
+
+  const displayTitle = session.primaryTitle?.trim() || session.terminalTitle?.trim();
+  return Boolean(displayTitle && getVisibleTerminalTitle(displayTitle));
+}
+
+function normalizePreviousSessionRecord(candidate: unknown): SessionRecord | undefined {
+  if (!candidate || typeof candidate !== "object") {
+    return undefined;
+  }
+  const record = candidate as Partial<SessionRecord>;
+  if (
+    record.kind === "terminal" &&
+    typeof record.sessionId === "string" &&
+    typeof record.displayId === "string" &&
+    typeof record.alias === "string" &&
+    typeof record.title === "string"
+  ) {
+    return record as TerminalSessionRecord;
+  }
+  if (
+    record.kind === "browser" &&
+    typeof record.sessionId === "string" &&
+    typeof record.displayId === "string" &&
+    typeof record.alias === "string" &&
+    typeof record.title === "string" &&
+    typeof (record as Partial<BrowserSessionRecord>).browser?.url === "string"
+  ) {
+    return record as BrowserSessionRecord;
+  }
+  if (
+    record.kind === "t3" &&
+    typeof record.sessionId === "string" &&
+    typeof record.displayId === "string" &&
+    typeof record.alias === "string" &&
+    typeof record.title === "string" &&
+    typeof (record as Partial<T3SessionRecord>).t3?.threadId === "string"
+  ) {
+    return record as T3SessionRecord;
   }
   return undefined;
 }
@@ -2287,8 +2432,145 @@ function restorePreviousSession(historyId: string): void {
   if (!previousSession?.isRestorable) {
     return;
   }
+  const archivedRecord = normalizePreviousSessionRecord(previousSession.sessionRecord);
+  if (archivedRecord?.kind === "terminal") {
+    if (restorePreviousTerminalSession(previousSession, archivedRecord)) {
+      deletePreviousSession(historyId);
+    }
+    return;
+  }
+
   createTerminal(previousSession.primaryTitle || previousSession.alias || "Restored Session");
   deletePreviousSession(historyId);
+}
+
+function restorePreviousTerminalSession(
+  previousSession: SidebarPreviousSessionItem,
+  archivedRecord: TerminalSessionRecord,
+): boolean {
+  /**
+   * CDXC:PreviousSessions 2026-05-05-05:30
+   * Restoring a previous agent session is a session recreation operation, not a
+   * title-only terminal launch. Use the archived terminal record to preserve the
+   * agent id, first user message, favorite state, title provenance, and resume
+   * command inputs while assigning a fresh live terminal id.
+   */
+  const project = activatePreviousSessionProject(previousSession);
+  const groupId = resolvePreviousSessionRestoreGroupId(project, previousSession.groupId);
+  const initialInput = buildNativeRestoredTerminalInitialInput(archivedRecord);
+  const restoredSession = createTerminal(
+    archivedRecord.title || previousSession.primaryTitle || DEFAULT_TERMINAL_SESSION_TITLE,
+    initialInput,
+    groupId,
+    archivedRecord.agentName,
+  );
+  if (!restoredSession) {
+    return false;
+  }
+
+  const restoredRecord = mergeArchivedTerminalDetails(restoredSession, archivedRecord);
+  updateProjectWorkspace(project.projectId, (workspace) =>
+    replaceSessionRecordInWorkspace(workspace, restoredSession.sessionId, restoredRecord),
+  );
+
+  const terminalState = terminalStateById.get(restoredSession.sessionId);
+  if (terminalState) {
+    terminalState.agentName = restoredRecord.agentName;
+    terminalState.firstUserMessage = restoredRecord.firstUserMessage;
+    terminalState.terminalTitle = restoredRecord.title;
+  }
+  publish();
+  return true;
+}
+
+function activatePreviousSessionProject(previousSession: SidebarPreviousSessionItem): NativeProject {
+  const projectId = previousSession.projectId?.trim();
+  const existingProject = projectId ? findProject(projectId) : undefined;
+  if (existingProject) {
+    const didSwitchProject = activeProjectId !== existingProject.projectId;
+    const didRestoreRecentProject = existingProject.isRecentProject === true;
+    projects = projects.map((project) =>
+      project.projectId === existingProject.projectId
+        ? { ...project, isRecentProject: false, recentClosedAt: undefined }
+        : project,
+    );
+    activeProjectId = existingProject.projectId;
+    writeStoredProjects("restorePreviousSessionProject");
+    postZedOverlaySettings("workspace-focus");
+    if (didSwitchProject || didRestoreRecentProject) {
+      scheduleSyncOpenProjectWithZed("restorePreviousSessionProject");
+    }
+    void refreshGitState();
+    return activeProject();
+  }
+
+  const projectPath = previousSession.projectPath?.trim();
+  if (!projectPath) {
+    return activeProject();
+  }
+
+  const restoredProjectId = projectId || createProjectId(projectPath);
+  projects = [
+    ...projects,
+    {
+      isChat: false,
+      name: previousSession.projectName?.trim() || projectNameFromPath(projectPath),
+      path: projectPath,
+      projectId: restoredProjectId,
+      theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+      workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
+    },
+  ];
+  activeProjectId = restoredProjectId;
+  writeStoredProjects("restorePreviousSessionProject");
+  postZedOverlaySettings("workspace-focus");
+  scheduleSyncOpenProjectWithZed("restorePreviousSessionProject");
+  void refreshGitState();
+  return activeProject();
+}
+
+function resolvePreviousSessionRestoreGroupId(
+  project: NativeProject,
+  groupId: string | undefined,
+): string | undefined {
+  return groupId && project.workspace.groups.some((group) => group.groupId === groupId)
+    ? groupId
+    : undefined;
+}
+
+function mergeArchivedTerminalDetails(
+  restoredSession: TerminalSessionRecord,
+  archivedRecord: TerminalSessionRecord,
+): TerminalSessionRecord {
+  return {
+    ...restoredSession,
+    agentName: archivedRecord.agentName ?? restoredSession.agentName,
+    firstUserMessage: archivedRecord.firstUserMessage,
+    isFavorite: archivedRecord.isFavorite,
+    isSleeping: false,
+    terminalEngine: archivedRecord.terminalEngine ?? restoredSession.terminalEngine,
+    title: archivedRecord.title || restoredSession.title,
+    titleSource: archivedRecord.titleSource ?? restoredSession.titleSource,
+  };
+}
+
+function replaceSessionRecordInWorkspace(
+  workspace: GroupedSessionWorkspaceSnapshot,
+  sessionId: string,
+  restoredRecord: SessionRecord,
+): GroupedSessionWorkspaceSnapshot {
+  return normalizeSimpleGroupedSessionWorkspaceSnapshot({
+    ...workspace,
+    groups: workspace.groups.map((group) => ({
+      ...group,
+      snapshot: {
+        ...group.snapshot,
+        sessions: group.snapshot.sessions.map((session) =>
+          session.sessionId === sessionId ? restoredRecord : session,
+        ),
+      },
+    })),
+  });
 }
 
 function clearGeneratedPreviousSessions(): void {
