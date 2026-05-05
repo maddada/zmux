@@ -37,13 +37,19 @@ brew install --cask maddada/tap/zmux
 - Native Sparkle updates for macOS releases.
 - Native T3 Code panes with managed runtime bootstrap, authenticated thread routing, and remote/browser access links.
 - Optional Browser Panes mode opens browser actions as workspace panes with address navigation, reload, DevTools, React Grab, profiles, and favicon-backed sidebar cards.
+- Chromium CEF browser panes keep native browser storage and cookies across app restarts.
+- Shared Ghostty settings keep terminal configuration consistent between the native host and sidebar settings UI.
 - Sidebar Actions and Open In split controls can run the primary command or show React-rendered dropdown menus for Finder, Visual Studio Code, and Zed.
+- Configure Actions modal supports readable project-action rows plus create, edit, and delete flows.
+- Native floating status indicators show running, attention, and available session counts with click-to-focus routing.
 - Combined sidebar mode shows one project group per project across all projects, with Separated mode still available.
 - Recent Projects keeps closed or empty combined-mode projects available with fuzzy project/path search.
 - Previous Sessions can restore archived terminal sessions with agent identity, first-message metadata, title provenance, favorites, and resume inputs.
+- Persistent terminal session providers preserve terminal restore metadata across app restarts.
 - Workspace theme menus can set preset themes or custom colors that tint the dock, project headers, and active workspace sidebar surfaces.
 - Empty Combined-mode project and Chats groups auto-collapse while empty and expand when sessions appear.
 - Sparse Combined sidebars stay pinned instead of rubber-banding when collapsed project lists fit the viewport.
+- Combined-mode Chats grouping keeps its synthetic group marker through sidebar store normalization.
 - Project context menus can set project theme, copy path, open in Finder, open in a specific IDE, or close a project into Recent Projects.
 - Native draggable workspace pane resizing for Ghostty and web panes.
 - Native pane header drag-to-reorder across terminal, T3, and browser panes.

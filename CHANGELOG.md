@@ -1,15 +1,23 @@
 # Changelog
 
-## 1.4.7 - 2026-05-05
+## 1.4.7 - 2026-05-06
 
-<!-- CDXC:Distribution 2026-05-05-05:49: Release notes for 1.4.7 must include
+<!-- CDXC:Distribution 2026-05-06-03:12: Release notes for 1.4.7 must include
 all commits after v1.4.6 so README, GitHub, Sparkle, and Homebrew release
 metadata describe the same shipped behavior. -->
 
+- Added persistent terminal session providers so terminal metadata, restore inputs, and provider state can survive app restarts.
+- Added Chromium CEF native browser support with vendored CEF build wiring, persistent browser storage, and cookie flushing on app termination.
+- Added shared Ghostty settings so terminal configuration can be reused across the native host and sidebar settings surfaces.
+- Added native floating session status indicators for running, attention, and available session counts, including click-to-focus routing back into the workspace.
+- Added a Configure Actions modal with readable action rows plus create, edit, and delete flows for sidebar project actions.
 - Added Previous Sessions restore for archived terminal session records so restored sessions keep agent identity, first-message metadata, title provenance, favorites, and resume inputs.
 - Filtered placeholder Previous Sessions entries so default titles such as `Terminal Session` and `Codex Session` are not saved as low-signal history cards.
 - Improved Previous Sessions project restore by switching back to the original project, reviving Recent Projects entries, or recreating the project when needed.
 - Fixed sparse Combined sidebar scrolling so empty/collapsed project lists stay pinned instead of rubber-banding or preserving stale scroll offsets.
+- Fixed Combined-mode Chats grouping so the synthetic Chats group marker survives sidebar-store normalization.
+- Improved native pane drag and reorder handling so hit testing stays scoped to pane headers while terminal/body interactions keep their expected routing.
+- Improved terminal close cleanup by skipping redundant Ghostty close requests once a process has already exited.
 - Adjusted native sidebar and Storybook layout so project panels can use the right edge rail without being clipped.
 
 ## 1.4.6 - 2026-05-05
