@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vite-plus/test";
+import { beforeEach, describe, expect, test } from "vitest";
 import type {
   SidebarHydrateMessage,
   SidebarSessionGroup,
@@ -99,6 +99,20 @@ describe("sidebar store", () => {
     });
 
     expect(useSidebarStore.getState().commandRunStates.build).toBeUndefined();
+  });
+
+  test("should preserve the synthetic chats group marker during hydration", () => {
+    useSidebarStore.getState().applySidebarMessage(
+      createHydrateMessage([
+        {
+          ...createGroup("combined-chats", [createSession("chat-session-1", "Chat")]),
+          isChatCollection: true,
+          title: "Chats",
+        },
+      ]),
+    );
+
+    expect(useSidebarStore.getState().groupsById["combined-chats"]?.isChatCollection).toBe(true);
   });
 
   test("should update only the targeted session record on sessionPresentationChanged", () => {

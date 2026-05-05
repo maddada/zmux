@@ -532,6 +532,13 @@ function toSidebarGroupRecord(group: SidebarSessionGroup): SidebarGroupRecord {
   return {
     groupId: group.groupId,
     isActive: group.isActive,
+    /**
+     * CDXC:Chats 2026-05-05-18:37
+     * The synthetic Chats group must keep its explicit collection marker after
+     * store normalization. Without this flag, the header icon falls through to
+     * project folder icons when Chats is expanded or collapsed.
+     */
+    isChatCollection: group.isChatCollection,
     isFocusModeActive: group.isFocusModeActive,
     kind: group.kind,
     layoutVisibleCount: group.layoutVisibleCount,
@@ -546,6 +553,7 @@ function haveSameSidebarGroupRecord(left: SidebarGroupRecord, right: SidebarGrou
   return (
     left.groupId === right.groupId &&
     left.isActive === right.isActive &&
+    left.isChatCollection === right.isChatCollection &&
     left.isFocusModeActive === right.isFocusModeActive &&
     left.kind === right.kind &&
     left.layoutVisibleCount === right.layoutVisibleCount &&
