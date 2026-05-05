@@ -34,8 +34,10 @@ brew install --cask maddada/tap/zmux
 - Sidebar Actions and Open In split controls can run the primary command or show React-rendered dropdown menus for Finder, Visual Studio Code, and Zed.
 - Combined sidebar mode shows one project group per project across all projects, with Separated mode still available.
 - Recent Projects keeps closed or empty combined-mode projects available with fuzzy project/path search.
+- Previous Sessions can restore archived terminal sessions with agent identity, first-message metadata, title provenance, favorites, and resume inputs.
 - Workspace theme menus can set preset themes or custom colors that tint the dock, project headers, and active workspace sidebar surfaces.
 - Empty Combined-mode project and Chats groups auto-collapse while empty and expand when sessions appear.
+- Sparse Combined sidebars stay pinned instead of rubber-banding when collapsed project lists fit the viewport.
 - Project context menus can set project theme, copy path, open in Finder, open in a specific IDE, or close a project into Recent Projects.
 - Native draggable workspace pane resizing for Ghostty and web panes.
 - Native pane header drag-to-reorder across terminal, T3, and browser panes.

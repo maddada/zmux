@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.4.7 - 2026-05-05
+
+<!-- CDXC:Distribution 2026-05-05-05:49: Release notes for 1.4.7 must include
+all commits after v1.4.6 so README, GitHub, Sparkle, and Homebrew release
+metadata describe the same shipped behavior. -->
+
+- Added Previous Sessions restore for archived terminal session records so restored sessions keep agent identity, first-message metadata, title provenance, favorites, and resume inputs.
+- Filtered placeholder Previous Sessions entries so default titles such as `Terminal Session` and `Codex Session` are not saved as low-signal history cards.
+- Improved Previous Sessions project restore by switching back to the original project, reviving Recent Projects entries, or recreating the project when needed.
+- Fixed sparse Combined sidebar scrolling so empty/collapsed project lists stay pinned instead of rubber-banding or preserving stale scroll offsets.
+- Adjusted native sidebar and Storybook layout so project panels can use the right edge rail without being clipped.
+
 ## 1.4.6 - 2026-05-05
 
 <!-- CDXC:Distribution 2026-05-05-05:01: Release notes for 1.4.6 must include
