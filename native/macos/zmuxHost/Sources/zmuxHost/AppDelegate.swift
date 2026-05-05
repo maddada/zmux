@@ -30,11 +30,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   private weak var workspaceView: TerminalWorkspaceView?
   private var zedOverlayController: ZedOverlayController?
   private var browserOverlayController: BrowserOverlayController?
+  private var sessionStatusIndicatorController: SessionStatusIndicatorController?
   private var hasPresentedAccessibilityPermissionDialog = false
   private var pendingZedOverlayConfiguration: ConfigureZedOverlay?
   private var hasUserDetachedZedOverlay = false
   private var pendingGhosttyConfigReloadTimer: Timer?
   private var t3RuntimeHeartbeatTimer: Timer?
+  private var isFlushingCEFBeforeTerminate = false
+  private var didFlushCEFBeforeTerminate = false
   private weak var attachToIdeTitlebarButton: NSButton?
   private let nativeSettingsStore = NativeSettingsStore()
   private let updaterController: SPUStandardUpdaterController
@@ -96,6 +99,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     NativeT3RuntimeLauncher.touchAppHeartbeat(reason: "applicationWillTerminate")
     t3RuntimeHeartbeatTimer?.invalidate()
     t3RuntimeHeartbeatTimer = nil
+  }
+
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    if didFlushCEFBeforeTerminate {
+      return .terminateNow
+    }
+    if isFlushingCEFBeforeTerminate {
+      return .terminateLater
+    }
+    isFlushingCEFBeforeTerminate = true
+    /**
+     CDXC:ChromiumBrowserPanes 2026-05-06-01:12
+     Chrome embed panes must preserve authenticated browser sessions across
+     zmux restarts. Delay app termination long enough for CEF to flush cookie
+     stores before the CEF message loop exits and CefShutdown runs.
+     */
+    ZmuxCEFFlushBrowserState { [weak self, weak sender] in
+      guard let self else {
+        sender?.reply(toApplicationShouldTerminate: true)
+        return
+      }
+      self.didFlushCEFBeforeTerminate = true
+      self.isFlushingCEFBeforeTerminate = false
+      sender?.reply(toApplicationShouldTerminate: true)
+    }
+    return .terminateLater
   }
 
   func applicationWillBecomeActive(_ notification: Notification) {
@@ -630,6 +659,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
 
   @MainActor
   private func makeWindow() {
+    let sessionStatusIndicatorController = SessionStatusIndicatorController { [weak self] status in
+      self?.handleSessionStatusIndicatorClick(status)
+    }
+    self.sessionStatusIndicatorController = sessionStatusIndicatorController
     let root = zmuxRootView(
       ghostty: ghostty,
       sendEvent: { [weak self] event in
@@ -662,6 +695,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       },
       showBrowserWindow: { [weak self] in
         self?.handle(.showBrowserWindow)
+      },
+      setSessionStatusIndicators: { [weak sessionStatusIndicatorController] command in
+        sessionStatusIndicatorController?.apply(command)
       }
     )
     workspaceView = root.workspaceView
@@ -741,6 +777,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       )
     }
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  @MainActor
+  private func handleSessionStatusIndicatorClick(_ status: NativeSessionStatusIndicatorStatus) {
+    /**
+     CDXC:SessionStatusIndicators 2026-05-05-19:47
+     Clicking a floating status circle should raise zmux and ask the sidebar to
+     choose the live matching session. Keep click routing on the typed native
+     host event bus so AppKit chrome and webview/sidebar state stay decoupled.
+     */
+    let event = HostEvent.sessionStatusIndicatorClicked(status: status)
+    window?.makeKeyAndOrderFront(nil)
+    bridge?.send(event)
+    (window?.contentView as? zmuxRootView)?.postHostEvent(event)
   }
 
   private func restoredInitialWindowFrame() -> NSRect {
@@ -924,6 +974,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       workspaceView?.sendTerminalEnter(sessionId: command.sessionId)
     case .setActiveTerminalSet(let command):
       workspaceView?.setActiveTerminalSet(command)
+    case .setSessionStatusIndicators(let command):
+      sessionStatusIndicatorController?.apply(command)
     case .setTerminalLayout(let command):
       workspaceView?.setTerminalLayout(command.layout)
     case .setTerminalVisibility(let command):
@@ -2065,6 +2117,7 @@ final class zmuxRootView: NSView {
   private let openWorkspaceInFinder: (OpenWorkspaceInFinder) -> Void
   private let openWorkspaceInIde: (OpenWorkspaceInIde) -> Void
   private let showBrowserWindow: () -> Void
+  private let setSessionStatusIndicators: (SetSessionStatusIndicators) -> Void
   private let sendHostEvent: (HostEvent) -> Void
   private let nativeSettingsStore = NativeSettingsStore()
   private var isModalHostReady = false
@@ -2100,7 +2153,8 @@ final class zmuxRootView: NSView {
     openZedWorkspace: @escaping (OpenZedWorkspace) -> Void,
     openWorkspaceInFinder: @escaping (OpenWorkspaceInFinder) -> Void,
     openWorkspaceInIde: @escaping (OpenWorkspaceInIde) -> Void,
-    showBrowserWindow: @escaping () -> Void
+    showBrowserWindow: @escaping () -> Void,
+    setSessionStatusIndicators: @escaping (SetSessionStatusIndicators) -> Void
   ) {
     self.workspaceView = TerminalWorkspaceView(
       ghostty: ghostty,
@@ -2116,6 +2170,7 @@ final class zmuxRootView: NSView {
     self.openWorkspaceInFinder = openWorkspaceInFinder
     self.openWorkspaceInIde = openWorkspaceInIde
     self.showBrowserWindow = showBrowserWindow
+    self.setSessionStatusIndicators = setSessionStatusIndicators
     self.sendHostEvent = sendEvent
     self.sidebarWidth = nativeSettingsStore.readSidebarChrome().width ?? Self.defaultSidebarWidth
     let configuration = WKWebViewConfiguration()
@@ -2296,6 +2351,8 @@ final class zmuxRootView: NSView {
       workspaceView.sendTerminalEnter(sessionId: command.sessionId)
     case .setActiveTerminalSet(let command):
       workspaceView.setActiveTerminalSet(command)
+    case .setSessionStatusIndicators(let command):
+      setSessionStatusIndicators(command)
     case .setTerminalLayout(let command):
       workspaceView.setTerminalLayout(command.layout)
     case .setTerminalVisibility(let command):

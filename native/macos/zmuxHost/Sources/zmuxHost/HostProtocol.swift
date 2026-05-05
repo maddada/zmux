@@ -14,6 +14,7 @@ enum HostCommand: Decodable {
   case writeTerminalText(WriteTerminalText)
   case sendTerminalEnter(SessionCommand)
   case setActiveTerminalSet(SetActiveTerminalSet)
+  case setSessionStatusIndicators(SetSessionStatusIndicators)
   case setTerminalLayout(SetTerminalLayout)
   case setTerminalVisibility(SetTerminalVisibility)
   case pickWorkspaceFolder
@@ -62,6 +63,7 @@ enum HostCommand: Decodable {
     case writeTerminalText
     case sendTerminalEnter
     case setActiveTerminalSet
+    case setSessionStatusIndicators
     case setTerminalLayout
     case setTerminalVisibility
     case pickWorkspaceFolder
@@ -122,6 +124,8 @@ enum HostCommand: Decodable {
       self = .sendTerminalEnter(try SessionCommand(from: decoder))
     case .setActiveTerminalSet:
       self = .setActiveTerminalSet(try SetActiveTerminalSet(from: decoder))
+    case .setSessionStatusIndicators:
+      self = .setSessionStatusIndicators(try SetSessionStatusIndicators(from: decoder))
     case .setTerminalLayout:
       self = .setTerminalLayout(try SetTerminalLayout(from: decoder))
     case .setTerminalVisibility:
@@ -232,6 +236,18 @@ struct SetActiveTerminalSet: Decodable {
   let sessionAgentIconDataUrls: [String: String]?
   let sessionActivities: [String: NativeTerminalActivity]?
   let sessionTitles: [String: String]?
+}
+
+struct SetSessionStatusIndicators: Decodable {
+  let attentionCount: Int
+  let runningCount: Int
+  let availableCount: Int
+}
+
+enum NativeSessionStatusIndicatorStatus: String, Codable {
+  case attention
+  case running
+  case available
 }
 
 struct SetTerminalLayout: Decodable {
@@ -438,6 +454,7 @@ enum HostEvent: Encodable {
   case terminalFocused(sessionId: String)
   case terminalBell(sessionId: String)
   case terminalError(sessionId: String, message: String)
+  case sessionStatusIndicatorClicked(status: NativeSessionStatusIndicatorStatus)
   case t3ThreadReady(
     sessionId: String, projectId: String, threadId: String, serverOrigin: String, workspaceRoot: String)
   case t3ThreadChanged(sessionId: String, threadId: String, title: String?)
@@ -468,6 +485,7 @@ enum HostEvent: Encodable {
     case ok
     case payloadJson
     case sessionPersistenceName
+    case status
     case sourceSessionId
     case targetSessionId
     case tmuxSessionName
@@ -534,6 +552,15 @@ enum HostEvent: Encodable {
       try container.encode("terminalError", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)
       try container.encode(message, forKey: .message)
+    case .sessionStatusIndicatorClicked(let status):
+      /**
+       CDXC:SessionStatusIndicators 2026-05-05-19:47
+       Floating AppKit status circles report only the clicked aggregate status
+       back to the sidebar. The sidebar owns the live session graph, so it
+       selects and focuses the correct matching session at click time.
+       */
+      try container.encode("sessionStatusIndicatorClicked", forKey: .type)
+      try container.encode(status, forKey: .status)
     case .t3ThreadReady(let sessionId, let projectId, let threadId, let serverOrigin, let workspaceRoot):
       try container.encode("t3ThreadReady", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)

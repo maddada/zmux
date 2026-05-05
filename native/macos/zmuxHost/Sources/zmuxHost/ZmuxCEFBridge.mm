@@ -4,9 +4,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cstring>
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,9 +19,11 @@
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
 #include "include/cef_context_menu_handler.h"
+#include "include/cef_cookie.h"
 #include "include/cef_display_handler.h"
 #include "include/cef_life_span_handler.h"
 #include "include/cef_load_handler.h"
+#include "include/cef_request_context.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -28,6 +32,60 @@ static bool g_cefInitialized = false;
 static CefRefPtr<CefApp> g_cefApp;
 static std::map<std::string, CefRefPtr<CefRequestContext>> g_persistentRequestContexts;
 static NSString* const ZmuxCEFBuiltInDefaultProfileIdentifier = @"52B43C05-4A1D-45D3-8FD5-9EF94952E445";
+using ZmuxCEFCompletionBlock = void (^)(void);
+
+struct ZmuxCEFProfileFlushState {
+  explicit ZmuxCEFProfileFlushState(ZmuxCEFCompletionBlock completionBlock)
+      : completion([completionBlock copy]) {}
+
+  ~ZmuxCEFProfileFlushState() {
+    completion = nil;
+  }
+
+  std::atomic<int> pending{0};
+  ZmuxCEFCompletionBlock completion;
+};
+
+static void ZmuxCEFFinishProfileFlush(std::shared_ptr<ZmuxCEFProfileFlushState> state) {
+  if (!state || state->pending.fetch_sub(1) != 1) {
+    return;
+  }
+  ZmuxCEFCompletionBlock completion = [state->completion copy];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (completion) {
+      completion();
+    }
+  });
+}
+
+class ZmuxCEFCookieFlushCallback : public CefCompletionCallback {
+ public:
+  explicit ZmuxCEFCookieFlushCallback(std::shared_ptr<ZmuxCEFProfileFlushState> state)
+      : state_(std::move(state)) {}
+
+  void OnComplete() override {
+    ZmuxCEFFinishProfileFlush(state_);
+  }
+
+ private:
+  std::shared_ptr<ZmuxCEFProfileFlushState> state_;
+
+  IMPLEMENT_REFCOUNTING(ZmuxCEFCookieFlushCallback);
+  DISALLOW_COPY_AND_ASSIGN(ZmuxCEFCookieFlushCallback);
+};
+
+static bool ZmuxCEFFlushCookieManager(CefRefPtr<CefCookieManager> manager,
+                                      std::shared_ptr<ZmuxCEFProfileFlushState> state) {
+  if (!manager || !state) {
+    return false;
+  }
+  state->pending.fetch_add(1);
+  if (!manager->FlushStore(new ZmuxCEFCookieFlushCallback(state))) {
+    ZmuxCEFFinishProfileFlush(state);
+    return false;
+  }
+  return true;
+}
 
 static bool IsPortAvailable(int port) {
   int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -730,13 +788,18 @@ bool ZmuxCEFInitialize(int argc, char* _Nullable argv[]) {
                                              attributes:nil
                                                   error:nil];
   /**
-   CDXC:ChromiumBrowserPanes 2026-05-04-17:01
-   CEF requires every request-context cache_path to be a child of
-   root_cache_path. Use ~/.zmux[-dev]/cef as the root so profile caches under
-   cef/profiles/<profile-id> persist cookies/storage instead of falling back to
-   in-memory Chromium storage.
+   CDXC:ChromiumBrowserPanes 2026-05-06-01:12
+   Chrome embed panes must keep users logged in after zmux restarts. CEF only
+   persists global-profile cookies, session cookies, localStorage, and IndexedDB
+   when the app-level cache_path is set; root_cache_path alone stores
+   installation data. Use ~/.zmux[-dev]/cef as both the CEF root and default
+   browser profile cache so the built-in profile survives process restarts and
+   custom profile caches under cef/partitions/<profile-id> still share the same
+   required root.
    */
+  CefString(&settings.cache_path) = [cachePath UTF8String];
   CefString(&settings.root_cache_path) = [cachePath UTF8String];
+  settings.persist_session_cookies = true;
   CefString(&settings.log_file) = [[cachePath stringByAppendingPathComponent:@"debug.log"] UTF8String];
   CefString(&settings.accept_language_list) = "en-US,en";
 
@@ -751,6 +814,34 @@ bool ZmuxCEFInitialize(int argc, char* _Nullable argv[]) {
 
 void ZmuxCEFRunMessageLoop(void) {
   CefRunMessageLoop();
+}
+
+void ZmuxCEFFlushBrowserState(ZmuxCEFCompletionBlock completion) {
+  auto state = std::make_shared<ZmuxCEFProfileFlushState>(completion);
+  /**
+   CDXC:ChromiumBrowserPanes 2026-05-06-01:12
+   Login cookies must be durable when the user quits or restarts zmux. CEF
+   writes web storage with the profile cache_path, but cookie writes can remain
+   buffered until the cookie managers are flushed. Flush the global default
+   profile and every custom CEF request-context profile before app termination
+   continues, so Google/auth cookies survive the next launch.
+   */
+  if (g_cefInitialized) {
+    CefRefPtr<CefRequestContext> globalContext = CefRequestContext::GetGlobalContext();
+    if (globalContext) {
+      ZmuxCEFFlushCookieManager(globalContext->GetCookieManager(nullptr), state);
+    }
+    for (const auto& entry : g_persistentRequestContexts) {
+      if (entry.second) {
+        ZmuxCEFFlushCookieManager(entry.second->GetCookieManager(nullptr), state);
+      }
+    }
+  }
+  if (state->pending.load() == 0 && completion) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      completion();
+    });
+  }
 }
 
 void ZmuxCEFShutdown(void) {

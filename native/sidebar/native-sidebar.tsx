@@ -185,6 +185,8 @@ import {
 } from "../../shared/ghostty-config-actions";
 import "../../sidebar/styles.css";
 
+type NativeSessionStatusIndicatorStatus = "attention" | "running" | "available";
+
 type NativeHostCommand =
   | {
       activateOnCreate?: boolean;
@@ -229,6 +231,18 @@ type NativeHostCommand =
       sessionActivities?: Record<string, "attention" | "working">;
       sessionTitles?: Record<string, string>;
       type: "setActiveTerminalSet";
+    }
+  | {
+      /**
+       * CDXC:SessionStatusIndicators 2026-05-05-19:47
+       * The AppKit floating circles receive only aggregate counts. Sidebar
+       * state remains authoritative for which session should be opened when a
+       * circle is clicked, avoiding duplicate native-side session selection.
+       */
+      attentionCount: number;
+      availableCount: number;
+      runningCount: number;
+      type: "setSessionStatusIndicators";
     }
   | { layout?: NativeTerminalLayout; type: "setTerminalLayout" }
   | { sessionId: string; type: "setTerminalVisibility"; visible: boolean }
@@ -376,6 +390,7 @@ type NativeHostEvent =
   | { sessionId: string; type: "terminalFocused" }
   | { sessionId: string; type: "terminalBell" }
   | { message: string; sessionId: string; type: "terminalError" }
+  | { status: NativeSessionStatusIndicatorStatus; type: "sessionStatusIndicatorClicked" }
   | {
       projectId: string;
       serverOrigin: string;
@@ -3459,6 +3474,7 @@ function publish(): void {
   postAppModalHost({ message: sidebarMessage, type: "sidebarState" });
   postWorkspaceBarState();
   syncNativeLayout();
+  syncNativeSessionStatusIndicators();
 }
 
 function ensureVisibleNativeSessions(reason: string): void {
@@ -3663,6 +3679,133 @@ function countWorkspaceBarSessions(project: NativeProject): WorkspaceBarProject[
     }
   }
   return counts;
+}
+
+type NativeSessionStatusIndicatorCandidate = {
+  lastInteractionAt?: string;
+  order: number;
+  projectId: string;
+  sessionId: string;
+  status: NativeSessionStatusIndicatorStatus;
+};
+
+function createNativeSessionStatusIndicatorCandidates(): NativeSessionStatusIndicatorCandidate[] {
+  /**
+   * CDXC:SessionStatusIndicators 2026-05-05-19:47
+   * Floating AppKit circles summarize every open zmux project session, not only
+   * the active group's visible panes. "Running" maps to the existing orange
+   * working activity state; gray available counts include all remaining
+   * non-recent sessions so the idle total is complete.
+   */
+  const candidates: NativeSessionStatusIndicatorCandidate[] = [];
+  let order = 0;
+  const openProjects = orderNativeProjectsForSidebar(
+    projects.filter((project) => project.isRecentProject !== true),
+  );
+
+  for (const project of openProjects) {
+    for (const group of project.workspace.groups) {
+      for (const session of createProjectedSidebarSessionsForGroup(group)) {
+        const status = getNativeSessionStatusIndicatorStatus(session);
+        candidates.push({
+          lastInteractionAt: session.lastInteractionAt,
+          order,
+          projectId: project.projectId,
+          sessionId: session.sessionId,
+          status,
+        });
+        order += 1;
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function getNativeSessionStatusIndicatorStatus(
+  session: SidebarSessionItem,
+): NativeSessionStatusIndicatorStatus {
+  if (session.activity === "attention") {
+    return "attention";
+  }
+  if (session.activity === "working") {
+    return "running";
+  }
+  return "available";
+}
+
+function syncNativeSessionStatusIndicators(): void {
+  const counts = {
+    attention: 0,
+    available: 0,
+    running: 0,
+  };
+  for (const candidate of createNativeSessionStatusIndicatorCandidates()) {
+    counts[candidate.status] += 1;
+  }
+  postNative({
+    attentionCount: counts.attention,
+    availableCount: counts.available,
+    runningCount: counts.running,
+    type: "setSessionStatusIndicators",
+  });
+}
+
+function handleNativeSessionStatusIndicatorClicked(
+  status: NativeSessionStatusIndicatorStatus,
+): void {
+  const target = selectNativeSessionStatusIndicatorTarget(status);
+  if (!target) {
+    return;
+  }
+
+  postNative({ type: "activateApp" });
+  if (activeProjectId !== target.projectId) {
+    focusProject(target.projectId);
+  }
+  focusSidebarSession(target.sessionId);
+}
+
+function selectNativeSessionStatusIndicatorTarget(
+  status: NativeSessionStatusIndicatorStatus,
+): NativeSessionStatusIndicatorCandidate | undefined {
+  const candidates = createNativeSessionStatusIndicatorCandidates()
+    .filter((candidate) => candidate.status === status)
+    .sort(compareNativeSessionStatusIndicatorCandidates);
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const focusedSessionId = activeSnapshot().focusedSessionId;
+  const focusedIndex = candidates.findIndex(
+    (candidate) =>
+      candidate.projectId === activeProjectId && candidate.sessionId === focusedSessionId,
+  );
+  if (focusedIndex >= 0 && candidates.length > 1) {
+    return candidates[(focusedIndex + 1) % candidates.length];
+  }
+  return candidates[0];
+}
+
+function compareNativeSessionStatusIndicatorCandidates(
+  left: NativeSessionStatusIndicatorCandidate,
+  right: NativeSessionStatusIndicatorCandidate,
+): number {
+  const timeDelta =
+    getNativeIndicatorTimestamp(right.lastInteractionAt) -
+    getNativeIndicatorTimestamp(left.lastInteractionAt);
+  if (timeDelta !== 0) {
+    return timeDelta;
+  }
+  return left.order - right.order;
+}
+
+function getNativeIndicatorTimestamp(value: string | undefined): number {
+  if (!value) {
+    return 0;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function postWorkspaceBarState(): void {
@@ -8749,6 +8892,10 @@ window.addEventListener("zmux-native-host-event", (event) => {
       actionId: hostEvent.actionId,
     });
     runNativeHotkeyAction(hostEvent.actionId);
+    return;
+  }
+  if (hostEvent.type === "sessionStatusIndicatorClicked") {
+    handleNativeSessionStatusIndicatorClicked(hostEvent.status);
     return;
   }
   if (hostEvent.type === "paneReorderRequested") {

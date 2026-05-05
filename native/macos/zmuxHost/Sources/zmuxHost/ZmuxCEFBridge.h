@@ -10,6 +10,7 @@ bool ZmuxCEFPrepareApplication(void);
 bool ZmuxCEFIsRuntimeAvailable(void);
 bool ZmuxCEFInitialize(int argc, char* _Nullable argv[_Nonnull]);
 void ZmuxCEFRunMessageLoop(void);
+void ZmuxCEFFlushBrowserState(void (^_Nullable completion)(void));
 void ZmuxCEFShutdown(void);
 int ZmuxCEFRemoteDebuggingPort(void);
 

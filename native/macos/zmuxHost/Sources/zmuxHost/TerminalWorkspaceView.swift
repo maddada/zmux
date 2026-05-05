@@ -598,21 +598,49 @@ final class TerminalWorkspaceView: NSView {
   }
 
   func closeTerminal(sessionId: String) {
+    closeTerminal(sessionId: sessionId, requestGhosttyClose: true, reason: "closeTerminal")
+  }
+
+  private func closeTerminal(sessionId: String, requestGhosttyClose: Bool, reason: String) {
     guard let session = sessions.removeValue(forKey: sessionId) else {
+      TerminalFocusDebugLog.append(
+        event: "nativeWorkspace.closeTerminal.missing",
+        details: [
+          "reason": reason,
+          "sessionId": sessionId,
+        ])
       return
     }
+    let processExited = session.view.processExited
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.closeTerminal.start",
+      details: [
+        "activeSessionIds": Array(activeSessionIds).sorted(),
+        "hasSurface": session.view.surface != nil,
+        "processExited": processExited,
+        "reason": reason,
+        "requestGhosttyClose": requestGhosttyClose,
+        "sessionId": sessionId,
+      ])
     activeSessionIds.remove(sessionId)
     sessionActivities.removeValue(forKey: sessionId)
     sessionAgentIconDataUrls.removeValue(forKey: sessionId)
     sessionTitles.removeValue(forKey: sessionId)
     resizeLogSignatureBySessionId.removeValue(forKey: sessionId)
-    if let surface = session.view.surface {
+    /**
+     CDXC:TerminalExitCleanup 2026-05-06-01:01
+     Exit polling runs after Ghostty has already marked the PTY surface exited.
+     Do not send Ghostty a second close request for that surface; the log at
+     2026-05-06 00:52:50 showed the app voluntarily terminating immediately
+     after this path handled an already-exited split pane.
+     */
+    if requestGhosttyClose, !processExited, let surface = session.view.surface {
       ghostty.requestClose(surface: surface)
     }
     NativeTerminalProcessMonitor.terminateSessionProcesses(
       ttyName: session.view.surfaceModel?.ttyName ?? session.ttyName,
       foregroundPid: session.view.surfaceModel?.foregroundPID ?? session.foregroundPid,
-      reason: "closeTerminal")
+      reason: reason)
     session.scrollView.removeFromSuperview()
     session.searchBarView.removeFromSuperview()
     session.titleBarView.removeFromSuperview()
@@ -625,6 +653,16 @@ final class TerminalWorkspaceView: NSView {
     needsLayout = true
     sendEvent(.terminalExited(sessionId: sessionId, exitCode: nil))
     stopExitPollingIfIdle()
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.closeTerminal.completed",
+      details: [
+        "activeSessionIds": Array(activeSessionIds).sorted(),
+        "focusedSessionId": nullableString(focusedSessionId),
+        "processExited": processExited,
+        "reason": reason,
+        "sessionId": sessionId,
+        "visibleSessionIds": orderedVisibleSessionIds(),
+      ])
   }
 
   /**
@@ -1672,6 +1710,51 @@ final class TerminalWorkspaceView: NSView {
     true
   }
 
+  /**
+   CDXC:NativePaneReorder 2026-05-06-03:04
+   Pane drag-to-reorder must still start from the native title bar only, but
+   embedded terminal/WebKit surfaces can sit above the title-bar mouse stream
+   during AppKit hit testing. Route only exact title-bar hits to the title-bar
+   view before falling back to normal pane hit testing; resize handles keep
+   priority so split resizing is not converted into pane dragging.
+   */
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    if let titleBarHitView = paneTitleBarHitView(at: point) {
+      return titleBarHitView
+    }
+    return super.hitTest(point)
+  }
+
+  private func paneTitleBarHitView(at point: CGPoint) -> NSView? {
+    guard paneResizeHit(at: point) == nil else {
+      return nil
+    }
+    for sessionId in orderedVisibleSessionIds().reversed() {
+      if let session = sessions[sessionId],
+        let hitView = paneTitleBarHitView(session.titleBarView, at: point)
+      {
+        return hitView
+      }
+      if let session = webPaneSessions[sessionId],
+        let hitView = paneTitleBarHitView(session.titleBarView, at: point)
+      {
+        return hitView
+      }
+    }
+    return nil
+  }
+
+  private func paneTitleBarHitView(
+    _ titleBarView: TerminalSessionTitleBarView,
+    at point: CGPoint
+  ) -> NSView? {
+    guard !titleBarView.isHidden, titleBarView.frame.contains(point) else {
+      return nil
+    }
+    let titleBarPoint = convert(point, to: titleBarView)
+    return titleBarView.hitTest(titleBarPoint)
+  }
+
   override func mouseDown(with event: NSEvent) {
     guard beginPaneResize(with: event) else {
       super.mouseDown(with: event)
@@ -1765,11 +1848,19 @@ final class TerminalWorkspaceView: NSView {
    CDXC:NativePaneReorder 2026-05-03-02:50
    Pane title bars contain AppKit controls, text fields, Ghostty surfaces, and
    WKWebViews that can consume mouse events before TerminalWorkspaceView sees
-   them. A window-local monitor observes the same native event stream and starts
-   header drags from the laid-out title-bar frames, while still letting normal
-   button and text events continue through AppKit. Title-bar actions are also
-   resolved here because native pane layers can keep the title-bar view itself
-   from receiving button mouse events.
+   them. Title-bar actions are resolved here because native pane layers can keep
+   the title-bar view itself from receiving button mouse events.
+
+   CDXC:NativePaneReorder 2026-05-06-01:57
+   Pane drag-to-reorder must start only from TerminalSessionTitleBarView's own
+   mouse handlers. The window-local monitor must not promote terminal
+   body/bottom-edge drags into pane-header drags by broad frame geometry checks.
+
+   CDXC:NativePaneReorder 2026-05-06-02:36
+   The window-local monitor may continue and release an existing
+   titlebar-started drag, because AppKit can deliver later drag/up events after
+   the pointer has left the title-bar view. This keeps drag startup titlebar-only
+   while preserving ghost/drop feedback during the drag.
    */
   private func installPaneHeaderEventMonitor() {
     guard paneHeaderEventMonitor == nil else {
@@ -1810,15 +1901,6 @@ final class TerminalWorkspaceView: NSView {
         paneHeaderActionPress = titleBarAction
         return
       }
-      guard paneResizeHit(at: point) == nil,
-        let sessionId = paneTitleBarSessionId(at: point)
-      else {
-        return
-      }
-      handlePaneTitleBarMouseDown(
-        event,
-        sessionId: sessionId,
-        focusReason: "nativeTitleBarMonitorMouseDown")
     case .leftMouseDragged:
       if paneHeaderActionPress != nil {
         return
@@ -1834,11 +1916,11 @@ final class TerminalWorkspaceView: NSView {
         paneResizeCursor(for: resizeDrag.direction).set()
         return
       }
-      guard let sessionId = paneHeaderDrag?.sourceSessionId else {
+      if let drag = paneHeaderDrag {
+        NSCursor.closedHand.set()
+        handlePaneTitleBarMouseDragged(event, sessionId: drag.sourceSessionId)
         return
       }
-      NSCursor.closedHand.set()
-      handlePaneTitleBarMouseDragged(event, sessionId: sessionId)
     case .leftMouseUp:
       if let pressedAction = paneHeaderActionPress {
         paneHeaderActionPress = nil
@@ -1856,10 +1938,10 @@ final class TerminalWorkspaceView: NSView {
             action: pressedAction.action))
         return
       }
-      guard let sessionId = paneHeaderDrag?.sourceSessionId else {
+      if let drag = paneHeaderDrag {
+        handlePaneTitleBarMouseUp(event, sessionId: drag.sourceSessionId)
         return
       }
-      handlePaneTitleBarMouseUp(event, sessionId: sessionId)
     default:
       return
     }
@@ -1961,11 +2043,26 @@ final class TerminalWorkspaceView: NSView {
     sessionId: String,
     focusReason: String
   ) {
+    let startPoint = convert(event.locationInWindow, from: nil)
+    /**
+     CDXC:NativePaneReorderDiagnostics 2026-05-06-02:45
+     Titlebar-only pane drag regressions need precise native breadcrumbs because
+     the cursor can be set by tracking areas even when mouseDown/drag routing is
+     broken. Log only drag lifecycle transitions, not every hover event.
+     */
+    TerminalFocusDebugLog.append(
+      event: "nativePaneReorder.mouseDown",
+      details: [
+        "focusReason": focusReason,
+        "sessionId": sessionId,
+        "startPoint": describeFrame(
+          CGRect(x: startPoint.x, y: startPoint.y, width: 0, height: 0)),
+      ])
     focusSession(sessionId: sessionId, reason: focusReason)
     paneHeaderDrag = PaneHeaderDrag(
       isDragging: false,
       sourceSessionId: sessionId,
-      startPoint: convert(event.locationInWindow, from: nil),
+      startPoint: startPoint,
       targetSessionId: nil)
   }
 
@@ -1983,6 +2080,14 @@ final class TerminalWorkspaceView: NSView {
     if !drag.isDragging {
       drag.isDragging = true
       paneHeaderDrag = drag
+      TerminalFocusDebugLog.append(
+        event: "nativePaneReorder.dragStarted",
+        details: [
+          "point": describeFrame(CGRect(x: point.x, y: point.y, width: 0, height: 0)),
+          "sessionId": sessionId,
+          "startPoint": describeFrame(
+            CGRect(x: drag.startPoint.x, y: drag.startPoint.y, width: 0, height: 0)),
+        ])
       beginPaneHeaderDragFeedback(for: drag.sourceSessionId, at: point)
     }
     updatePaneHeaderDragFeedback(for: drag.sourceSessionId, at: point)
@@ -2000,8 +2105,22 @@ final class TerminalWorkspaceView: NSView {
     let point = convert(event.locationInWindow, from: nil)
     guard let targetSessionId = paneSessionId(at: point), targetSessionId != drag.sourceSessionId
     else {
+      TerminalFocusDebugLog.append(
+        event: "nativePaneReorder.dropIgnored",
+        details: [
+          "point": describeFrame(CGRect(x: point.x, y: point.y, width: 0, height: 0)),
+          "sourceSessionId": drag.sourceSessionId,
+          "targetSessionId": paneSessionId(at: point) ?? NSNull(),
+        ])
       return
     }
+    TerminalFocusDebugLog.append(
+      event: "nativePaneReorder.dropRequested",
+      details: [
+        "point": describeFrame(CGRect(x: point.x, y: point.y, width: 0, height: 0)),
+        "sourceSessionId": drag.sourceSessionId,
+        "targetSessionId": targetSessionId,
+      ])
     sendEvent(
       .paneReorderRequested(
         sourceSessionId: drag.sourceSessionId,
@@ -2834,7 +2953,17 @@ final class TerminalWorkspaceView: NSView {
     }
     let displayTitle = chromiumWebPaneDisplayTitle(title: title, url: url, fallbackTitle: session.title)
     session.titleBarView.setTitle(normalizedTerminalSessionTitle(displayTitle, sessionId: sessionId))
-    sendEvent(.terminalTitleChanged(sessionId: sessionId, title: displayTitle))
+    /**
+     CDXC:BrowserPanes 2026-05-05-19:47
+     Chromium browser panes emit title changes through the shared native title
+     event, but they do not have terminal persistence names. Pass nil
+     explicitly so the typed host event contract stays complete.
+     */
+    sendEvent(
+      .terminalTitleChanged(
+        sessionId: sessionId,
+        title: displayTitle,
+        sessionPersistenceName: nil))
     if let url, !url.isEmpty {
       sendEvent(.browserUrlChanged(sessionId: sessionId, url: url))
     }
@@ -3684,7 +3813,7 @@ final class TerminalWorkspaceView: NSView {
       session.view.processExited ? sessionId : nil
     }
     for sessionId in exitedSessionIds {
-      closeTerminal(sessionId: sessionId)
+      closeTerminal(sessionId: sessionId, requestGhosttyClose: false, reason: "processExitedPoll")
     }
   }
 
@@ -4744,6 +4873,10 @@ private final class TerminalSessionTitleBarView: NSView {
     true
   }
 
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    true
+  }
+
   var displayTitle: String {
     titleLabel.stringValue
   }
@@ -4850,9 +4983,14 @@ private final class TerminalSessionTitleBarView: NSView {
      CDXC:NativePaneReorder 2026-05-03-03:42
      Pane headers are draggable from the visible title and empty title-bar
      chrome, but action buttons must remain normal controls. Check the
-     laid-out button frames inside this title-bar view so the window-level drag
-     monitor never starts a header drag or focuses the terminal before a button
-     click can be resolved on mouse-up.
+     laid-out button frames inside this title-bar view so pane dragging and
+     title-bar actions do not compete for the same mouse stream.
+
+     CDXC:NativePaneReorder 2026-05-06-02:14
+     Drag-to-reorder is titlebar-only and starts from this view's direct mouse
+     handlers. Non-action subviews such as the title label, favicon, and
+     activity dot must not win hit testing, otherwise the open-hand cursor can
+     appear while mouseDown/mouseDragged never reach the drag starter.
 
      CDXC:BrowserPanes 2026-05-03-11:06
      Delegate action-button hit testing to AppKit so browser pane close is a
@@ -4860,7 +4998,7 @@ private final class TerminalSessionTitleBarView: NSView {
      Accessibility activation. The title-bar view itself still owns empty
      chrome for pane dragging.
      */
-    if let hitView = super.hitTest(point), hitView !== self {
+    if actionButtonAction(at: point) != nil, let hitView = super.hitTest(point) {
       return hitView
     }
     return self
