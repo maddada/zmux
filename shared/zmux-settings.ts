@@ -27,6 +27,7 @@ import {
 
 export type TerminalCursorStyle = "bar" | "block" | "underline";
 export type BrowserOpenMode = "chrome-canary" | "browser-pane";
+export type SessionPersistenceProvider = "off" | "tmux" | "zmx";
 export type SidebarMode = "combined" | "separated";
 export type ZedOverlayTargetApp = "zed" | "zed-preview" | "vscode" | "vscode-insiders";
 const MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 0.25;
@@ -53,6 +54,7 @@ export type zmuxSettings = {
   showSidebarActions: boolean;
   showSidebarAgents: boolean;
   showSidebarGitButton: boolean;
+  sessionPersistenceProvider: SessionPersistenceProvider;
   sidebarMode: SidebarMode;
   sidebarTheme: SidebarThemeSetting;
   terminalCursorStyle: TerminalCursorStyle;
@@ -64,6 +66,7 @@ export type zmuxSettings = {
   terminalLineHeight: number;
   terminalMouseScrollMultiplierDiscrete: number;
   terminalMouseScrollMultiplierPrecision: number;
+  tmuxMode: boolean;
   terminalScrollToBottomWhenTyping: boolean;
   hotkeys: zmuxHotkeySettings;
   workspaceActivePaneBorderColor: string;
@@ -107,6 +110,13 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   showSidebarAgents: true,
   showSidebarGitButton: true,
   /**
+   * CDXC:SessionPersistence 2026-05-05-07:28
+   * Terminal persistence is opt-in and provider-selected. Off preserves the
+   * direct Ghostty launch path; tmux and zmx wrap new terminal/agent sessions in
+   * a named persistence session so app restart can reattach or recreate+resume.
+   */
+  sessionPersistenceProvider: "off",
+  /**
    * CDXC:SidebarMode 2026-05-03-10:42
    * New installs should start in Combined mode so the native sidebar presents
    * one project group per project and can show sessions from every project at
@@ -124,6 +134,13 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   terminalLineHeight: 1.2,
   terminalMouseScrollMultiplierDiscrete: 3,
   terminalMouseScrollMultiplierPrecision: 1,
+  /**
+   * CDXC:SessionPersistence 2026-05-05-07:28
+   * tmuxMode remains as a compatibility mirror for older persisted settings and
+   * legacy UI code. New launch behavior reads sessionPersistenceProvider so zmx
+   * can follow the same persistence semantics as tmux.
+   */
+  tmuxMode: false,
   terminalScrollToBottomWhenTyping: true,
   hotkeys: DEFAULT_zmux_HOTKEYS,
   workspaceActivePaneBorderColor: "#3b82f6",
@@ -170,6 +187,15 @@ export const BROWSER_OPEN_MODE_OPTIONS: ReadonlyArray<{
   { label: "Browser Panes", value: "browser-pane" },
 ];
 
+export const SESSION_PERSISTENCE_PROVIDER_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: SessionPersistenceProvider;
+}> = [
+  { label: "Off", value: "off" },
+  { label: "tmux", value: "tmux" },
+  { label: "zmx", value: "zmx" },
+];
+
 export const SIDEBAR_MODE_OPTIONS: ReadonlyArray<{
   label: string;
   value: SidebarMode;
@@ -208,6 +234,15 @@ export function getZedOverlayTargetAppLabel(targetApp: ZedOverlayTargetApp): str
 
 export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
   const source = isRecord(candidate) ? candidate : {};
+  const sessionPersistenceProvider = normalizeSessionPersistenceProvider(
+    readString(
+      source,
+      "sessionPersistenceProvider",
+      readBoolean(source, "tmuxMode", DEFAULT_zmux_SETTINGS.tmuxMode)
+        ? "tmux"
+        : DEFAULT_zmux_SETTINGS.sessionPersistenceProvider,
+    ),
+  );
   return {
     actionCompletionSound: clampCompletionSoundSetting(
       readString(source, "actionCompletionSound", DEFAULT_zmux_SETTINGS.actionCompletionSound),
@@ -273,6 +308,7 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
       "showSidebarGitButton",
       DEFAULT_zmux_SETTINGS.showSidebarGitButton,
     ),
+    sessionPersistenceProvider,
     /**
      * CDXC:SidebarMode 2026-05-03-10:42
      * Persist only the two supported sidebar presentation modes. Unknown or
@@ -347,6 +383,7 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
       MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
       DEFAULT_zmux_SETTINGS.terminalMouseScrollMultiplierPrecision,
     ),
+    tmuxMode: sessionPersistenceProvider === "tmux",
     terminalScrollToBottomWhenTyping: readBoolean(
       source,
       "terminalScrollToBottomWhenTyping",
@@ -421,6 +458,12 @@ function normalizeBrowserOpenMode(value: string | undefined): BrowserOpenMode {
 
 function normalizeSidebarMode(value: string | undefined): SidebarMode {
   return value === "separated" ? "separated" : DEFAULT_zmux_SETTINGS.sidebarMode;
+}
+
+function normalizeSessionPersistenceProvider(
+  value: string | undefined,
+): SessionPersistenceProvider {
+  return value === "tmux" || value === "zmx" ? value : "off";
 }
 
 function normalizeZedOverlayTargetApp(value: string | undefined): ZedOverlayTargetApp {

@@ -128,6 +128,33 @@ describe("normalizezmuxSettings", () => {
     });
   });
 
+  test("keeps session persistence provider opt-in", () => {
+    /**
+     * CDXC:SessionPersistence 2026-05-05-07:28
+     * Session persistence must not change existing launch behavior until the
+     * user selects a provider in Settings. Legacy tmuxMode=true settings should
+     * migrate to the tmux provider, and zmx must persist as its own provider.
+     */
+    expect(DEFAULT_zmux_SETTINGS.sessionPersistenceProvider).toBe("off");
+    expect(DEFAULT_zmux_SETTINGS.tmuxMode).toBe(false);
+    expect(normalizezmuxSettings({})).toMatchObject({
+      sessionPersistenceProvider: "off",
+      tmuxMode: false,
+    });
+    expect(normalizezmuxSettings({ tmuxMode: true })).toMatchObject({
+      sessionPersistenceProvider: "tmux",
+      tmuxMode: true,
+    });
+    expect(normalizezmuxSettings({ sessionPersistenceProvider: "zmx" })).toMatchObject({
+      sessionPersistenceProvider: "zmx",
+      tmuxMode: false,
+    });
+    expect(normalizezmuxSettings({ sessionPersistenceProvider: "wat" })).toMatchObject({
+      sessionPersistenceProvider: "off",
+      tmuxMode: false,
+    });
+  });
+
   test("keeps valid Zed overlay settings", () => {
     expect(
       normalizezmuxSettings({

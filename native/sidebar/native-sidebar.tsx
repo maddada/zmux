@@ -103,6 +103,7 @@ import {
   setSessionTitleInSimpleWorkspace,
   setT3SessionMetadataInSimpleWorkspace,
   setTerminalSessionAgentNameInSimpleWorkspace,
+  setTerminalSessionPersistenceNameInSimpleWorkspace,
   setViewModeInSimpleWorkspace,
   setVisibleCountInSimpleWorkspace,
   swapVisibleSessionsInSimpleWorkspace,
@@ -191,6 +192,8 @@ type NativeHostCommand =
       env?: Record<string, string>;
       initialInput?: string;
       sessionId: string;
+      sessionPersistenceName?: string;
+      sessionPersistenceProvider?: "tmux" | "zmx";
       title?: string;
       type: "createTerminal";
     }
@@ -339,8 +342,19 @@ type NativeTerminalLayout =
     };
 
 type NativeHostEvent =
-  | { foregroundPid?: number; sessionId: string; ttyName?: string; type: "terminalReady" }
-  | { sessionId: string; title: string; type: "terminalTitleChanged" }
+  | {
+      foregroundPid?: number;
+      sessionId: string;
+      sessionPersistenceName?: string;
+      ttyName?: string;
+      type: "terminalReady";
+    }
+  | {
+      sessionId: string;
+      sessionPersistenceName?: string;
+      title: string;
+      type: "terminalTitleChanged";
+    }
   | { faviconDataUrl?: string; sessionId: string; type: "browserFaviconChanged" }
   | { sessionId: string; type: "browserUrlChanged"; url: string }
   | {
@@ -734,6 +748,8 @@ const terminalStateById = new Map<
     firstUserMessage?: string;
     lastActivityAt?: string;
     lifecycleState: "done" | "error" | "running" | "sleeping";
+    sessionPersistenceName?: string;
+    sessionPersistenceProvider?: zmuxSettings["sessionPersistenceProvider"];
     sessionStateFilePath?: string;
     terminalTitle?: string;
   }
@@ -1399,6 +1415,19 @@ function saveSettings(nextSettings: zmuxSettings): void {
   postZedOverlaySettings();
   publish();
   previewNativeSoundSettingChange(previousSettings, settings);
+}
+
+function nextSessionPersistenceProvider(
+  provider: zmuxSettings["sessionPersistenceProvider"],
+): zmuxSettings["sessionPersistenceProvider"] {
+  switch (provider) {
+    case "off":
+      return "tmux";
+    case "tmux":
+      return "zmx";
+    case "zmx":
+      return "off";
+  }
 }
 
 function syncGhosttyTerminalSettings(
@@ -2548,6 +2577,10 @@ function mergeArchivedTerminalDetails(
     firstUserMessage: archivedRecord.firstUserMessage,
     isFavorite: archivedRecord.isFavorite,
     isSleeping: false,
+    sessionPersistenceName:
+      archivedRecord.sessionPersistenceName ??
+      archivedRecord.tmuxSessionName ??
+      restoredSession.sessionPersistenceName,
     terminalEngine: archivedRecord.terminalEngine ?? restoredSession.terminalEngine,
     title: archivedRecord.title || restoredSession.title,
     titleSource: archivedRecord.titleSource ?? restoredSession.titleSource,
@@ -2840,6 +2873,21 @@ function setTerminalSessionAgentName(sessionId: string, agentName: string | unde
   updateActiveProjectWorkspace(
     (workspace) =>
       setTerminalSessionAgentNameInSimpleWorkspace(workspace, sessionId, agentName).snapshot,
+  );
+}
+
+function setTerminalSessionPersistenceName(
+  sessionId: string,
+  sessionPersistenceName: string | undefined,
+): void {
+  updateActiveProjectWorkspace(
+    (workspace) =>
+      setTerminalSessionPersistenceNameInSimpleWorkspace(
+        workspace,
+        sessionId,
+        sessionPersistenceName,
+      )
+        .snapshot,
   );
 }
 
@@ -3457,6 +3505,8 @@ function restoreNativeTerminalSession(
     activity: "idle",
     agentName: session.agentName,
     lifecycleState: "running",
+    sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
+    sessionPersistenceProvider: settings.sessionPersistenceProvider,
     sessionStateFilePath,
     terminalTitle: session.title,
   });
@@ -3468,6 +3518,8 @@ function restoreNativeTerminalSession(
     reason,
     sessionId: session.sessionId,
     sessionStateFilePath,
+    sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
+    sessionPersistenceProvider: settings.sessionPersistenceProvider,
     terminalTitle: session.title,
   });
   const nativeEnvironment = createNativeAgentSessionEnvironment({
@@ -3497,6 +3549,11 @@ function restoreNativeTerminalSession(
     env: nativeEnvironment,
     initialInput,
     sessionId: nativeSessionId,
+    sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
+    sessionPersistenceProvider:
+      settings.sessionPersistenceProvider === "off"
+        ? undefined
+        : settings.sessionPersistenceProvider,
     title: session.title,
     type: "createTerminal",
   });
@@ -4370,6 +4427,8 @@ function createTerminal(
     activity: initialInput.trim() && !agentName ? "working" : "idle",
     agentName,
     lifecycleState: "running",
+    sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
+    sessionPersistenceProvider: settings.sessionPersistenceProvider,
     sessionStateFilePath,
     terminalTitle: title,
   });
@@ -4408,6 +4467,7 @@ function createTerminal(
     colorEnv: readAgentColorEnvironmentSnapshot(nativeEnvironment),
     nativeSessionId,
     projectId: project.projectId,
+    sessionPersistenceProvider: settings.sessionPersistenceProvider,
     sessionId: session.sessionId,
   });
   postNative({
@@ -4423,6 +4483,11 @@ function createTerminal(
     env: nativeEnvironment,
     initialInput,
     sessionId: nativeSessionId,
+    sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
+    sessionPersistenceProvider:
+      settings.sessionPersistenceProvider === "off"
+        ? undefined
+        : settings.sessionPersistenceProvider,
     title,
     type: "createTerminal",
   });
@@ -5016,6 +5081,7 @@ function syncSessionTitleFromNativeTerminalTitle(
     agentName: terminalState.agentName,
     previousTerminalTitle,
     session,
+    sessionPersistenceProvider: terminalState.sessionPersistenceProvider,
     visibleTitle,
   });
   if (!decision.shouldSync) {
@@ -5055,6 +5121,7 @@ function getNativeTerminalTitleSessionSyncDecision(args: {
   agentName?: string;
   previousTerminalTitle?: string;
   session: SessionRecord;
+  sessionPersistenceProvider?: zmuxSettings["sessionPersistenceProvider"];
   visibleTitle: string;
 }): { reason: string; shouldSync: boolean } {
   if (args.session.kind !== "terminal") {
@@ -5077,6 +5144,23 @@ function getNativeTerminalTitleSessionSyncDecision(args: {
   if (isValidNativeAgentTerminalTitle(args.visibleTitle, args.agentName)) {
     return {
       reason: `valid-agent-terminal-title-from-${args.session.titleSource ?? "unknown"}`,
+      shouldSync: true,
+    };
+  }
+
+  if (
+    args.sessionPersistenceProvider !== undefined &&
+    args.sessionPersistenceProvider !== "off" &&
+    !isRejectedNativeResumeTitle(args.visibleTitle)
+  ) {
+    /**
+     * CDXC:SessionPersistence 2026-05-05-07:28
+     * Persistence providers ask sidebar cards to follow the terminal title
+     * reported through the attached pane. Trust visible, non-command titles even
+     * for plain terminal sessions so the card maps to tmux/zmx pane identity.
+     */
+    return {
+      reason: `${args.sessionPersistenceProvider}-terminal-title-from-${args.session.titleSource ?? "unknown"}`,
       shouldSync: true,
     };
   }
@@ -7997,6 +8081,14 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
         showLastInteractionTimeOnSessionCards: !settings.showLastInteractionTimeOnSessionCards,
       });
       return;
+    case "cycleSessionPersistenceProvider":
+      saveSettings({
+        ...settings,
+        sessionPersistenceProvider: nextSessionPersistenceProvider(
+          settings.sessionPersistenceProvider,
+        ),
+      });
+      return;
     case "adjustTerminalFontSize":
       saveSettings({
         ...settings,
@@ -8787,7 +8879,20 @@ window.addEventListener("zmux-native-host-event", (event) => {
       const effectiveDerivedActivity = nextDerivedActivity
         ? getNativeEffectiveTitleActivity(sidebarSessionId, nextDerivedActivity)
         : undefined;
+      const didUpdateSessionPersistenceName =
+        hostEvent.sessionPersistenceName !== undefined &&
+        terminalState.sessionPersistenceName !== hostEvent.sessionPersistenceName;
       terminalState.terminalTitle = hostEvent.title;
+      if (hostEvent.sessionPersistenceName !== undefined) {
+        /**
+         * CDXC:SessionPersistence 2026-05-05-07:28
+         * Native persistence names are the durable reconnect identity. Persist
+         * them separately from the visible card title so app restart can attach
+         * to a live tmux/zmx session before recreating and resuming the agent.
+         */
+        terminalState.sessionPersistenceName = hostEvent.sessionPersistenceName;
+        setTerminalSessionPersistenceName(sidebarSessionId, hostEvent.sessionPersistenceName);
+      }
       /**
        * CDXC:AgentDetection 2026-04-26-10:50
        * Native Ghostty sessions may start as plain shells and only later reveal
@@ -8822,7 +8927,8 @@ window.addEventListener("zmux-native-host-event", (event) => {
         previousVisibleTerminalTitle === getVisibleTerminalTitle(hostEvent.title) &&
         previousActivity === terminalState.activity &&
         knownAgentNameBeforeDetection === terminalState.agentName &&
-        haveSameTitleDerivedSessionActivity(previousDerivedActivity, effectiveDerivedActivity)
+        haveSameTitleDerivedSessionActivity(previousDerivedActivity, effectiveDerivedActivity) &&
+        !didUpdateSessionPersistenceName
       ) {
         return;
       }
@@ -8856,6 +8962,10 @@ window.addEventListener("zmux-native-host-event", (event) => {
       }
     } else if (hostEvent.type === "terminalReady") {
       terminalState.lifecycleState = "running";
+      if (hostEvent.sessionPersistenceName !== undefined) {
+        terminalState.sessionPersistenceName = hostEvent.sessionPersistenceName;
+        setTerminalSessionPersistenceName(sidebarSessionId, hostEvent.sessionPersistenceName);
+      }
     }
   }
   publish();

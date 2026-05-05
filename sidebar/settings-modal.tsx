@@ -36,11 +36,13 @@ import {
 import {
   BROWSER_OPEN_MODE_OPTIONS,
   DEFAULT_zmux_SETTINGS,
+  SESSION_PERSISTENCE_PROVIDER_OPTIONS,
   SIDEBAR_MODE_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   ZED_OVERLAY_TARGET_APP_OPTIONS,
   normalizezmuxSettings,
   type BrowserOpenMode,
+  type SessionPersistenceProvider,
   type SidebarMode,
   type TerminalCursorStyle,
   type ZedOverlayTargetApp,
@@ -267,6 +269,12 @@ export function SettingsModal({
         ],
         subtitle: "Choose the cursor shape.",
         title: "Cursor Style",
+      },
+      {
+        key: "sessionPersistenceProvider",
+        options: SESSION_PERSISTENCE_PROVIDER_OPTIONS,
+        subtitle: "Choose Off, tmux, or zmx for restart-safe terminal sessions.",
+        title: "Session Persistence",
       },
     ]),
     terminalScrolling: getSettingsSectionSearch(settingsSearchQuery, "Terminal Scrolling", [
@@ -679,6 +687,22 @@ export function SettingsModal({
                   { label: "Underline", value: "underline" },
                 ]}
                 value={draft.terminalCursorStyle}
+              />
+              ) : null}
+              {shouldShowSetting(settingsSearch.terminal, "sessionPersistenceProvider") ? (
+              /* CDXC:SessionPersistence 2026-05-05-07:28
+                  Session persistence is a provider choice for new terminal and
+                  agent launches. Existing panes keep their current process;
+                  new panes can use tmux or zmx so restart restores by attach
+                  first and recreate+resume only when the named session is gone. */
+              <SelectField
+                description="Choose Off, tmux, or zmx for restart-safe terminal sessions."
+                label="Session Persistence"
+                onChange={(value) =>
+                  updateDraft("sessionPersistenceProvider", value as SessionPersistenceProvider)
+                }
+                options={SESSION_PERSISTENCE_PROVIDER_OPTIONS}
+                value={draft.sessionPersistenceProvider}
               />
               ) : null}
             </SettingsSection>

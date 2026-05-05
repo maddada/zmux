@@ -428,6 +428,9 @@ export type SidebarToExtensionMessage =
       type: "toggleShowLastInteractionTimeOnSessionCards";
     }
   | {
+      type: "cycleSessionPersistenceProvider";
+    }
+  | {
       delta: -1 | 1;
       type: "adjustTerminalFontSize";
     }

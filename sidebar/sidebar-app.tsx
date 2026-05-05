@@ -19,6 +19,7 @@ import {
   IconPlusFilled,
   IconSearch,
   IconSettings,
+  IconTerminal2,
 } from "@tabler/icons-react";
 import {
   useEffect,
@@ -1613,6 +1614,11 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     vscode.postMessage({ type: "toggleCompletionBell" });
   };
 
+  const cycleSessionPersistenceProvider = () => {
+    setIsOverflowMenuOpen(false);
+    vscode.postMessage({ type: "cycleSessionPersistenceProvider" });
+  };
+
   const restoreRecentProject = (projectId: string) => {
     setRecentProjectsQuery("");
     setIsRecentProjectsOpen(false);
@@ -1667,6 +1673,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     isPreviousSessionsOpen,
     isScratchPadOpen,
     isSessionSearchOpen,
+    sessionPersistenceProvider: settings?.sessionPersistenceProvider,
     onMoveSidebar: moveSidebar,
     onAccessT3FromBrowser: (sessionId: string) => {
       setIsOverflowMenuOpen(false);
@@ -1698,6 +1705,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     onToggleBell: toggleCompletionBell,
     onToggleMenu: toggleOverflowMenu,
     onToggleScratchPad: openScratchPad,
+    onCycleSessionPersistenceProvider: cycleSessionPersistenceProvider,
     overflowMenuPosition,
     overflowMenuRef,
   } satisfies RenderSidebarTopControlsOptions;
@@ -2182,6 +2190,16 @@ function getScratchPadMenuLabel(isScratchPadOpen: boolean): string {
   return isScratchPadOpen ? "Hide Scratch Pad" : "Scratch Pad";
 }
 
+function getSessionPersistenceProviderMenuLabel(provider: string | undefined): string {
+  if (provider === "tmux") {
+    return "Persistence: tmux";
+  }
+  if (provider === "zmx") {
+    return "Persistence: zmx";
+  }
+  return "Persistence: Off";
+}
+
 type RenderSidebarTopControlsOptions = {
   browserAccessSessionId?: string;
   completionBellEnabled: boolean;
@@ -2191,6 +2209,7 @@ type RenderSidebarTopControlsOptions = {
   isPreviousSessionsOpen: boolean;
   isScratchPadOpen: boolean;
   isSessionSearchOpen: boolean;
+  sessionPersistenceProvider?: string;
   onAccessT3FromBrowser: (sessionId: string) => void;
   onMoveSidebar: () => void;
   onOpenHelp: () => void;
@@ -2200,6 +2219,7 @@ type RenderSidebarTopControlsOptions = {
   onTogglePinnedPrompts: () => void;
   onTogglePreviousSessions: () => void;
   onToggleSessionSearch: () => void;
+  onCycleSessionPersistenceProvider: () => void;
   onToggleActiveSessionsSortMode: () => void;
   onToggleBell: () => void;
   onToggleMenu: (trigger: HTMLElement) => void;
@@ -2217,6 +2237,7 @@ function renderFloatingOverflowMenu({
   isPreviousSessionsOpen,
   isScratchPadOpen,
   isSessionSearchOpen,
+  sessionPersistenceProvider,
   onAccessT3FromBrowser,
   onMoveSidebar: _onMoveSidebar,
   onOpenHelp,
@@ -2228,6 +2249,7 @@ function renderFloatingOverflowMenu({
   onTogglePinnedPrompts,
   onTogglePreviousSessions,
   onToggleSessionSearch,
+  onCycleSessionPersistenceProvider,
   onToggleMenu,
   onToggleScratchPad,
   overflowMenuPosition,
@@ -2362,6 +2384,26 @@ function renderFloatingOverflowMenu({
                     />
                   )}
                   {completionBellEnabled ? "Completion Sound On" : "Completion Sound Off"}
+                </button>
+                <button
+                  className="session-context-menu-item"
+                  onClick={onCycleSessionPersistenceProvider}
+                  role="menuitem"
+                  type="button"
+                >
+                  {/*
+                   * CDXC:SessionPersistence 2026-05-05-07:28
+                   * Session persistence is a launch behavior users need while
+                   * working, so the overflow menu cycles the persisted provider
+                   * without requiring a settings-modal detour.
+                   */}
+                  <IconTerminal2
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={14}
+                    stroke={1.8}
+                  />
+                  {getSessionPersistenceProviderMenuLabel(sessionPersistenceProvider)}
                 </button>
                 <button
                   className="session-context-menu-item"

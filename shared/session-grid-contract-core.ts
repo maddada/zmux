@@ -98,7 +98,10 @@ export type BaseSessionRecord = {
 export type TerminalSessionRecord = BaseSessionRecord & {
   agentName?: string;
   kind: "terminal";
+  sessionPersistenceName?: string;
   terminalEngine: TerminalEngine;
+  /** @deprecated use sessionPersistenceName for tmux and zmx providers. */
+  tmuxSessionName?: string;
 };
 
 export type T3SessionRecord = BaseSessionRecord & {
@@ -129,7 +132,10 @@ export type CreateSessionRecordOptions =
       initialPresentation?: "background" | "focused";
       kind?: "terminal";
       sessionId?: string;
+      sessionPersistenceName?: string;
       terminalEngine?: TerminalEngine;
+      /** @deprecated use sessionPersistenceName for tmux and zmx providers. */
+      tmuxSessionName?: string;
       title?: string;
       titleSource?: SessionTitleSource;
     }

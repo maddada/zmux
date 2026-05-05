@@ -287,6 +287,25 @@ export function reduceSidebarStoryWorkspace(
         },
       };
 
+    case "cycleSessionPersistenceProvider":
+      return workspace.options.settings
+        ? {
+            ...workspace,
+            options: {
+              ...workspace.options,
+              settings: {
+                ...workspace.options.settings,
+                sessionPersistenceProvider:
+                  workspace.options.settings.sessionPersistenceProvider === "off"
+                    ? "tmux"
+                    : workspace.options.settings.sessionPersistenceProvider === "tmux"
+                      ? "zmx"
+                      : "off",
+              },
+            },
+          }
+        : undefined;
+
     case "toggleFullscreenSession":
       return {
         ...workspace,

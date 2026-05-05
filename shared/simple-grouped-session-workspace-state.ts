@@ -573,6 +573,33 @@ export function setTerminalSessionAgentNameInSimpleWorkspace(
   });
 }
 
+export function setTerminalSessionPersistenceNameInSimpleWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  sessionId: string,
+  sessionPersistenceName: string | undefined,
+): WorkspaceMutationResult {
+  const nextSessionPersistenceName = sessionPersistenceName?.trim() || undefined;
+  /**
+   * CDXC:SessionPersistence 2026-05-05-07:28
+   * Provider reconnect identity must be stored separately from the sidebar
+   * title. Titles can change as agent CLIs rename work, while restart restore
+   * needs the last known tmux/zmx session name to attach before recreating.
+   */
+  return updateSession(snapshot, sessionId, (session) => {
+    if (
+      session.kind !== "terminal" ||
+      session.sessionPersistenceName === nextSessionPersistenceName
+    ) {
+      return session;
+    }
+
+    return {
+      ...session,
+      sessionPersistenceName: nextSessionPersistenceName,
+    };
+  });
+}
+
 export function setTerminalSessionEngineInSimpleWorkspace(
   snapshot: GroupedSessionWorkspaceSnapshot,
   sessionId: string,

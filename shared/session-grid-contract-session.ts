@@ -388,6 +388,9 @@ export function createSessionRecord(
     sessionId,
     slotIndex,
     terminalEngine: normalizeTerminalEngine(options?.terminalEngine),
+    sessionPersistenceName: normalizeTerminalSessionPersistenceName(
+      options?.sessionPersistenceName ?? options?.tmuxSessionName,
+    ),
     title,
     titleSource,
   };
@@ -411,6 +414,11 @@ function normalizeSessionTitleSource(
 
 export function normalizeTerminalSessionAgentName(value: string | undefined): string | undefined {
   const normalizedValue = value?.replace(/\s+/g, " ").trim();
+  return normalizedValue && normalizedValue.length > 0 ? normalizedValue : undefined;
+}
+
+function normalizeTerminalSessionPersistenceName(value: string | undefined): string | undefined {
+  const normalizedValue = value?.trim();
   return normalizedValue && normalizedValue.length > 0 ? normalizedValue : undefined;
 }
 

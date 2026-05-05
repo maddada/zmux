@@ -191,7 +191,11 @@ struct CreateTerminal: Decodable {
   let env: [String: String]?
   let initialInput: String?
   let sessionId: String
+  let sessionPersistenceName: String?
+  let sessionPersistenceProvider: String?
   let title: String?
+  let tmuxMode: Bool?
+  let tmuxSessionName: String?
 }
 
 struct CreateWebPane: Decodable {
@@ -415,8 +419,8 @@ enum NativeTerminalLayout: Decodable {
 enum HostEvent: Encodable {
   case hostReady
   case nativeHotkey(actionId: String)
-  case terminalReady(sessionId: String, ttyName: String?, foregroundPid: Int?)
-  case terminalTitleChanged(sessionId: String, title: String)
+  case terminalReady(sessionId: String, ttyName: String?, foregroundPid: Int?, sessionPersistenceName: String?)
+  case terminalTitleChanged(sessionId: String, title: String, sessionPersistenceName: String?)
   case browserFaviconChanged(sessionId: String, faviconDataUrl: String?)
   case browserUrlChanged(sessionId: String, url: String)
   case terminalTitleBarAction(sessionId: String, action: TerminalTitleBarAction)
@@ -455,8 +459,10 @@ enum HostEvent: Encodable {
     case requestId
     case ok
     case payloadJson
+    case sessionPersistenceName
     case sourceSessionId
     case targetSessionId
+    case tmuxSessionName
   }
 
   func encode(to encoder: Encoder) throws {
@@ -475,15 +481,17 @@ enum HostEvent: Encodable {
       */
       try container.encode("nativeHotkey", forKey: .type)
       try container.encode(actionId, forKey: .actionId)
-    case .terminalReady(let sessionId, let ttyName, let foregroundPid):
+    case .terminalReady(let sessionId, let ttyName, let foregroundPid, let sessionPersistenceName):
       try container.encode("terminalReady", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)
       try container.encodeIfPresent(ttyName, forKey: .ttyName)
       try container.encodeIfPresent(foregroundPid, forKey: .foregroundPid)
-    case .terminalTitleChanged(let sessionId, let title):
+      try container.encodeIfPresent(sessionPersistenceName, forKey: .sessionPersistenceName)
+    case .terminalTitleChanged(let sessionId, let title, let sessionPersistenceName):
       try container.encode("terminalTitleChanged", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)
       try container.encode(title, forKey: .title)
+      try container.encodeIfPresent(sessionPersistenceName, forKey: .sessionPersistenceName)
     case .browserFaviconChanged(let sessionId, let faviconDataUrl):
       try container.encode("browserFaviconChanged", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)

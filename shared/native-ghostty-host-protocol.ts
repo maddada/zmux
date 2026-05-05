@@ -19,7 +19,11 @@ export type NativeGhosttyHostCommand =
       env?: Record<string, string>;
       initialInput?: string;
       sessionId: string;
+      sessionPersistenceName?: string;
+      sessionPersistenceProvider?: "tmux" | "zmx";
       title?: string;
+      tmuxMode?: boolean;
+      tmuxSessionName?: string;
       type: "createTerminal";
     }
   | {
@@ -73,12 +77,16 @@ export type NativeGhosttyHostEvent =
   | {
       foregroundPid?: number;
       sessionId: string;
+      sessionPersistenceName?: string;
+      tmuxSessionName?: string;
       ttyName?: string;
       type: "terminalReady";
     }
   | {
       sessionId: string;
+      sessionPersistenceName?: string;
       title: string;
+      tmuxSessionName?: string;
       type: "terminalTitleChanged";
     }
   | {

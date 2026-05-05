@@ -877,7 +877,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
           env: nil,
           initialInput: "printf 'Failed to start zmux bridge: \(error.localizedDescription)\\n'\r",
           sessionId: "bridge-error",
-          title: "Bridge error"
+          sessionPersistenceName: nil,
+          sessionPersistenceProvider: nil,
+          title: "Bridge error",
+          tmuxMode: nil,
+          tmuxSessionName: nil
         ))
     }
   }

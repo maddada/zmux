@@ -156,6 +156,8 @@ final class TerminalWorkspaceView: NSView {
     let titleBarView: TerminalSessionTitleBarView
     let borderView: TerminalPaneBorderView
     var foregroundPid: Int?
+    var sessionPersistenceName: String?
+    var sessionPersistenceProvider: NativeSessionPersistenceProvider?
     var ttyName: String?
     var cancellables: Set<AnyCancellable> = []
   }
@@ -321,10 +323,39 @@ final class TerminalWorkspaceView: NSView {
       return
     }
 
+    let sessionPersistenceProvider = NativeSessionPersistenceProvider.resolve(command)
+    let sessionPersistenceName = sessionPersistenceProvider == nil
+      ? nil
+      : (NativeSessionPersistenceMode.normalizedSessionName(
+        command.sessionPersistenceName ?? command.tmuxSessionName)
+        ?? NativeSessionPersistenceMode.sessionName(
+          sessionId: command.sessionId,
+          title: command.title))
     var config = Ghostty.SurfaceConfiguration()
     config.workingDirectory = command.cwd
     config.environmentVariables = nativeGhosttyTerminalEnvironment(command.env)
-    config.initialInput = command.initialInput
+    config.initialInput = sessionPersistenceProvider == nil ? command.initialInput : nil
+    if let sessionPersistenceProvider, let sessionPersistenceName {
+      /**
+       CDXC:SessionPersistence 2026-05-05-07:28
+       When a persistence provider is selected, each zmux sidebar terminal
+       creates or attaches to one named tmux/zmx session. The app does not
+       inspect provider-internal panes/windows/tabs; the sidebar card remains
+       mapped to the original attached terminal surface.
+
+       CDXC:SessionPersistence 2026-05-05-07:28
+       App restart must reconnect to existing provider sessions without
+       replaying agent launch or resume input into the live pane. Move initial
+       input into the provider creation script so it is sent only when the named
+       session did not already exist.
+       */
+      config.command = NativeSessionPersistenceMode.attachCommand(
+        provider: sessionPersistenceProvider,
+        cwd: command.cwd,
+        initialInput: command.initialInput,
+        sessionName: sessionPersistenceName
+      )
+    }
     TerminalFocusDebugLog.append(
       event: "nativeWorkspace.createTerminal.surfaceInit.start",
       details: [
@@ -336,6 +367,8 @@ final class TerminalWorkspaceView: NSView {
         "surfaceProcessColorEnv": nativeTerminalColorEnvironmentSnapshot(
           nativeGhosttyTerminalEffectiveProcessEnvironment()),
         "title": command.title ?? "",
+        "sessionPersistenceName": sessionPersistenceName ?? "",
+        "sessionPersistenceProvider": sessionPersistenceProvider?.rawValue ?? "off",
         "workingDirectory": command.cwd,
       ])
     let surfaceView = withNativeGhosttyTerminalProcessEnvironment {
@@ -397,6 +430,8 @@ final class TerminalWorkspaceView: NSView {
       titleBarView: titleBarView,
       borderView: borderView,
       foregroundPid: nil,
+      sessionPersistenceName: sessionPersistenceName,
+      sessionPersistenceProvider: sessionPersistenceProvider,
       ttyName: nil)
     surfaceView.$title
       .removeDuplicates()
@@ -409,7 +444,17 @@ final class TerminalWorkspaceView: NSView {
          title. The pane title comes from setActiveTerminalSet.sessionTitles so
          already-ellipsized OSC/window titles cannot poison AppKit chrome.
          */
-        self?.sendEvent(.terminalTitleChanged(sessionId: command.sessionId, title: title))
+        guard let self else { return }
+        let sessionPersistenceName = self.updatePersistenceSessionForTerminalTitle(
+          sessionId: command.sessionId,
+          title: title
+        )
+        self.sendEvent(
+          .terminalTitleChanged(
+            sessionId: command.sessionId,
+            title: title,
+            sessionPersistenceName: sessionPersistenceName
+          ))
       }
       .store(in: &session.cancellables)
     surfaceView.$bell
@@ -478,7 +523,8 @@ final class TerminalWorkspaceView: NSView {
       .terminalReady(
         sessionId: command.sessionId,
         ttyName: ttyName,
-        foregroundPid: foregroundPid
+        foregroundPid: foregroundPid,
+        sessionPersistenceName: sessionPersistenceName
       ))
     sendEvent(.terminalCwdChanged(sessionId: command.sessionId, cwd: command.cwd))
     startExitPollingIfNeeded()
@@ -492,6 +538,42 @@ final class TerminalWorkspaceView: NSView {
         "ttyName": ttyName ?? "",
         "visibleSessionIds": orderedVisibleSessionIds(),
       ])
+  }
+
+  private func updatePersistenceSessionForTerminalTitle(sessionId: String, title: String) -> String? {
+    guard
+      let provider = sessions[sessionId]?.sessionPersistenceProvider,
+      let currentSessionName = sessions[sessionId]?.sessionPersistenceName
+    else {
+      return nil
+    }
+    guard provider == .tmux else {
+      /**
+       CDXC:SessionPersistence 2026-05-05-07:28
+       zmx 0.4 exposes attach/run/list/kill/history but no rename command. Keep
+       the durable zmx attach identity stable while the sidebar still follows
+       Ghostty title events for user-visible card names.
+       */
+      return currentSessionName
+    }
+    let nextSessionName = NativeSessionPersistenceMode.sessionName(sessionId: sessionId, title: title)
+    guard nextSessionName != currentSessionName else {
+      return currentSessionName
+    }
+    /**
+     CDXC:SessionPersistence 2026-05-05-07:28
+     Agent CLIs reveal useful task names through terminal title changes after
+     launch. tmux can rename the backing session from that live title so SSH
+     users can find the same session by task-oriented name instead of opaque id.
+     */
+    sessions[sessionId]?.sessionPersistenceName = nextSessionName
+    NativeSessionPersistenceMode.renameTmuxSession(
+      from: currentSessionName,
+      sessionId: sessionId,
+      title: title,
+      to: nextSessionName
+    )
+    return nextSessionName
   }
 
   func closeTerminal(sessionId: String) {
@@ -2545,7 +2627,11 @@ final class TerminalWorkspaceView: NSView {
 
     let displayTitle = webPaneDisplayTitle(for: webView, fallbackTitle: session.title)
     session.titleBarView.setTitle(normalizedTerminalSessionTitle(displayTitle, sessionId: sessionId))
-    sendEvent(.terminalTitleChanged(sessionId: sessionId, title: displayTitle))
+    sendEvent(
+      .terminalTitleChanged(
+        sessionId: sessionId,
+        title: displayTitle,
+        sessionPersistenceName: nil))
     if let url = webView.url?.absoluteString, !url.isEmpty {
       /**
        CDXC:BrowserPanes 2026-05-03-03:41
@@ -3674,6 +3760,231 @@ private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandle
       }
     }
     return String(describing: value)
+  }
+}
+
+private enum NativeSessionPersistenceProvider: String {
+  case tmux
+  case zmx
+
+  static func resolve(_ command: CreateTerminal) -> NativeSessionPersistenceProvider? {
+    if let provider = command.sessionPersistenceProvider,
+      let resolvedProvider = NativeSessionPersistenceProvider(rawValue: provider)
+    {
+      return resolvedProvider
+    }
+    return command.tmuxMode == true ? .tmux : nil
+  }
+}
+
+private enum NativeSessionPersistenceMode {
+  static func attachCommand(
+    provider: NativeSessionPersistenceProvider,
+    cwd: String,
+    initialInput: String?,
+    sessionName: String
+  ) -> String {
+    switch provider {
+    case .tmux:
+      return tmuxAttachCommand(cwd: cwd, initialInput: initialInput, sessionName: sessionName)
+    case .zmx:
+      return zmxAttachCommand(cwd: cwd, initialInput: initialInput, sessionName: sessionName)
+    }
+  }
+
+  private static func tmuxAttachCommand(
+    cwd: String,
+    initialInput: String?,
+    sessionName: String
+  ) -> String {
+    let script = """
+      tmux_session=\(shellQuote(sessionName))
+      tmux_cwd=\(shellQuote(cwd))
+      tmux_initial_input=\(shellQuote(initialInput ?? ""))
+      tmux_created=0
+      if ! command -v tmux >/dev/null 2>&1; then
+        printf '%s\\n' 'tmux mode is enabled, but tmux was not found on PATH.'
+        exit 127
+      fi
+      if ! tmux has-session -t "$tmux_session" 2>/dev/null; then
+        tmux new-session -d -s "$tmux_session" -c "$tmux_cwd"
+        tmux_created=1
+      fi
+      tmux set-option -t "$tmux_session" set-titles on >/dev/null
+      tmux set-option -t "$tmux_session" set-titles-string '#T' >/dev/null
+      if [ "$tmux_created" = "1" ] && [ -n "$tmux_initial_input" ]; then
+        # CDXC:TmuxMode 2026-05-05-06:31: Target the active pane by session
+        # name so user tmux base-index settings do not break first launch.
+        tmux send-keys -t "$tmux_session" -l "$tmux_initial_input"
+      fi
+      exec tmux attach-session -t "$tmux_session"
+      """
+    /**
+     CDXC:TmuxMode 2026-05-05-06:06
+     Ghostty accepts one command string. Run a small login-shell script that
+     creates exactly one tmux session/pane for the sidebar terminal, configures
+     tmux to forward the pane title to Ghostty, then execs attach so remote SSH
+     clients can attach to the same named session.
+
+     CDXC:TmuxMode 2026-05-05-06:31
+     Initial agent commands belong only to a newly created tmux pane. Do not use
+     Ghostty initialInput in tmux mode, because app restart should attach to the
+     running tmux pane without injecting a second resume command.
+     */
+    return "/bin/zsh -lc \(shellQuote(script))"
+  }
+
+  private static func zmxAttachCommand(
+    cwd: String,
+    initialInput: String?,
+    sessionName: String
+  ) -> String {
+    let script = """
+      zmx_session=\(shellQuote(sessionName))
+      zmx_cwd=\(shellQuote(cwd))
+      zmx_initial_command=\(shellQuote(shellCommand(fromInitialInput: initialInput)))
+      if ! command -v zmx >/dev/null 2>&1; then
+        printf '%s\\n' 'session persistence is set to zmx, but zmx was not found on PATH.'
+        exit 127
+      fi
+      if ! zmx list --short 2>/dev/null | grep -F -x -- "$zmx_session" >/dev/null 2>&1; then
+        cd "$zmx_cwd" || exit
+        if [ -n "$zmx_initial_command" ]; then
+          zmx run "$zmx_session" /bin/zsh -lc "$zmx_initial_command" >/dev/null 2>&1 &
+        else
+          zmx run "$zmx_session" /bin/zsh -lc ':' >/dev/null 2>&1 &
+        fi
+        zmx_ready=0
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+          if zmx list --short 2>/dev/null | grep -F -x -- "$zmx_session" >/dev/null 2>&1; then
+            zmx_ready=1
+            break
+          fi
+          sleep 0.05
+        done
+        if [ "$zmx_ready" != "1" ]; then
+          printf '%s\\n' 'zmx session was not ready for attach.'
+          exit 1
+        fi
+      fi
+      exec zmx attach "$zmx_session"
+      """
+    /**
+     CDXC:SessionPersistence 2026-05-05-07:28
+     zmx `run` creates a named session and sends a command, but it waits for that
+     command to complete. Agent resume commands are long-running, so creation
+     launches `zmx run` in the background, waits only for the session to appear,
+     then execs `zmx attach`. Existing sessions skip `run` entirely so restart
+     attaches without replaying resume input.
+     */
+    return "/bin/zsh -lc \(shellQuote(script))"
+  }
+
+  static func renameTmuxSession(
+    from currentName: String,
+    sessionId: String,
+    title: String,
+    to nextName: String
+  ) {
+    DispatchQueue.global(qos: .utility).async {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+      process.arguments = ["tmux", "rename-session", "-t", currentName, nextName]
+      process.standardOutput = Pipe()
+      process.standardError = Pipe()
+      do {
+        try process.run()
+        process.waitUntilExit()
+        if process.terminationStatus != 0 {
+          TerminalFocusDebugLog.append(
+            event: "nativeWorkspace.tmux.renameSession.failed",
+            details: [
+              "currentName": currentName,
+              "exitCode": process.terminationStatus,
+              "nextName": nextName,
+              "requestedSessionId": sessionId,
+              "title": title,
+            ])
+        }
+      } catch {
+        TerminalFocusDebugLog.append(
+          event: "nativeWorkspace.tmux.renameSession.failed",
+          details: [
+            "currentName": currentName,
+            "error": error.localizedDescription,
+            "nextName": nextName,
+            "requestedSessionId": sessionId,
+            "title": title,
+          ])
+      }
+    }
+  }
+
+  static func sessionName(sessionId: String, title: String?) -> String {
+    let identitySlug = slug(sessionId) ?? "session"
+    let identitySuffix = String(identitySlug.suffix(12))
+    let titleSlug = slug(title) ?? "terminal"
+    let limitedTitleSlug = String(titleSlug.prefix(48)).trimmingCharacters(
+      in: CharacterSet(charactersIn: "-_"))
+    let visibleTitleSlug = limitedTitleSlug.isEmpty ? "terminal" : limitedTitleSlug
+    return "zmux-\(visibleTitleSlug)-\(identitySuffix)"
+  }
+
+  static func normalizedSessionName(_ value: String?) -> String? {
+    let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !trimmed.isEmpty else {
+      return nil
+    }
+    /**
+     CDXC:SessionPersistence 2026-05-05-07:28
+     Persisted provider session names are trusted only when they match the
+     app-generated target-safe shape. Corrupt or legacy missing names should
+     regenerate from the terminal title instead of attaching to an ambiguous
+     tmux/zmx target.
+     */
+    guard trimmed.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else {
+      return nil
+    }
+    return trimmed
+  }
+
+  private static func slug(_ value: String?) -> String? {
+    let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !trimmed.isEmpty else {
+      return nil
+    }
+
+    var result = ""
+    var didAppendSeparator = false
+    for scalar in trimmed.lowercased().unicodeScalars {
+      if isAsciiAlphaNumeric(scalar) {
+        result.unicodeScalars.append(scalar)
+        didAppendSeparator = false
+      } else if !didAppendSeparator {
+        result.append("-")
+        didAppendSeparator = true
+      }
+    }
+
+    let normalized = result.trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
+    return normalized.isEmpty ? nil : normalized
+  }
+
+  private static func isAsciiAlphaNumeric(_ scalar: UnicodeScalar) -> Bool {
+    (scalar.value >= 48 && scalar.value <= 57) ||
+      (scalar.value >= 97 && scalar.value <= 122)
+  }
+
+  private static func shellCommand(fromInitialInput initialInput: String?) -> String {
+    let normalized = (initialInput ?? "")
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return normalized
+  }
+
+  private static func shellQuote(_ value: String) -> String {
+    "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
   }
 }
 

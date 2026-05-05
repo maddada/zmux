@@ -279,9 +279,19 @@ export function normalizeSessionRecord(session: SessionRecord): SessionRecord {
     terminalEngine: normalizeTerminalEngine(
       session.kind === "terminal" ? session.terminalEngine : undefined,
     ),
+    sessionPersistenceName: normalizeTerminalSessionPersistenceName(
+      session.kind === "terminal"
+        ? (session.sessionPersistenceName ?? session.tmuxSessionName)
+        : undefined,
+    ),
     title,
     titleSource,
   };
+}
+
+function normalizeTerminalSessionPersistenceName(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
 }
 
 function normalizeSessionTitleSource(
