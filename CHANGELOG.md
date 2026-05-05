@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.4.6 - 2026-05-05
+
+<!-- CDXC:Distribution 2026-05-05-05:01: Release notes for 1.4.6 must include
+all commits after v1.4.5 so README, GitHub, Sparkle, and Homebrew release
+metadata describe the same shipped behavior. -->
+
+- Replaced native title-bar action controls with compact sidebar Actions dropdowns for project commands and Open In targets.
+- Added explicit Open In choices for Finder, Visual Studio Code, and Zed, including brand icons and persisted primary target selection.
+- Added removable Actions dropdown rows so configured project actions can be deleted from the same menu that runs them.
+- Added custom workspace theme colors that tint the workspace dock, Combined-mode project headers, and active workspace sidebar theme surfaces.
+- Moved custom workspace color selection into the workspace Theme context menu with a recent-color palette, removing the separate workspace config modal.
+- Improved empty Combined-mode Chats and project groups so they auto-collapse while empty, expand when sessions appear, and show static folder/chat icons instead of inactive chevrons.
+- Improved Recent Projects styling to match normal sidebar group rows and show preserved session counts inline.
+- Expanded Codex first-prompt hook installation to existing Codex profile homes so first-prompt auto-title capture works when `CODEX_HOME` points at a profile directory.
+- Finished native-only cleanup by removing the retired VS Code extension/workspace webview sources from Storybook and TypeScript configuration.
+
 ## 1.4.5 - 2026-05-05
 
 <!-- CDXC:Distribution 2026-05-05-02:22: Release notes for 1.4.5 must include
