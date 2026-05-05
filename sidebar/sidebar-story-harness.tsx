@@ -73,7 +73,16 @@ export function SidebarStoryHarness({ message }: SidebarStoryHarnessProps) {
   }, [workspace]);
 
   return (
-    <div style={{ height: "100%", width: "100%" }}>
+    <div
+      /*
+       * CDXC:SidebarStorybook 2026-05-05-05:29
+       * Native sidebar stories must not insert an extra block between
+       * .native-sidebar-main and SidebarApp. The real app renders the project
+       * header and stack as direct flex children, and scroll/overflow bugs only
+       * reproduce accurately when Storybook keeps that layout contract.
+       */
+      style={{ display: "contents" }}
+    >
       <SidebarApp vscode={vscode} />
     </div>
   );

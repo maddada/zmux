@@ -941,8 +941,11 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     displayedBrowserGroupIds.length === 0 &&
     displayedWorkspaceGroupIds.length === 0 &&
     filteredPreviousSessions.length === 0;
-  const { showBottomGlow: showSessionGroupsBottomGlow, showTopGlow: showSessionGroupsTopGlow } =
-    useScrollGlowState(sessionGroupsContentRef);
+  const {
+    hasOverflow: sessionGroupsHaveScrollableOverflow,
+    showBottomGlow: showSessionGroupsBottomGlow,
+    showTopGlow: showSessionGroupsTopGlow,
+  } = useScrollGlowState(sessionGroupsContentRef);
   const sidebarSessionSearchResults = useMemo(
     () =>
       createSidebarSessionSearchResults({
@@ -1755,12 +1758,17 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
             className="session-groups-scroll-shell"
             data-scroll-glow-bottom={String(showSessionGroupsBottomGlow)}
             data-scroll-glow-top={String(showSessionGroupsTopGlow)}
+            data-scrollable-y={String(sessionGroupsHaveScrollableOverflow)}
           >
             <div
               aria-hidden="true"
               className="session-groups-scroll-glow session-groups-scroll-glow-top"
             />
-            <div className="session-groups-content scroll-mask-y" ref={sessionGroupsContentRef}>
+            <div
+              className="session-groups-content scroll-mask-y"
+              data-scrollable-y={String(sessionGroupsHaveScrollableOverflow)}
+              ref={sessionGroupsContentRef}
+            >
               {displayedBrowserGroupIds.length > 0 ? (
                 <div className="group-list browser-group-list">
                   {displayedBrowserGroupIds.map((groupId) => (

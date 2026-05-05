@@ -47,17 +47,23 @@ body.native-sidebar-body #root {
   padding-right: 8px;
 }
 
-/* CDXC:NativeSidebarChrome 2026-04-28-03:33: The native sidebar webview must
-   keep long session/action content scrollable. The project header consumes
-   fixed vertical space, so the sidebar stack owns only the remaining height,
-   scrolls if its top panels exceed that space, and gives the session list a
-   bounded scroll viewport. */
-body.native-sidebar-body .stack {
+/* CDXC:NativeSidebarChrome 2026-05-05-05:29: The native sidebar webview must
+   keep long session/action content scrollable without clipping the right-side
+   edge rail. The project header consumes fixed vertical space, while the
+   session list and Recent Projects list own their bounded scroll viewports. */
+body.native-sidebar-body .stack,
+.native-sidebar-shell .stack {
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
+  /*
+   * CDXC:SidebarClipping 2026-05-05-05:29
+   * Combined sidebar project panels intentionally extend into the native
+   * sidebar edge rail so right-side badges, status dots, and create buttons
+   * can use the full sidebar width. The stack must not horizontally clip that
+   * rail; session lists and Recent Projects own their vertical scroll bounds.
+   */
+  overflow: visible;
   overscroll-behavior: contain;
 }
 

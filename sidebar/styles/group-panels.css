@@ -152,15 +152,16 @@
   gap: calc(10px * var(--sidebar-density-scale));
   justify-content: space-between;
   /*
-   * CDXC:SidebarHover 2026-05-04-07:00
+   * CDXC:SidebarHover 2026-05-05-05:29
    * Section headers and chat/browser group headers share one surface style:
-   * no extra margins, 3px left content padding, and no right content padding.
+   * no extra margins, the same 6px left content padding as project headers,
+   * and no right content padding.
    */
   margin-left: 0;
   margin-right: 0;
   min-width: 0;
   padding: calc(2px * var(--sidebar-density-scale)) 0
-    calc(2px * var(--sidebar-density-scale)) 3px;
+    calc(2px * var(--sidebar-density-scale)) 6px;
   position: relative;
   transition: background-color 120ms ease;
   z-index: 4;
@@ -513,6 +514,16 @@ body[data-sidebar-theme^="light-"]
   overflow-y: auto;
   overscroll-behavior: contain;
   position: relative;
+}
+
+.session-groups-content[data-scrollable-y="false"] {
+  /*
+   * CDXC:SidebarScroll 2026-05-05-05:29
+   * Sparse Combined sidebars with only a chat and a collapsed project should
+   * stay fixed under wheel/trackpad input. The React overflow measurement
+   * flips this back to auto only when the list is taller than its viewport.
+   */
+  overflow-y: hidden;
 }
 
 .session-groups-scroll-shell {
