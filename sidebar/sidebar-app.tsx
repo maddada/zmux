@@ -7,7 +7,10 @@ import {
   IconBellOff,
   IconArrowsSort,
   IconBookmark,
+  IconBrowser,
   IconCaretRightFilled,
+  IconChevronDown,
+  IconChevronRight,
   IconDeviceMobile,
   IconEye,
   IconFolder,
@@ -1643,6 +1646,17 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     vscode.postMessage({ type: "openWorkspaceWelcome" });
   };
 
+  const openBrowserPane = () => {
+    /**
+     * CDXC:ChromiumBrowserPanes 2026-05-04-16:51
+     * The sidebar needs a direct browser-pane creation button for Chromium/CEF
+     * testing. Use the explicit browser-pane message so this button is stable
+     * even when the general browser action setting still targets Chrome Canary.
+     */
+    setIsOverflowMenuOpen(false);
+    vscode.postMessage({ type: "openBrowserPane" });
+  };
+
   const browserAccessSessionId = useMemo(() => {
     const orderedSessionIds = groupOrder.flatMap(
       (groupId) => authoritativeSessionIdsByGroup[groupId] ?? [],
@@ -1675,6 +1689,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     isSessionSearchOpen,
     sessionPersistenceProvider: settings?.sessionPersistenceProvider,
     onMoveSidebar: moveSidebar,
+    onOpenBrowser: openBrowserPane,
     onAccessT3FromBrowser: (sessionId: string) => {
       setIsOverflowMenuOpen(false);
       vscode.postMessage({
@@ -2212,6 +2227,7 @@ type RenderSidebarTopControlsOptions = {
   sessionPersistenceProvider?: string;
   onAccessT3FromBrowser: (sessionId: string) => void;
   onMoveSidebar: () => void;
+  onOpenBrowser: () => void;
   onOpenHelp: () => void;
   onOpenHotkeys: () => void;
   onOpenSettings: () => void;
@@ -2240,6 +2256,7 @@ function renderFloatingOverflowMenu({
   sessionPersistenceProvider,
   onAccessT3FromBrowser,
   onMoveSidebar: _onMoveSidebar,
+  onOpenBrowser,
   onOpenHelp,
   onOpenHotkeys,
   onOpenSettings,
@@ -2263,6 +2280,14 @@ function renderFloatingOverflowMenu({
        * are hidden, so its trigger floats at the top-right of the whole sidebar
        * instead of being owned by a header titlebar.
        */}
+      <ToolbarIconButton
+        ariaLabel="Open Chromium browser pane"
+        className="floating-toolbar-button sidebar-floating-browser-trigger"
+        onClick={onOpenBrowser}
+        tooltip="New Browser"
+      >
+        <IconBrowser aria-hidden="true" className="toolbar-tabler-icon" size={14} stroke={2} />
+      </ToolbarIconButton>
       <ToolbarIconButton
         ariaControls="sidebar-overflow-menu"
         ariaExpanded={isOverflowMenuOpen}

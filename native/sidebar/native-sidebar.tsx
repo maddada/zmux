@@ -6959,6 +6959,14 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
           typeof payload.url === "string" ? payload.url : DEFAULT_BROWSER_LAUNCH_URL,
         );
         return { ok: true };
+      case "openBrowserPane":
+        /**
+         * CDXC:ChromiumBrowserPanes 2026-05-04-17:04
+         * CEF pane testing needs a non-UI path that exercises the same
+         * in-workspace browser creation as the sidebar button when macOS
+         * accessibility automation is unavailable in local agent sessions.
+         */
+        return { ok: true, session: createNativeBrowserSession(DEFAULT_BROWSER_LAUNCH_URL) };
       case "showBrowser":
         showNativeBrowserWindow();
         return { ok: true };
@@ -8040,6 +8048,15 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     }
     case "openBrowser":
       openNativeBrowserWindow(DEFAULT_BROWSER_LAUNCH_URL);
+      return;
+    case "openBrowserPane":
+      /**
+       * CDXC:ChromiumBrowserPanes 2026-05-04-17:00
+       * The dedicated sidebar test button must create the Chromium pane
+       * directly, not route through browserOpenMode where legacy Canary remains
+       * a valid user setting for browser command actions.
+       */
+      createNativeBrowserSession(DEFAULT_BROWSER_LAUNCH_URL);
       return;
     case "openWorkspaceWelcome":
       openNativeExternalUrl("https://github.com/maddada/zmux");

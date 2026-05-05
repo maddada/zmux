@@ -18,6 +18,8 @@
 	<string>${MARKETING_VERSION}</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>zmux uses Bluetooth only when a website in a Chromium browser pane requests browser features such as passkeys, security keys, or Bluetooth devices.</string>
 	<key>SUEnableDownloaderService</key>
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>

@@ -2,12 +2,20 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 bool ZmuxCEFPrepareApplication(void);
 bool ZmuxCEFIsRuntimeAvailable(void);
-bool ZmuxCEFInitialize(int argc, char* argv[]);
+bool ZmuxCEFInitialize(int argc, char* _Nullable argv[_Nonnull]);
 void ZmuxCEFRunMessageLoop(void);
 void ZmuxCEFShutdown(void);
 int ZmuxCEFRemoteDebuggingPort(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 @interface ZmuxCEFBrowserView : NSView
 

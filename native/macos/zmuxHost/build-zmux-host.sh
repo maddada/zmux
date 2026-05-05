@@ -63,6 +63,7 @@ EOF
 fi
 
 GHOSTTY_KIT="$GHOSTTY_ROOT/macos/GhosttyKit.xcframework"
+CEF_ROOT="${CEF_ROOT:-}"
 
 if [[ ! -d "$GHOSTTY_KIT" ]]; then
 	cat >&2 <<EOF
@@ -77,6 +78,16 @@ Build it first:
     zig build -Demit-xcframework -Dxcframework-target=native -Demit-macos-app=false
 EOF
 	exit 1
+fi
+
+if [[ -z "$CEF_ROOT" ]]; then
+	# CDXC:ChromiumBrowserPanes 2026-05-04-16:38
+	# Browser panes render through embedded Chromium, so the native host build
+	# vendors CEF and its helper binary before Xcode resolves ObjC++ headers and
+	# link paths. This is a build dependency, not a package-manager install.
+	CEF_ROOT="$("$SCRIPT_DIR/vendor-cef.sh")"
+else
+	CEF_ROOT="$CEF_ROOT" "$SCRIPT_DIR/vendor-cef.sh" >/dev/null
 fi
 
 if ! command -v xcodegen >/dev/null 2>&1; then
@@ -197,7 +208,21 @@ export ZMUX_APP_DISPLAY_NAME
 export ZMUX_BUNDLE_ID
 export ZMUX_HOME_DIRECTORY_NAME
 export ZMUX_SHARED_HOME_DIRECTORY_NAME
+export CEF_ROOT
 xcodegen generate --spec "$SCRIPT_DIR/project.yml"
+
+STALE_APP_PATH="$DERIVED_DATA/Build/Products/$CONFIGURATION/$ZMUX_APP_NAME.app"
+if [[ -d "$STALE_APP_PATH/Contents/Frameworks" ]]; then
+	# CDXC:ChromiumBrowserPanes 2026-05-04-17:00
+	# CEF is copied after Xcode validation because the Spotify minimal framework
+	# layout does not satisfy Xcode's generic framework validator. Incremental
+	# builds must remove only the generated CEF payload before xcodebuild, then
+	# copy and sign the runtime again after the app bundle is produced.
+	rm -rf \
+		"$STALE_APP_PATH/Contents/Frameworks/Chromium Embedded Framework.framework" \
+		"$STALE_APP_PATH"/Contents/Frameworks/zmux\ Helper*.app
+fi
+
 xcodebuild \
 	-project "$PROJECT_PATH" \
 	-scheme zmux \
@@ -214,6 +239,56 @@ APP_PATH="$(
 		-showBuildSettings 2>/dev/null |
 		awk -F' = ' '/BUILT_PRODUCTS_DIR/ { print $2; exit }'
 )/$ZMUX_APP_NAME.app"
+
+copy_cef_runtime() {
+	local app_path="$1"
+	local frameworks_dir="$app_path/Contents/Frameworks"
+	local helper_source="$SCRIPT_DIR/build/cef/zmux-cef-helper"
+	local helper_version="${MARKETING_VERSION:-1}"
+	mkdir -p "$frameworks_dir"
+	rsync -a --delete "$CEF_ROOT/Release/Chromium Embedded Framework.framework" "$frameworks_dir/"
+	local helper_names=(
+		"zmux Helper"
+		"zmux Helper (Alerts)"
+		"zmux Helper (GPU)"
+		"zmux Helper (Plugin)"
+		"zmux Helper (Renderer)"
+	)
+	local helper_name
+	for helper_name in "${helper_names[@]}"; do
+		local helper_app="$frameworks_dir/$helper_name.app"
+		local helper_macos="$helper_app/Contents/MacOS"
+		mkdir -p "$helper_macos"
+		cp "$helper_source" "$helper_macos/$helper_name"
+		chmod +x "$helper_macos/$helper_name"
+		cat >"$helper_app/Contents/Info.plist" <<EOF_HELPER
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>$helper_name</string>
+	<key>CFBundleIdentifier</key>
+	<string>$ZMUX_BUNDLE_ID.$(printf '%s' "$helper_name" | tr ' ()' '---')</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$helper_name</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+		<key>CFBundleShortVersionString</key>
+	<string>$helper_version</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSBackgroundOnly</key>
+	<true/>
+</dict>
+</plist>
+EOF_HELPER
+	done
+}
+
+copy_cef_runtime "$APP_PATH"
 
 "$SCRIPT_DIR/codesign-zmux-host.sh" "$APP_PATH"
 

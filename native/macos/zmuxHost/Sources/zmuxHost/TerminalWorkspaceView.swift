@@ -164,6 +164,7 @@ final class TerminalWorkspaceView: NSView {
 
   private struct WebPaneSession {
     let browserTitleObservation: NSKeyValueObservation?
+    let chromiumView: ZmuxCEFBrowserView?
     let diagnosticsBridge: T3CodePaneDiagnosticsBridge
     let hostView: WebPaneHostView
     let isManagedT3Pane: Bool
@@ -173,9 +174,29 @@ final class TerminalWorkspaceView: NSView {
     let title: String
     let workspaceRoot: String?
     let browserProfileID: UUID?
-    let webView: WKWebView
+    let webView: WKWebView?
     let titleBarView: TerminalSessionTitleBarView
     let borderView: TerminalPaneBorderView
+
+    var browserContentView: NSView {
+      chromiumView ?? webView ?? hostView
+    }
+
+    var currentURLString: String? {
+      chromiumView?.currentURLString ?? webView?.url?.absoluteString
+    }
+
+    var isLoading: Bool {
+      chromiumView?.isLoading ?? webView?.isLoading ?? false
+    }
+
+    var canNavigateBack: Bool {
+      chromiumView?.canGoBack ?? webView?.canGoBack ?? false
+    }
+
+    var canNavigateForward: Bool {
+      chromiumView?.canGoForward ?? webView?.canGoForward ?? false
+    }
   }
 
   private struct PaneResizeHit {
@@ -624,6 +645,7 @@ final class TerminalWorkspaceView: NSView {
       if existingSession.isManagedT3Pane, isManagedT3Pane {
         webPaneSessions[command.sessionId] = WebPaneSession(
           browserTitleObservation: existingSession.browserTitleObservation,
+          chromiumView: existingSession.chromiumView,
           diagnosticsBridge: existingSession.diagnosticsBridge,
           hostView: existingSession.hostView,
           isManagedT3Pane: existingSession.isManagedT3Pane,
@@ -655,39 +677,30 @@ final class TerminalWorkspaceView: NSView {
       "url": command.url,
       "workspaceRoot": command.cwd ?? NSNull(),
     ])
-    let configuration = WKWebViewConfiguration()
-    configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
-    configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
-    if !isManagedT3Pane {
-      /**
-       CDXC:BrowserPanes 2026-05-03-02:08
-       Public sites such as Google serve legacy/basic markup to WKWebView's
-       bare default user agent because it lacks Safari's Version/Safari product
-       token. Browser panes should identify as Safari-compatible WebKit so page
-       styling matches Safari while T3 panes keep their managed runtime path.
-       */
-      configuration.applicationNameForUserAgent = Self.browserPaneApplicationNameForUserAgent
-    }
     let browserProfileID = isManagedT3Pane ? nil : NativeBrowserProfileStore.shared.effectiveLastUsedProfileID
-    configuration.websiteDataStore = browserProfileID.map {
-      NativeBrowserProfileStore.shared.websiteDataStore(for: $0)
-    } ?? .default()
     let diagnosticsBridge = T3CodePaneDiagnosticsBridge(
       sessionId: command.sessionId,
       onThreadChanged: { [weak self] sessionId, threadId, title in
         self?.sendEvent(.t3ThreadChanged(sessionId: sessionId, threadId: threadId, title: title))
       })
-    configuration.userContentController.add(
-      diagnosticsBridge,
-      name: T3CodePaneDiagnosticsBridge.messageHandlerName
-    )
-    configuration.userContentController.addUserScript(
-      WKUserScript(
-        source: Self.t3WebPaneDiagnosticsScript,
-        injectionTime: .atDocumentStart,
-        forMainFrameOnly: false
-      ))
+
+    let webView: WKWebView?
+    let chromiumView: ZmuxCEFBrowserView?
     if isManagedT3Pane {
+      let configuration = WKWebViewConfiguration()
+      configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+      configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+      configuration.websiteDataStore = .default()
+      configuration.userContentController.add(
+        diagnosticsBridge,
+        name: T3CodePaneDiagnosticsBridge.messageHandlerName
+      )
+      configuration.userContentController.addUserScript(
+        WKUserScript(
+          source: Self.t3WebPaneDiagnosticsScript,
+          injectionTime: .atDocumentStart,
+          forMainFrameOnly: false
+        ))
       configuration.userContentController.addUserScript(
         WKUserScript(
           source: Self.t3WebPaneBridgeScript(
@@ -695,25 +708,49 @@ final class TerminalWorkspaceView: NSView {
           injectionTime: .atDocumentStart,
           forMainFrameOnly: true
         ))
+      let managedWebView = WKWebView(frame: .zero, configuration: configuration)
+      if #available(macOS 13.3, *) {
+        managedWebView.isInspectable = true
+      }
+      managedWebView.translatesAutoresizingMaskIntoConstraints = true
+      managedWebView.allowsBackForwardNavigationGestures = true
+      managedWebView.navigationDelegate = self
+      managedWebView.uiDelegate = self
+      /**
+       CDXC:T3Code 2026-04-30-19:17
+       Native T3 panes must use WKWebView's default opaque drawing path. The
+       accessibility tree can report a live T3 DOM even when transparent WebKit
+       compositing only shows the workspace's gray backing layer, so do not make
+       the embedded app transparent while debugging or rendering production panes.
+       */
+      managedWebView.wantsLayer = true
+      managedWebView.layer?.masksToBounds = true
+      managedWebView.underPageBackgroundColor = NSColor(calibratedRed: 0.086, green: 0.086, blue: 0.086, alpha: 1)
+      webView = managedWebView
+      chromiumView = nil
+    } else {
+      guard ZmuxCEFIsRuntimeAvailable() else {
+        /**
+         CDXC:ChromiumBrowserPanes 2026-05-04-16:38
+         Normal browser panes must render with Chromium. If the bundled CEF
+         runtime is missing, fail visibly instead of opening a WebKit pane that
+         looks like the requested workflow but uses the wrong engine.
+         */
+        sendEvent(
+          .terminalError(
+            sessionId: command.sessionId,
+            message: "Chromium runtime is not bundled for browser panes"))
+        return
+      }
+      let profileIdentifier = browserProfileID?.uuidString ?? "default"
+      let browserView = ZmuxCEFBrowserView(
+        frame: .zero,
+        initialURL: command.url,
+        profileIdentifier: profileIdentifier)
+      browserView.translatesAutoresizingMaskIntoConstraints = true
+      webView = nil
+      chromiumView = browserView
     }
-    let webView = WKWebView(frame: .zero, configuration: configuration)
-    if #available(macOS 13.3, *) {
-      webView.isInspectable = true
-    }
-    webView.translatesAutoresizingMaskIntoConstraints = true
-    webView.allowsBackForwardNavigationGestures = true
-    webView.navigationDelegate = self
-    webView.uiDelegate = self
-    /**
-     CDXC:T3Code 2026-04-30-19:17
-     Native T3 panes must use WKWebView's default opaque drawing path. The
-     accessibility tree can report a live T3 DOM even when transparent WebKit
-     compositing only shows the workspace's gray backing layer, so do not make
-     the embedded app transparent while debugging or rendering production panes.
-     */
-    webView.wantsLayer = true
-    webView.layer?.masksToBounds = true
-    webView.underPageBackgroundColor = NSColor(calibratedRed: 0.086, green: 0.086, blue: 0.086, alpha: 1)
     /**
      CDXC:BrowserPanes 2026-05-02-16:58
      Browser panes need in-pane navigation chrome like the embedded browser
@@ -722,6 +759,8 @@ final class TerminalWorkspaceView: NSView {
      still participates in the same splitter layout as T3 Code and terminals.
      */
     let hostView = WebPaneHostView(
+      browserView: chromiumView ?? webView!,
+      chromiumView: chromiumView,
       webView: webView,
       showsBrowserToolbar: !isManagedT3Pane,
       initialAddress: command.url,
@@ -742,6 +781,33 @@ final class TerminalWorkspaceView: NSView {
       }
     )
     hostView.translatesAutoresizingMaskIntoConstraints = false
+    if let chromiumView {
+      chromiumView.titleChangedHandler = { [weak self, weak hostView, weak chromiumView] title in
+        self?.updateChromiumWebPaneMetadata(
+          sessionId: command.sessionId,
+          title: title,
+          url: chromiumView?.currentURLString,
+          reason: "chromiumTitleChanged")
+        hostView?.refreshBrowserToolbar(reason: "chromiumTitleChanged")
+      }
+      chromiumView.urlChangedHandler = { [weak self, weak hostView, weak chromiumView] url in
+        self?.updateChromiumWebPaneMetadata(
+          sessionId: command.sessionId,
+          title: chromiumView?.pageTitle,
+          url: url,
+          reason: "chromiumUrlChanged")
+        hostView?.refreshBrowserToolbar(reason: "chromiumUrlChanged")
+      }
+      chromiumView.faviconURLChangedHandler = { [weak self] faviconURL in
+        self?.updateChromiumWebPaneFavicon(
+          sessionId: command.sessionId,
+          faviconURL: URL(string: faviconURL),
+          reason: "chromiumFaviconChanged")
+      }
+      chromiumView.navigationStateChangedHandler = { [weak hostView] _, _, _ in
+        hostView?.refreshBrowserToolbar(reason: "chromiumNavigationStateChanged")
+      }
+    }
 
     let titleBarView = TerminalSessionTitleBarView(
       title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId),
@@ -780,18 +846,11 @@ final class TerminalWorkspaceView: NSView {
      them through the existing session-title sync path so later layout syncs do
      not overwrite the AppKit title bar with the initial browser card title.
      */
-    let browserTitleObservation =
-      isManagedT3Pane
-      ? nil
-      : webView.observe(\.title, options: [.new]) { [weak self, weak webView] _, _ in
-        Task { @MainActor in
-          guard let webView else { return }
-          self?.updateWebPanePageMetadata(for: webView, reason: "titleObservation")
-        }
-      }
+    let browserTitleObservation: NSKeyValueObservation? = nil
 
     webPaneSessions[command.sessionId] = WebPaneSession(
       browserTitleObservation: browserTitleObservation,
+      chromiumView: chromiumView,
       diagnosticsBridge: diagnosticsBridge,
       hostView: hostView,
       isManagedT3Pane: isManagedT3Pane,
@@ -847,7 +906,7 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.close.start", [
-      "currentUrl": session.webView.url?.absoluteString ?? NSNull(),
+      "currentUrl": session.currentURLString ?? NSNull(),
       "sessionId": sessionId,
     ])
     activeSessionIds.remove(sessionId)
@@ -857,12 +916,15 @@ final class TerminalWorkspaceView: NSView {
     pendingAuthenticatedWebPaneLoadSessionIds.remove(sessionId)
     t3ThreadRouteRetryAttemptsBySessionId.removeValue(forKey: sessionId)
     webPaneFaviconTasksBySessionId.removeValue(forKey: sessionId)?.cancel()
-    session.webView.navigationDelegate = nil
-    session.webView.uiDelegate = nil
-    session.webView.configuration.userContentController.removeScriptMessageHandler(
-      forName: T3CodePaneDiagnosticsBridge.messageHandlerName
-    )
-    session.webView.stopLoading()
+    if let webView = session.webView {
+      webView.navigationDelegate = nil
+      webView.uiDelegate = nil
+      webView.configuration.userContentController.removeScriptMessageHandler(
+        forName: T3CodePaneDiagnosticsBridge.messageHandlerName
+      )
+      webView.stopLoading()
+    }
+    session.chromiumView?.closeBrowser()
     session.hostView.removeFromSuperview()
     session.titleBarView.removeFromSuperview()
     session.borderView.removeFromSuperview()
@@ -892,13 +954,13 @@ final class TerminalWorkspaceView: NSView {
       ])
       return
     }
-    let view = session.webView
+    let view = session.browserContentView
     focusedSessionId = sessionId
     orderWebPaneViewsToFront(session)
     updateAllTerminalBorders()
     _ = window?.makeFirstResponder(view)
     NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.focus.applied", [
-      "currentUrl": view.url?.absoluteString ?? NSNull(),
+      "currentUrl": session.currentURLString ?? NSNull(),
       "reason": reason,
       "sessionId": sessionId,
     ])
@@ -910,7 +972,9 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     focusWebPane(sessionId: sessionId, reason: "browserDevTools")
-    if !NativeBrowserDevTools.toggle(for: session.webView) {
+    if let chromiumView = session.chromiumView {
+      chromiumView.toggleDevTools()
+    } else if let webView = session.webView, !NativeBrowserDevTools.toggle(for: webView) {
       NSSound.beep()
     }
   }
@@ -921,7 +985,11 @@ final class TerminalWorkspaceView: NSView {
     }
     focusWebPane(sessionId: sessionId, reason: "browserReactGrab")
     Task { @MainActor in
-      await NativeBrowserReactGrabInjector.toggleOrInject(into: session.webView)
+      if let chromiumView = session.chromiumView {
+        await NativeBrowserReactGrabInjector.toggleOrInject(into: chromiumView)
+      } else if let webView = session.webView {
+        await NativeBrowserReactGrabInjector.toggleOrInject(into: webView)
+      }
     }
   }
 
@@ -955,10 +1023,18 @@ final class TerminalWorkspaceView: NSView {
      because browser panes are first-class AppKit panes and their title-bar
      controls should not be terminal-only no-ops.
      */
-    if session.webView.isLoading {
-      session.webView.stopLoading()
+    if session.isLoading {
+      if let chromiumView = session.chromiumView {
+        chromiumView.stopLoading()
+      } else {
+        session.webView?.stopLoading()
+      }
     } else {
-      session.webView.reload()
+      if let chromiumView = session.chromiumView {
+        chromiumView.reload()
+      } else {
+        session.webView?.reload()
+      }
     }
   }
 
@@ -2285,7 +2361,10 @@ final class TerminalWorkspaceView: NSView {
       guard !self.completedWebPaneLoadSessionIds.contains(sessionId) else {
         return
       }
-      if session.webView.isLoading {
+      guard let webView = session.webView else {
+        return
+      }
+      if webView.isLoading {
         NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.retry.waiting", [
           "remainingAttempts": remainingAttempts,
           "sessionId": sessionId,
@@ -2307,7 +2386,7 @@ final class TerminalWorkspaceView: NSView {
        actually finishes, then stop.
        */
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.retry", [
-        "currentUrl": session.webView.url?.absoluteString ?? NSNull(),
+        "currentUrl": webView.url?.absoluteString ?? NSNull(),
         "remainingAttempts": remainingAttempts,
         "sessionId": sessionId,
         "url": url.absoluteString,
@@ -2325,19 +2404,18 @@ final class TerminalWorkspaceView: NSView {
         return
       }
       /**
-       CDXC:BrowserPanes 2026-05-02-06:35
-       Non-T3 browser panes use the generic WKWebView loading path directly.
-       The T3 authentication/thread-route bootstrap is intentionally gated to
-       the managed localhost runtime so normal web URLs do not call T3-only APIs
-       or emit T3 thread-ready events.
+       CDXC:ChromiumBrowserPanes 2026-05-04-16:38
+       Non-T3 browser panes load through embedded Chromium/CEF, not WebKit.
+       The T3 authentication/thread-route bootstrap remains gated to managed
+       localhost runtime URLs so public web navigation never calls T3-only APIs.
        */
       NativeT3CodePaneReproLog.append("nativeWorkspace.browserWebPane.load.start", [
-        "cachePolicy": reason == "initial" ? "reloadIgnoringLocalCacheData" : "useProtocolCachePolicy",
+        "engine": session.chromiumView == nil ? "missing-chromium" : "chromium",
         "reason": reason,
         "sessionId": sessionId,
         "url": url.absoluteString,
       ])
-      session.webView.load(Self.browserPaneURLRequest(url: url, reason: reason))
+      session.chromiumView?.loadURLString(url.absoluteString)
       return
     }
     guard !pendingAuthenticatedWebPaneLoadSessionIds.contains(sessionId) else {
@@ -2386,7 +2464,7 @@ final class TerminalWorkspaceView: NSView {
             "url": url.absoluteString,
             "workspaceRoot": session.workspaceRoot ?? NSNull(),
           ])
-          session.webView.load(URLRequest(url: route.url))
+          session.webView?.load(URLRequest(url: route.url))
           self.scheduleWebPaneReload(sessionId: sessionId, url: route.url, remainingAttempts: 16)
         case .failure(let error):
           NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.threadRouteFailed", [
@@ -2501,7 +2579,7 @@ final class TerminalWorkspaceView: NSView {
       "reason": reason,
       "sessionId": sessionId,
     ])
-    session.webView.loadHTMLString(
+    session.webView?.loadHTMLString(
       Self.t3WebPaneStatusHtml(title: title, message: message, caption: caption, loading: loading),
       baseURL: nil
     )
@@ -2587,7 +2665,7 @@ final class TerminalWorkspaceView: NSView {
 
   private func loadWebPaneError(session: WebPaneSession, message: String) {
     let escaped = Self.escapeHtmlText(message)
-    session.webView.loadHTMLString(
+    session.webView?.loadHTMLString(
       """
       <!doctype html>
       <html>
@@ -2614,7 +2692,9 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func sessionId(for webView: WKWebView) -> String? {
-    webPaneSessions.first { _, session in session.webView === webView }?.key
+    webPaneSessions.first { _, session in
+      session.webView.map { $0 === webView } ?? false
+    }?.key
   }
 
   private func updateWebPanePageMetadata(for webView: WKWebView, reason: String) {
@@ -2673,7 +2753,9 @@ final class TerminalWorkspaceView: NSView {
     }
 
     let sessionId = session.sessionId
-    let webView = session.webView
+    guard let webView = session.webView else {
+      return
+    }
     webPaneFaviconTasksBySessionId.removeValue(forKey: sessionId)?.cancel()
     webPaneFaviconTasksBySessionId[sessionId] = Task { @MainActor in
       guard self.webPaneSessions[sessionId]?.webView === webView else { return }
@@ -2687,7 +2769,7 @@ final class TerminalWorkspaceView: NSView {
         let (data, response) = try await URLSession.shared.data(from: faviconURL)
         guard !Task.isCancelled,
           let image = NSImage(data: data),
-          self.webPaneSessions[sessionId]?.webView.url?.host == pageURL.host
+          self.webPaneSessions[sessionId]?.webView?.url?.host == pageURL.host
         else {
           return
         }
@@ -2739,6 +2821,89 @@ final class TerminalWorkspaceView: NSView {
       return resolved
     }
     return fallbackFaviconURL(for: pageURL)
+  }
+
+  private func updateChromiumWebPaneMetadata(
+    sessionId: String,
+    title: String?,
+    url: String?,
+    reason: String
+  ) {
+    guard let session = webPaneSessions[sessionId], !session.isManagedT3Pane else {
+      return
+    }
+    let displayTitle = chromiumWebPaneDisplayTitle(title: title, url: url, fallbackTitle: session.title)
+    session.titleBarView.setTitle(normalizedTerminalSessionTitle(displayTitle, sessionId: sessionId))
+    sendEvent(.terminalTitleChanged(sessionId: sessionId, title: displayTitle))
+    if let url, !url.isEmpty {
+      sendEvent(.browserUrlChanged(sessionId: sessionId, url: url))
+    }
+    NativeT3CodePaneReproLog.append("nativeWorkspace.chromiumBrowserPane.metadata.updated", [
+      "reason": reason,
+      "sessionId": sessionId,
+      "title": displayTitle,
+      "url": url ?? NSNull(),
+    ])
+  }
+
+  private func chromiumWebPaneDisplayTitle(title: String?, url: String?, fallbackTitle: String) -> String {
+    let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !trimmedTitle.isEmpty {
+      return trimmedTitle
+    }
+    if let url, let host = URL(string: url)?.host, !host.isEmpty {
+      return host
+    }
+    let fallback = fallbackTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    return fallback.isEmpty ? "Browser" : fallback
+  }
+
+  private func updateChromiumWebPaneFavicon(sessionId: String, faviconURL: URL?, reason: String) {
+    guard let session = webPaneSessions[sessionId] else {
+      return
+    }
+    guard let faviconURL, faviconURL.scheme == "http" || faviconURL.scheme == "https" else {
+      session.titleBarView.setFavicon(nil)
+      sendEvent(.browserFaviconChanged(sessionId: sessionId, faviconDataUrl: nil))
+      return
+    }
+    let expectedHost = URL(string: session.currentURLString ?? "")?.host
+    webPaneFaviconTasksBySessionId.removeValue(forKey: sessionId)?.cancel()
+    webPaneFaviconTasksBySessionId[sessionId] = Task { @MainActor in
+      do {
+        let (data, response) = try await URLSession.shared.data(from: faviconURL)
+        guard !Task.isCancelled,
+          let image = NSImage(data: data),
+          self.webPaneSessions[sessionId]?.chromiumView != nil,
+          expectedHost == nil || URL(string: self.webPaneSessions[sessionId]?.currentURLString ?? "")?.host == expectedHost
+        else {
+          return
+        }
+        session.titleBarView.setFavicon(image)
+        let mimeType =
+          (response as? HTTPURLResponse)?.mimeType
+          ?? response.mimeType
+          ?? Self.faviconMimeType(for: faviconURL)
+        self.sendEvent(
+          .browserFaviconChanged(
+            sessionId: sessionId,
+            faviconDataUrl: Self.dataUrl(for: data, mimeType: mimeType)))
+        NativeT3CodePaneReproLog.append("nativeWorkspace.chromiumBrowserPane.favicon.updated", [
+          "faviconUrl": faviconURL.absoluteString,
+          "reason": reason,
+          "sessionId": sessionId,
+        ])
+      } catch {
+        session.titleBarView.setFavicon(nil)
+        self.sendEvent(.browserFaviconChanged(sessionId: sessionId, faviconDataUrl: nil))
+        NativeT3CodePaneReproLog.append("nativeWorkspace.chromiumBrowserPane.favicon.failed", [
+          "error": error.localizedDescription,
+          "faviconUrl": faviconURL.absoluteString,
+          "reason": reason,
+          "sessionId": sessionId,
+        ])
+      }
+    }
   }
 
   private func resolvedFaviconURL(href: String, pageURL: URL) -> URL? {
@@ -3370,8 +3535,9 @@ final class TerminalWorkspaceView: NSView {
       }
     }
     for (sessionId, session) in webPaneSessions {
+      let contentView = session.browserContentView
       if responderView === session.hostView || responderView.isDescendant(of: session.hostView)
-        || responderView === session.webView || responderView.isDescendant(of: session.webView)
+        || responderView === contentView || responderView.isDescendant(of: contentView)
       {
         return sessionId
       }
@@ -5030,7 +5196,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private static let toolbarItemGap: CGFloat = 10
   private static let addressMinimumWidth: CGFloat = 180
 
-  private let webView: WKWebView
+  private let browserView: NSView
+  private weak var chromiumView: ZmuxCEFBrowserView?
+  private weak var webView: WKWebView?
   private let showsBrowserToolbar: Bool
   private let onFocus: (() -> Void)?
   private let onOpenDevTools: (() -> Void)?
@@ -5081,7 +5249,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private var isEditingAddress = false
 
   init(
-    webView: WKWebView,
+    browserView: NSView,
+    chromiumView: ZmuxCEFBrowserView? = nil,
+    webView: WKWebView? = nil,
     showsBrowserToolbar: Bool = false,
     initialAddress: String? = nil,
     onFocus: (() -> Void)? = nil,
@@ -5090,6 +5260,8 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     onShowProfilePicker: (() -> Void)? = nil,
     onShowImportSettings: (() -> Void)? = nil
   ) {
+    self.browserView = browserView
+    self.chromiumView = chromiumView
     self.webView = webView
     self.showsBrowserToolbar = showsBrowserToolbar
     self.onFocus = onFocus
@@ -5104,14 +5276,14 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     layer?.backgroundColor = NSColor(calibratedRed: 0.086, green: 0.086, blue: 0.086, alpha: 1)
       .cgColor
     layer?.masksToBounds = true
-    webView.translatesAutoresizingMaskIntoConstraints = true
-    webView.autoresizingMask = [.width, .height]
-    webView.frame = bounds
+    browserView.translatesAutoresizingMaskIntoConstraints = true
+    browserView.autoresizingMask = [.width, .height]
+    browserView.frame = bounds
     if showsBrowserToolbar {
       configureBrowserToolbar(initialAddress: initialAddress)
       addSubview(toolbarView)
     }
-    addSubview(webView)
+    addSubview(browserView)
     updateBrowserToolbarState()
   }
 
@@ -5137,9 +5309,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       toolbarView.removeFromSuperview()
       addSubview(toolbarView)
     }
-    if webView.superview !== self {
-      webView.removeFromSuperview()
-      addSubview(webView)
+    if browserView.superview !== self {
+      browserView.removeFromSuperview()
+      addSubview(browserView)
     }
     let webFrame: CGRect
     if showsBrowserToolbar {
@@ -5155,9 +5327,13 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     } else {
       webFrame = bounds
     }
-    if webView.frame != webFrame {
-      webView.frame = webFrame
+    if browserView.frame != webFrame {
+      browserView.frame = webFrame
     }
+  }
+
+  func refreshBrowserToolbar(reason: String) {
+    updateBrowserToolbarState()
   }
 
   func refreshHostedWebView(reason: String) {
@@ -5165,9 +5341,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       toolbarView.removeFromSuperview()
       addSubview(toolbarView)
     }
-    if webView.superview !== self {
-      webView.removeFromSuperview()
-      addSubview(webView)
+    if browserView.superview !== self {
+      browserView.removeFromSuperview()
+      addSubview(browserView)
     }
     let toolbarHeight = showsBrowserToolbar ? min(Self.browserToolbarHeight, max(0, bounds.height)) : 0
     if showsBrowserToolbar {
@@ -5179,21 +5355,21 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       )
       layoutBrowserToolbar()
     }
-    webView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - toolbarHeight))
+    browserView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - toolbarHeight))
     updateBrowserToolbarState()
     needsLayout = true
     needsDisplay = true
-    webView.needsLayout = true
-    webView.needsDisplay = true
+    browserView.needsLayout = true
+    browserView.needsDisplay = true
     layoutSubtreeIfNeeded()
-    webView.layoutSubtreeIfNeeded()
+    browserView.layoutSubtreeIfNeeded()
     displayIfNeeded()
-    webView.displayIfNeeded()
+    browserView.displayIfNeeded()
     NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.host.refresh", [
       "hostFrame": Self.describeFrame(frame),
       "reason": reason,
-      "webFrame": Self.describeFrame(webView.frame),
-      "webUrl": webView.url?.absoluteString ?? NSNull(),
+      "webFrame": Self.describeFrame(browserView.frame),
+      "webUrl": currentURLString() ?? NSNull(),
       "windowNumber": window?.windowNumber ?? NSNull(),
     ])
   }
@@ -5240,23 +5416,23 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     if commandSelector == #selector(NSResponder.insertNewline(_:)) {
       /**
        CDXC:BrowserPanes 2026-05-03-03:59
-       Address-bar Return must always drive WKWebView navigation. Handling the
+       Address-bar Return must always drive pane browser navigation. Handling the
        text command directly avoids AppKit swallowing the field action after a
        page focus transition or autocomplete interaction.
        */
       commitAddress()
-      window?.makeFirstResponder(webView)
+      window?.makeFirstResponder(browserView)
       return true
     }
     if commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
       commitAddress()
-      window?.makeFirstResponder(webView)
+      window?.makeFirstResponder(browserView)
       return true
     }
     if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
       isEditingAddress = false
       updateBrowserToolbarState()
-      window?.makeFirstResponder(webView)
+      window?.makeFirstResponder(browserView)
       return true
     }
     return false
@@ -5282,7 +5458,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
        embedded pane instead of leaving stale page content behind the new text.
        */
       self.commitAddress()
-      self.window?.makeFirstResponder(self.webView)
+      self.window?.makeFirstResponder(self.browserView)
       return nil
     }
   }
@@ -5359,23 +5535,25 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     /**
      CDXC:BrowserPanes 2026-05-02-17:03
      The address bar is native AppKit chrome for embedded browser panes. It
-     normalizes typed URLs/searches and drives the pane's own WKWebView, keeping
-     browser navigation inside the pane instead of opening external overlays.
+     normalizes typed URLs/searches and drives the pane's own browser renderer,
+     keeping browser navigation inside the pane instead of opening external overlays.
      */
-    navigationObservations = [
-      webView.observe(\.url, options: [.initial, .new]) { [weak self] _, _ in
-        Task { @MainActor in self?.updateBrowserToolbarState() }
-      },
-      webView.observe(\.canGoBack, options: [.initial, .new]) { [weak self] _, _ in
-        Task { @MainActor in self?.updateBrowserToolbarState() }
-      },
-      webView.observe(\.canGoForward, options: [.initial, .new]) { [weak self] _, _ in
-        Task { @MainActor in self?.updateBrowserToolbarState() }
-      },
-      webView.observe(\.isLoading, options: [.initial, .new]) { [weak self] _, _ in
-        Task { @MainActor in self?.updateBrowserToolbarState() }
-      },
-    ]
+    if let webView {
+      navigationObservations = [
+        webView.observe(\.url, options: [.initial, .new]) { [weak self] _, _ in
+          Task { @MainActor in self?.updateBrowserToolbarState() }
+        },
+        webView.observe(\.canGoBack, options: [.initial, .new]) { [weak self] _, _ in
+          Task { @MainActor in self?.updateBrowserToolbarState() }
+        },
+        webView.observe(\.canGoForward, options: [.initial, .new]) { [weak self] _, _ in
+          Task { @MainActor in self?.updateBrowserToolbarState() }
+        },
+        webView.observe(\.isLoading, options: [.initial, .new]) { [weak self] _, _ in
+          Task { @MainActor in self?.updateBrowserToolbarState() }
+        },
+      ]
+    }
   }
 
   private func layoutBrowserToolbar() {
@@ -5429,14 +5607,30 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     guard showsBrowserToolbar else {
       return
     }
-    backButton.isEnabled = webView.canGoBack
-    forwardButton.isEnabled = webView.canGoForward
-    reloadButton.toolTip = webView.isLoading ? "Stop Loading" : "Reload"
-    let lockSymbol = webView.url?.scheme == "https" ? "lock.fill" : "globe"
+    backButton.isEnabled = canGoBack()
+    forwardButton.isEnabled = canGoForward()
+    reloadButton.toolTip = isPageLoading() ? "Stop Loading" : "Reload"
+    let lockSymbol = URL(string: currentURLString() ?? "")?.scheme == "https" ? "lock.fill" : "globe"
     securityIcon.image = NSImage(systemSymbolName: lockSymbol, accessibilityDescription: nil)
     if !isEditingAddress {
-      addressField.stringValue = webView.url?.absoluteString ?? addressField.stringValue
+      addressField.stringValue = currentURLString() ?? addressField.stringValue
     }
+  }
+
+  private func currentURLString() -> String? {
+    chromiumView?.currentURLString ?? webView?.url?.absoluteString
+  }
+
+  private func canGoBack() -> Bool {
+    chromiumView?.canGoBack ?? webView?.canGoBack ?? false
+  }
+
+  private func canGoForward() -> Bool {
+    chromiumView?.canGoForward ?? webView?.canGoForward ?? false
+  }
+
+  private func isPageLoading() -> Bool {
+    chromiumView?.isLoading ?? webView?.isLoading ?? false
   }
 
   private static func browserPaneNavigationRequest(url: URL) -> URLRequest {
@@ -5452,24 +5646,36 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
 
   @objc private func goBack() {
     onFocus?()
-    if webView.canGoBack {
-      webView.goBack()
+    if chromiumView?.canGoBack == true {
+      chromiumView?.goBack()
+    } else if webView?.canGoBack == true {
+      webView?.goBack()
     }
   }
 
   @objc private func goForward() {
     onFocus?()
-    if webView.canGoForward {
-      webView.goForward()
+    if chromiumView?.canGoForward == true {
+      chromiumView?.goForward()
+    } else if webView?.canGoForward == true {
+      webView?.goForward()
     }
   }
 
   @objc private func reloadPage() {
     onFocus?()
-    if webView.isLoading {
-      webView.stopLoading()
+    if isPageLoading() {
+      if let chromiumView {
+        chromiumView.stopLoading()
+      } else {
+        webView?.stopLoading()
+      }
     } else {
-      webView.reload()
+      if let chromiumView {
+        chromiumView.reload()
+      } else {
+        webView?.reload()
+      }
     }
   }
 
@@ -5493,7 +5699,11 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       "url": url.absoluteString,
     ])
     addressField.stringValue = url.absoluteString
-    webView.load(Self.browserPaneNavigationRequest(url: url))
+    if let chromiumView {
+      chromiumView.loadURLString(url.absoluteString)
+    } else {
+      webView?.load(Self.browserPaneNavigationRequest(url: url))
+    }
   }
 
   @objc private func openDevTools() {
@@ -5538,13 +5748,23 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
      pages update in place without replacing the browser pane or using overlay UI.
      */
     browserThemeMode = mode
-    switch mode {
-    case .system:
-      webView.appearance = nil
-    case .light:
-      webView.appearance = NSAppearance(named: .aqua)
-    case .dark:
-      webView.appearance = NSAppearance(named: .darkAqua)
+    if let webView {
+      switch mode {
+      case .system:
+        webView.appearance = nil
+      case .light:
+        webView.appearance = NSAppearance(named: .aqua)
+      case .dark:
+        webView.appearance = NSAppearance(named: .darkAqua)
+      }
+    } else {
+      /**
+       CDXC:ChromiumBrowserPanes 2026-05-04-16:51
+       Chromium panes should not fake WebKit's per-view AppKit appearance hook.
+       CEF needs explicit page/runtime theme support to do this correctly, so
+       the toolbar stores the selected mode but leaves Chromium rendering alone
+       until a real Chromium theme implementation is added.
+       */
     }
     appearanceButton.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: "Browser Theme")
   }

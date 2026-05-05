@@ -64,8 +64,11 @@ build_cef_wrapper_and_helper() {
 		mkdir -p "$CEF_ROOT/build"
 		(
 			cd "$CEF_ROOT/build"
-			"$CMAKE_BIN" -DPROJECT_ARCH="$CMAKE_ARCH" -DCMAKE_BUILD_TYPE=Release ..
-			make -j8 libcef_dll_wrapper
+			# CDXC:ChromiumBrowserPanes 2026-05-04-16:57: The host build captures
+			# this script's stdout as CEF_ROOT. Keep CMake/make diagnostics on
+			# stderr so Xcode header/search paths receive only the final CEF path.
+			"$CMAKE_BIN" -DPROJECT_ARCH="$CMAKE_ARCH" -DCMAKE_BUILD_TYPE=Release .. >&2
+			make -j8 libcef_dll_wrapper >&2
 		)
 	fi
 

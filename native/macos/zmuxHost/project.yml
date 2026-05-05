@@ -28,7 +28,11 @@ settings:
     MARKETING_VERSION: "1.4.6"
     SDKROOT: macosx
     SWIFT_VERSION: "5.0"
-    SWIFT_OBJC_BRIDGING_HEADER: ${GHOSTTY_ROOT}/macos/Sources/App/macOS/ghostty-bridging-header.h
+    # CDXC:ChromiumBrowserPanes 2026-05-04-16:38: Swift needs both Ghostty's
+    # C bridge and the local CEF browser bridge. Route through a local bridging
+    # header so Chromium panes can be native AppKit views without replacing the
+    # existing Ghostty bridge contract.
+    SWIFT_OBJC_BRIDGING_HEADER: Sources/zmuxHost/ZmuxHost-Bridging-Header.h
 packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
@@ -58,6 +62,12 @@ targets:
         SUEnableInstallerLauncherService: true
         SUFeedURL: ${ZMUX_SPARKLE_FEED_URL}
         SUPublicEDKey: ${ZMUX_SPARKLE_PUBLIC_ED_KEY}
+        # CDXC:ChromiumBrowserPanes 2026-05-04-17:20: Chromium can probe
+        # paired Bluetooth devices during Google sign-in, passkey, security-key,
+        # or Web Bluetooth flows. macOS TCC terminates apps that access
+        # Bluetooth without this usage string, so every generated app plist must
+        # include it before CEF browser panes are enabled.
+        NSBluetoothAlwaysUsageDescription: zmux uses Bluetooth only when a website in a Chromium browser pane requests browser features such as passkeys, security keys, or Bluetooth devices.
     sources:
       - path: Sources/Shared
       - path: Sources/zmuxHost
@@ -125,6 +135,21 @@ targets:
         OTHER_LDFLAGS:
           - "$(inherited)"
           - "-lc++"
+          - "-weak_framework"
+          - "\"Chromium Embedded Framework\""
+          - "-lcef_dll_wrapper"
+        HEADER_SEARCH_PATHS:
+          - "$(inherited)"
+          - "${GHOSTTY_ROOT}/macos/Sources/App/macOS"
+          - "${CEF_ROOT}"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "${CEF_ROOT}/Release"
+        LIBRARY_SEARCH_PATHS:
+          - "$(inherited)"
+          - "${CEF_ROOT}/build/libcef_dll_wrapper"
+        CLANG_CXX_LANGUAGE_STANDARD: c++20
+        CLANG_ENABLE_OBJC_ARC: YES
         # CDXC:Distribution 2026-04-27-08:37: Public notarized releases are
         # signed under Mohamad Youssef's Apple team, so the bundle identifier
         # uses the com.madda namespace expected by the brew publishing flow.

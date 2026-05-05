@@ -534,7 +534,8 @@ button:disabled {
   visibility: visible;
 }
 
-.sidebar-floating-overflow-trigger {
+.sidebar-floating-overflow-trigger,
+.sidebar-floating-browser-trigger {
   opacity: 0;
   pointer-events: none;
   position: fixed;
@@ -553,13 +554,25 @@ button:disabled {
   z-index: 260;
 }
 
+.sidebar-floating-browser-trigger {
+  /*
+   * CDXC:ChromiumBrowserPanes 2026-05-04-16:51
+   * Chromium browser testing needs a direct sidebar affordance, next to the
+   * global overflow trigger, so users can create a browser pane without
+   * depending on a browser command or the legacy Canary browser group.
+   */
+  right: 31px;
+}
+
 /*
  * CDXC:Sidebar-controls 2026-04-25-10:01
  * The floating overflow menu is a global sidebar control, but it should stay
  * visually quiet until the user is interacting with the sidebar or its menu.
  */
 body:hover .sidebar-floating-overflow-trigger,
+body:hover .sidebar-floating-browser-trigger,
 body:has(:focus-visible) .sidebar-floating-overflow-trigger,
+body:has(:focus-visible) .sidebar-floating-browser-trigger,
 .sidebar-floating-overflow-trigger[data-selected="true"] {
   opacity: 1;
   pointer-events: auto;

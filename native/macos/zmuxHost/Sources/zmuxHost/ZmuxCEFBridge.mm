@@ -4,11 +4,15 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cstring>
+#include <functional>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "include/base/cef_logging.h"
 #include "include/cef_app.h"
+#include "include/cef_application_mac.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
@@ -19,11 +23,11 @@
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 
-namespace {
-
 static int g_remoteDebuggingPort = 9333;
 static bool g_cefInitialized = false;
 static CefRefPtr<CefApp> g_cefApp;
+static std::map<std::string, CefRefPtr<CefRequestContext>> g_persistentRequestContexts;
+static NSString* const ZmuxCEFBuiltInDefaultProfileIdentifier = @"52B43C05-4A1D-45D3-8FD5-9EF94952E445";
 
 static bool IsPortAvailable(int port) {
   int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -71,6 +75,45 @@ static NSString* ZmuxCEFStorageDirectory(void) {
   return path;
 }
 
+static CefRefPtr<CefRequestContext> ZmuxCEFRequestContextForProfile(NSString* profileIdentifier) {
+  NSString* identifier = profileIdentifier.length > 0 ? profileIdentifier : @"default";
+  if ([identifier isEqualToString:@"default"] || [identifier isEqualToString:ZmuxCEFBuiltInDefaultProfileIdentifier]) {
+    return CefRequestContext::GetGlobalContext();
+  }
+
+  std::string key([identifier UTF8String]);
+  auto existing = g_persistentRequestContexts.find(key);
+  if (existing != g_persistentRequestContexts.end()) {
+    return existing->second;
+  }
+
+  /**
+   CDXC:ChromiumBrowserPanes 2026-05-04-17:09
+   Electrobun keeps CEF custom partitions outside Chromium's own `Default`
+   profile folder and reuses each request context. Chrome runtime can reject
+   duplicate or colliding cache paths, so custom zmux profiles use cached CEF
+   contexts under `cef/partitions/<profile-id>` while the built-in default
+   profile stays on Chromium's global context.
+   */
+  NSString* partitionPath = [[ZmuxCEFStorageDirectory() stringByAppendingPathComponent:@"partitions"]
+    stringByAppendingPathComponent:identifier];
+  [[NSFileManager defaultManager] createDirectoryAtPath:partitionPath
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
+
+  CefRequestContextSettings contextSettings;
+  contextSettings.persist_session_cookies = true;
+  CefString(&contextSettings.cache_path) = [partitionPath UTF8String];
+  CefRefPtr<CefRequestContext> context = CefRequestContext::CreateContext(contextSettings, nullptr);
+  if (!context) {
+    NSLog(@"[CEF] Failed to create persistent request context for profile %@; using global context.", identifier);
+    return CefRequestContext::GetGlobalContext();
+  }
+  g_persistentRequestContexts[key] = context;
+  return context;
+}
+
 static NSString* ZmuxCEFFrameworkExecutablePath(void) {
   return [[[NSBundle mainBundle] privateFrameworksPath]
     stringByAppendingPathComponent:@"Chromium Embedded Framework.framework/Chromium Embedded Framework"];
@@ -113,6 +156,8 @@ static NSString* EscapeDevToolsWebSocketURL(NSString* url) {
 
 class ZmuxCEFApp : public CefApp, public CefBrowserProcessHandler {
  public:
+  ZmuxCEFApp() = default;
+
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
     return this;
   }
@@ -234,8 +279,6 @@ static NSString* StringFromCefString(const CefString& value) {
   return [NSString stringWithUTF8String:stringValue.c_str()] ?: @"";
 }
 
-}  // namespace
-
 @interface ZmuxCEFBrowserView () {
  @private
   NSString* initialURL_;
@@ -262,9 +305,9 @@ static NSString* StringFromCefString(const CefString& value) {
     initialURL_ = [initialURL copy];
     profileIdentifier_ = [profileIdentifier copy];
     currentURLString_ = [initialURL copy];
-    wantsLayer = YES;
-    layer.backgroundColor = [NSColor colorWithCalibratedWhite:0.086 alpha:1].CGColor;
-    layer.masksToBounds = YES;
+    self.wantsLayer = YES;
+    self.layer.backgroundColor = [NSColor colorWithCalibratedWhite:0.086 alpha:1].CGColor;
+    self.layer.masksToBounds = YES;
   }
   return self;
 }
@@ -330,22 +373,7 @@ static NSString* StringFromCefString(const CefString& value) {
   CefBrowserSettings browserSettings;
   browserSettings.background_color = CefColorSetARGB(255, 22, 22, 22);
 
-  /**
-   CDXC:ChromiumBrowserPanes 2026-05-04-16:38
-   Browser profiles are Chromium request contexts backed by a deterministic
-   per-profile cache directory. This preserves cookies and storage without
-   reusing WKWebsiteDataStore or hiding a WebKit fallback behind the same UI.
-   */
-  NSString* profilePath = [[ZmuxCEFStorageDirectory() stringByAppendingPathComponent:@"profiles"]
-    stringByAppendingPathComponent:profileIdentifier_.length > 0 ? profileIdentifier_ : @"default"];
-  [[NSFileManager defaultManager] createDirectoryAtPath:profilePath
-                            withIntermediateDirectories:YES
-                                             attributes:nil
-                                                  error:nil];
-
-  CefRequestContextSettings contextSettings;
-  CefString(&contextSettings.cache_path) = [profilePath UTF8String];
-  CefRefPtr<CefRequestContext> requestContext = CefRequestContext::CreateContext(contextSettings, nullptr);
+  CefRefPtr<CefRequestContext> requestContext = ZmuxCEFRequestContextForProfile(profileIdentifier_);
 
   client_ = new ZmuxCEFBrowserClient(self);
   browser_ = CefBrowserHost::CreateBrowserSync(
@@ -468,8 +496,6 @@ static NSString* StringFromCefString(const CefString& value) {
 }
 
 @end
-
-namespace {
 
 void ZmuxCEFBrowserClient::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) {
   lastTitle_ = title.ToString();
@@ -659,8 +685,6 @@ void ZmuxCEFBrowserClient::CreateRemoteDevToolsWindow(NSString* frontendURL) {
     nullptr);
 }
 
-}  // namespace
-
 bool ZmuxCEFPrepareApplication(void) {
   [ZmuxCEFApplication sharedApplication];
   return [NSApp isKindOfClass:[ZmuxCEFApplication class]];
@@ -671,7 +695,7 @@ bool ZmuxCEFIsRuntimeAvailable(void) {
     && [[NSFileManager defaultManager] fileExistsAtPath:ZmuxCEFHelperExecutablePath()];
 }
 
-bool ZmuxCEFInitialize(int argc, char* argv[]) {
+bool ZmuxCEFInitialize(int argc, char* _Nullable argv[]) {
   if (g_cefInitialized) {
     return true;
   }
@@ -700,11 +724,18 @@ bool ZmuxCEFInitialize(int argc, char* argv[]) {
   CefString(&settings.framework_dir_path) = [ZmuxCEFFrameworkBundlePath() UTF8String];
   CefString(&settings.browser_subprocess_path) = [ZmuxCEFHelperExecutablePath() UTF8String];
 
-  NSString* cachePath = [ZmuxCEFStorageDirectory() stringByAppendingPathComponent:@"root"];
+  NSString* cachePath = ZmuxCEFStorageDirectory();
   [[NSFileManager defaultManager] createDirectoryAtPath:cachePath
                             withIntermediateDirectories:YES
                                              attributes:nil
                                                   error:nil];
+  /**
+   CDXC:ChromiumBrowserPanes 2026-05-04-17:01
+   CEF requires every request-context cache_path to be a child of
+   root_cache_path. Use ~/.zmux[-dev]/cef as the root so profile caches under
+   cef/profiles/<profile-id> persist cookies/storage instead of falling back to
+   in-memory Chromium storage.
+   */
   CefString(&settings.root_cache_path) = [cachePath UTF8String];
   CefString(&settings.log_file) = [[cachePath stringByAppendingPathComponent:@"debug.log"] UTF8String];
   CefString(&settings.accept_language_list) = "en-US,en";
