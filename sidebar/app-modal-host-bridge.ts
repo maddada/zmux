@@ -3,7 +3,6 @@ import { logAppModalError } from "./app-modal-error-log";
 import type { CommandConfigDraft } from "./command-config-modal";
 import type { SidebarActionType } from "../shared/sidebar-commands";
 import type { ExtensionToSidebarMessage } from "../shared/session-grid-contract";
-import type { WorkspaceProjectConfigDraft } from "../shared/workspace-dock-icons";
 
 type T3BrowserAccessMessage = Extract<ExtensionToSidebarMessage, { type: "showT3BrowserAccess" }>;
 
@@ -20,8 +19,7 @@ export type AppModalKind =
   | "scratchPad"
   | "settings"
   | "t3BrowserAccess"
-  | "t3ThreadId"
-  | "workspaceConfig";
+  | "t3ThreadId";
 
 export type OpenAppModalMessage =
   | {
@@ -34,7 +32,6 @@ export type OpenAppModalMessage =
         | "renameSession"
         | "t3BrowserAccess"
         | "t3ThreadId"
-        | "workspaceConfig"
       >;
       type: "open";
     }
@@ -46,11 +43,6 @@ export type OpenAppModalMessage =
       commandDraft: CommandConfigDraft;
       lockedActionType?: SidebarActionType;
       modal: "commandConfig";
-      type: "open";
-    }
-  | {
-      modal: "workspaceConfig";
-      projectConfigDraft: WorkspaceProjectConfigDraft;
       type: "open";
     }
   | {

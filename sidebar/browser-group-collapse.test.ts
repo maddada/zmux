@@ -98,6 +98,47 @@ describe("reconcileCollapsedGroupsById", () => {
     });
   });
 
+  test("should auto-collapse empty combined project and chats groups", () => {
+    expect(
+      reconcileCollapsedGroupsById({
+        autoCollapseGroupIds: ["combined-chats", "project-zmux"],
+        browserGroupIds: [],
+        groupIds: ["combined-chats", "project-zmux"],
+        previousBrowserSessionCountsByGroup: {},
+        previousCollapsedGroupsById: {},
+        sessionIdsByGroup: {
+          "combined-chats": [],
+          "project-zmux": [],
+        },
+      }),
+    ).toEqual({
+      "combined-chats": true,
+      "project-zmux": true,
+    });
+  });
+
+  test("should expand a collapsed combined group when a session is created", () => {
+    expect(
+      reconcileCollapsedGroupsById({
+        autoCollapseGroupIds: ["combined-chats", "project-zmux"],
+        browserGroupIds: [],
+        groupIds: ["combined-chats", "project-zmux"],
+        previousBrowserSessionCountsByGroup: {
+          "combined-chats": 0,
+          "project-zmux": 0,
+        },
+        previousCollapsedGroupsById: {
+          "combined-chats": true,
+          "project-zmux": true,
+        },
+        sessionIdsByGroup: {
+          "combined-chats": ["chat-session-1"],
+          "project-zmux": ["session-1"],
+        },
+      }),
+    ).toEqual({});
+  });
+
   test("should defer browser auto-collapse while a browser open is still settling", () => {
     expect(
       reconcileCollapsedGroupsById({

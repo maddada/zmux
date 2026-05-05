@@ -11,73 +11,54 @@
 }
 
 .recent-projects-drawer {
+  --sidebar-session-column-offset: calc(18px * var(--sidebar-density-scale));
   /*
-   * CDXC:RecentProjects 2026-05-04-14:25
-   * Recent Projects is a bottom drawer in Combined mode, separate from the
-   * draggable group list so parked projects cannot become cross-project drop
-   * targets or affect project-group ordering.
+   * CDXC:RecentProjects 2026-05-05-04:37
+   * Recent Projects uses the same header geometry as Combined project groups:
+   * no bottom drawer padding, no aggregate count in the section header, and
+   * project rows that read like active project headers with a persistent
+   * right-side circular session count.
    */
   border-top: 1px solid color-mix(in srgb, var(--app-border) 56%, transparent);
   display: grid;
-  gap: calc(8px * var(--sidebar-density-scale));
+  gap: calc(6px * var(--sidebar-density-scale));
+  justify-items: center;
   margin-left: calc(-12px * var(--sidebar-density-scale));
   margin-right: calc(-12px * var(--sidebar-density-scale));
-  padding: calc(8px * var(--sidebar-density-scale)) calc(12px * var(--sidebar-density-scale))
-    calc(10px * var(--sidebar-density-scale));
+  padding: calc(6px * var(--sidebar-density-scale)) 0 0;
   position: relative;
 }
 
-.recent-projects-drawer-toggle {
-  align-items: center;
+.recent-projects-drawer-toggle.group-head,
+.recent-projects-row.group-head {
   background: transparent;
   border: none;
-  border-radius: calc(8px * var(--sidebar-density-scale));
   color: color-mix(in srgb, var(--app-foreground) 74%, var(--app-muted) 26%);
-  display: flex;
-  gap: calc(7px * var(--sidebar-density-scale));
+  cursor: pointer;
+  display: block;
+  justify-self: center;
+  max-width: calc(100% - var(--sidebar-session-column-offset));
   min-width: 0;
-  padding: calc(3px * var(--sidebar-density-scale)) 0
-    calc(3px * var(--sidebar-density-scale)) 3px;
   text-align: left;
-  width: 100%;
+  width: calc(100% - var(--sidebar-session-column-offset));
 }
 
-.recent-projects-drawer-toggle:hover,
-.recent-projects-drawer-toggle:focus-visible {
-  background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
+.recent-projects-drawer-toggle.group-head:focus-visible,
+.recent-projects-row.group-head:focus-visible {
   color: var(--app-foreground);
   outline: none;
 }
 
-.recent-projects-drawer-title {
-  flex: 1 1 auto;
-  font-size: calc(11px * var(--sidebar-density-scale));
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.recent-projects-drawer-count {
-  align-items: center;
-  border: 1px solid color-mix(in srgb, var(--app-border) 76%, transparent);
-  border-radius: 999px;
-  color: color-mix(in srgb, var(--app-foreground) 58%, transparent);
-  display: inline-flex;
-  flex: none;
-  font-size: calc(10px * var(--sidebar-density-scale));
-  height: 18px;
-  justify-content: center;
-  min-width: 18px;
-  padding: 0 calc(5px * var(--sidebar-density-scale));
+.recent-projects-drawer-title,
+.recent-projects-row-title {
+  letter-spacing: 0.12em;
 }
 
 .recent-projects-drawer-body {
   display: grid;
   gap: calc(8px * var(--sidebar-density-scale));
+  justify-items: center;
+  width: 100%;
 }
 
 .recent-projects-search {
@@ -111,35 +92,23 @@
 .recent-projects-list {
   display: grid;
   gap: calc(2px * var(--sidebar-density-scale));
+  justify-items: center;
   max-height: min(220px, 35vh);
   overflow: hidden auto;
+  width: 100%;
 }
 
-.recent-projects-row {
-  background: transparent;
-  border: none;
-  border-radius: calc(8px * var(--sidebar-density-scale));
+.recent-projects-row-icon {
   color: color-mix(in srgb, var(--app-foreground) 72%, var(--app-muted) 28%);
-  min-width: 0;
-  padding: calc(5px * var(--sidebar-density-scale)) calc(6px * var(--sidebar-density-scale));
-  text-align: left;
 }
 
-.recent-projects-row:hover,
-.recent-projects-row:focus-visible {
-  background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
-  color: var(--app-foreground);
-  outline: none;
-}
-
-.recent-projects-row-title {
-  display: block;
-  font-size: calc(12px * var(--sidebar-density-scale));
-  line-height: 1.25;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.recent-projects-session-count.group-add-button {
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  font-size: calc(10px * var(--sidebar-density-scale));
+  font-weight: 600;
+  opacity: 1;
+  pointer-events: none;
+  visibility: visible;
 }
 
 .recent-projects-empty {

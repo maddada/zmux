@@ -8,12 +8,26 @@ export function getBrowserSessionCountsByGroup({
   browserGroupIds: readonly string[];
   sessionIdsByGroup: SessionIdsByGroup;
 }): Record<string, number> {
+  return getSessionCountsByGroup({
+    groupIds: browserGroupIds,
+    sessionIdsByGroup,
+  });
+}
+
+export function getSessionCountsByGroup({
+  groupIds,
+  sessionIdsByGroup,
+}: {
+  groupIds: readonly string[];
+  sessionIdsByGroup: SessionIdsByGroup;
+}): Record<string, number> {
   return Object.fromEntries(
-    browserGroupIds.map((groupId) => [groupId, (sessionIdsByGroup[groupId] ?? []).length]),
+    groupIds.map((groupId) => [groupId, (sessionIdsByGroup[groupId] ?? []).length]),
   );
 }
 
 export function reconcileCollapsedGroupsById({
+  autoCollapseGroupIds,
   browserGroupIds,
   collapseBlockedGroupIds = [],
   groupIds,
@@ -21,6 +35,7 @@ export function reconcileCollapsedGroupsById({
   previousCollapsedGroupsById,
   sessionIdsByGroup,
 }: {
+  autoCollapseGroupIds?: readonly string[];
   browserGroupIds: readonly string[];
   collapseBlockedGroupIds?: readonly string[];
   groupIds: readonly string[];
@@ -42,24 +57,31 @@ export function reconcileCollapsedGroupsById({
     next[groupId] = collapsed;
   }
 
-  for (const browserGroupId of browserGroupIds) {
-    const previousCount = previousBrowserSessionCountsByGroup[browserGroupId];
-    const nextCount = (sessionIdsByGroup[browserGroupId] ?? []).length;
+  /**
+   * CDXC:SidebarGroups 2026-05-05-04:48
+   * Empty Combined-mode project and Chats sections behave like browser groups:
+   * they stay collapsed while empty, expand when a session/chat appears, and
+   * collapse again when their last session disappears. Preserve manual
+   * collapse for non-empty groups unless their session count increases.
+   */
+  for (const groupId of new Set(autoCollapseGroupIds ?? browserGroupIds)) {
+    const previousCount = previousBrowserSessionCountsByGroup[groupId];
+    const nextCount = (sessionIdsByGroup[groupId] ?? []).length;
 
     if (nextCount === 0) {
-      if (blockedGroupIds.has(browserGroupId)) {
+      if (blockedGroupIds.has(groupId)) {
         continue;
       }
 
-      if (!next[browserGroupId]) {
-        next[browserGroupId] = true;
+      if (!next[groupId]) {
+        next[groupId] = true;
         changed = true;
       }
       continue;
     }
 
-    if (previousCount !== undefined && nextCount > previousCount && next[browserGroupId]) {
-      delete next[browserGroupId];
+    if (previousCount !== undefined && nextCount > previousCount && next[groupId]) {
+      delete next[groupId];
       changed = true;
     }
   }

@@ -8,7 +8,7 @@ import type {
   SidebarCommandRunMode,
 } from "./sidebar-commands";
 import type { SidebarGitAction, SidebarGitState } from "./sidebar-git";
-import type { zmuxSettings } from "./zmux-settings";
+import type { ZedOverlayTargetApp, zmuxSettings } from "./zmux-settings";
 import type { SidebarPinnedPrompt } from "./sidebar-pinned-prompts";
 import type {
   SessionLifecycleState,
@@ -168,6 +168,13 @@ export type SidebarHudState = {
   completionBellEnabled: boolean;
   completionSound: CompletionSoundSetting;
   completionSoundLabel: string;
+  /**
+   * CDXC:WorkspaceTheme 2026-05-05-02:58
+   * The active workspace can override the preset sidebar theme with a custom
+   * validated color. Keep the preset `theme` as the fallback, and send this
+   * color separately so CSS can derive app-level theme variables.
+   */
+  customThemeColor?: string;
   debuggingMode: boolean;
   focusedSessionTitle?: string;
   git: SidebarGitState;
@@ -490,10 +497,6 @@ export type SidebarToExtensionMessage =
       title: string;
     }
   | {
-      type: "openWorkspaceConfigForGroup";
-      groupId: string;
-    }
-  | {
       type: "copyWorkspaceProjectPathForGroup";
       groupId: string;
     }
@@ -518,12 +521,24 @@ export type SidebarToExtensionMessage =
        * Route these commands through the native sidebar so stored workspace
        * paths remain trusted on the app side instead of being accepted from DOM.
        */
-      type: "openActiveWorkspaceProjectInFinder" | "openActiveWorkspaceProjectInIde";
+      type: "openActiveWorkspaceProjectInFinder";
+    }
+  | {
+      /**
+       * CDXC:SidebarActions 2026-05-05-03:11
+       * The sidebar Open In dropdown lists explicit IDE targets. The selected
+       * target must travel with the active-project open command instead of
+       * being inferred from Settings, so choosing VS Code or Zed immediately
+       * opens the project in that exact app.
+       */
+      targetApp: Extract<ZedOverlayTargetApp, "vscode" | "zed">;
+      type: "openActiveWorkspaceProjectInIde";
     }
   | {
       type: "setWorkspaceProjectThemeForGroup";
       groupId: string;
-      theme: SidebarTheme;
+      theme?: SidebarTheme;
+      themeColor?: string;
     }
   | {
       /**
@@ -731,14 +746,6 @@ export type SidebarToExtensionMessage =
       playCompletionSound: boolean;
       command?: string;
       url?: string;
-    }
-  | {
-      type: "saveWorkspaceConfig";
-      icon?: WorkspaceDockIcon;
-      name: string;
-      projectId: string;
-      theme?: SidebarTheme;
-      themeColor?: string;
     }
   | {
       type: "deleteSidebarCommand";

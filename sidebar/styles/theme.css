@@ -298,6 +298,131 @@ body[data-sidebar-theme="light-orange"],
   --attention-secondary: color-mix(in srgb, #ffd1a3 68%, #d17b31 32%);
 }
 
+/*
+ * CDXC:WorkspaceTheme 2026-05-05-02:58
+ * A workspace Custom theme color should affect the sidebar theme, not only the
+ * project label. Keep the selected preset as the light/dark fallback, then
+ * derive the app-level accent, surfaces, and activity colors from the active
+ * project's validated custom color.
+ */
+body[data-sidebar-custom-theme="true"],
+.zmux-root[data-sidebar-custom-theme="true"],
+.stack[data-sidebar-custom-theme="true"] {
+  --app-button-background: var(--workspace-sidebar-theme-color);
+  --app-button-foreground: var(--workspace-sidebar-theme-foreground);
+  --session-visible-glow: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 10%,
+    transparent
+  );
+  --session-visible-hover-border: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 52%,
+    var(--app-border)
+  );
+  --session-visible-hover-ring: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 9%,
+    transparent
+  );
+  --session-visible-hover-shadow: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 8%,
+    transparent
+  );
+  --session-visible-hover-overlay: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--workspace-sidebar-theme-color) 10%, transparent),
+    transparent 62%
+  );
+  --session-focused-border: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 56%,
+    var(--app-border)
+  );
+  --session-focused-outline: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 46%,
+    #ffffff 12%
+  );
+  --session-focused-ring: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 24%,
+    transparent
+  );
+  --session-focus-visible-outline: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 52%,
+    #ffffff 18%
+  );
+  --working-primary: color-mix(in srgb, var(--workspace-sidebar-theme-color) 58%, #ffb454 42%);
+  --working-secondary: color-mix(in srgb, #ffd27a 62%, var(--workspace-sidebar-theme-color) 38%);
+  --attention-primary: color-mix(in srgb, var(--workspace-sidebar-theme-color) 72%, #5ea0ff 28%);
+  --attention-secondary: color-mix(
+    in srgb,
+    #9dcbff 58%,
+    var(--workspace-sidebar-theme-color) 42%
+  );
+}
+
+body[data-sidebar-custom-theme="true"]:is(
+    [data-sidebar-theme="plain-dark"],
+    [data-sidebar-theme^="dark-"]
+  ),
+.zmux-root[data-sidebar-custom-theme="true"]:is(
+    [data-sidebar-theme="plain-dark"],
+    [data-sidebar-theme^="dark-"]
+  ),
+.stack[data-sidebar-custom-theme="true"]:is(
+    [data-sidebar-theme="plain-dark"],
+    [data-sidebar-theme^="dark-"]
+  ) {
+  color-scheme: dark;
+  --app-background: color-mix(in srgb, var(--workspace-sidebar-theme-color) 12%, #0c1117 88%);
+  --app-card: color-mix(in srgb, var(--workspace-sidebar-theme-color) 15%, #121924 85%);
+  --app-card-active: color-mix(in srgb, var(--workspace-sidebar-theme-color) 22%, #182233 78%);
+  --app-border: color-mix(in srgb, var(--workspace-sidebar-theme-color) 32%, #ffffff 10%);
+  --app-input-background: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 12%,
+    #0f151d 88%
+  );
+  --app-muted: color-mix(in srgb, var(--workspace-sidebar-theme-color) 28%, #90a0b8 72%);
+  --app-tooltip-background: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 16%,
+    #151d29 84%
+  );
+  --app-tooltip-foreground: #edf4ff;
+}
+
+body[data-sidebar-custom-theme="true"]:is(
+    [data-sidebar-theme="plain-light"],
+    [data-sidebar-theme^="light-"]
+  ),
+.zmux-root[data-sidebar-custom-theme="true"]:is(
+    [data-sidebar-theme="plain-light"],
+    [data-sidebar-theme^="light-"]
+  ),
+.stack[data-sidebar-custom-theme="true"]:is(
+    [data-sidebar-theme="plain-light"],
+    [data-sidebar-theme^="light-"]
+  ) {
+  color-scheme: light;
+  --app-background: color-mix(in srgb, var(--workspace-sidebar-theme-color) 8%, #f5f7fb 92%);
+  --app-card: color-mix(in srgb, var(--workspace-sidebar-theme-color) 5%, #ffffff 95%);
+  --app-card-active: color-mix(in srgb, var(--workspace-sidebar-theme-color) 12%, #f1f5fb 88%);
+  --app-border: color-mix(in srgb, var(--workspace-sidebar-theme-color) 30%, #000000 12%);
+  --app-input-background: color-mix(in srgb, var(--workspace-sidebar-theme-color) 4%, #ffffff 96%);
+  --app-muted: color-mix(in srgb, var(--workspace-sidebar-theme-color) 22%, #60748b 78%);
+  --app-tooltip-background: color-mix(
+    in srgb,
+    var(--workspace-sidebar-theme-color) 5%,
+    #ffffff 95%
+  );
+  --app-tooltip-foreground: #172334;
+}
+
 * {
   box-sizing: border-box;
 }

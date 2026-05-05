@@ -7,10 +7,10 @@ import {
   IconBellOff,
   IconArrowsSort,
   IconBookmark,
-  IconChevronDown,
-  IconChevronRight,
+  IconCaretRightFilled,
   IconDeviceMobile,
   IconEye,
+  IconFolder,
   IconHelpCircle,
   IconHistory,
   IconKeyboard,
@@ -38,6 +38,10 @@ import {
   type ExtensionToSidebarMessage,
   type SidebarCollapsibleSection,
 } from "../shared/session-grid-contract";
+import {
+  getWorkspaceThemeForeground,
+  normalizeWorkspaceThemeColor,
+} from "../shared/workspace-dock-icons";
 import type { SidebarActionType } from "../shared/sidebar-commands";
 import { playCompletionSound, prepareCompletionSoundPlayback } from "./completion-sound-player";
 import { AgentsPanel } from "./agents-panel";
@@ -70,7 +74,7 @@ import {
 } from "./sidebar-dnd";
 import {
   expandCollapsedGroupsById,
-  getBrowserSessionCountsByGroup,
+  getSessionCountsByGroup,
   reconcileCollapsedGroupsById,
 } from "./browser-group-collapse";
 import { SessionGroupSection } from "./session-group-section";
@@ -185,7 +189,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const groupIdsRef = useRef<string[]>([]);
   const sessionIdsByGroupRef = useRef<SessionIdsByGroup>({});
-  const previousBrowserSessionCountsByGroupRef = useRef<Record<string, number>>({});
+  const previousAutoCollapseSessionCountsByGroupRef = useRef<Record<string, number>>({});
   const browserAutoCollapseSuppressedUntilRef = useRef(0);
   const previousNormalizedSessionSearchQueryRef = useRef("");
   const pointerDownSessionTargetRef = useRef<SidebarPointerDownSessionTarget | undefined>(
@@ -227,6 +231,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     collapsedSections,
     completionBellEnabled,
     createSessionOnSidebarDoubleClick,
+    customThemeColor,
     debuggingMode,
     groupOrder,
     previousSessions,
@@ -248,6 +253,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       collapsedSections: state.hud.collapsedSections,
       completionBellEnabled: state.hud.completionBellEnabled,
       createSessionOnSidebarDoubleClick: state.hud.createSessionOnSidebarDoubleClick,
+      customThemeColor: state.hud.customThemeColor,
       debuggingMode: state.hud.debuggingMode,
       groupOrder: state.groupOrder,
       previousSessions: state.previousSessions,
@@ -297,9 +303,20 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     });
   });
 
+  /**
+   * CDXC:SidebarMode 2026-05-03-10:42
+   * Combined mode is only active when the host sends persisted settings. That
+   * keeps legacy sidebar hydration on the existing Separated behavior while
+   * the native app can default new installs to Combined.
+   */
+  const isCombinedSidebarMode = settings?.sidebarMode === "combined";
+
   useLayoutEffect(() => {
-    const nextBrowserSessionCountsByGroup = getBrowserSessionCountsByGroup({
-      browserGroupIds,
+    const autoCollapseGroupIds = isCombinedSidebarMode
+      ? [...browserGroupIds, ...workspaceGroupIds]
+      : browserGroupIds;
+    const nextAutoCollapseSessionCountsByGroup = getSessionCountsByGroup({
+      groupIds: autoCollapseGroupIds,
       sessionIdsByGroup: authoritativeSessionIdsByGroup,
     });
     const collapseBlockedBrowserGroupIds =
@@ -307,16 +324,23 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
 
     setCollapsedGroupsById((previous) =>
       reconcileCollapsedGroupsById({
+        autoCollapseGroupIds,
         browserGroupIds,
         collapseBlockedGroupIds: collapseBlockedBrowserGroupIds,
         groupIds: groupOrder,
-        previousBrowserSessionCountsByGroup: previousBrowserSessionCountsByGroupRef.current,
+        previousBrowserSessionCountsByGroup: previousAutoCollapseSessionCountsByGroupRef.current,
         previousCollapsedGroupsById: previous,
         sessionIdsByGroup: authoritativeSessionIdsByGroup,
       }),
     );
-    previousBrowserSessionCountsByGroupRef.current = nextBrowserSessionCountsByGroup;
-  }, [authoritativeSessionIdsByGroup, browserGroupIds, groupOrder]);
+    previousAutoCollapseSessionCountsByGroupRef.current = nextAutoCollapseSessionCountsByGroup;
+  }, [
+    authoritativeSessionIdsByGroup,
+    browserGroupIds,
+    groupOrder,
+    isCombinedSidebarMode,
+    workspaceGroupIds,
+  ]);
 
   const isSidebarInteractionBlocked = isStartupInteractionBlocked;
 
@@ -669,11 +693,33 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
 
   useEffect(() => {
     document.body.dataset.sidebarTheme = theme;
+    const normalizedThemeColor = normalizeWorkspaceThemeColor(customThemeColor);
+    if (normalizedThemeColor) {
+      /**
+       * CDXC:WorkspaceTheme 2026-05-05-02:58
+       * Custom workspace colors are active-project sidebar theme overrides:
+       * keep the preset data-sidebar-theme as fallback, but publish validated
+       * CSS variables so the app-level theme surfaces derive from the color.
+       */
+      document.body.dataset.sidebarCustomTheme = "true";
+      document.body.style.setProperty("--workspace-sidebar-theme-color", normalizedThemeColor);
+      document.body.style.setProperty(
+        "--workspace-sidebar-theme-foreground",
+        getWorkspaceThemeForeground(normalizedThemeColor),
+      );
+    } else {
+      delete document.body.dataset.sidebarCustomTheme;
+      document.body.style.removeProperty("--workspace-sidebar-theme-color");
+      document.body.style.removeProperty("--workspace-sidebar-theme-foreground");
+    }
 
     return () => {
       delete document.body.dataset.sidebarTheme;
+      delete document.body.dataset.sidebarCustomTheme;
+      document.body.style.removeProperty("--workspace-sidebar-theme-color");
+      document.body.style.removeProperty("--workspace-sidebar-theme-foreground");
     };
-  }, [theme]);
+  }, [customThemeColor, theme]);
 
   useEffect(() => {
     document.body.style.setProperty("--zmux-agent-manager-zoom", `${agentManagerZoomPercent}%`);
@@ -795,13 +841,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     setIsOverflowMenuOpen((previous) => !previous);
   };
 
-  /**
-   * CDXC:SidebarMode 2026-05-03-10:42
-   * Combined mode is only active when the host sends persisted settings. That
-   * keeps legacy sidebar hydration on the existing Separated behavior while
-   * the native app can default new installs to Combined.
-   */
-  const isCombinedSidebarMode = settings?.sidebarMode === "combined";
   const isManualActiveSessionsSort = activeSessionsSortMode === "manual";
   const visibleBrowserGroupIds =
     !isCombinedSidebarMode && sectionVisibility.browsers ? browserGroupIds : [];
@@ -1670,6 +1709,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       <div
         className="stack"
         data-dimmed={String(isStartupInteractionBlocked)}
+        data-sidebar-custom-theme={String(Boolean(normalizeWorkspaceThemeColor(customThemeColor)))}
         data-sidebar-theme={theme}
         onDoubleClick={handleSidebarDoubleClick}
       >
@@ -1876,17 +1916,35 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
              */}
             <button
               aria-expanded={isRecentProjectsOpen}
-              className="recent-projects-drawer-toggle"
+              className="recent-projects-drawer-toggle group-head"
+              data-collapsible="true"
               onClick={() => setIsRecentProjectsOpen((previous) => !previous)}
               type="button"
             >
-              {isRecentProjectsOpen ? (
-                <IconChevronDown aria-hidden="true" size={14} stroke={2} />
-              ) : (
-                <IconChevronRight aria-hidden="true" size={14} stroke={2} />
-              )}
-              <span className="recent-projects-drawer-title">Recent Projects</span>
-              <span className="recent-projects-drawer-count">{recentProjects.length}</span>
+              <span className="group-title-wrap">
+                <span className="group-title-row">
+                  <span
+                    aria-hidden="true"
+                    className="group-collapse-button section-titlebar-toggle"
+                    data-collapsed={String(!isRecentProjectsOpen)}
+                    data-has-idle-icon="true"
+                  >
+                    <span className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon">
+                      <IconHistory size={16} stroke={1.8} />
+                    </span>
+                    <IconCaretRightFilled
+                      aria-hidden="true"
+                      className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+                      size={16}
+                    />
+                  </span>
+                  <span className="group-title-handle">
+                    <span className="recent-projects-drawer-title group-title section-titlebar-label">
+                      Recent Projects
+                    </span>
+                  </span>
+                </span>
+              </span>
             </button>
             {isRecentProjectsOpen ? (
               <div className="recent-projects-drawer-body">
@@ -1904,14 +1962,33 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
                   {filteredRecentProjects.length > 0 ? (
                     filteredRecentProjects.map((project) => (
                       <button
-                        className="recent-projects-row"
+                        className="recent-projects-row group-head"
                         key={project.projectId}
                         onClick={() => restoreRecentProject(project.projectId)}
                         title={project.path}
                         type="button"
                       >
-                        <span className="recent-projects-row-title">
-                          [{project.sessionCount}] {project.title}
+                        <span className="group-title-wrap">
+                          <span className="group-title-row">
+                            <span
+                              aria-hidden="true"
+                              className="recent-projects-row-icon group-collapse-button section-titlebar-toggle"
+                            >
+                              <IconFolder size={16} stroke={1.8} />
+                            </span>
+                            <span className="group-title-handle">
+                              <span className="recent-projects-row-title group-title section-titlebar-label">
+                                {project.title}
+                              </span>
+                            </span>
+                            <span className="group-title-spacer" />
+                            <span
+                              aria-label={`${project.sessionCount} preserved sessions`}
+                              className="recent-projects-session-count group-add-button"
+                            >
+                              {project.sessionCount}
+                            </span>
+                          </span>
                         </span>
                       </button>
                     ))

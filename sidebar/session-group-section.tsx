@@ -1,6 +1,7 @@
 import { Tooltip } from "@base-ui/react/tooltip";
 import {
   IconCaretRightFilled,
+  IconCheck,
   IconChevronLeft,
   IconChevronRight,
   IconCode,
@@ -14,7 +15,6 @@ import {
   IconPlayerPlay,
   IconPlus,
   IconRefresh,
-  IconSettings,
   IconTrash,
   IconWorld,
   IconX,
@@ -57,6 +57,13 @@ import { useSidebarStore } from "./sidebar-store";
 import { SortableSessionCard } from "./sortable-session-card";
 import { useCollapsibleHeight } from "./use-collapsible-height";
 import type { WebviewApi } from "./webview-api";
+import {
+  DEFAULT_WORKSPACE_THEME_COLOR,
+  normalizeWorkspaceThemeColor,
+  readWorkspaceThemeColorHistory,
+  updateWorkspaceThemeColorHistory,
+  writeWorkspaceThemeColorHistory,
+} from "../shared/workspace-dock-icons";
 
 const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 196;
@@ -152,7 +159,7 @@ type ContextMenuPosition = {
 };
 
 type GroupContextMenuPosition = ContextMenuPosition & {
-  view: "group" | "project-themes";
+  view: "group" | "project-custom-theme" | "project-themes";
 };
 
 type GroupControlMenu = "visible-count";
@@ -264,6 +271,8 @@ export function SessionGroupSection({
   const sessionsById = useSidebarStore((state) => state.sessionsById);
   const orderedSessionIds = orderedSessionIdsProp ?? storedSessionIds;
   const [contextMenuPosition, setContextMenuPosition] = useState<GroupContextMenuPosition>();
+  const [customThemeColor, setCustomThemeColor] = useState(DEFAULT_WORKSPACE_THEME_COLOR);
+  const [recentThemeColors, setRecentThemeColors] = useState(readWorkspaceThemeColorHistory);
   const [draftTitle, setDraftTitle] = useState(group?.title ?? "");
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -348,6 +357,7 @@ export function SessionGroupSection({
     .map((sessionId) => sessionsById[sessionId])
     .filter((session): session is NonNullable<typeof session> => session !== undefined);
   const sessionSummary = getGroupSessionSummary(groupSessions);
+  const actualSessionCount = storedSessionIds.length;
   const allSessionsSleeping =
     groupSessions.length > 0 && groupSessions.every((session) => session.isSleeping);
   const browserTabCount = isBrowserGroup ? groupSessions.length : 0;
@@ -378,7 +388,14 @@ export function SessionGroupSection({
     sessions: groupSessions,
   });
   const emptyStateLabel = isBrowserGroup ? "No browsers" : "No sessions";
-  const shouldSelectEmptyProject = Boolean(projectContext && orderedSessionIds.length === 0);
+  const shouldSelectEmptyProject = Boolean(projectContext && actualSessionCount === 0);
+  /**
+   * CDXC:SidebarGroups 2026-05-05-04:48
+   * Empty project and Chats sections are not expandable; they stay collapsed
+   * until a session appears. Keep their real folder/chat icon visible instead
+   * of exposing a chevron that cannot expand anything.
+   */
+  const canToggleCollapsed = actualSessionCount > 0 && emptyBrowserExpandTooltip === undefined;
 
   useEffect(() => {
     postGroupDebugLog("group.sectionMounted", {
@@ -637,17 +654,18 @@ export function SessionGroupSection({
     });
   };
 
-  const openProjectConfig = () => {
-    setContextMenuPosition(undefined);
-    vscode.postMessage({
-      groupId: group.groupId,
-      type: "openWorkspaceConfigForGroup",
-    });
-  };
-
   const openProjectThemeMenu = () => {
     setContextMenuPosition((currentPosition) =>
       currentPosition ? { ...currentPosition, view: "project-themes" } : currentPosition,
+    );
+  };
+
+  const openProjectCustomThemeMenu = () => {
+    setCustomThemeColor(
+      projectContext?.themeColor ?? recentThemeColors[0] ?? DEFAULT_WORKSPACE_THEME_COLOR,
+    );
+    setContextMenuPosition((currentPosition) =>
+      currentPosition ? { ...currentPosition, view: "project-custom-theme" } : currentPosition,
     );
   };
 
@@ -690,6 +708,26 @@ export function SessionGroupSection({
     });
   };
 
+  const chooseProjectThemeColor = (themeColor: string) => {
+    const normalizedColor = normalizeWorkspaceThemeColor(themeColor);
+    if (!normalizedColor) {
+      return;
+    }
+
+    setContextMenuPosition(undefined);
+    const nextRecentThemeColors = updateWorkspaceThemeColorHistory(
+      recentThemeColors,
+      normalizedColor,
+    );
+    setRecentThemeColors(nextRecentThemeColors);
+    writeWorkspaceThemeColorHistory(nextRecentThemeColors);
+    vscode.postMessage({
+      groupId: group.groupId,
+      themeColor: normalizedColor,
+      type: "setWorkspaceProjectThemeForGroup",
+    });
+  };
+
   const closeProject = () => {
     if (!projectContext?.canRemoveProject) {
       return;
@@ -719,7 +757,7 @@ export function SessionGroupSection({
   };
 
   const toggleCollapsed = () => {
-    if (emptyBrowserExpandTooltip) {
+    if (!canToggleCollapsed) {
       return;
     }
 
@@ -786,7 +824,7 @@ export function SessionGroupSection({
             clampContextMenuPosition(
               event.clientX,
               event.clientY,
-              projectContext ? 6 : 3 + Number(canFullReloadGroup),
+              projectContext ? 5 : 3 + Number(canFullReloadGroup),
             ),
           );
         }}
@@ -817,14 +855,15 @@ export function SessionGroupSection({
                       <Tooltip.Trigger
                         render={
                           <button
-                            aria-controls={isCollapsed ? undefined : sessionsRegionId}
+                            aria-controls={canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined}
                             aria-disabled="true"
-                            aria-expanded={!isCollapsed}
+                            aria-expanded={canToggleCollapsed ? !isCollapsed : undefined}
                             aria-label={emptyBrowserExpandTooltip}
                             className="group-collapse-button section-titlebar-toggle"
                             data-collapsed={String(isCollapsed)}
                             data-empty-browser-group="true"
-                            data-has-idle-icon="true"
+                            data-has-idle-icon={String(canToggleCollapsed)}
+                            data-static-icon={String(!canToggleCollapsed)}
                             onClick={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
@@ -838,11 +877,13 @@ export function SessionGroupSection({
                             >
                               <IconWorld size={16} stroke={1.8} />
                             </span>
-                            <IconCaretRightFilled
-                              aria-hidden="true"
-                              className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
-                              size={16}
-                            />
+                            {canToggleCollapsed ? (
+                              <IconCaretRightFilled
+                                aria-hidden="true"
+                                className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+                                size={16}
+                              />
+                            ) : null}
                           </button>
                         }
                       />
@@ -860,13 +901,23 @@ export function SessionGroupSection({
                     <Tooltip.Trigger
                       render={
                         <button
-                          aria-controls={isCollapsed ? undefined : sessionsRegionId}
-                          aria-expanded={!isCollapsed}
-                          aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${group.title}`}
+                          aria-controls={
+                            canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined
+                          }
+                          aria-disabled={!canToggleCollapsed && !shouldSelectEmptyProject}
+                          aria-expanded={canToggleCollapsed ? !isCollapsed : undefined}
+                          aria-label={
+                            shouldSelectEmptyProject
+                              ? `Select ${group.title}`
+                              : canToggleCollapsed
+                                ? `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
+                                : group.title
+                          }
                           className="group-collapse-button section-titlebar-toggle"
                           data-collapsed={String(isCollapsed)}
                           data-empty-project={String(shouldSelectEmptyProject)}
-                          data-has-idle-icon="true"
+                          data-has-idle-icon={String(canToggleCollapsed)}
+                          data-static-icon={String(!canToggleCollapsed)}
                           onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
@@ -888,11 +939,13 @@ export function SessionGroupSection({
                               <IconFolderOpen size={16} stroke={1.8} />
                             )}
                           </span>
-                          <IconCaretRightFilled
-                            aria-hidden="true"
-                            className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
-                            size={16}
-                          />
+                          {canToggleCollapsed ? (
+                            <IconCaretRightFilled
+                              aria-hidden="true"
+                              className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+                              size={16}
+                            />
+                          ) : null}
                         </button>
                       }
                     />
@@ -904,12 +957,19 @@ export function SessionGroupSection({
                   ref={isBrowserGroup || isChatCollection ? undefined : sortable.handleRef}
                 >
                   <button
-                    aria-controls={isCollapsed ? undefined : sessionsRegionId}
-                    aria-disabled={emptyBrowserExpandTooltip !== undefined}
-                    aria-expanded={!isCollapsed}
+                    aria-controls={canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined}
+                    aria-disabled={
+                      emptyBrowserExpandTooltip !== undefined ||
+                      (!canToggleCollapsed && !shouldSelectEmptyProject)
+                    }
+                    aria-expanded={canToggleCollapsed ? !isCollapsed : undefined}
                     aria-label={
                       emptyBrowserExpandTooltip ??
-                      `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
+                      (shouldSelectEmptyProject
+                        ? `Select ${group.title}`
+                        : canToggleCollapsed
+                          ? `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
+                          : group.title)
                     }
                     className="group-title-button"
                     data-empty-browser-group={String(emptyBrowserExpandTooltip !== undefined)}
@@ -921,7 +981,11 @@ export function SessionGroupSection({
                     }}
                     title={
                       emptyBrowserExpandTooltip ??
-                      `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
+                      (shouldSelectEmptyProject
+                        ? `Select ${group.title}`
+                        : canToggleCollapsed
+                          ? `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
+                          : group.title)
                     }
                     type="button"
                   >
@@ -1119,21 +1183,28 @@ export function SessionGroupSection({
                       Back
                     </button>
                     <div className="session-context-menu-divider" role="separator" />
-                    {projectContext.themeColor ? (
-                      <button
-                        className="session-context-menu-item workspace-dock-theme-menu-item"
-                        data-selected="true"
-                        onClick={openProjectConfig}
-                        role="menuitemradio"
-                        type="button"
-                      >
-                        <span
-                          className="workspace-dock-theme-swatch"
-                          style={getProjectThemeSwatchStyle(projectContext.themeColor)}
-                        />
-                        Custom Color
-                      </button>
-                    ) : null}
+                    <button
+                      className="session-context-menu-item workspace-dock-theme-menu-item"
+                      data-selected={String(Boolean(projectContext.themeColor))}
+                      onClick={openProjectCustomThemeMenu}
+                      role="menuitemradio"
+                      type="button"
+                    >
+                      <span
+                        className="workspace-dock-theme-swatch"
+                        style={getProjectThemeSwatchStyle(
+                          projectContext.themeColor ??
+                            recentThemeColors[0] ??
+                            DEFAULT_WORKSPACE_THEME_COLOR,
+                        )}
+                      />
+                      Custom
+                      <IconChevronRight
+                        aria-hidden="true"
+                        className="session-context-menu-trailing-icon"
+                        size={14}
+                      />
+                    </button>
                     {PROJECT_CONTEXT_THEME_OPTIONS.map((theme) => (
                       <button
                         className="session-context-menu-item workspace-dock-theme-menu-item"
@@ -1153,13 +1224,88 @@ export function SessionGroupSection({
                       </button>
                     ))}
                   </>
+                ) : contextMenuPosition.view === "project-custom-theme" ? (
+                  <>
+                    <button
+                      className="session-context-menu-item"
+                      onClick={openProjectThemeMenu}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconChevronLeft
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Back
+                    </button>
+                    <div className="session-context-menu-divider" role="separator" />
+                    <div className="workspace-theme-custom-picker">
+                      {/*
+                       * CDXC:WorkspaceTheme 2026-05-05-02:58
+                       * Combined-mode project headers use the same Theme menu
+                       * custom color picker as the workspace dock. Applying a
+                       * color posts a validated project theme color and records
+                       * it in the local recent-color palette.
+                       */}
+                      <input
+                        aria-label="Custom workspace theme color"
+                        className="workspace-theme-color-input"
+                        onChange={(event) => {
+                          const normalizedColor = normalizeWorkspaceThemeColor(
+                            event.currentTarget.value,
+                          );
+                          if (normalizedColor) {
+                            setCustomThemeColor(normalizedColor);
+                          }
+                        }}
+                        type="color"
+                        value={customThemeColor}
+                      />
+                      <input
+                        aria-label="Custom workspace theme color hex"
+                        className="workspace-theme-color-text"
+                        onChange={(event) => {
+                          const normalizedColor = normalizeWorkspaceThemeColor(
+                            event.currentTarget.value,
+                          );
+                          if (normalizedColor) {
+                            setCustomThemeColor(normalizedColor);
+                          }
+                        }}
+                        value={customThemeColor}
+                      />
+                      <button
+                        aria-label="Apply custom workspace theme color"
+                        className="workspace-theme-color-apply"
+                        onClick={() => chooseProjectThemeColor(customThemeColor)}
+                        type="button"
+                      >
+                        <IconCheck aria-hidden="true" size={14} stroke={2.2} />
+                      </button>
+                    </div>
+                    {recentThemeColors.length > 0 ? (
+                      <div className="workspace-theme-color-palette">
+                        {recentThemeColors.map((themeColor) => (
+                          <button
+                            aria-label={`Use ${themeColor}`}
+                            className="workspace-theme-color-palette-button"
+                            key={themeColor}
+                            onClick={() => chooseProjectThemeColor(themeColor)}
+                            style={getProjectThemeSwatchStyle(themeColor)}
+                            type="button"
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
                 ) : (
                   <>
                     {/*
                      * CDXC:SidebarMode 2026-05-03-19:19
                      * Combined mode hides the workspace rail, so the project
-                     * group's right-click menu owns the Configure, Theme,
-                     * Copy Path, and Close Project actions for that project.
+                     * group's right-click menu owns Theme, Copy Path, and
+                     * Close Project actions for that project.
                      * Close Project parks the project in Recent Projects
                      * without deleting saved sessions.
                      * CDXC:WorkspaceActions 2026-05-04-08:22
@@ -1167,19 +1313,6 @@ export function SessionGroupSection({
                      * commands: Finder reveals the workspace folder, while
                      * the IDE action targets the selected IDE from Settings.
                      */}
-                    <button
-                      className="session-context-menu-item"
-                      onClick={openProjectConfig}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <IconSettings
-                        aria-hidden="true"
-                        className="session-context-menu-icon"
-                        size={14}
-                      />
-                      Configure
-                    </button>
                     <button
                       className="session-context-menu-item"
                       onClick={openProjectThemeMenu}

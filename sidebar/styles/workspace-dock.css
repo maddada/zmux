@@ -301,7 +301,7 @@ body.native-sidebar-body .stack {
   z-index: 50;
 }
 
-.workspace-dock-context-menu .session-context-menu-trailing-icon {
+.session-context-menu-trailing-icon {
   margin-left: auto;
 }
 
@@ -317,4 +317,86 @@ body.native-sidebar-body .stack {
   margin-left: -2px;
   background: var(--workspace-dock-button-background, #2f6feb);
   width: 12px;
+}
+
+/* CDXC:WorkspaceTheme 2026-05-05-02:58: Custom workspace colors live in the
+   Theme context menu, with a picker and recent-color palette shared by the
+   workspace dock and Combined-mode project group menus. */
+.workspace-theme-custom-picker {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 34px minmax(0, 1fr) 28px;
+  padding: 2px 4px;
+}
+
+.workspace-theme-color-input {
+  appearance: none;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--app-border) 88%, transparent);
+  border-radius: 8px;
+  cursor: pointer;
+  height: 28px;
+  padding: 3px;
+  width: 34px;
+}
+
+.workspace-theme-color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.workspace-theme-color-input::-webkit-color-swatch,
+.workspace-theme-color-input::-moz-color-swatch {
+  border: 0;
+  border-radius: 5px;
+}
+
+.workspace-theme-color-text {
+  background: color-mix(in srgb, var(--app-card-active) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 88%, transparent);
+  border-radius: 8px;
+  color: inherit;
+  font: 700 11px var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
+  height: 28px;
+  letter-spacing: 0;
+  min-width: 0;
+  padding: 0 8px;
+  text-transform: uppercase;
+}
+
+.workspace-theme-color-apply,
+.workspace-theme-color-palette-button {
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--app-border) 88%, transparent);
+  border-radius: 8px;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+}
+
+.workspace-theme-color-apply {
+  background: color-mix(in srgb, var(--app-button-background) 18%, transparent);
+  color: var(--app-button-background);
+  width: 28px;
+}
+
+.workspace-theme-color-palette {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 4px;
+}
+
+.workspace-theme-color-palette-button {
+  background: var(--workspace-dock-button-background, #2f6feb);
+  min-width: 0;
+}
+
+.workspace-theme-color-apply:hover,
+.workspace-theme-color-apply:focus-visible,
+.workspace-theme-color-palette-button:hover,
+.workspace-theme-color-palette-button:focus-visible {
+  border-color: color-mix(in srgb, var(--app-button-background) 54%, var(--app-border));
+  outline: none;
 }

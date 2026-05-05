@@ -97,6 +97,14 @@ export const Default: Story = {
               ),
             }));
           },
+          setProjectThemeColor: (projectId, themeColor) => {
+            setCurrentState((previous) => ({
+              ...previous,
+              projects: previous.projects.map((project) =>
+                project.projectId === projectId ? { ...project, themeColor } : project,
+              ),
+            }));
+          },
         }}
         state={currentState}
       />

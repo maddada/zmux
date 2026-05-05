@@ -13,13 +13,12 @@ import { SettingsModal } from "../../sidebar/settings-modal";
 import { SessionRenameModal } from "../../sidebar/session-rename-modal";
 import { T3BrowserAccessModal } from "../../sidebar/t3-browser-access-modal";
 import { T3ThreadIdModal } from "../../sidebar/t3-thread-id-modal";
-import {
-  WorkspaceConfigModal,
-  type WorkspaceConfigModalProps,
-} from "../../sidebar/workspace-config-modal";
 import type { SidebarActionType } from "../../shared/sidebar-commands";
 import type { ExtensionToSidebarMessage } from "../../shared/session-grid-contract";
-import type { WorkspaceProjectConfigDraft } from "../../shared/workspace-dock-icons";
+import {
+  getWorkspaceThemeForeground,
+  normalizeWorkspaceThemeColor,
+} from "../../shared/workspace-dock-icons";
 import {
   installAppModalGlobalErrorLogging,
   logAppModalError,
@@ -42,8 +41,7 @@ type AppModalKind =
   | "scratchPad"
   | "settings"
   | "t3BrowserAccess"
-  | "t3ThreadId"
-  | "workspaceConfig";
+  | "t3ThreadId";
 
 type T3BrowserAccessMessage = Extract<ExtensionToSidebarMessage, { type: "showT3BrowserAccess" }>;
 
@@ -57,7 +55,6 @@ type AppModalHostMessage =
       message?: string;
       lockedActionType?: SidebarActionType;
       modal: AppModalKind;
-      projectConfigDraft?: WorkspaceProjectConfigDraft;
       sessionId?: string;
       threadId?: string;
       title?: string;
@@ -89,22 +86,7 @@ type ConfigModalState = {
   agentDraft?: AgentConfigDraft;
   commandDraft?: CommandConfigDraft;
   lockedActionType?: SidebarActionType;
-  projectConfigDraft?: WorkspaceProjectConfigDraft;
 };
-
-const WORKSPACE_CONFIG_THEME_OPTIONS = [
-  { label: "Plain Dark", value: "plain-dark" },
-  { label: "Plain Light", value: "plain-light" },
-  { label: "Dark Blue", value: "dark-blue" },
-  { label: "Dark Green", value: "dark-green" },
-  { label: "Dark Red", value: "dark-red" },
-  { label: "Dark Pink", value: "dark-pink" },
-  { label: "Dark Orange", value: "dark-orange" },
-  { label: "Light Blue", value: "light-blue" },
-  { label: "Light Green", value: "light-green" },
-  { label: "Light Pink", value: "light-pink" },
-  { label: "Light Orange", value: "light-orange" },
-] satisfies WorkspaceConfigModalProps["themeOptions"];
 
 declare global {
   interface Window {
@@ -148,15 +130,32 @@ function AppModalHost() {
     t3ThreadId,
   } = useModalStateFromNative();
   const settings = useSidebarStore((state) => state.hud.settings);
+  const customThemeColor = useSidebarStore((state) => state.hud.customThemeColor);
   const theme = useSidebarStore((state) => state.hud.theme);
 
   useEffect(() => {
     document.body.dataset.sidebarTheme = theme;
+    const normalizedThemeColor = normalizeWorkspaceThemeColor(customThemeColor);
+    if (normalizedThemeColor) {
+      document.body.dataset.sidebarCustomTheme = "true";
+      document.body.style.setProperty("--workspace-sidebar-theme-color", normalizedThemeColor);
+      document.body.style.setProperty(
+        "--workspace-sidebar-theme-foreground",
+        getWorkspaceThemeForeground(normalizedThemeColor),
+      );
+    } else {
+      delete document.body.dataset.sidebarCustomTheme;
+      document.body.style.removeProperty("--workspace-sidebar-theme-color");
+      document.body.style.removeProperty("--workspace-sidebar-theme-foreground");
+    }
 
     return () => {
       delete document.body.dataset.sidebarTheme;
+      delete document.body.dataset.sidebarCustomTheme;
+      document.body.style.removeProperty("--workspace-sidebar-theme-color");
+      document.body.style.removeProperty("--workspace-sidebar-theme-foreground");
     };
-  }, [theme]);
+  }, [customThemeColor, theme]);
 
   return (
     <>
@@ -311,23 +310,6 @@ function AppModalHost() {
           closeModal();
         }}
       />
-      <WorkspaceConfigModal
-        draft={config.projectConfigDraft ?? createEmptyWorkspaceConfigDraft()}
-        isOpen={activeModal === "workspaceConfig" && config.projectConfigDraft !== undefined}
-        onCancel={closeModal}
-        onSave={(draft) => {
-          vscode.postMessage({
-            icon: draft.icon,
-            name: draft.name,
-            projectId: draft.projectId,
-            theme: draft.theme,
-            themeColor: draft.themeColor,
-            type: "saveWorkspaceConfig",
-          });
-          closeModal();
-        }}
-        themeOptions={WORKSPACE_CONFIG_THEME_OPTIONS}
-      />
       <AgentConfigModal
         draft={config.agentDraft ?? createEmptyAgentDraft()}
         isOpen={activeModal === "agentConfig" && config.agentDraft !== undefined}
@@ -459,16 +441,6 @@ function useModalStateFromNative() {
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
-          } else if (message.modal === "workspaceConfig") {
-            if (!message.projectConfigDraft) {
-              throw new Error("Workspace config modal request is missing projectConfigDraft.");
-            }
-            setConfig({ projectConfigDraft: message.projectConfigDraft });
-            setFirstUserMessage(undefined);
-            setFindPreviousSession(undefined);
-            setRenameSession(undefined);
-            setT3BrowserAccess(undefined);
-            setT3ThreadId(undefined);
           } else {
             setConfig({});
             setFindPreviousSession(undefined);
@@ -532,13 +504,6 @@ function createEmptyAgentDraft(): AgentConfigDraft {
   return {
     command: "",
     name: "",
-  };
-}
-
-function createEmptyWorkspaceConfigDraft(): WorkspaceProjectConfigDraft {
-  return {
-    name: "",
-    projectId: "",
   };
 }
 

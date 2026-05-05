@@ -92,6 +92,7 @@ export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
       completionBellEnabled: false,
       completionSound: DEFAULT_COMPLETION_SOUND,
       completionSoundLabel: getCompletionSoundLabel(DEFAULT_COMPLETION_SOUND),
+      customThemeColor: undefined,
       debuggingMode: false,
       focusedSessionTitle: undefined,
       git: createDefaultSidebarGitState(),

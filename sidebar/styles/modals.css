@@ -961,62 +961,6 @@
   gap: 12px;
 }
 
-/* CDXC:WorkspaceConfig 2026-04-28-01:19: The workspace configuration modal
-   intentionally reuses the Configure Action modal surface; only the image row
-   adds workspace-specific preview and upload controls. */
-.workspace-config-image-row {
-  align-items: center;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-}
-
-.workspace-config-image-preview,
-.workspace-config-image-placeholder {
-  align-items: center;
-  background: color-mix(in srgb, var(--app-card-active) 92%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
-  border-radius: 10px;
-  display: inline-flex;
-  height: 38px;
-  justify-content: center;
-  width: 40px;
-}
-
-.workspace-config-image-preview {
-  object-fit: cover;
-}
-
-.workspace-config-image-placeholder {
-  color: color-mix(in srgb, var(--app-muted) 88%, var(--app-foreground) 12%);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0;
-}
-
-.workspace-config-image-button,
-.workspace-config-restore-button {
-  align-items: center;
-  display: inline-flex;
-  justify-content: center;
-  min-width: max-content;
-  position: relative;
-}
-
-.workspace-config-restore-button {
-  min-width: 38px;
-  padding: 0;
-  width: 38px;
-}
-
-.workspace-config-file-input {
-  cursor: pointer;
-  inset: 0;
-  opacity: 0;
-  position: absolute;
-  width: 100%;
-}
-
 .settings-modal-scroll {
   display: grid;
   gap: 14px;

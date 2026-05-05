@@ -1,11 +1,11 @@
 import { createRoot } from "react-dom/client";
 import {
+  IconCheck,
   IconChevronLeft,
   IconChevronRight,
   IconCode,
   IconFolderOpen,
   IconMessageCirclePlus,
-  IconSettings,
   IconPlus,
   IconPalette,
   IconTrash,
@@ -25,6 +25,7 @@ import { SidebarApp } from "../../sidebar/sidebar-app";
 import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "../../sidebar/agent-logos";
 import {
   explainFirstPromptAutoRenameDecision,
+  isGenericAgentSessionTitle,
   resolveFirstPromptAutoRenameStrategy,
   type FirstPromptAutoRenameStrategy,
 } from "../../shared/first-prompt-session-title";
@@ -153,11 +154,15 @@ import {
   normalizeStartupRecentProjects,
 } from "./recent-projects";
 import {
+  DEFAULT_WORKSPACE_THEME_COLOR,
+  getWorkspaceThemeForeground,
   normalizeWorkspaceDockIcon,
   normalizeWorkspaceDockIconDataUrl,
   normalizeWorkspaceThemeColor,
+  readWorkspaceThemeColorHistory,
+  updateWorkspaceThemeColorHistory,
+  writeWorkspaceThemeColorHistory,
   type WorkspaceDockIcon,
-  type WorkspaceProjectConfigDraft,
 } from "../../shared/workspace-dock-icons";
 import {
   DEFAULT_zmux_SETTINGS,
@@ -406,8 +411,8 @@ declare global {
       removeProject: (projectId: string) => void;
       reorderProjects: (projectIds: string[]) => void;
       setProjectIcon: (projectId: string, iconDataUrl: string | undefined) => void;
-      setProjectConfig: (projectId: string, draft: WorkspaceProjectConfigDraft) => void;
       setProjectTheme: (projectId: string, theme: SidebarTheme) => void;
+      setProjectThemeColor: (projectId: string, themeColor: string) => void;
     };
     __zmux_NATIVE_SETTINGS__?: {
       attachZedOverlay: (targetApp: ZedOverlayTargetApp) => void;
@@ -1070,15 +1075,23 @@ function openNativeWorkspaceInFinder(workspacePath: string): void {
   postNative({ type: "openWorkspaceInFinder", workspacePath });
 }
 
-function openNativeWorkspaceInSelectedIde(workspacePath: string): void {
+function openNativeWorkspaceInSelectedIde(
+  workspacePath: string,
+  targetApp: ZedOverlayTargetApp = settings.zedOverlayTargetApp,
+): void {
   /**
    * CDXC:WorkspaceActions 2026-05-04-08:22
    * Project right-click IDE opens are explicit user commands. They use the
    * Settings-selected IDE target directly and do not require IDE attachment or
    * sync-open settings to be enabled first.
+   *
+   * CDXC:SidebarActions 2026-05-05-03:11
+   * Sidebar Open In can choose a concrete IDE per click. Accepting an explicit
+   * target here keeps context-menu opens settings-driven while letting the
+   * Actions dropdown open Finder, VS Code, or Zed without mutating Settings.
    */
   postNative({
-    targetApp: settings.zedOverlayTargetApp,
+    targetApp,
     type: "openWorkspaceInIde",
     workspacePath,
   });
@@ -2977,6 +2990,7 @@ function buildSidebarMessage(): SidebarHydrateMessage {
         directory: project.path,
         name: project.name,
       },
+      customThemeColor: normalizeWorkspaceThemeColor(project.themeColor),
       recentProjects: isCombinedSidebarMode ? createSidebarRecentProjects() : [],
       settings,
     },
@@ -3389,33 +3403,47 @@ async function ensureNativeAgentFirstPromptHooks(): Promise<void> {
    * beside existing Codex and Claude hooks; it writes the first prompt into the
    * session state file that the native sidebar polls before sending Codex
    * `/rename <title>` or Claude's bare `/rename`.
+   *
+   * CDXC:SessionTitleSync 2026-05-05-04:27
+   * Codex terminals launched from zmux can run with CODEX_HOME pointed at a
+   * profile directory such as ~/.codex-profiles/personal. Install the native
+   * first-prompt hook into every existing Codex profile as well as ~/.codex so
+   * prompt capture follows the Codex home that the terminal actually uses.
    */
   const command = buildEnsureNativeAgentHooksCommand();
   const result = await runNativeProcess("/bin/zsh", ["-lc", command]);
   if (result.exitCode !== 0) {
     throw new Error(result.stderr.trim() || result.stdout.trim() || "Agent hook install failed.");
   }
+  const installedCodexHooksPaths = result.stdout
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("codexHooksPath="))
+    .map((line) => line.slice("codexHooksPath=".length))
+    .filter(Boolean);
   appendSessionTitleDebugLog("nativeSidebar.firstPromptAutoRename.hooksInstalled", {
     claudeSettingsPath: `${nativeHomeDirectory()}/.claude/settings.json`,
-    codexHooksPath: `${nativeHomeDirectory()}/.codex/hooks.json`,
+    codexHooksPaths: installedCodexHooksPaths.length
+      ? installedCodexHooksPaths
+      : [`${nativeHomeDirectory()}/.codex/hooks.json`],
     notifyHookPath: zmux_AGENT_NOTIFY_HOOK_PATH,
   });
 }
 
 function buildEnsureNativeAgentHooksCommand(): string {
   const notifyHookPath = zmux_AGENT_NOTIFY_HOOK_PATH;
-  const codexHooksPath = `${nativeHomeDirectory()}/.codex/hooks.json`;
+  const homeDirectory = nativeHomeDirectory();
   const claudeSettingsPath = `${nativeHomeDirectory()}/.claude/settings.json`;
   return [
     "set -e",
-    `mkdir -p ${quoteNativeShellArg(dirnameNativePath(notifyHookPath))} ${quoteNativeShellArg(dirnameNativePath(codexHooksPath))} ${quoteNativeShellArg(dirnameNativePath(claudeSettingsPath))}`,
+    `mkdir -p ${quoteNativeShellArg(dirnameNativePath(notifyHookPath))} ${quoteNativeShellArg(dirnameNativePath(claudeSettingsPath))}`,
     `cat > ${quoteNativeShellArg(notifyHookPath)} <<'zmux_NOTIFY_HOOK'`,
     getNativeCodexNotifyHookScript(),
     "zmux_NOTIFY_HOOK",
     `chmod 755 ${quoteNativeShellArg(notifyHookPath)}`,
-    `/usr/bin/python3 - ${quoteNativeShellArg(codexHooksPath)} ${quoteNativeShellArg(notifyHookPath)} codex <<'zmux_CODEX_HOOK_MERGE'`,
-    getNativeAgentHookMergeScript(),
-    "zmux_CODEX_HOOK_MERGE",
+    `/usr/bin/python3 - ${quoteNativeShellArg(notifyHookPath)} ${quoteNativeShellArg(homeDirectory)} <<'zmux_CODEX_HOOK_MERGE_ALL'`,
+    getNativeCodexHookMergeAllScript(),
+    "zmux_CODEX_HOOK_MERGE_ALL",
     `/usr/bin/python3 - ${quoteNativeShellArg(claudeSettingsPath)} ${quoteNativeShellArg(notifyHookPath)} claude <<'zmux_CLAUDE_HOOK_MERGE'`,
     getNativeAgentHookMergeScript(),
     "zmux_CLAUDE_HOOK_MERGE",
@@ -3472,8 +3500,9 @@ except FileNotFoundError:
 if state.get("autoTitleFromFirstPrompt") in {"1", "true", "TRUE", "True"}:
     sys.exit(0)
 
+payload_agent = payload.get("agent")
 state["status"] = state.get("status") or "idle"
-state["agent"] = state.get("agent") or os.environ.get("VSMUX_AGENT") or os.environ.get("ZMUX_AGENT") or os.environ.get("zmux_AGENT") or "codex"
+state["agent"] = state.get("agent") or (payload_agent if isinstance(payload_agent, str) else "") or os.environ.get("VSMUX_AGENT") or os.environ.get("ZMUX_AGENT") or os.environ.get("zmux_AGENT") or "codex"
 state["firstUserMessageBase64"] = state.get("firstUserMessageBase64") or base64.b64encode(prompt.encode("utf-8")).decode("ascii")
 if state.get("pendingFirstPromptAutoRenamePrompt", "").strip():
     path = pathlib.Path(state_path)
@@ -3582,6 +3611,83 @@ hooks_path.parent.mkdir(parents=True, exist_ok=True)
 with open(hooks_path, "w", encoding="utf-8") as handle:
     json.dump(data, handle, indent=2)
     handle.write("\\n")
+	`;
+}
+
+function getNativeCodexHookMergeAllScript(): string {
+  return `import json
+import pathlib
+import sys
+
+notify_hook_path = pathlib.Path(sys.argv[1])
+home_path = pathlib.Path(sys.argv[2])
+command = str(notify_hook_path)
+
+def load_hooks_data(hooks_path):
+    try:
+        with open(hooks_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+        data["hooks"] = hooks
+    return data, hooks
+
+def is_zmux_command(hook):
+    return isinstance(hook, dict) and hook.get("command") == command
+
+def merge_hook(hooks_path):
+    data, hooks = load_hooks_data(hooks_path)
+    groups = hooks.get("UserPromptSubmit")
+    if not isinstance(groups, list):
+        groups = []
+
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        group_hooks = group.get("hooks")
+        if isinstance(group_hooks, list) and any(is_zmux_command(hook) for hook in group_hooks):
+            hooks["UserPromptSubmit"] = groups
+            hooks_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(hooks_path, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, indent=2)
+                handle.write("\\n")
+            return
+
+    groups.append({
+        "hooks": [
+            {
+                "type": "command",
+                "command": command,
+            }
+        ]
+    })
+    hooks["UserPromptSubmit"] = groups
+    hooks_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(hooks_path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\\n")
+
+hook_paths = [home_path / ".codex" / "hooks.json"]
+profiles_path = home_path / ".codex-profiles"
+if profiles_path.is_dir():
+    for profile_path in sorted(profiles_path.iterdir()):
+        if profile_path.is_dir():
+            hook_paths.append(profile_path / "hooks.json")
+
+seen = set()
+for hooks_path in hook_paths:
+    resolved = str(hooks_path)
+    if resolved in seen:
+        continue
+    seen.add(resolved)
+    merge_hook(hooks_path)
+    print(f"codexHooksPath={resolved}")
 `;
 }
 
@@ -4624,7 +4730,6 @@ function syncSessionTitleFromNativeTerminalTitle(
     });
     return;
   }
-
   const decision = getNativeTerminalTitleSessionSyncDecision({
     agentName: terminalState.agentName,
     previousTerminalTitle,
@@ -4775,7 +4880,19 @@ async function processNativeFirstPromptAutoRename(
   }
   const pendingPrompt = persistedState.pendingFirstPromptAutoRenamePrompt?.trim();
   const agentName = persistedState.agentName || terminalState.agentName;
-  const currentTitle = persistedState.title || session.title || terminalState.terminalTitle;
+  /**
+   * CDXC:SessionTitleSync 2026-05-05-04:27
+   * A pending first prompt is stronger than a terminal-auto title. Codex can set
+   * its thread title before the native poller processes the hook state; treating
+   * that terminal-auto title as the current user title makes auto-generation
+   * clear the prompt as stale instead of sending `/rename <generated title>`.
+   */
+  const shouldLetFirstPromptAutoRenameClaimTitle =
+    Boolean(pendingPrompt) &&
+    (session.titleSource === "terminal-auto" || isGenericAgentSessionTitle(agentName, session.title));
+  const currentTitle = shouldLetFirstPromptAutoRenameClaimTitle
+    ? undefined
+    : persistedState.title || session.title || terminalState.terminalTitle;
   const decision = explainFirstPromptAutoRenameDecision({
     agentName,
     /**
@@ -7209,79 +7326,30 @@ function setProjectIcon(projectId: string, iconDataUrl: string | undefined): voi
   publish();
 }
 
-function setProjectConfig(projectId: string, draft: WorkspaceProjectConfigDraft): void {
-  /**
-   * CDXC:WorkspaceTheme 2026-05-05-02:58
-   * Workspace configuration now includes a custom theme color. Persist only a
-   * normalized hex color and let preset themes remain the fallback when the
-   * custom color is empty.
-   *
-   * CDXC:WorkspaceConfig 2026-04-28-01:19
-   * The workspace configure modal saves name, theme, and either a Tabler icon,
-   * an uploaded image, or no icon in one transaction so Cancel never applies a
-   * partial workspace identity change.
-   */
-  const name = draft.name.trim();
-  const icon = normalizeWorkspaceDockIcon(draft.icon);
-  const theme = normalizeWorkspaceDockTheme(draft.theme);
-  const themeColor = normalizeWorkspaceThemeColor(draft.themeColor);
-  projects = projects.map((project) =>
-    project.projectId === projectId
-      ? {
-          ...project,
-          icon,
-          iconDataUrl: icon?.kind === "image" ? icon.dataUrl : undefined,
-          name: name || project.name,
-          theme: theme ?? project.theme,
-          themeColor,
-        }
-      : project,
-  );
-  writeStoredProjects("setProjectConfig");
-  publish();
-}
-
-function openWorkspaceConfigModal(projectId: string): void {
-  /**
-   * CDXC:SidebarMode 2026-05-03-19:19
-   * In Combined mode the workspace dock is hidden, so project configuration
-   * opens from the combined project group's context menu using the same modal
-   * payload as the dock button menu.
-   */
-  const project = projects.find((candidate) => candidate.projectId === projectId);
-  if (!project) {
-    return;
-  }
-  openAppModal({
-    modal: "workspaceConfig",
-    projectConfigDraft: {
-      icon: project.icon ?? normalizeLegacyWorkspaceDockIcon(project),
-      name: project.name,
-      projectId: project.projectId,
-      theme: project.theme,
-      themeColor: project.themeColor,
-    },
-    type: "open",
-  });
-}
-
-function saveWorkspaceConfig(
-  message: Extract<SidebarToExtensionMessage, { type: "saveWorkspaceConfig" }>,
-): void {
-  setProjectConfig(message.projectId, {
-    icon: message.icon,
-    name: message.name,
-    projectId: message.projectId,
-    theme: message.theme,
-    themeColor: message.themeColor,
-  });
-}
-
 function setProjectTheme(projectId: string, theme: SidebarTheme): void {
   projects = projects.map((project) =>
     project.projectId === projectId ? { ...project, theme, themeColor: undefined } : project,
   );
   writeStoredProjects("setProjectTheme");
+  publish();
+}
+
+function setProjectThemeColor(projectId: string, themeColor: string): void {
+  const normalizedColor = normalizeWorkspaceThemeColor(themeColor);
+  if (!normalizedColor) {
+    return;
+  }
+
+  /**
+   * CDXC:WorkspaceTheme 2026-05-05-02:58
+   * The Theme context menu owns custom workspace colors. Applying Custom keeps
+   * the current preset as fallback metadata but writes a validated color that
+   * immediately overrides the dock button and Combined-mode project header.
+   */
+  projects = projects.map((project) =>
+    project.projectId === projectId ? { ...project, themeColor: normalizedColor } : project,
+  );
+  writeStoredProjects("setProjectThemeColor");
   publish();
 }
 
@@ -7696,11 +7764,6 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       );
       publish();
       return;
-    case "openWorkspaceConfigForGroup": {
-      const groupReference = resolveSidebarGroupReference(message.groupId);
-      openWorkspaceConfigModal(groupReference.project.projectId);
-      return;
-    }
     case "copyWorkspaceProjectPathForGroup": {
       const groupReference = resolveSidebarGroupReference(message.groupId);
       /*
@@ -7729,11 +7792,18 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       openNativeWorkspaceInFinder(activeProject().path);
       return;
     case "openActiveWorkspaceProjectInIde":
-      openNativeWorkspaceInSelectedIde(activeProject().path);
+      openNativeWorkspaceInSelectedIde(activeProject().path, message.targetApp);
       return;
     case "setWorkspaceProjectThemeForGroup": {
       const groupReference = resolveSidebarGroupReference(message.groupId);
-      setProjectTheme(groupReference.project.projectId, message.theme);
+      const themeColor = normalizeWorkspaceThemeColor(message.themeColor);
+      if (themeColor) {
+        setProjectThemeColor(groupReference.project.projectId, themeColor);
+        return;
+      }
+      if (message.theme) {
+        setProjectTheme(groupReference.project.projectId, message.theme);
+      }
       return;
     }
     case "closeWorkspaceProjectForGroup": {
@@ -8021,9 +8091,6 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "saveSidebarCommand":
       saveSidebarCommand(message);
-      return;
-    case "saveWorkspaceConfig":
-      saveWorkspaceConfig(message);
       return;
     case "deleteSidebarCommand":
       deleteSidebarCommand(message.commandId);
@@ -8628,8 +8695,8 @@ window.__zmux_NATIVE_WORKSPACE_BAR__ = {
   removeProject,
   reorderProjects,
   setProjectIcon,
-  setProjectConfig,
   setProjectTheme,
+  setProjectThemeColor,
 };
 
 window.__zmux_NATIVE_SETTINGS__ = {
@@ -8658,7 +8725,7 @@ window.__zmux_NATIVE_CLI__ = {
 type WorkspaceDockMenuState = {
   left: number;
   projectId: string;
-  view: "root" | "themes";
+  view: "customTheme" | "root" | "themes";
   top: number;
 };
 
@@ -8714,8 +8781,8 @@ type WorkspaceDockActions = {
   pickWorkspaceIcon: (projectId: string) => void;
   removeProject: (projectId: string) => void;
   reorderProjects: (projectIds: string[]) => void;
-  setProjectConfig: (projectId: string, draft: WorkspaceProjectConfigDraft) => void;
   setProjectTheme: (projectId: string, theme: SidebarTheme) => void;
+  setProjectThemeColor: (projectId: string, themeColor: string) => void;
 };
 
 /**
@@ -8739,6 +8806,8 @@ export function WorkspaceDock({
     sourceProjectId?: string;
   }>({ ghostText: "", isDragging: false, pointerX: 0, pointerY: 0 });
   const [menu, setMenu] = useState<WorkspaceDockMenuState>();
+  const [customThemeColor, setCustomThemeColor] = useState(DEFAULT_WORKSPACE_THEME_COLOR);
+  const [recentThemeColors, setRecentThemeColors] = useState(readWorkspaceThemeColorHistory);
   const dockRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<WorkspaceDockDragState | undefined>(undefined);
   const selectedIdeLabel = getZedOverlayTargetAppLabel(settings.zedOverlayTargetApp);
@@ -8760,8 +8829,8 @@ export function WorkspaceDock({
     pickWorkspaceIcon: (projectId) => postNative({ projectId, type: "pickWorkspaceIcon" }),
     removeProject,
     reorderProjects,
-    setProjectConfig,
     setProjectTheme,
+    setProjectThemeColor,
     ...actions,
   };
 
@@ -8946,31 +9015,6 @@ export function WorkspaceDock({
     });
   };
 
-  const openWorkspaceConfig = (projectId: string) => {
-    /**
-     * CDXC:WorkspaceConfig 2026-04-28-01:19
-     * Workspace icon changes now happen inside a configure modal so Tabler
-     * glyphs, uploaded images, theme, and workspace name share the same Save
-     * and Cancel behavior as the existing Configure Action flow.
-     */
-    const project = state.projects.find((candidate) => candidate.projectId === projectId);
-    if (!project) {
-      return;
-    }
-    openAppModal({
-      modal: "workspaceConfig",
-      projectConfigDraft: {
-        icon: project.icon ?? normalizeLegacyWorkspaceDockIcon(project),
-        name: project.title,
-        projectId: project.projectId,
-        theme: project.theme,
-        themeColor: project.themeColor,
-      },
-      type: "open",
-    });
-    setMenu(undefined);
-  };
-
   /**
    * CDXC:WorkspaceDock 2026-04-27-09:17
    * Workspace theme selection is a submenu, matching the worktree action menu
@@ -8985,8 +9029,35 @@ export function WorkspaceDock({
     setMenu((currentMenu) => (currentMenu ? { ...currentMenu, view: "root" } : currentMenu));
   };
 
+  const openCustomThemeMenu = () => {
+    if (!menu) {
+      return;
+    }
+    const project = state.projects.find((candidate) => candidate.projectId === menu.projectId);
+    setCustomThemeColor(
+      project?.themeColor ?? recentThemeColors[0] ?? DEFAULT_WORKSPACE_THEME_COLOR,
+    );
+    setMenu({ ...menu, view: "customTheme" });
+  };
+
   const chooseTheme = (projectId: string, theme: SidebarTheme) => {
     workspaceActions.setProjectTheme(projectId, theme);
+    setMenu(undefined);
+  };
+
+  const chooseCustomThemeColor = (projectId: string, themeColor: string) => {
+    const normalizedColor = normalizeWorkspaceThemeColor(themeColor);
+    if (!normalizedColor) {
+      return;
+    }
+
+    workspaceActions.setProjectThemeColor(projectId, normalizedColor);
+    const nextRecentThemeColors = updateWorkspaceThemeColorHistory(
+      recentThemeColors,
+      normalizedColor,
+    );
+    setRecentThemeColors(nextRecentThemeColors);
+    writeWorkspaceThemeColorHistory(nextRecentThemeColors);
     setMenu(undefined);
   };
 
@@ -9074,15 +9145,6 @@ export function WorkspaceDock({
             <>
               <button
                 className="session-context-menu-item"
-                onClick={() => openWorkspaceConfig(menu.projectId)}
-                role="menuitem"
-                type="button"
-              >
-                <IconSettings aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Configure
-              </button>
-              <button
-                className="session-context-menu-item"
                 onClick={openThemeMenu}
                 role="menuitem"
                 type="button"
@@ -9144,7 +9206,7 @@ export function WorkspaceDock({
                 Remove
               </button>
             </>
-          ) : (
+          ) : menu.view === "themes" ? (
             <>
               <button
                 className="session-context-menu-item"
@@ -9160,10 +9222,32 @@ export function WorkspaceDock({
                 Back
               </button>
               <div className="session-context-menu-divider" role="separator" />
+              <button
+                className="session-context-menu-item workspace-dock-theme-menu-item"
+                data-selected={String(Boolean(menuProject.themeColor))}
+                onClick={openCustomThemeMenu}
+                role="menuitemradio"
+                type="button"
+              >
+                <span
+                  className="workspace-dock-theme-swatch"
+                  style={getWorkspaceDockThemeSwatchStyle(
+                    menuProject.themeColor ?? recentThemeColors[0] ?? DEFAULT_WORKSPACE_THEME_COLOR,
+                  )}
+                />
+                Custom
+                <IconChevronRight
+                  aria-hidden="true"
+                  className="session-context-menu-trailing-icon"
+                  size={14}
+                />
+              </button>
               {WORKSPACE_DOCK_THEME_OPTIONS.map((theme) => (
                 <button
                   className="session-context-menu-item workspace-dock-theme-menu-item"
-                  data-selected={String((menuProject.theme ?? "dark-blue") === theme.value)}
+                  data-selected={String(
+                    !menuProject.themeColor && (menuProject.theme ?? "dark-blue") === theme.value,
+                  )}
                   key={theme.value}
                   onClick={() => chooseTheme(menu.projectId, theme.value)}
                   role="menuitemradio"
@@ -9176,6 +9260,80 @@ export function WorkspaceDock({
                   {theme.label}
                 </button>
               ))}
+            </>
+          ) : (
+            <>
+              <button
+                className="session-context-menu-item"
+                onClick={openThemeMenu}
+                role="menuitem"
+                type="button"
+              >
+                <IconChevronLeft
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                />
+                Back
+              </button>
+              <div className="session-context-menu-divider" role="separator" />
+              <div className="workspace-theme-custom-picker">
+                {/*
+                 * CDXC:WorkspaceTheme 2026-05-05-02:58
+                 * Custom color selection belongs in the Theme context menu.
+                 * The picker writes a project theme color immediately and also
+                 * records recent validated colors for the palette below.
+                 */}
+                <input
+                  aria-label="Custom workspace theme color"
+                  className="workspace-theme-color-input"
+                  onChange={(event) => {
+                    const normalizedColor = normalizeWorkspaceThemeColor(
+                      event.currentTarget.value,
+                    );
+                    if (normalizedColor) {
+                      setCustomThemeColor(normalizedColor);
+                    }
+                  }}
+                  type="color"
+                  value={customThemeColor}
+                />
+                <input
+                  aria-label="Custom workspace theme color hex"
+                  className="workspace-theme-color-text"
+                  onChange={(event) => {
+                    const normalizedColor = normalizeWorkspaceThemeColor(
+                      event.currentTarget.value,
+                    );
+                    if (normalizedColor) {
+                      setCustomThemeColor(normalizedColor);
+                    }
+                  }}
+                  value={customThemeColor}
+                />
+                <button
+                  aria-label="Apply custom workspace theme color"
+                  className="workspace-theme-color-apply"
+                  onClick={() => chooseCustomThemeColor(menu.projectId, customThemeColor)}
+                  type="button"
+                >
+                  <IconCheck aria-hidden="true" size={14} stroke={2.2} />
+                </button>
+              </div>
+              {recentThemeColors.length > 0 ? (
+                <div className="workspace-theme-color-palette">
+                  {recentThemeColors.map((themeColor) => (
+                    <button
+                      aria-label={`Use ${themeColor}`}
+                      className="workspace-theme-color-palette-button"
+                      key={themeColor}
+                      onClick={() => chooseCustomThemeColor(menu.projectId, themeColor)}
+                      style={getWorkspaceDockThemeSwatchStyle(themeColor)}
+                      type="button"
+                    />
+                  ))}
+                </div>
+              ) : null}
             </>
           )}
         </div>
@@ -9287,17 +9445,19 @@ function getWorkspaceDockThemeStyle(themeColor: string | undefined): CSSProperti
   return {
     "--workspace-dock-button-background": normalizedColor,
     "--workspace-dock-button-border": `color-mix(in srgb, ${normalizedColor} 68%, white 32%)`,
-    "--workspace-dock-button-foreground": getWorkspaceDockThemeForeground(normalizedColor),
+    "--workspace-dock-button-foreground": getWorkspaceThemeForeground(normalizedColor),
   } as CSSProperties;
 }
 
-function getWorkspaceDockThemeForeground(themeColor: string): "#111111" | "#ffffff" {
-  const hex = themeColor.replace("#", "");
-  const red = Number.parseInt(hex.slice(0, 2), 16);
-  const green = Number.parseInt(hex.slice(2, 4), 16);
-  const blue = Number.parseInt(hex.slice(4, 6), 16);
-  const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
-  return luminance > 154 ? "#111111" : "#ffffff";
+function getWorkspaceDockThemeSwatchStyle(themeColor: string | undefined): CSSProperties | undefined {
+  const normalizedColor = normalizeWorkspaceThemeColor(themeColor);
+  if (!normalizedColor) {
+    return undefined;
+  }
+
+  return {
+    "--workspace-dock-button-background": normalizedColor,
+  } as CSSProperties;
 }
 
 function formatWorkspaceDockCount(count: number): string {
