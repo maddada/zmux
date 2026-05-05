@@ -535,10 +535,17 @@ export type SidebarToExtensionMessage =
       type: "openActiveWorkspaceProjectInIde";
     }
   | {
+      /**
+       * CDXC:WorkspaceTheme 2026-05-05-05:01
+       * Preset theme selection must actively clear a previous Custom color.
+       * `themeColor: null` is the sidebar-to-native signal that the custom
+       * override is being removed, so icon and project-header tinting cannot
+       * keep using stale custom CSS variables after a preset is selected.
+       */
       type: "setWorkspaceProjectThemeForGroup";
       groupId: string;
       theme?: SidebarTheme;
-      themeColor?: string;
+      themeColor?: string | null;
     }
   | {
       /**

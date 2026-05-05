@@ -704,6 +704,7 @@ export function SessionGroupSection({
     vscode.postMessage({
       groupId: group.groupId,
       theme,
+      themeColor: null,
       type: "setWorkspaceProjectThemeForGroup",
     });
   };

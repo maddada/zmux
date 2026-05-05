@@ -7328,10 +7328,21 @@ function setProjectIcon(projectId: string, iconDataUrl: string | undefined): voi
 
 function setProjectTheme(projectId: string, theme: SidebarTheme): void {
   projects = projects.map((project) =>
-    project.projectId === projectId ? { ...project, theme, themeColor: undefined } : project,
+    project.projectId === projectId ? removeProjectCustomThemeColor(project, theme) : project,
   );
   writeStoredProjects("setProjectTheme");
   publish();
+}
+
+/**
+ * CDXC:WorkspaceTheme 2026-05-05-05:01
+ * Choosing a preset theme is not a Custom theme update. Remove the persisted
+ * custom color field instead of leaving an undefined marker so every renderer
+ * falls back to preset icon, sidebar, and project-header colors immediately.
+ */
+function removeProjectCustomThemeColor(project: NativeProject, theme: SidebarTheme): NativeProject {
+  const { themeColor: _removedThemeColor, ...projectWithoutCustomTheme } = project;
+  return { ...projectWithoutCustomTheme, theme };
 }
 
 function setProjectThemeColor(projectId: string, themeColor: string): void {
