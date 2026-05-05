@@ -10,20 +10,51 @@ describe("getGhosttyTerminalConfigValues", () => {
         terminalFontFamily: "JetBrains Mono",
         terminalFontSize: 13,
         terminalFontWeight: 650,
+        terminalClipboardPasteProtection: false,
+        terminalClipboardTrimTrailingSpaces: false,
+        terminalConfirmCloseSurface: "always",
+        terminalCopyOnSelect: "clipboard",
+        terminalCursorStyleBlink: false,
+        terminalGhosttyTheme: "GitHub Dark Default",
         terminalLetterSpacing: 0.5,
         terminalLineHeight: 1.1,
+        terminalMouseHideWhileTyping: true,
         terminalMouseScrollMultiplierDiscrete: 4,
         terminalMouseScrollMultiplierPrecision: 0.75,
+        terminalScrollbackLimitMb: 25,
+        terminalScrollbar: "never",
       }),
     ).toEqual({
       adjustCellHeightPercent: 0.10000000000000009,
       adjustCellWidth: 0.5,
+      clipboardPasteProtection: false,
+      clipboardTrimTrailingSpaces: false,
+      confirmCloseSurface: "always",
+      copyOnSelect: "clipboard",
+      cursorStyleBlink: false,
       fontFamily: "JetBrains Mono",
       fontSize: 13,
-      fontThicken: true,
-      fontThickenStrength: 128,
+      fontVariationWeight: 650,
+      ghosttyTheme: "GitHub Dark Default",
+      mouseHideWhileTyping: true,
       mouseScrollMultiplierDiscrete: 4,
       mouseScrollMultiplierPrecision: 0.75,
+      scrollbackLimitBytes: 25000000,
+      scrollbar: "never",
     });
+  });
+
+  test("leaves Ghostty font weight unmanaged at the default slider value", () => {
+    /**
+     * CDXC:TerminalTypographySettings 2026-04-29-09:32
+     * A 400 weight is the UI's normal-weight default, so zmux does not write a
+     * font-variation wght value unless the user moves the slider away from it.
+     */
+    expect(
+      getGhosttyTerminalConfigValues({
+        ...DEFAULT_zmux_SETTINGS,
+        terminalFontWeight: 400,
+      }).fontVariationWeight,
+    ).toBeNull();
   });
 });

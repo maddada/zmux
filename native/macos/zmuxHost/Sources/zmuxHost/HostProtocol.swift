@@ -233,11 +233,19 @@ struct SyncGhosttyTerminalSettings: Decodable {
   let adjustCellWidth: Double
   let fontFamily: String
   let fontSize: Double
-  let fontThicken: Bool
-  let fontThickenStrength: Int
+  let fontVariationWeight: Int?
+  let clipboardPasteProtection: Bool
+  let clipboardTrimTrailingSpaces: Bool
+  let confirmCloseSurface: String
+  let copyOnSelect: String
+  let cursorStyleBlink: Bool
+  let ghosttyTheme: String
+  let mouseHideWhileTyping: Bool
   let mouseScrollMultiplierDiscrete: Double
   let mouseScrollMultiplierPrecision: Double
   let reloadImmediately: Bool?
+  let scrollbackLimitBytes: Int
+  let scrollbar: String
 }
 
 struct OpenExternalUrl: Decodable {

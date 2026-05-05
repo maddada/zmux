@@ -24,7 +24,6 @@ import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { COMPLETION_SOUND_OPTIONS, type CompletionSoundSetting } from "../shared/completion-sound";
-import { TERMINAL_FONT_PRESETS, type TerminalFontPreset } from "../shared/terminal-font-preset";
 import {
   resolveSidebarTheme,
   type SidebarTheme,
@@ -33,15 +32,23 @@ import {
 } from "../shared/session-grid-contract";
 import {
   DEFAULT_zmux_SETTINGS,
+  GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS,
+  GHOSTTY_COPY_ON_SELECT_OPTIONS,
+  GHOSTTY_SCROLLBAR_OPTIONS,
+  GHOSTTY_THEME_SETTING_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   ZED_OVERLAY_TARGET_APP_OPTIONS,
   normalizezmuxSettings,
+  type GhosttyConfirmCloseSurface,
+  type GhosttyCopyOnSelect,
+  type GhosttyScrollbar,
   type TerminalCursorStyle,
   type ZedOverlayTargetApp,
   type zmuxSettings,
 } from "../shared/zmux-settings";
 
 const NUMERIC_SETTINGS_DEBOUNCE_MS = 180;
+const GHOSTTY_THEME_UNMANAGED_VALUE = "__zmux_ghostty_theme_unmanaged__";
 
 export type SettingsModalProps = {
   accessibilityPermissionGranted?: boolean;
@@ -262,13 +269,24 @@ export function SettingsModal({
                 windows may still need Cmd+Shift+, to reload.
               </div>
               <SelectField
-                description="Pick the terminal typeface."
+                contentClassName="max-h-80"
+                description="Choose a bundled Ghostty theme, or leave your existing Ghostty config in charge."
+                label="Theme"
+                onChange={(value) =>
+                  updateDraft(
+                    "terminalGhosttyTheme",
+                    value === GHOSTTY_THEME_UNMANAGED_VALUE ? "" : value,
+                  )
+                }
+                options={GHOSTTY_THEME_SETTING_OPTIONS}
+                showScrollButtons={false}
+                value={draft.terminalGhosttyTheme || GHOSTTY_THEME_UNMANAGED_VALUE}
+              />
+              <TextField
+                description="Type a Ghostty font-family name. Leave blank to use existing Ghostty config or Ghostty's platform default."
                 label="Font Family"
-                onChange={(value) => updateDraft("terminalFontFamily", value as TerminalFontPreset)}
-                options={TERMINAL_FONT_PRESETS.map((preset) => ({
-                  label: preset.preset,
-                  value: preset.preset,
-                }))}
+                onChange={(value) => updateDraft("terminalFontFamily", value)}
+                placeholder="Ghostty default"
                 value={draft.terminalFontFamily}
               />
               <SliderNumberField
@@ -278,7 +296,7 @@ export function SettingsModal({
                 min={8}
                 onCommit={(value) => updateDraft("terminalFontSize", value)}
                 onChange={(value) => updateDraftDebounced("terminalFontSize", value)}
-                step={1}
+                step={0.5}
                 value={draft.terminalFontSize}
               />
               <SliderNumberField
@@ -298,7 +316,7 @@ export function SettingsModal({
                 min={0.8}
                 onCommit={(value) => updateDraft("terminalLineHeight", value)}
                 onChange={(value) => updateDraftDebounced("terminalLineHeight", value)}
-                step={0.05}
+                step={0.1}
                 value={draft.terminalLineHeight}
               />
               <SliderNumberField
@@ -323,6 +341,74 @@ export function SettingsModal({
                   { label: "Underline", value: "underline" },
                 ]}
                 value={draft.terminalCursorStyle}
+              />
+              <ToggleField
+                checked={draft.terminalCursorStyleBlink}
+                description="Blink the terminal cursor."
+                label="Cursor blink"
+                onChange={(checked) => updateDraft("terminalCursorStyleBlink", checked)}
+              />
+            </SettingsSection>
+
+            <SettingsSection title="Terminal Behavior">
+              {/* CDXC:TerminalBehaviorSettings 2026-04-29-09:32: Expose the
+                  Ghostty settings users commonly tune: scrollback memory,
+                  copy-on-select, close confirmation, clipboard safety,
+                  pointer hiding, and native scrollbar visibility. These
+                  controls write documented Ghostty config keys instead of
+                  intercepting terminal behavior inside zmux. */}
+              <SliderNumberField
+                description="Scrollback memory per terminal surface. Ghostty default is 10 MB and changes affect new terminals."
+                label="Scrollback limit"
+                max={200}
+                min={1}
+                onCommit={(value) => updateDraft("terminalScrollbackLimitMb", value)}
+                onChange={(value) => updateDraftDebounced("terminalScrollbackLimitMb", value)}
+                step={1}
+                value={draft.terminalScrollbackLimitMb}
+              />
+              <SelectField
+                description="Copy selected terminal text automatically."
+                label="Copy on select"
+                onChange={(value) =>
+                  updateDraft("terminalCopyOnSelect", value as GhosttyCopyOnSelect)
+                }
+                options={GHOSTTY_COPY_ON_SELECT_OPTIONS}
+                value={draft.terminalCopyOnSelect}
+              />
+              <SelectField
+                description="Confirm before closing terminal surfaces."
+                label="Confirm close"
+                onChange={(value) =>
+                  updateDraft("terminalConfirmCloseSurface", value as GhosttyConfirmCloseSurface)
+                }
+                options={GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS}
+                value={draft.terminalConfirmCloseSurface}
+              />
+              <ToggleField
+                checked={draft.terminalClipboardTrimTrailingSpaces}
+                description="Trim trailing whitespace when copying terminal text."
+                label="Trim trailing spaces on copy"
+                onChange={(checked) => updateDraft("terminalClipboardTrimTrailingSpaces", checked)}
+              />
+              <ToggleField
+                checked={draft.terminalClipboardPasteProtection}
+                description="Ask before pasting text Ghostty considers unsafe."
+                label="Paste protection"
+                onChange={(checked) => updateDraft("terminalClipboardPasteProtection", checked)}
+              />
+              <ToggleField
+                checked={draft.terminalMouseHideWhileTyping}
+                description="Hide the pointer while typing in the terminal."
+                label="Hide mouse while typing"
+                onChange={(checked) => updateDraft("terminalMouseHideWhileTyping", checked)}
+              />
+              <SelectField
+                description="Control whether Ghostty shows its native scrollback scrollbar."
+                label="Scrollbar"
+                onChange={(value) => updateDraft("terminalScrollbar", value as GhosttyScrollbar)}
+                options={GHOSTTY_SCROLLBAR_OPTIONS}
+                value={draft.terminalScrollbar}
               />
             </SettingsSection>
 
@@ -691,11 +777,13 @@ function TextField({
   description,
   label,
   onChange,
+  placeholder,
   value,
 }: {
   description?: string;
   label: string;
   onChange: (value: string) => void;
+  placeholder?: string;
   value: string;
 }) {
   const id = useId();
@@ -705,6 +793,7 @@ function TextField({
         id={id}
         className="h-10 px-3 text-sm"
         onChange={(event) => onChange(event.currentTarget.value)}
+        placeholder={placeholder}
         value={value}
       />
     </SettingRow>

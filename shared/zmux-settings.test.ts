@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   DEFAULT_zmux_SETTINGS,
+  GHOSTTY_THEME_SETTING_OPTIONS,
   normalizezmuxSettings,
   ZED_OVERLAY_TARGET_APP_OPTIONS,
 } from "./zmux-settings";
@@ -64,6 +65,130 @@ describe("normalizezmuxSettings", () => {
     ).toMatchObject({
       terminalMouseScrollMultiplierDiscrete: 8,
       terminalMouseScrollMultiplierPrecision: 0.25,
+    });
+  });
+
+  test("keeps common Ghostty terminal behavior settings", () => {
+    /**
+     * CDXC:TerminalBehaviorSettings 2026-04-29-09:32
+     * The settings modal owns common Ghostty behavior controls and writes the
+     * documented enum/range values into the shared Ghostty config.
+     */
+    expect(normalizezmuxSettings({})).toMatchObject({
+      terminalClipboardPasteProtection: true,
+      terminalClipboardTrimTrailingSpaces: true,
+      terminalConfirmCloseSurface: "true",
+      terminalCopyOnSelect: "true",
+      terminalCursorStyleBlink: true,
+      terminalMouseHideWhileTyping: false,
+      terminalScrollbackLimitMb: 10,
+      terminalScrollbar: "system",
+    });
+    expect(
+      normalizezmuxSettings({
+        terminalClipboardPasteProtection: false,
+        terminalClipboardTrimTrailingSpaces: false,
+        terminalConfirmCloseSurface: "always",
+        terminalCopyOnSelect: "clipboard",
+        terminalCursorStyleBlink: false,
+        terminalMouseHideWhileTyping: true,
+        terminalScrollbackLimitMb: 25,
+        terminalScrollbar: "never",
+      }),
+    ).toMatchObject({
+      terminalClipboardPasteProtection: false,
+      terminalClipboardTrimTrailingSpaces: false,
+      terminalConfirmCloseSurface: "always",
+      terminalCopyOnSelect: "clipboard",
+      terminalCursorStyleBlink: false,
+      terminalMouseHideWhileTyping: true,
+      terminalScrollbackLimitMb: 25,
+      terminalScrollbar: "never",
+    });
+    expect(
+      normalizezmuxSettings({
+        terminalConfirmCloseSurface: "ask-me",
+        terminalCopyOnSelect: "system",
+        terminalScrollbackLimitMb: 1000,
+        terminalScrollbar: "always",
+      }),
+    ).toMatchObject({
+      terminalConfirmCloseSurface: "true",
+      terminalCopyOnSelect: "true",
+      terminalScrollbackLimitMb: 200,
+      terminalScrollbar: "system",
+    });
+  });
+
+  test("keeps Ghostty typography settings in documented practical ranges", () => {
+    /**
+     * CDXC:TerminalTypographySettings 2026-04-29-09:32
+     * Typography settings default to Ghostty's macOS defaults where possible:
+     * font family is unmanaged, font size is 13pt, no thickening is requested,
+     * and cell metric adjustments start at zero.
+     */
+    expect(normalizezmuxSettings({})).toMatchObject({
+      terminalFontFamily: "",
+      terminalFontSize: 13,
+      terminalFontWeight: 400,
+      terminalLetterSpacing: 0,
+      terminalLineHeight: 1,
+    });
+    expect(
+      normalizezmuxSettings({
+        terminalFontFamily: "Hack",
+        terminalFontSize: 13.5,
+        terminalFontWeight: 650,
+        terminalLetterSpacing: 0.6,
+        terminalLineHeight: 1.3,
+      }),
+    ).toMatchObject({
+      terminalFontFamily: "Hack",
+      terminalFontSize: 13.5,
+      terminalFontWeight: 650,
+      terminalLetterSpacing: 0.6,
+      terminalLineHeight: 1.3,
+    });
+    expect(
+      normalizezmuxSettings({
+        terminalFontFamily: "Cross Platform Mono",
+        terminalFontSize: 512,
+        terminalFontWeight: 10,
+        terminalLetterSpacing: 99,
+        terminalLineHeight: -1,
+      }),
+    ).toMatchObject({
+      terminalFontFamily: "Consolas",
+      terminalFontSize: 32,
+      terminalFontWeight: 100,
+      terminalLetterSpacing: 8,
+      terminalLineHeight: 0.8,
+    });
+  });
+
+  test("keeps bundled Ghostty theme settings", () => {
+    /**
+     * CDXC:TerminalThemeSettings 2026-04-29-09:32
+     * Ghostty theme names are exact strings from the bundled theme list. The
+     * empty value means zmux should leave the user's Ghostty theme unmanaged.
+     */
+    expect(GHOSTTY_THEME_SETTING_OPTIONS).toContainEqual({
+      label: "Use existing Ghostty config",
+      value: "__zmux_ghostty_theme_unmanaged__",
+    });
+    expect(GHOSTTY_THEME_SETTING_OPTIONS).toContainEqual({
+      label: "GitHub Dark Default",
+      value: "GitHub Dark Default",
+    });
+    expect(
+      normalizezmuxSettings({
+        terminalGhosttyTheme: "GitHub Dark Default",
+      }),
+    ).toMatchObject({
+      terminalGhosttyTheme: "GitHub Dark Default",
+    });
+    expect(normalizezmuxSettings({ terminalGhosttyTheme: "Not A Bundled Theme" })).toMatchObject({
+      terminalGhosttyTheme: "",
     });
   });
 

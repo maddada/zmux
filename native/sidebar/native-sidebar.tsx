@@ -201,11 +201,19 @@ type NativeHostCommand =
       adjustCellWidth: number;
       fontFamily: string;
       fontSize: number;
-      fontThicken: boolean;
-      fontThickenStrength: number;
+      fontVariationWeight: number | null;
+      clipboardPasteProtection: boolean;
+      clipboardTrimTrailingSpaces: boolean;
+      confirmCloseSurface: string;
+      copyOnSelect: string;
+      cursorStyleBlink: boolean;
+      ghosttyTheme: string;
+      mouseHideWhileTyping: boolean;
       mouseScrollMultiplierDiscrete: number;
       mouseScrollMultiplierPrecision: number;
       reloadImmediately?: boolean;
+      scrollbackLimitBytes: number;
+      scrollbar: string;
       type: "syncGhosttyTerminalSettings";
     }
   | { type: "openExternalUrl"; url: string }
@@ -1074,6 +1082,10 @@ function syncGhosttyTerminalSettings(
    * Scroll multipliers must be testable as soon as the slider settles. Reload
    * Ghostty immediately for scroll-only changes instead of waiting for the
    * delayed font-metric reload path used during typography drags.
+   *
+   * CDXC:TerminalBehaviorSettings 2026-04-29-09:32
+   * Theme and interaction controls should also reload immediately because they
+   * do not require the delayed font metric rebuild path.
    */
   postNative({
     ...getGhosttyTerminalConfigValues(nextSettings),
@@ -1082,7 +1094,18 @@ function syncGhosttyTerminalSettings(
       (previousSettings.terminalMouseScrollMultiplierDiscrete !==
         nextSettings.terminalMouseScrollMultiplierDiscrete ||
         previousSettings.terminalMouseScrollMultiplierPrecision !==
-          nextSettings.terminalMouseScrollMultiplierPrecision),
+          nextSettings.terminalMouseScrollMultiplierPrecision ||
+        previousSettings.terminalGhosttyTheme !== nextSettings.terminalGhosttyTheme ||
+        previousSettings.terminalCursorStyleBlink !== nextSettings.terminalCursorStyleBlink ||
+        previousSettings.terminalCopyOnSelect !== nextSettings.terminalCopyOnSelect ||
+        previousSettings.terminalConfirmCloseSurface !== nextSettings.terminalConfirmCloseSurface ||
+        previousSettings.terminalClipboardTrimTrailingSpaces !==
+          nextSettings.terminalClipboardTrimTrailingSpaces ||
+        previousSettings.terminalClipboardPasteProtection !==
+          nextSettings.terminalClipboardPasteProtection ||
+        previousSettings.terminalMouseHideWhileTyping !==
+          nextSettings.terminalMouseHideWhileTyping ||
+        previousSettings.terminalScrollbar !== nextSettings.terminalScrollbar),
     type: "syncGhosttyTerminalSettings",
   });
 }
