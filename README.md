@@ -1,4 +1,4 @@
-# ZMUX - The IDE Integrated Agents Manager
+# ZMUX - Native Ghostty Fork with an IDE Integrated Agents Manager
 
 <img width="1295" height="953" alt="image" src="https://github.com/user-attachments/assets/7ed8791d-eae2-4951-a417-27f4b217eb9e" />
 
@@ -14,6 +14,12 @@ brew install --cask maddada/tap/zmux
 - Auto sync of the terminal title and status with UI.
 - Show status indicators for running/done.
 - Allows up to 3x3 split and multiple groups per project each with different split
+
+## Combined Mode (default, all projects in 1 sidebar):
+
+<img width="3456" height="2234" alt="2026-05-06_zmux_01-50-19@2x" src="https://github.com/user-attachments/assets/4e9b06f4-a1d8-4f43-b77e-95c32f7ab566" />
+
+## Separated Mode (each workspace is separate tab):
 
 <img width="600" src="https://github.com/user-attachments/assets/61d2cdf4-dcaf-409a-a292-477e0f78baf5" />
 
