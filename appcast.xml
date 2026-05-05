@@ -5,6 +5,17 @@
         <link>https://github.com/maddada/zmux/releases</link>
         <description>Sparkle appcast for zmux macOS releases.</description>
         <item>
+            <title>1.4.6</title>
+            <pubDate>Tue, 05 May 2026 05:08:20 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/zmux/releases/tag/v1.4.6</sparkle:fullReleaseNotesLink>
+            <sparkle:version>10406</sparkle:version>
+            <sparkle:shortVersionString>1.4.6</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <sparkle:releaseNotesLink sparkle:edSignature="o23Dgl5s0axjcVQSAs79vAaf4okZAL3Of01+VVdcGu4nQJrLoGktO7a+QIlVDeO6i5aIV0u7rqVUY5iSsPAsCA==" sparkle:length="89">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.6.md</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/maddada/zmux/releases/download/v1.4.6/zmux-1.4.6.dmg" length="24174355" type="application/octet-stream" sparkle:edSignature="KBi0vGoiOAknwG0gTt/F268/5wlPiL3qiO60TPbXnVUMUR0XC2OGarqSfPuQkBXwcI7rrO5XYQSl7lQKujQqCw=="/>
+        </item>
+        <item>
             <title>1.4.5</title>
             <pubDate>Tue, 05 May 2026 02:24:41 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/zmux/releases/tag/v1.4.5</sparkle:fullReleaseNotesLink>
@@ -62,6 +73,6 @@
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: obNAUktCn5jkcsDvy5aW0umA6Frg7LpNPQC/e6MmyB2F23Eb4rxugyEgpOFdrfpIlrB+UwXY0NL1zqHc5B60DQ==
-length: 5671
+edSignature: dbIYh2V5tmrk5QnTGYz0nXyju4cVH+VaHh8HGJqmoreE8yHtjh9Z3ZSfSFuAilZmUSGwsBupYxcRCXpsJlO+Dw==
+length: 6734
 -->
