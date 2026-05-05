@@ -17,6 +17,7 @@ import { createPortal } from "react-dom";
 import {
   forwardRef,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -26,7 +27,7 @@ import {
 import { useShallow } from "zustand/react/shallow";
 import type { SidebarAgentButton } from "../shared/sidebar-agents";
 import type { SidebarCommandButton } from "../shared/sidebar-commands";
-import { DEFAULT_zmux_SETTINGS, getZedOverlayTargetAppLabel } from "../shared/zmux-settings";
+import { getZedOverlayTargetAppLabel, type ZedOverlayTargetApp } from "../shared/zmux-settings";
 import { AGENT_LOGOS } from "./agent-logos";
 import { getSidebarButtonGridColumnCount } from "./button-grid";
 import { SidebarCommandIconGlyph } from "./sidebar-command-icon";
@@ -45,9 +46,19 @@ const CONTEXT_MENU_HEIGHT_PX = 166;
 const QUICK_ACTION_MENU_MARGIN_PX = 12;
 const QUICK_ACTION_MENU_WIDTH_PX = 220;
 const REORDER_SYNC_TIMEOUT_MS = 3_000;
-const PRIMARY_AGENT_STORAGE_KEY = "zmux-sidebar-primary-agent";
 const PRIMARY_COMMAND_STORAGE_KEY = "zmux-sidebar-primary-command";
 const PRIMARY_OPEN_IN_STORAGE_KEY = "zmux-sidebar-primary-open-in";
+
+type OpenInQuickActionTarget = "finder" | Extract<ZedOverlayTargetApp, "vscode" | "zed">;
+
+const OPEN_IN_QUICK_ACTIONS: ReadonlyArray<{
+  label: string;
+  target: OpenInQuickActionTarget;
+}> = [
+  { label: "Finder", target: "finder" },
+  { label: getZedOverlayTargetAppLabel("vscode"), target: "vscode" },
+  { label: getZedOverlayTargetAppLabel("zed"), target: "zed" },
+];
 
 type AgentsPanelProps = {
   createRequestId: number;
@@ -68,7 +79,7 @@ type AgentMenuState = {
   position: ContextMenuPosition;
 };
 
-type QuickActionMenuKind = "agent" | "command" | "openIn";
+type QuickActionMenuKind = "command" | "openIn";
 
 type QuickActionMenuState = {
   kind: QuickActionMenuKind;
@@ -140,26 +151,21 @@ export function AgentsPanel({
   titlebarActions,
   vscode,
 }: AgentsPanelProps) {
-  const { agents, commands, pendingAgentIds, selectedIdeTarget } = useSidebarStore(
+  const { agents, commands, pendingAgentIds } = useSidebarStore(
     useShallow((state) => ({
       agents: state.hud.agents,
       commands: state.hud.commands,
       pendingAgentIds: state.hud.pendingAgentIds,
-      selectedIdeTarget:
-        state.hud.settings?.zedOverlayTargetApp ?? DEFAULT_zmux_SETTINGS.zedOverlayTargetApp,
     })),
   );
   const latestAgentOrderSyncResult = useSidebarStore((state) => state.latestAgentOrderSyncResult);
   const [contextMenu, setContextMenu] = useState<AgentMenuState>();
   const [quickActionMenu, setQuickActionMenu] = useState<QuickActionMenuState>();
-  const [primaryAgentId, setPrimaryAgentId] = useState(
-    () => localStorage.getItem(PRIMARY_AGENT_STORAGE_KEY)?.trim() || undefined,
-  );
   const [primaryCommandId, setPrimaryCommandId] = useState(
     () => localStorage.getItem(PRIMARY_COMMAND_STORAGE_KEY)?.trim() || undefined,
   );
-  const [primaryOpenInTarget, setPrimaryOpenInTarget] = useState<"finder" | "ide">(() =>
-    localStorage.getItem(PRIMARY_OPEN_IN_STORAGE_KEY)?.trim() === "finder" ? "finder" : "ide",
+  const [primaryOpenInTarget, setPrimaryOpenInTarget] = useState<OpenInQuickActionTarget>(() =>
+    normalizeOpenInQuickActionTarget(localStorage.getItem(PRIMARY_OPEN_IN_STORAGE_KEY)),
   );
   const [draftAgentIds, setDraftAgentIds] = useState<string[] | undefined>();
   const gridRef = useRef<HTMLDivElement>(null);
@@ -331,21 +337,15 @@ export function AgentsPanel({
   const gridColumnCount = getSidebarButtonGridColumnCount(orderedAgents.length);
   const shouldShowEmptyState = orderedAgents.length === 0;
   const runnableCommands = commands.filter(isRunnableSidebarCommand);
-  const primaryAgent = resolvePrimaryAgent(orderedAgents, primaryAgentId);
   const primaryCommand = resolvePrimaryCommand(runnableCommands, primaryCommandId);
-  const selectedIdeLabel = getZedOverlayTargetAppLabel(selectedIdeTarget);
-
-  const persistPrimaryAgent = (agentId: string) => {
-    setPrimaryAgentId(agentId);
-    localStorage.setItem(PRIMARY_AGENT_STORAGE_KEY, agentId);
-  };
+  const primaryOpenInLabel = getOpenInQuickActionLabel(primaryOpenInTarget);
 
   const persistPrimaryCommand = (commandId: string) => {
     setPrimaryCommandId(commandId);
     localStorage.setItem(PRIMARY_COMMAND_STORAGE_KEY, commandId);
   };
 
-  const persistPrimaryOpenIn = (target: "finder" | "ide") => {
+  const persistPrimaryOpenIn = (target: OpenInQuickActionTarget) => {
     setPrimaryOpenInTarget(target);
     localStorage.setItem(PRIMARY_OPEN_IN_STORAGE_KEY, target);
   };
@@ -355,7 +355,6 @@ export function AgentsPanel({
       openCreateAgentEditor();
       return;
     }
-    persistPrimaryAgent(agent.agentId);
     if (!agent.command) {
       openAgentEditor(agent);
       return;
@@ -378,11 +377,29 @@ export function AgentsPanel({
     });
   };
 
-  const runOpenIn = (target: "finder" | "ide") => {
-    persistPrimaryOpenIn(target);
+  const removeCommand = (command: SidebarCommandButton) => {
+    if (primaryCommandId === command.commandId) {
+      setPrimaryCommandId(undefined);
+      localStorage.removeItem(PRIMARY_COMMAND_STORAGE_KEY);
+    }
     vscode.postMessage({
-      type:
-        target === "finder" ? "openActiveWorkspaceProjectInFinder" : "openActiveWorkspaceProjectInIde",
+      commandId: command.commandId,
+      type: "deleteSidebarCommand",
+    });
+  };
+
+  const runOpenIn = (target: OpenInQuickActionTarget) => {
+    persistPrimaryOpenIn(target);
+    if (target === "finder") {
+      vscode.postMessage({
+        type: "openActiveWorkspaceProjectInFinder",
+      });
+      return;
+    }
+
+    vscode.postMessage({
+      targetApp: target,
+      type: "openActiveWorkspaceProjectInIde",
     });
   };
 
@@ -590,19 +607,12 @@ export function AgentsPanel({
               {/*
                * CDXC:SidebarActions 2026-05-05-02:47
                * Agents moved from a standalone "Agents" title to an Actions
-               * surface with three React-owned split dropdowns: agent, project
-               * action, and Open In. Selecting a dropdown option immediately
-               * runs it and promotes it to the primary left-side action.
+               * surface. The agent grid stays intact below the React-owned
+               * dropdowns for project Actions and Open In. Selecting a dropdown
+               * option immediately runs it and promotes it to the primary
+               * left-side action.
                */}
               <div className="quick-actions-row" data-empty-space-blocking="true">
-                <QuickActionSplitButton
-                  ariaLabel={primaryAgent ? `Launch ${primaryAgent.name}` : "Choose agent"}
-                  icon={<AgentQuickActionIcon agent={primaryAgent} />}
-                  menuLabel="Choose agent"
-                  onPrimaryClick={() => runAgent(primaryAgent)}
-                  onToggleClick={(event) => openQuickActionMenu("agent", event)}
-                  title={primaryAgent?.name ?? "Agent"}
-                />
                 <QuickActionSplitButton
                   ariaLabel={
                     primaryCommand ? `Run ${quickCommandLabel(primaryCommand)}` : "Choose action"
@@ -614,18 +624,12 @@ export function AgentsPanel({
                   title={primaryCommand ? quickCommandLabel(primaryCommand) : "Action"}
                 />
                 <QuickActionSplitButton
-                  ariaLabel={`Open in ${primaryOpenInTarget === "finder" ? "Finder" : selectedIdeLabel}`}
-                  icon={
-                    primaryOpenInTarget === "finder" ? (
-                      <IconFolderOpen aria-hidden="true" size={18} stroke={1.8} />
-                    ) : (
-                      <IconCodeDots aria-hidden="true" size={18} stroke={1.8} />
-                    )
-                  }
+                  ariaLabel={`Open in ${primaryOpenInLabel}`}
+                  icon={<OpenInQuickActionIcon target={primaryOpenInTarget} />}
                   menuLabel="Choose open target"
                   onPrimaryClick={() => runOpenIn(primaryOpenInTarget)}
                   onToggleClick={(event) => openQuickActionMenu("openIn", event)}
-                  title={primaryOpenInTarget === "finder" ? "Finder" : selectedIdeLabel}
+                  title={primaryOpenInLabel}
                 />
               </div>
               {shouldShowEmptyState ? (
@@ -747,34 +751,27 @@ export function AgentsPanel({
       {quickActionMenu
         ? createPortal(
             <QuickActionMenu
-              agents={orderedAgents}
               commands={runnableCommands}
               menu={quickActionMenu}
-              onAddAgent={() => {
-                setQuickActionMenu(undefined);
-                openCreateAgentEditor();
-              }}
               onAddCommand={() => {
                 setQuickActionMenu(undefined);
                 openCreateCommandEditor();
-              }}
-              onRunAgent={(agent) => {
-                setQuickActionMenu(undefined);
-                runAgent(agent);
               }}
               onRunCommand={(command) => {
                 setQuickActionMenu(undefined);
                 runCommand(command);
               }}
+              onRemoveCommand={(command) => {
+                setQuickActionMenu(undefined);
+                removeCommand(command);
+              }}
               onRunOpenIn={(target) => {
                 setQuickActionMenu(undefined);
                 runOpenIn(target);
               }}
-              primaryAgentId={primaryAgent?.agentId}
               primaryCommandId={primaryCommand?.commandId}
               primaryOpenInTarget={primaryOpenInTarget}
               ref={menuRef}
-              selectedIdeLabel={selectedIdeLabel}
             />,
             document.body,
           )
@@ -825,34 +822,26 @@ function QuickActionSplitButton({
 }
 
 type QuickActionMenuProps = {
-  agents: readonly SidebarAgentButton[];
   commands: readonly SidebarCommandButton[];
   menu: QuickActionMenuState;
-  onAddAgent: () => void;
   onAddCommand: () => void;
-  onRunAgent: (agent: SidebarAgentButton) => void;
+  onRemoveCommand: (command: SidebarCommandButton) => void;
   onRunCommand: (command: SidebarCommandButton) => void;
-  onRunOpenIn: (target: "finder" | "ide") => void;
-  primaryAgentId: string | undefined;
+  onRunOpenIn: (target: OpenInQuickActionTarget) => void;
   primaryCommandId: string | undefined;
-  primaryOpenInTarget: "finder" | "ide";
-  selectedIdeLabel: string;
+  primaryOpenInTarget: OpenInQuickActionTarget;
 };
 
 const QuickActionMenu = forwardRef<HTMLDivElement, QuickActionMenuProps>(function QuickActionMenu(
   {
-    agents,
     commands,
     menu,
-    onAddAgent,
     onAddCommand,
-    onRunAgent,
+    onRemoveCommand,
     onRunCommand,
     onRunOpenIn,
-    primaryAgentId,
     primaryCommandId,
     primaryOpenInTarget,
-    selectedIdeLabel,
   },
   ref,
 ) {
@@ -872,74 +861,105 @@ const QuickActionMenu = forwardRef<HTMLDivElement, QuickActionMenuProps>(functio
         width: `${QUICK_ACTION_MENU_WIDTH_PX}px`,
       }}
     >
-      {menu.kind === "agent" ? (
-        <>
-          <div className="quick-action-menu-label">agents</div>
-          {agents.length > 0 ? (
-            agents.map((agent) => (
-              <QuickActionMenuItem
-                icon={<AgentQuickActionIcon agent={agent} />}
-                isSelected={agent.agentId === primaryAgentId}
-                key={agent.agentId}
-                label={agent.name}
-                onClick={() => onRunAgent(agent)}
-              />
-            ))
-          ) : (
-            <div className="quick-action-menu-empty">No agents configured</div>
-          )}
-          <div className="quick-action-menu-divider" role="separator" />
-          <QuickActionMenuItem
-            icon={<IconPlus aria-hidden="true" size={18} stroke={1.8} />}
-            label="Add agent"
-            onClick={onAddAgent}
-          />
-        </>
-      ) : null}
       {menu.kind === "command" ? (
         <>
-          <div className="quick-action-menu-label">actions</div>
+          <div className="quick-action-menu-label">Actions</div>
           {commands.length > 0 ? (
             commands.map((command) => (
-              <QuickActionMenuItem
-                icon={<CommandQuickActionIcon command={command} />}
+              <QuickActionCommandMenuItem
+                command={command}
                 isSelected={command.commandId === primaryCommandId}
                 key={command.commandId}
-                label={quickCommandLabel(command)}
-                onClick={() => onRunCommand(command)}
+                onRemove={() => onRemoveCommand(command)}
+                onRun={() => onRunCommand(command)}
               />
             ))
           ) : (
-            <div className="quick-action-menu-empty">No actions configured</div>
+            <div className="quick-action-menu-empty">No Actions configured</div>
           )}
           <div className="quick-action-menu-divider" role="separator" />
           <QuickActionMenuItem
             icon={<IconPlus aria-hidden="true" size={18} stroke={1.8} />}
-            label="Add action"
+            label="Add Action"
             onClick={onAddCommand}
           />
         </>
       ) : null}
       {menu.kind === "openIn" ? (
         <>
-          <div className="quick-action-menu-label">open in</div>
-          <QuickActionMenuItem
-            icon={<IconCodeDots aria-hidden="true" size={18} stroke={1.8} />}
-            isSelected={primaryOpenInTarget === "ide"}
-            label={selectedIdeLabel}
-            onClick={() => onRunOpenIn("ide")}
-          />
-          <QuickActionMenuItem
-            icon={<IconFolderOpen aria-hidden="true" size={18} stroke={1.8} />}
-            isSelected={primaryOpenInTarget === "finder"}
-            label="Finder"
-            onClick={() => onRunOpenIn("finder")}
-          />
+          <div className="quick-action-menu-label">Open In</div>
+          {OPEN_IN_QUICK_ACTIONS.map((item) => (
+            <QuickActionMenuItem
+              icon={<OpenInQuickActionIcon target={item.target} />}
+              isSelected={primaryOpenInTarget === item.target}
+              key={item.target}
+              label={item.label}
+              onClick={() => onRunOpenIn(item.target)}
+            />
+          ))}
         </>
       ) : null}
     </div>
   );
 });
+
+type QuickActionCommandMenuItemProps = {
+  command: SidebarCommandButton;
+  isSelected: boolean;
+  onRemove: () => void;
+  onRun: () => void;
+};
+
+/**
+ * CDXC:SidebarActions 2026-05-05-04:55
+ * The Actions dropdown must support removal without making normal action
+ * clicks destructive. Each row keeps the main click target for run/promote and
+ * exposes a separate trailing remove button that uses the existing command
+ * deletion path.
+ */
+function QuickActionCommandMenuItem({
+  command,
+  isSelected,
+  onRemove,
+  onRun,
+}: QuickActionCommandMenuItemProps) {
+  const label = quickCommandLabel(command);
+
+  return (
+    <div className="quick-action-command-row" role="presentation">
+      <button
+        className="quick-action-menu-item quick-action-menu-command-run"
+        data-selected={String(isSelected)}
+        onClick={onRun}
+        role="menuitem"
+        type="button"
+      >
+        <span aria-hidden="true" className="quick-action-menu-item-icon">
+          <CommandQuickActionIcon command={command} />
+        </span>
+        <span className="quick-action-menu-item-label">{label}</span>
+        {isSelected ? (
+          <IconCheck
+            aria-hidden="true"
+            className="quick-action-menu-item-check"
+            size={18}
+            stroke={1.9}
+          />
+        ) : null}
+      </button>
+      <button
+        aria-label={`Remove ${label}`}
+        className="quick-action-menu-remove-button"
+        onClick={onRemove}
+        role="menuitem"
+        title={`Remove ${label}`}
+        type="button"
+      >
+        <IconTrash aria-hidden="true" size={16} stroke={1.8} />
+      </button>
+    </div>
+  );
+}
 
 type QuickActionMenuItemProps = {
   icon: ReactNode;
@@ -978,23 +998,6 @@ function QuickActionMenuItem({
   );
 }
 
-function AgentQuickActionIcon({ agent }: { agent: SidebarAgentButton | undefined }) {
-  if (agent?.icon) {
-    return (
-      <img
-        alt=""
-        aria-hidden="true"
-        className="quick-action-icon quick-action-agent-icon"
-        data-agent-icon={agent.icon}
-        draggable={false}
-        src={AGENT_LOGOS[agent.icon]}
-      />
-    );
-  }
-
-  return <IconCodeDots aria-hidden="true" className="quick-action-icon" size={18} stroke={1.8} />;
-}
-
 function CommandQuickActionIcon({ command }: { command: SidebarCommandButton | undefined }) {
   if (command?.icon) {
     return (
@@ -1011,17 +1014,161 @@ function CommandQuickActionIcon({ command }: { command: SidebarCommandButton | u
   return <IconPlayerPlay aria-hidden="true" className="quick-action-icon" size={18} stroke={1.8} />;
 }
 
+function OpenInQuickActionIcon({ target }: { target: OpenInQuickActionTarget }) {
+  if (target === "finder") {
+    return <IconFolderOpen aria-hidden="true" className="quick-action-icon" size={18} stroke={1.8} />;
+  }
+
+  if (target === "vscode") {
+    return <VisualStudioCodeIcon className="quick-action-icon quick-action-brand-icon" />;
+  }
+
+  return <ZedIcon className="quick-action-icon quick-action-brand-icon quick-action-zed-icon" />;
+}
+
+/**
+ * CDXC:SidebarActions 2026-05-05-04:07
+ * Open In must show the actual Visual Studio Code and Zed brand icons from
+ * SVGL instead of a generic code glyph. Icons are embedded locally so the
+ * native sidebar renders them with the correct brand colors offline.
+ */
+function VisualStudioCodeIcon({ className }: { className?: string }) {
+  const id = useId();
+  const maskId = `${id}-vscode-mask`;
+  const filterBottomId = `${id}-vscode-filter-bottom`;
+  const filterRightId = `${id}-vscode-filter-right`;
+  const gradientId = `${id}-vscode-overlay`;
+
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      viewBox="0 0 100 100"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <mask
+        height="100"
+        id={maskId}
+        maskUnits="userSpaceOnUse"
+        style={{ maskType: "alpha" }}
+        width="100"
+        x="0"
+        y="0"
+      >
+        <path
+          clipRule="evenodd"
+          d="M70.912 99.317a6.223 6.223 0 0 0 4.96-.19l20.589-9.907A6.25 6.25 0 0 0 100 83.587V16.413a6.25 6.25 0 0 0-3.54-5.632L75.874.874a6.226 6.226 0 0 0-7.104 1.21L29.355 38.04 12.187 25.01a4.162 4.162 0 0 0-5.318.236l-5.506 5.009a4.168 4.168 0 0 0-.004 6.162L16.247 50 1.36 63.583a4.168 4.168 0 0 0 .004 6.162l5.506 5.01a4.162 4.162 0 0 0 5.318.236l17.168-13.032L68.77 97.917a6.217 6.217 0 0 0 2.143 1.4ZM75.015 27.3 45.11 50l29.906 22.701V27.3Z"
+          fill="#fff"
+          fillRule="evenodd"
+        />
+      </mask>
+      <g mask={`url(#${maskId})`}>
+        <path
+          d="M96.461 10.796 75.857.876a6.23 6.23 0 0 0-7.107 1.207l-67.451 61.5a4.167 4.167 0 0 0 .004 6.162l5.51 5.009a4.167 4.167 0 0 0 5.32.236l81.228-61.62c2.725-2.067 6.639-.124 6.639 3.297v-.24a6.25 6.25 0 0 0-3.539-5.63Z"
+          fill="#0065A9"
+        />
+        <g filter={`url(#${filterBottomId})`}>
+          <path
+            d="m96.461 89.204-20.604 9.92a6.229 6.229 0 0 1-7.107-1.207l-67.451-61.5a4.167 4.167 0 0 1 .004-6.162l5.51-5.009a4.167 4.167 0 0 1 5.32-.236l81.228 61.62c2.725 2.067 6.639.124 6.639-3.297v.24a6.25 6.25 0 0 1-3.539 5.63Z"
+            fill="#007ACC"
+          />
+        </g>
+        <g filter={`url(#${filterRightId})`}>
+          <path
+            d="M75.858 99.126a6.232 6.232 0 0 1-7.108-1.21c2.306 2.307 6.25.674 6.25-2.588V4.672c0-3.262-3.944-4.895-6.25-2.589a6.232 6.232 0 0 1 7.108-1.21l20.6 9.908A6.25 6.25 0 0 1 100 16.413v67.174a6.25 6.25 0 0 1-3.541 5.633l-20.601 9.906Z"
+            fill="#1F9CF0"
+          />
+        </g>
+        <path
+          clipRule="evenodd"
+          d="M70.851 99.317a6.224 6.224 0 0 0 4.96-.19L96.4 89.22a6.25 6.25 0 0 0 3.54-5.633V16.413a6.25 6.25 0 0 0-3.54-5.632L75.812.874a6.226 6.226 0 0 0-7.104 1.21L29.294 38.04 12.126 25.01a4.162 4.162 0 0 0-5.317.236l-5.507 5.009a4.168 4.168 0 0 0-.004 6.162L16.186 50 1.298 63.583a4.168 4.168 0 0 0 .004 6.162l5.507 5.009a4.162 4.162 0 0 0 5.317.236L29.294 61.96l39.414 35.958a6.218 6.218 0 0 0 2.143 1.4ZM74.954 27.3 45.048 50l29.906 22.701V27.3Z"
+          fill={`url(#${gradientId})`}
+          fillRule="evenodd"
+          opacity=".25"
+          style={{ mixBlendMode: "overlay" }}
+        />
+      </g>
+      <defs>
+        <filter
+          colorInterpolationFilters="sRGB"
+          filterUnits="userSpaceOnUse"
+          height="92.246"
+          id={filterBottomId}
+          width="116.727"
+          x="-8.394"
+          y="15.829"
+        >
+          <feFlood floodOpacity="0" result="BackgroundImageFix" />
+          <feColorMatrix
+            in="SourceAlpha"
+            values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
+          />
+          <feOffset />
+          <feGaussianBlur stdDeviation="4.167" />
+          <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0" />
+          <feBlend in2="BackgroundImageFix" mode="overlay" result="effect1_dropShadow" />
+          <feBlend in="SourceGraphic" in2="effect1_dropShadow" result="shape" />
+        </filter>
+        <filter
+          colorInterpolationFilters="sRGB"
+          filterUnits="userSpaceOnUse"
+          height="116.151"
+          id={filterRightId}
+          width="47.917"
+          x="60.417"
+          y="-8.076"
+        >
+          <feFlood floodOpacity="0" result="BackgroundImageFix" />
+          <feColorMatrix
+            in="SourceAlpha"
+            values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
+          />
+          <feOffset />
+          <feGaussianBlur stdDeviation="4.167" />
+          <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0" />
+          <feBlend in2="BackgroundImageFix" mode="overlay" result="effect1_dropShadow" />
+          <feBlend in="SourceGraphic" in2="effect1_dropShadow" result="shape" />
+        </filter>
+        <linearGradient
+          gradientUnits="userSpaceOnUse"
+          id={gradientId}
+          x1="49.939"
+          x2="49.939"
+          y1=".258"
+          y2="99.742"
+        >
+          <stop stopColor="#fff" />
+          <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
+function ZedIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      viewBox="0 0 96 96"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        clipRule="evenodd"
+        d="M9 6a3 3 0 0 0-3 3v66H0V9a9 9 0 0 1 9-9h80.379c4.009 0 6.016 4.847 3.182 7.682L43.055 57.187H57V51h6v7.688a4.5 4.5 0 0 1-4.5 4.5H37.055L26.743 73.5H73.5V36h6v37.5a6 6 0 0 1-6 6H20.743L10.243 90H87a3 3 0 0 0 3-3V21h6v66a9 9 0 0 1-9 9H6.621c-4.009 0-6.016-4.847-3.182-7.682L52.757 39H39v6h-6v-7.5a4.5 4.5 0 0 1 4.5-4.5h21.257l10.5-10.5H22.5V60h-6V22.5a6 6 0 0 1 6-6h52.757L85.757 6H9Z"
+        fill="currentColor"
+        fillRule="evenodd"
+      />
+    </svg>
+  );
+}
+
 function isRunnableSidebarCommand(command: SidebarCommandButton): boolean {
   return command.actionType === "browser"
     ? Boolean(command.url?.trim())
     : Boolean(command.command?.trim());
-}
-
-function resolvePrimaryAgent(
-  agents: readonly SidebarAgentButton[],
-  primaryAgentId: string | undefined,
-): SidebarAgentButton | undefined {
-  return agents.find((agent) => agent.agentId === primaryAgentId) ?? agents[0];
 }
 
 function resolvePrimaryCommand(
@@ -1033,6 +1180,16 @@ function resolvePrimaryCommand(
 
 function quickCommandLabel(command: SidebarCommandButton): string {
   return command.name.trim() || command.commandId;
+}
+
+function normalizeOpenInQuickActionTarget(value: string | null): OpenInQuickActionTarget {
+  return OPEN_IN_QUICK_ACTIONS.some((item) => item.target === value)
+    ? (value as OpenInQuickActionTarget)
+    : "finder";
+}
+
+function getOpenInQuickActionLabel(target: OpenInQuickActionTarget): string {
+  return OPEN_IN_QUICK_ACTIONS.find((item) => item.target === target)?.label ?? "Finder";
 }
 
 type SortableAgentButtonProps = {

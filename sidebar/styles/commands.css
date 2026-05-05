@@ -251,15 +251,16 @@
 
 /*
  * CDXC:SidebarActions 2026-05-05-02:47
- * The Actions section hosts three compact React split dropdowns under the
- * sidebar header. The left segment runs the promoted option; the chevron opens
- * a React menu aligned under the trigger, matching the native-looking segmented
- * controls without depending on AppKit titlebar buttons.
+ * The Actions section hosts compact React split dropdowns under the sidebar
+ * header. The left segment runs the promoted option; the chevron opens a React
+ * menu aligned under the trigger, matching the native-looking segmented
+ * controls without depending on AppKit titlebar buttons. Agent launchers remain
+ * as normal sidebar buttons below this row.
  */
 .quick-actions-row {
   display: grid;
   gap: calc(8px * var(--sidebar-density-scale));
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .quick-action-split-button {
@@ -314,29 +315,13 @@
   flex: none;
 }
 
-.quick-action-agent-icon {
+.quick-action-brand-icon {
   height: calc(18px * var(--sidebar-density-scale));
-  object-fit: contain;
   width: calc(18px * var(--sidebar-density-scale));
 }
 
-body[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="codex"],
-body[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="opencode"],
-body[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="t3"],
-body[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="browser"],
-.zmux-root[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="codex"],
-.zmux-root[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="opencode"],
-.zmux-root[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="t3"],
-.zmux-root[data-sidebar-theme="plain-dark"] .quick-action-agent-icon[data-agent-icon="browser"],
-body[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="codex"],
-body[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="opencode"],
-body[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="t3"],
-body[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="browser"],
-.zmux-root[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="codex"],
-.zmux-root[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="opencode"],
-.zmux-root[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="t3"],
-.zmux-root[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="browser"] {
-  filter: brightness(0) invert(1);
+.quick-action-zed-icon {
+  color: color-mix(in srgb, var(--app-foreground) 96%, var(--app-muted) 4%);
 }
 
 .quick-action-menu {
@@ -385,6 +370,37 @@ body[data-sidebar-theme^="dark-"] .quick-action-agent-icon[data-agent-icon="brow
   padding: 0 calc(10px * var(--sidebar-density-scale));
   text-align: left;
   width: 100%;
+}
+
+.quick-action-command-row {
+  display: grid;
+  gap: calc(2px * var(--sidebar-density-scale));
+  grid-template-columns: minmax(0, 1fr) calc(34px * var(--sidebar-density-scale));
+  min-width: 0;
+}
+
+.quick-action-menu-command-run {
+  min-width: 0;
+}
+
+.quick-action-menu-remove-button {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: calc(10px * var(--sidebar-density-scale));
+  color: color-mix(in srgb, var(--app-muted) 80%, var(--app-foreground) 20%);
+  display: inline-flex;
+  justify-content: center;
+  min-height: calc(36px * var(--sidebar-density-scale));
+  padding: 0;
+  width: 100%;
+}
+
+.quick-action-menu-remove-button:hover,
+.quick-action-menu-remove-button:focus-visible {
+  background: color-mix(in srgb, #e05656 16%, var(--app-card-active) 84%);
+  color: color-mix(in srgb, #e05656 88%, var(--app-foreground) 12%);
+  outline: none;
 }
 
 .quick-action-menu-item:hover,
