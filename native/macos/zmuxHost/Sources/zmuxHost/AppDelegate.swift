@@ -1491,18 +1491,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     var retainedLines =
       config
       .components(separatedBy: .newlines)
-      .filter { shouldRetainGhosttyConfigLine($0) }
+      .filter { shouldRetainGhosttyConfigLine($0, command: command) }
     while retainedLines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
       retainedLines.removeLast()
     }
-    let lines =
-      retainedLines + [
-        "font-family = \(formatGhosttyString(command.fontFamily))",
+    var managedSettingLines = [
         "font-size = \(formatGhosttyNumber(command.fontSize))",
-        "font-thicken = \(command.fontThicken ? "true" : "false")",
-        "font-thicken-strength = \(max(0, min(255, command.fontThickenStrength)))",
         "adjust-cell-height = \(formatGhosttyPercent(command.adjustCellHeightPercent))",
         "adjust-cell-width = \(formatGhosttyNumber(command.adjustCellWidth))",
+        /**
+         CDXC:TerminalBehaviorSettings 2026-04-29-09:32
+         Common zmux settings map directly to Ghostty config keys so the
+         embedded terminal and external Ghostty windows share scrollback,
+         cursor blink, copy-on-select, and close confirmation behavior.
+         */
+        "scrollback-limit = \(max(1, command.scrollbackLimitBytes))",
+        "cursor-style-blink = \(command.cursorStyleBlink ? "true" : "false")",
+        "clipboard-trim-trailing-spaces = \(command.clipboardTrimTrailingSpaces ? "true" : "false")",
+        "clipboard-paste-protection = \(command.clipboardPasteProtection ? "true" : "false")",
+        "copy-on-select = \(command.copyOnSelect)",
+        "confirm-close-surface = \(command.confirmCloseSurface)",
+        "mouse-hide-while-typing = \(command.mouseHideWhileTyping ? "true" : "false")",
+        "scrollbar = \(command.scrollbar)",
         /**
          CDXC:TerminalScrollSettings 2026-04-29-08:56
          zmux manages Ghostty scroll speed through the documented prefixed
@@ -1511,7 +1521,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
          */
         "mouse-scroll-multiplier = precision:\(formatGhosttyNumber(command.mouseScrollMultiplierPrecision)),discrete:\(formatGhosttyNumber(command.mouseScrollMultiplierDiscrete))",
       ]
-    return lines.joined(separator: "\n") + "\n"
+    let fontFamily = command.fontFamily.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !fontFamily.isEmpty {
+      /**
+       CDXC:TerminalTypographySettings 2026-04-29-09:32
+       Empty font-family means zmux leaves the user's existing Ghostty font
+       family or platform default untouched. Non-empty values are written as
+       raw Ghostty font-family strings from the settings modal text field.
+      */
+      managedSettingLines.insert("font-family = \(formatGhosttyString(fontFamily))", at: 0)
+    }
+    if let fontVariationWeight = command.fontVariationWeight {
+      /**
+       CDXC:TerminalTypographySettings 2026-04-29-09:32
+       Ghostty has no font-weight key. The weight slider writes the documented
+       variable-font axis setting, and the config merge removes older zmux
+       wght entries before adding the selected value.
+       */
+      managedSettingLines.append("font-variation = wght=\(fontVariationWeight)")
+    }
+    let lines = retainedLines + managedSettingLines
+    let themeName = command.ghosttyTheme.trimmingCharacters(in: .whitespacesAndNewlines)
+    let finalLines =
+      themeName.isEmpty ? lines : lines + ["theme = \(formatGhosttyString(themeName))"]
+    return finalLines.joined(separator: "\n") + "\n"
   }
 
   private static func mergeGhosttyConfigSettings(
@@ -1533,21 +1566,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     return nextLines.isEmpty ? "" : nextLines.joined(separator: "\n") + "\n"
   }
 
-  private static func shouldRetainGhosttyConfigLine(_ line: String) -> Bool {
+  private static func shouldRetainGhosttyConfigLine(
+    _ line: String,
+    command: SyncGhosttyTerminalSettings
+  ) -> Bool {
     let managedKeys: Set<String> = [
       "adjust-cell-height",
       "adjust-cell-width",
-      "font-family",
+      "clipboard-paste-protection",
+      "clipboard-trim-trailing-spaces",
+      "confirm-close-surface",
+      "copy-on-select",
+      "cursor-style-blink",
       "font-size",
       "font-thicken",
       "font-thicken-strength",
+      "mouse-hide-while-typing",
       "mouse-scroll-multiplier",
+      "scrollbar",
+      "scrollback-limit",
     ]
     let key = readGhosttyConfigKey(line)
     if managedKeys.contains(key) {
       return false
     }
+    if key == "font-family" {
+      return command.fontFamily.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    if key == "theme" {
+      return command.ghosttyTheme.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
     if key != "font-variation" {
+      return true
+    }
+    if command.fontVariationWeight == nil {
       return true
     }
     return !readGhosttyConfigValue(line)
