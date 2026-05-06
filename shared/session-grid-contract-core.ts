@@ -100,7 +100,7 @@ export type TerminalSessionRecord = BaseSessionRecord & {
   kind: "terminal";
   sessionPersistenceName?: string;
   terminalEngine: TerminalEngine;
-  /** @deprecated use sessionPersistenceName for tmux and zmx providers. */
+  /** @deprecated use sessionPersistenceName for tmux, zmx, and zellij providers. */
   tmuxSessionName?: string;
 };
 
@@ -134,7 +134,7 @@ export type CreateSessionRecordOptions =
       sessionId?: string;
       sessionPersistenceName?: string;
       terminalEngine?: TerminalEngine;
-      /** @deprecated use sessionPersistenceName for tmux and zmx providers. */
+      /** @deprecated use sessionPersistenceName for tmux, zmx, and zellij providers. */
       tmuxSessionName?: string;
       title?: string;
       titleSource?: SessionTitleSource;

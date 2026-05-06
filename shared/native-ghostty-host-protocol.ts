@@ -20,7 +20,7 @@ export type NativeGhosttyHostCommand =
       initialInput?: string;
       sessionId: string;
       sessionPersistenceName?: string;
-      sessionPersistenceProvider?: "tmux" | "zmx";
+      sessionPersistenceProvider?: "tmux" | "zmx" | "zellij";
       title?: string;
       tmuxMode?: boolean;
       tmuxSessionName?: string;

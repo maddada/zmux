@@ -2212,6 +2212,9 @@ function getSessionPersistenceProviderMenuLabel(provider: string | undefined): s
   if (provider === "zmx") {
     return "Persistence: zmx";
   }
+  if (provider === "zellij") {
+    return "Persistence: zellij";
+  }
   return "Persistence: Off";
 }
 

@@ -360,7 +360,7 @@ final class TerminalWorkspaceView: NSView {
       /**
        CDXC:SessionPersistence 2026-05-05-07:28
        When a persistence provider is selected, each zmux sidebar terminal
-       creates or attaches to one named tmux/zmx session. The app does not
+       creates or attaches to one named provider session. The app does not
        inspect provider-internal panes/windows/tabs; the sidebar card remains
        mapped to the original attached terminal surface.
 
@@ -571,9 +571,11 @@ final class TerminalWorkspaceView: NSView {
     guard provider == .tmux else {
       /**
        CDXC:SessionPersistence 2026-05-05-07:28
-       zmx 0.4 exposes attach/run/list/kill/history but no rename command. Keep
-       the durable zmx attach identity stable while the sidebar still follows
-       Ghostty title events for user-visible card names.
+       zmx 0.4 exposes attach/run/list/kill/history but no rename command, and
+       zellij session rename is an in-session action rather than a targetable
+       external command. Keep non-tmux durable attach identities stable while
+       the sidebar still follows Ghostty title events for user-visible card
+       names.
        */
       return currentSessionName
     }
@@ -4061,6 +4063,7 @@ private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandle
 private enum NativeSessionPersistenceProvider: String {
   case tmux
   case zmx
+  case zellij
 
   static func resolve(_ command: CreateTerminal) -> NativeSessionPersistenceProvider? {
     if let provider = command.sessionPersistenceProvider,
@@ -4084,6 +4087,8 @@ private enum NativeSessionPersistenceMode {
       return tmuxAttachCommand(cwd: cwd, initialInput: initialInput, sessionName: sessionName)
     case .zmx:
       return zmxAttachCommand(cwd: cwd, initialInput: initialInput, sessionName: sessionName)
+    case .zellij:
+      return zellijAttachCommand(cwd: cwd, initialInput: initialInput, sessionName: sessionName)
     }
   }
 
@@ -4175,6 +4180,38 @@ private enum NativeSessionPersistenceMode {
     return "/bin/zsh -lc \(shellQuote(script))"
   }
 
+  private static func zellijAttachCommand(
+    cwd: String,
+    initialInput: String?,
+    sessionName: String
+  ) -> String {
+    let initialCommand = shellCommand(fromInitialInput: initialInput)
+    let layout = zellijLayout(cwd: cwd, initialCommand: initialCommand)
+    let script = """
+      zellij_session=\(shellQuote(sessionName))
+      if ! command -v zellij >/dev/null 2>&1; then
+        printf '%s\\n' 'session persistence is set to zellij, but zellij was not found on PATH.'
+        exit 127
+      fi
+      if zellij list-sessions --short --no-formatting 2>/dev/null | grep -F -x -- "$zellij_session" >/dev/null 2>&1; then
+        exec zellij attach "$zellij_session"
+      fi
+      exec zellij --session "$zellij_session" --layout <(cat <<'ZMUX_ZELLIJ_LAYOUT'
+      \(layout)
+      ZMUX_ZELLIJ_LAYOUT
+      )
+      """
+    /**
+     CDXC:SessionPersistence 2026-05-06-03:43
+     Zellij should match tmux/zmx UX: attach to a live named session when it
+     exists, otherwise create the named session and run the pending agent resume
+     command inside that first pane. Ghostty initialInput remains disabled for
+     persistence providers so app restart never replays resume text into an
+     already running session.
+     */
+    return "/bin/zsh -lc \(shellQuote(script))"
+  }
+
   static func renameTmuxSession(
     from currentName: String,
     sessionId: String,
@@ -4235,7 +4272,7 @@ private enum NativeSessionPersistenceMode {
      Persisted provider session names are trusted only when they match the
      app-generated target-safe shape. Corrupt or legacy missing names should
      regenerate from the terminal title instead of attaching to an ambiguous
-     tmux/zmx target.
+     provider target.
      */
     guard trimmed.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else {
       return nil
@@ -4280,6 +4317,48 @@ private enum NativeSessionPersistenceMode {
 
   private static func shellQuote(_ value: String) -> String {
     "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+  }
+
+  private static func zellijLayout(cwd: String, initialCommand: String) -> String {
+    if initialCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return """
+        layout {
+          cwd \(zellijKdlString(cwd))
+          pane
+        }
+        """
+    }
+    return """
+      layout {
+        pane {
+          cwd \(zellijKdlString(cwd))
+          command "/bin/zsh"
+          args "-lc" \(zellijKdlString(initialCommand))
+        }
+      }
+      """
+  }
+
+  private static func zellijKdlString(_ value: String) -> String {
+    var result = "\""
+    for scalar in value.unicodeScalars {
+      switch scalar {
+      case "\\":
+        result += "\\\\"
+      case "\"":
+        result += "\\\""
+      case "\n":
+        result += "\\n"
+      case "\r":
+        result += "\\r"
+      case "\t":
+        result += "\\t"
+      default:
+        result.unicodeScalars.append(scalar)
+      }
+    }
+    result += "\""
+    return result
   }
 }
 

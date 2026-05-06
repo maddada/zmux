@@ -300,7 +300,9 @@ export function reduceSidebarStoryWorkspace(
                     ? "tmux"
                     : workspace.options.settings.sessionPersistenceProvider === "tmux"
                       ? "zmx"
-                      : "off",
+                      : workspace.options.settings.sessionPersistenceProvider === "zmx"
+                        ? "zellij"
+                        : "off",
               },
             },
           }

@@ -169,6 +169,7 @@ import {
   DEFAULT_zmux_SETTINGS,
   getZedOverlayTargetAppLabel,
   normalizezmuxSettings,
+  type SidebarSide,
   type ZedOverlayTargetApp,
   type zmuxSettings,
 } from "../../shared/zmux-settings";
@@ -195,7 +196,7 @@ type NativeHostCommand =
       initialInput?: string;
       sessionId: string;
       sessionPersistenceName?: string;
-      sessionPersistenceProvider?: "tmux" | "zmx";
+      sessionPersistenceProvider?: "tmux" | "zmx" | "zellij";
       title?: string;
       type: "createTerminal";
     }
@@ -308,7 +309,7 @@ type NativeHostCommand =
   | { sessionId: string; type: "injectBrowserReactGrab" }
   | { sessionId: string; type: "showBrowserProfilePicker" }
   | { sessionId: string; type: "showBrowserImportSettings" }
-  | { side: "left" | "right"; type: "setSidebarSide" }
+  | { side: SidebarSide; type: "setSidebarSide" }
   | {
       enabled: boolean;
       hideTitlebarButton: boolean;
@@ -502,7 +503,7 @@ const PINNED_PROMPTS_STORAGE_KEY = "zmux-native-pinned-prompts";
 const COLLAPSED_SECTIONS_STORAGE_KEY = "zmux-native-collapsed-sections";
 const ACTIVE_SESSIONS_SORT_MODE_STORAGE_KEY = "zmux-native-active-sessions-sort-mode";
 const PREVIOUS_SESSIONS_STORAGE_KEY = "zmux-native-previous-sessions";
-const SIDEBAR_SIDE_STORAGE_KEY = "zmux-native-sidebar-side";
+const LEGACY_SIDEBAR_SIDE_STORAGE_KEY = "zmux-native-sidebar-side";
 const GIT_PRIMARY_ACTION_STORAGE_KEY = "zmux-native-git-primary-action";
 const GIT_CONFIRM_COMMIT_STORAGE_KEY = "zmux-native-git-confirm-commit";
 const GIT_GENERATE_COMMIT_BODY_STORAGE_KEY = "zmux-native-git-generate-commit-body";
@@ -1381,7 +1382,7 @@ function readStoredSettings(): zmuxSettings {
       sharedSettingsJson || localStorage.getItem(SETTINGS_STORAGE_KEY) || "null",
     );
     const storedSettings = normalizezmuxSettings(
-      normalizeStoredSettingsSidebarMode(storedSettingsSource),
+      normalizeStoredSettingsSidebarSide(normalizeStoredSettingsSidebarMode(storedSettingsSource)),
     );
     if (!sharedSettingsJson) {
       persistSharedSettingsSnapshot(storedSettings);
@@ -1402,6 +1403,36 @@ function readStoredSettings(): zmuxSettings {
   } catch {
     return DEFAULT_zmux_SETTINGS;
   }
+}
+
+function normalizeStoredSettingsSidebarSide(candidate: unknown): unknown {
+  const legacySidebarSide = readLegacyStoredSidebarSide();
+  if (!legacySidebarSide) {
+    return candidate;
+  }
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return { sidebarSide: legacySidebarSide };
+  }
+  if ("sidebarSide" in candidate) {
+    return candidate;
+  }
+
+  /**
+   * CDXC:SidebarPlacement 2026-05-06-17:32
+   * Sidebar placement now lives in zmux settings. Migrate the old hotkey-only
+   * localStorage side value into the settings snapshot so right-side users do
+   * not get moved back to the left after upgrading.
+   */
+  return {
+    ...candidate,
+    sidebarSide: legacySidebarSide,
+  };
+}
+
+function readLegacyStoredSidebarSide(): SidebarSide | undefined {
+  return localStorage.getItem(LEGACY_SIDEBAR_SIDE_STORAGE_KEY) === "right"
+    ? "right"
+    : undefined;
 }
 
 function normalizeStoredSettingsSidebarMode(candidate: unknown): unknown {
@@ -1434,21 +1465,47 @@ function saveSettings(nextSettings: zmuxSettings): void {
     clearPendingZedProjectSync();
   }
   persistSharedSettingsSnapshot(settings);
+  syncNativeSidebarSide(settings.sidebarSide, previousSettings.sidebarSide);
   syncGhosttyTerminalSettings(settings, previousSettings);
   postZedOverlaySettings();
   publish();
   previewNativeSoundSettingChange(previousSettings, settings);
 }
 
+function syncNativeSidebarSide(
+  nextSidebarSide: SidebarSide,
+  previousSidebarSide?: SidebarSide,
+): void {
+  if (sidebarSide === nextSidebarSide && previousSidebarSide === nextSidebarSide) {
+    return;
+  }
+  /**
+   * CDXC:SidebarPlacement 2026-05-06-17:32
+   * Settings changes must move the AppKit sidebar immediately. Keep the native
+   * side mirror synchronized from the persisted settings value so the settings
+   * dropdown and move-sidebar hotkey cannot diverge.
+   */
+  sidebarSide = nextSidebarSide;
+  postNative({ side: sidebarSide, type: "setSidebarSide" });
+}
+
 function nextSessionPersistenceProvider(
   provider: zmuxSettings["sessionPersistenceProvider"],
 ): zmuxSettings["sessionPersistenceProvider"] {
+  /**
+   * CDXC:SessionPersistence 2026-05-06-03:43
+   * The overflow menu is the quick persistence-mode control. Cycle zellij in
+   * the same path as tmux and zmx so all providers share one UX instead of
+   * requiring users to open Settings for the new provider.
+   */
   switch (provider) {
     case "off":
       return "tmux";
     case "tmux":
       return "zmx";
     case "zmx":
+      return "zellij";
+    case "zellij":
       return "off";
   }
 }
@@ -1980,15 +2037,21 @@ function toggleActiveSessionsSortMode(): void {
   publish();
 }
 
-function readSidebarSide(): "left" | "right" {
-  return localStorage.getItem(SIDEBAR_SIDE_STORAGE_KEY) === "right" ? "right" : "left";
+function readSidebarSide(): SidebarSide {
+  return settings.sidebarSide;
 }
 
 function moveSidebarToOtherSide(): void {
-  sidebarSide = sidebarSide === "left" ? "right" : "left";
-  localStorage.setItem(SIDEBAR_SIDE_STORAGE_KEY, sidebarSide);
-  postNative({ side: sidebarSide, type: "setSidebarSide" });
-  publish();
+  /**
+   * CDXC:SidebarPlacement 2026-05-06-17:32
+   * The move-sidebar hotkey is now another way to change the same Settings
+   * value, so the visible Settings control, shared snapshot, and AppKit chrome
+   * stay aligned after either interaction.
+   */
+  saveSettings({
+    ...settings,
+    sidebarSide: settings.sidebarSide === "left" ? "right" : "left",
+  });
 }
 
 function readGitPrimaryAction(): SidebarGitAction {
@@ -2735,11 +2798,11 @@ function scheduleSyncOpenProjectWithZed(reason: string): void {
 
   const scheduledProject = activeProject();
   /**
-   * CDXC:ZedOverlayWorkspace 2026-04-28-05:18
-   * Switching zmux workspaces syncs the selected project into the configured
-   * Zed target after a 2s trailing debounce. The native Show Zed button only
-   * toggles zmux visibility, so rapid workspace clicks coalesce into one
-   * editor-open request for the final active project.
+   * CDXC:IDEAttachment 2026-05-06-12:49
+   * Switching zmux workspaces in Separated or Combined sidebar mode syncs the
+   * selected project into the attached IDE after a 2s trailing debounce. Rapid
+   * workspace activations coalesce into one editor-open request for the final
+   * active project, and the user can disable this separately from attachment.
    */
   pendingZedProjectSyncTimeout = window.setTimeout(() => {
     pendingZedProjectSyncTimeout = undefined;
@@ -5323,7 +5386,7 @@ function getNativeTerminalTitleSessionSyncDecision(args: {
      * CDXC:SessionPersistence 2026-05-05-07:28
      * Persistence providers ask sidebar cards to follow the terminal title
      * reported through the attached pane. Trust visible, non-command titles even
-     * for plain terminal sessions so the card maps to tmux/zmx pane identity.
+     * for plain terminal sessions so the card maps to the provider pane identity.
      */
     return {
       reason: `${args.sessionPersistenceProvider}-terminal-title-from-${args.session.titleSource ?? "unknown"}`,
@@ -9075,7 +9138,7 @@ window.addEventListener("zmux-native-host-event", (event) => {
          * CDXC:SessionPersistence 2026-05-05-07:28
          * Native persistence names are the durable reconnect identity. Persist
          * them separately from the visible card title so app restart can attach
-         * to a live tmux/zmx session before recreating and resuming the agent.
+         * to a live provider session before recreating and resuming the agent.
          */
         terminalState.sessionPersistenceName = hostEvent.sessionPersistenceName;
         setTerminalSessionPersistenceName(sidebarSessionId, hostEvent.sessionPersistenceName);

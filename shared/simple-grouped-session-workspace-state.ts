@@ -583,7 +583,7 @@ export function setTerminalSessionPersistenceNameInSimpleWorkspace(
    * CDXC:SessionPersistence 2026-05-05-07:28
    * Provider reconnect identity must be stored separately from the sidebar
    * title. Titles can change as agent CLIs rename work, while restart restore
-   * needs the last known tmux/zmx session name to attach before recreating.
+   * needs the last known persistence session name to attach before recreating.
    */
   return updateSession(snapshot, sessionId, (session) => {
     if (

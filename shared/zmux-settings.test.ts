@@ -4,7 +4,9 @@ import {
   DEFAULT_zmux_SETTINGS,
   GHOSTTY_THEME_SETTING_OPTIONS,
   normalizezmuxSettings,
+  SESSION_PERSISTENCE_PROVIDER_OPTIONS,
   SIDEBAR_MODE_OPTIONS,
+  SIDEBAR_SIDE_OPTIONS,
   ZED_OVERLAY_TARGET_APP_OPTIONS,
 } from "./zmux-settings";
 
@@ -30,12 +32,11 @@ describe("normalizezmuxSettings", () => {
     });
   });
 
-  test("keeps Sync Open Project with Zed enabled by default", () => {
+  test("keeps active project IDE sync enabled by default", () => {
     /**
-     * CDXC:ZedOverlayWorkspace 2026-04-28-05:18
-     * The sync setting must default on so existing users get project-to-Zed
-     * syncing after switching zmux workspaces, with the debounce owned by the
-     * sidebar instead of by the native Show Zed button.
+     * CDXC:IDEAttachment 2026-05-06-12:49
+     * The sync setting must default on so project activation in either sidebar
+     * mode can debounce one attached-IDE workspace sync from the sidebar.
      */
     expect(DEFAULT_zmux_SETTINGS.syncOpenProjectWithZed).toBe(true);
     expect(normalizezmuxSettings({ syncOpenProjectWithZed: false })).toMatchObject({
@@ -89,6 +90,29 @@ describe("normalizezmuxSettings", () => {
     ]);
   });
 
+  test("keeps sidebar side as a selectable left or right setting", () => {
+    /**
+     * CDXC:SidebarPlacement 2026-05-06-17:32
+     * Sidebar placement is persisted with the rest of Settings so users can
+     * choose right-side chrome from the top Sidebar setting, while invalid
+     * values still normalize to the left-side default AppKit layout.
+     */
+    expect(DEFAULT_zmux_SETTINGS.sidebarSide).toBe("left");
+    expect(normalizezmuxSettings({})).toMatchObject({
+      sidebarSide: "left",
+    });
+    expect(normalizezmuxSettings({ sidebarSide: "right" })).toMatchObject({
+      sidebarSide: "right",
+    });
+    expect(normalizezmuxSettings({ sidebarSide: "bottom" })).toMatchObject({
+      sidebarSide: "left",
+    });
+    expect(SIDEBAR_SIDE_OPTIONS).toEqual([
+      { label: "Left", value: "left" },
+      { label: "Right", value: "right" },
+    ]);
+  });
+
   test("keeps the workspace background color setting", () => {
     expect(DEFAULT_zmux_SETTINGS.workspaceBackgroundColor).toBe("#121212");
     expect(normalizezmuxSettings({ workspaceBackgroundColor: "#202020" })).toMatchObject({
@@ -134,7 +158,8 @@ describe("normalizezmuxSettings", () => {
      * CDXC:SessionPersistence 2026-05-05-07:28
      * Session persistence must not change existing launch behavior until the
      * user selects a provider in Settings. Legacy tmuxMode=true settings should
-     * migrate to the tmux provider, and zmx must persist as its own provider.
+     * migrate to the tmux provider, and zmx/zellij must persist as provider
+     * choices with the same restart-safe attach/recreate contract.
      */
     expect(DEFAULT_zmux_SETTINGS.sessionPersistenceProvider).toBe("off");
     expect(DEFAULT_zmux_SETTINGS.tmuxMode).toBe(false);
@@ -149,6 +174,14 @@ describe("normalizezmuxSettings", () => {
     expect(normalizezmuxSettings({ sessionPersistenceProvider: "zmx" })).toMatchObject({
       sessionPersistenceProvider: "zmx",
       tmuxMode: false,
+    });
+    expect(normalizezmuxSettings({ sessionPersistenceProvider: "zellij" })).toMatchObject({
+      sessionPersistenceProvider: "zellij",
+      tmuxMode: false,
+    });
+    expect(SESSION_PERSISTENCE_PROVIDER_OPTIONS).toContainEqual({
+      label: "zellij",
+      value: "zellij",
     });
     expect(normalizezmuxSettings({ sessionPersistenceProvider: "wat" })).toMatchObject({
       sessionPersistenceProvider: "off",

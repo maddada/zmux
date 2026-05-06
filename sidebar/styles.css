@@ -43,6 +43,20 @@
   opacity: revert-layer;
 }
 
+/* CDXC:Settings 2026-05-06-12:57: Modified settings use an orange star
+   action next to the setting label. The control needs its own scoped color
+   because the modal's shadcn button reset intentionally reverts inherited
+   button colors for generic sidebar compatibility. */
+.zmux-settings-shadcn .settings-modified-reset-button {
+  color: #f97316;
+}
+
+.zmux-settings-shadcn .settings-modified-reset-button:hover,
+.zmux-settings-shadcn .settings-modified-reset-button:focus-visible {
+  background: color-mix(in srgb, #f97316 16%, transparent);
+  color: #fb923c;
+}
+
 /* CDXC:Settings 2026-04-26-22:29: Section title pills in the settings modal
    must size to the full title in the native app as well as Storybook. A
    scoped CSS class avoids shadcn CardHeader/container internals under-measuring

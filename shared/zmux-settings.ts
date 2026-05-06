@@ -30,8 +30,9 @@ export type GhosttyCopyOnSelect = "false" | "true" | "clipboard";
 export type GhosttyScrollbar = "system" | "never";
 export type TerminalCursorStyle = "bar" | "block" | "underline";
 export type BrowserOpenMode = "chrome-canary" | "browser-pane";
-export type SessionPersistenceProvider = "off" | "tmux" | "zmx";
+export type SessionPersistenceProvider = "off" | "tmux" | "zmx" | "zellij";
 export type SidebarMode = "combined" | "separated";
+export type SidebarSide = "left" | "right";
 export type ZedOverlayTargetApp = "zed" | "zed-preview" | "vscode" | "vscode-insiders";
 const MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 0.25;
 const MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 8;
@@ -61,6 +62,7 @@ export type zmuxSettings = {
   showSidebarGitButton: boolean;
   sessionPersistenceProvider: SessionPersistenceProvider;
   sidebarMode: SidebarMode;
+  sidebarSide: SidebarSide;
   sidebarTheme: SidebarThemeSetting;
   terminalCursorStyle: TerminalCursorStyle;
   terminalCursorStyleBlink: boolean;
@@ -86,6 +88,11 @@ export type zmuxSettings = {
   workspaceActivePaneBorderColor: string;
   workspaceBackgroundColor: string;
   workspacePaneGap: number;
+  /**
+   * CDXC:IDEAttachment 2026-05-06-12:49
+   * Keep the persisted Zed-named key for compatibility, but treat it as the
+   * default-on setting that lets workspace activation sync to the attached IDE.
+   */
   syncOpenProjectWithZed: boolean;
   zedOverlayEnabled: boolean;
   zedOverlayHideTitlebarButton: boolean;
@@ -126,8 +133,14 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   /**
    * CDXC:SessionPersistence 2026-05-05-07:28
    * Terminal persistence is opt-in and provider-selected. Off preserves the
-   * direct Ghostty launch path; tmux and zmx wrap new terminal/agent sessions in
-   * a named persistence session so app restart can reattach or recreate+resume.
+   * direct Ghostty launch path; tmux, zmx, and zellij wrap new terminal/agent
+   * sessions in a named persistence session so app restart can reattach or
+   * recreate+resume.
+   *
+   * CDXC:SessionPersistence 2026-05-06-03:43
+   * zellij must appear as the same user-facing persistence provider choice as
+   * tmux/zmx. It remains opt-in and uses the same durable session name contract
+   * for restart attach and missing-session recreate+resume behavior.
    */
   sessionPersistenceProvider: "off",
   /**
@@ -138,6 +151,12 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
    * multi-group behavior.
    */
   sidebarMode: "combined",
+  /**
+   * CDXC:SidebarPlacement 2026-05-06-17:32
+   * Sidebar side is a first-class setting so users can choose left or right
+   * placement from Settings instead of relying only on the move-sidebar hotkey.
+   */
+  sidebarSide: "left",
   sidebarTheme: "auto",
   terminalCursorStyle: "bar",
   terminalCursorStyleBlink: true,
@@ -153,8 +172,8 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   /**
    * CDXC:SessionPersistence 2026-05-05-07:28
    * tmuxMode remains as a compatibility mirror for older persisted settings and
-   * legacy UI code. New launch behavior reads sessionPersistenceProvider so zmx
-   * can follow the same persistence semantics as tmux.
+   * legacy UI code. New launch behavior reads sessionPersistenceProvider so
+   * zmx and zellij can follow the same persistence semantics as tmux.
    */
   tmuxMode: false,
   terminalScrollToBottomWhenTyping: true,
@@ -169,6 +188,11 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   workspaceActivePaneBorderColor: "#3b82f6",
   workspaceBackgroundColor: "#121212",
   workspacePaneGap: 12,
+  /**
+   * CDXC:IDEAttachment 2026-05-06-12:49
+   * New installs should auto-sync the active zmux project to the attached IDE
+   * after workspace activation unless the user disables this setting.
+   */
   syncOpenProjectWithZed: true,
   zedOverlayEnabled: false,
   zedOverlayHideTitlebarButton: false,
@@ -217,6 +241,7 @@ export const SESSION_PERSISTENCE_PROVIDER_OPTIONS: ReadonlyArray<{
   { label: "Off", value: "off" },
   { label: "tmux", value: "tmux" },
   { label: "zmx", value: "zmx" },
+  { label: "zellij", value: "zellij" },
 ];
 
 export const SIDEBAR_MODE_OPTIONS: ReadonlyArray<{
@@ -225,6 +250,14 @@ export const SIDEBAR_MODE_OPTIONS: ReadonlyArray<{
 }> = [
   { label: "Combined", value: "combined" },
   { label: "Separated", value: "separated" },
+];
+
+export const SIDEBAR_SIDE_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: SidebarSide;
+}> = [
+  { label: "Left", value: "left" },
+  { label: "Right", value: "right" },
 ];
 
 export const GHOSTTY_COPY_ON_SELECT_OPTIONS: ReadonlyArray<{
@@ -380,6 +413,15 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
      */
     sidebarMode: normalizeSidebarMode(
       readString(source, "sidebarMode", DEFAULT_zmux_SETTINGS.sidebarMode),
+    ),
+    /**
+     * CDXC:SidebarPlacement 2026-05-06-17:32
+     * Persist only the supported AppKit chrome sides. Unknown values normalize
+     * to the default left placement so the native layout never receives an
+     * unsupported sidebar position.
+     */
+    sidebarSide: normalizeSidebarSide(
+      readString(source, "sidebarSide", DEFAULT_zmux_SETTINGS.sidebarSide),
     ),
     sidebarTheme: clampSidebarThemeSetting(
       readString(source, "sidebarTheme", DEFAULT_zmux_SETTINGS.sidebarTheme),
@@ -593,10 +635,14 @@ function normalizeSidebarMode(value: string | undefined): SidebarMode {
   return value === "separated" ? "separated" : DEFAULT_zmux_SETTINGS.sidebarMode;
 }
 
+function normalizeSidebarSide(value: string | undefined): SidebarSide {
+  return value === "right" ? "right" : DEFAULT_zmux_SETTINGS.sidebarSide;
+}
+
 function normalizeSessionPersistenceProvider(
   value: string | undefined,
 ): SessionPersistenceProvider {
-  return value === "tmux" || value === "zmx" ? value : "off";
+  return value === "tmux" || value === "zmx" || value === "zellij" ? value : "off";
 }
 
 function normalizeGhosttyTheme(value: string | undefined): string {

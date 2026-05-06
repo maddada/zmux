@@ -24,6 +24,13 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { IconStarFilled } from "@tabler/icons-react";
 import { COMPLETION_SOUND_OPTIONS, type CompletionSoundSetting } from "../shared/completion-sound";
 import { ZMUX_RECOMMENDED_GHOSTTY_CONFIG_LINES } from "../shared/ghostty-config-actions";
 import {
@@ -41,6 +48,7 @@ import {
   GHOSTTY_THEME_SETTING_OPTIONS,
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
   SIDEBAR_MODE_OPTIONS,
+  SIDEBAR_SIDE_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   ZED_OVERLAY_TARGET_APP_OPTIONS,
   normalizezmuxSettings,
@@ -50,6 +58,7 @@ import {
   type GhosttyScrollbar,
   type SessionPersistenceProvider,
   type SidebarMode,
+  type SidebarSide,
   type TerminalCursorStyle,
   type ZedOverlayTargetApp,
   type zmuxSettings,
@@ -57,6 +66,7 @@ import {
 
 const NUMERIC_SETTINGS_DEBOUNCE_MS = 180;
 const GHOSTTY_THEME_UNMANAGED_VALUE = "__zmux_ghostty_theme_unmanaged__";
+const MODIFIED_SETTING_TOOLTIP = "Modified Setting.\n \nClick to Reset to Default";
 
 type SettingSearchDefinition = {
   key: string;
@@ -69,6 +79,11 @@ type SettingsSectionSearchResult = {
   isSearching: boolean;
   sectionMatches: boolean;
   visibleSettingKeys: Set<string>;
+};
+
+type SettingModificationProps = {
+  isModified?: boolean;
+  onResetToDefault?: () => void;
 };
 
 export type GhosttySettingsAction =
@@ -136,8 +151,8 @@ export function SettingsModal({
       },
       {
         key: "syncOpenProjectWithZed",
-        subtitle: "Open the active zmux project in Zed after switching workspaces.",
-        title: "Sync open project with Zed",
+        subtitle: "Open the active zmux project in the attached IDE after switching workspaces.",
+        title: "Sync active project with IDE",
       },
     ]),
     sessionCards: getSettingsSectionSearch(settingsSearchQuery, "Session Cards", [
@@ -158,6 +173,12 @@ export function SettingsModal({
       },
     ]),
     sidebar: getSettingsSectionSearch(settingsSearchQuery, "Sidebar", [
+      {
+        key: "sidebarSide",
+        options: SIDEBAR_SIDE_OPTIONS,
+        subtitle: "Choose which side of the screen holds the sidebar.",
+        title: "Side",
+      },
       {
         key: "sidebarMode",
         options: SIDEBAR_MODE_OPTIONS,
@@ -282,7 +303,7 @@ export function SettingsModal({
       {
         key: "sessionPersistenceProvider",
         options: SESSION_PERSISTENCE_PROVIDER_OPTIONS,
-        subtitle: "Choose Off, tmux, or zmx for restart-safe terminal sessions.",
+        subtitle: "Choose Off, tmux, zmx, or zellij for restart-safe terminal sessions.",
         title: "Session Persistence",
       },
     ]),
@@ -444,6 +465,21 @@ export function SettingsModal({
   };
 
   const resetSettings = () => applySettings(DEFAULT_zmux_SETTINGS);
+  const resetSetting = <Key extends keyof zmuxSettings>(key: Key) => {
+    applySettings({
+      ...(pendingSettingsRef.current ?? draft),
+      [key]: DEFAULT_zmux_SETTINGS[key],
+    });
+  };
+  const getSettingModificationProps = <Key extends keyof zmuxSettings>(
+    key: Key,
+  ): Required<SettingModificationProps> => ({
+    isModified: !Object.is(
+      (pendingSettingsRef.current ?? draft)[key],
+      DEFAULT_zmux_SETTINGS[key],
+    ),
+    onResetToDefault: () => resetSetting(key),
+  });
 
   const applyRecommendedGhosttySettings = () => {
     /**
@@ -503,21 +539,22 @@ export function SettingsModal({
         className="zmux-settings-shadcn max-h-[min(700px,calc(100vh-2rem))] gap-0 overflow-hidden p-0 font-sans sm:max-w-xl"
         data-sidebar-theme={modalTheme}
       >
-        <DialogHeader className="px-5 pt-5 pb-3">
-          <DialogTitle className="text-xl">Settings</DialogTitle>
-          <Input
-            aria-label="Search settings"
-            className="mt-3 h-10 px-3 text-sm"
-            onChange={(event) => setSettingsSearchQuery(event.currentTarget.value)}
-            placeholder="Search settings"
-            value={settingsSearchQuery}
-          />
-        </DialogHeader>
+        <TooltipProvider delayDuration={300}>
+          <DialogHeader className="px-5 pt-5 pb-3">
+            <DialogTitle className="text-xl">Settings</DialogTitle>
+            <Input
+              aria-label="Search settings"
+              className="mt-3 h-10 px-3 text-sm"
+              onChange={(event) => setSettingsSearchQuery(event.currentTarget.value)}
+              placeholder="Search settings"
+              value={settingsSearchQuery}
+            />
+          </DialogHeader>
 
-        {/* CDXC:Settings 2026-04-26-10:43: The settings dialog lives inside a
-            narrow sidebar webview, so the Radix scroll area needs an explicit
-            height instead of letting Dialog crop an auto-height viewport. */}
-        <ScrollArea className="h-[min(560px,calc(100vh-9rem))] min-h-0">
+          {/* CDXC:Settings 2026-04-26-10:43: The settings dialog lives inside a
+              narrow sidebar webview, so the Radix scroll area needs an explicit
+              height instead of letting Dialog crop an auto-height viewport. */}
+          <ScrollArea className="h-[min(560px,calc(100vh-9rem))] min-h-0">
           <div className="flex flex-col gap-6 px-5 pb-5">
             {accessibilityPermissionGranted === false ? (
               /**
@@ -533,6 +570,19 @@ export function SettingsModal({
 
             {shouldShowSettingsSection(settingsSearch.sidebar) ? (
               <SettingsSection title="Sidebar">
+              {/* CDXC:SidebarPlacement 2026-05-06-17:32: Sidebar side is the
+                  first Sidebar setting so users can move the sidebar to the
+                  right side from Settings without discovering the hotkey. */}
+              {shouldShowSetting(settingsSearch.sidebar, "sidebarSide") ? (
+              <SelectField
+                description="Choose which side of the screen holds the sidebar."
+                label="Side"
+                {...getSettingModificationProps("sidebarSide")}
+                onChange={(value) => updateDraft("sidebarSide", value as SidebarSide)}
+                options={SIDEBAR_SIDE_OPTIONS}
+                value={draft.sidebarSide}
+              />
+              ) : null}
               {/* CDXC:SidebarMode 2026-05-03-10:42: Combined mode is a
                   sidebar-wide presentation choice, not a section visibility
                   toggle. Keep it above the per-section controls so users can
@@ -541,6 +591,7 @@ export function SettingsModal({
               <SelectField
                 description="Choose how project sessions are grouped."
                 label="Mode"
+                {...getSettingModificationProps("sidebarMode")}
                 onChange={(value) => updateDraft("sidebarMode", value as SidebarMode)}
                 options={SIDEBAR_MODE_OPTIONS}
                 value={draft.sidebarMode}
@@ -550,6 +601,7 @@ export function SettingsModal({
               <SelectField
                 description="Choose the sidebar color scheme."
                 label="Theme"
+                {...getSettingModificationProps("sidebarTheme")}
                 onChange={(value) => updateDraft("sidebarTheme", value as SidebarThemeSetting)}
                 options={SIDEBAR_THEME_SETTING_OPTIONS}
                 value={draft.sidebarTheme}
@@ -559,6 +611,7 @@ export function SettingsModal({
               <SliderNumberField
                 description="Scale the agent manager UI."
                 label="Agent Manager Zoom"
+                {...getSettingModificationProps("agentManagerZoomPercent")}
                 max={200}
                 min={50}
                 onCommit={(value) => updateDraft("agentManagerZoomPercent", value)}
@@ -572,6 +625,7 @@ export function SettingsModal({
                 checked={draft.showSidebarActions}
                 description="Show the command and action launcher."
                 label="Show Actions section"
+                {...getSettingModificationProps("showSidebarActions")}
                 onChange={(checked) => updateDraft("showSidebarActions", checked)}
               />
               ) : null}
@@ -580,6 +634,7 @@ export function SettingsModal({
                 checked={draft.showSidebarAgents}
                 description="Show active agent sessions."
                 label="Show Agents section"
+                {...getSettingModificationProps("showSidebarAgents")}
                 onChange={(checked) => updateDraft("showSidebarAgents", checked)}
               />
               ) : null}
@@ -588,6 +643,7 @@ export function SettingsModal({
                 checked={draft.showSidebarGitButton}
                 description="Show git tools in the sidebar toolbar."
                 label="Show Git button"
+                {...getSettingModificationProps("showSidebarGitButton")}
                 onChange={(checked) => updateDraft("showSidebarGitButton", checked)}
               />
               ) : null}
@@ -596,6 +652,7 @@ export function SettingsModal({
                 checked={draft.createSessionOnSidebarDoubleClick}
                 description="Create a session from empty sidebar space."
                 label="Double-click empty sidebar space to create a session"
+                {...getSettingModificationProps("createSessionOnSidebarDoubleClick")}
                 onChange={(checked) => updateDraft("createSessionOnSidebarDoubleClick", checked)}
               />
               ) : null}
@@ -604,6 +661,7 @@ export function SettingsModal({
                 checked={draft.renameSessionOnDoubleClick}
                 description="Rename sessions directly from their cards."
                 label="Double-click session cards to rename"
+                {...getSettingModificationProps("renameSessionOnDoubleClick")}
                 onChange={(checked) => updateDraft("renameSessionOnDoubleClick", checked)}
               />
               ) : null}
@@ -617,6 +675,7 @@ export function SettingsModal({
                 checked={draft.showCloseButtonOnSessionCards}
                 description="Reveal the close control when hovering a card."
                 label="Show close button on hover"
+                {...getSettingModificationProps("showCloseButtonOnSessionCards")}
                 onChange={(checked) => updateDraft("showCloseButtonOnSessionCards", checked)}
               />
               ) : null}
@@ -625,6 +684,7 @@ export function SettingsModal({
                 checked={draft.showHotkeysOnSessionCards}
                 description="Display card shortcuts where available."
                 label="Show hotkeys on cards"
+                {...getSettingModificationProps("showHotkeysOnSessionCards")}
                 onChange={(checked) => updateDraft("showHotkeysOnSessionCards", checked)}
               />
               ) : null}
@@ -636,6 +696,7 @@ export function SettingsModal({
                 checked={draft.showLastInteractionTimeOnSessionCards}
                 description="Use Last Active as the default trailing card detail instead of Agent Icon."
                 label="Use Last Active instead of Agent Icon"
+                {...getSettingModificationProps("showLastInteractionTimeOnSessionCards")}
                 onChange={(checked) =>
                   updateDraft("showLastInteractionTimeOnSessionCards", checked)
                 }
@@ -671,6 +732,7 @@ export function SettingsModal({
                   contentClassName="max-h-80"
                   description="Choose a bundled Ghostty theme, or leave your existing Ghostty config in charge."
                   label="Theme"
+                  {...getSettingModificationProps("terminalGhosttyTheme")}
                   onChange={(value) =>
                     updateDraft(
                       "terminalGhosttyTheme",
@@ -686,6 +748,7 @@ export function SettingsModal({
                 <TextField
                   description="Type a Ghostty font-family name. Leave blank to use existing Ghostty config or Ghostty's platform default."
                   label="Font Family"
+                  {...getSettingModificationProps("terminalFontFamily")}
                   onChange={(value) => updateDraft("terminalFontFamily", value)}
                   placeholder="Ghostty default"
                   value={draft.terminalFontFamily}
@@ -695,6 +758,7 @@ export function SettingsModal({
               <SliderNumberField
                 description="Set terminal text size."
                 label="Font Size"
+                {...getSettingModificationProps("terminalFontSize")}
                 max={32}
                 min={8}
                 onCommit={(value) => updateDraft("terminalFontSize", value)}
@@ -707,6 +771,7 @@ export function SettingsModal({
               <SliderNumberField
                 description="Set terminal text weight."
                 label="Font Weight"
+                {...getSettingModificationProps("terminalFontWeight")}
                 max={900}
                 min={100}
                 onCommit={(value) => updateDraft("terminalFontWeight", value)}
@@ -719,6 +784,7 @@ export function SettingsModal({
               <SliderNumberField
                 description="Adjust terminal row height."
                 label="Line Height"
+                {...getSettingModificationProps("terminalLineHeight")}
                 max={2}
                 min={0.8}
                 onCommit={(value) => updateDraft("terminalLineHeight", value)}
@@ -731,6 +797,7 @@ export function SettingsModal({
               <SliderNumberField
                 description="Adjust spacing between glyphs."
                 label="Letter Spacing"
+                {...getSettingModificationProps("terminalLetterSpacing")}
                 max={8}
                 min={-2}
                 onCommit={(value) => updateDraft("terminalLetterSpacing", value)}
@@ -743,6 +810,7 @@ export function SettingsModal({
               <SelectField
                 description="Choose the cursor shape."
                 label="Cursor Style"
+                {...getSettingModificationProps("terminalCursorStyle")}
                 onChange={(value) =>
                   updateDraft("terminalCursorStyle", value as TerminalCursorStyle)
                 }
@@ -759,6 +827,7 @@ export function SettingsModal({
                 checked={draft.terminalCursorStyleBlink}
                 description="Blink the terminal cursor."
                 label="Cursor blink"
+                {...getSettingModificationProps("terminalCursorStyleBlink")}
                 onChange={(checked) => updateDraft("terminalCursorStyleBlink", checked)}
               />
               ) : null}
@@ -766,11 +835,17 @@ export function SettingsModal({
               /* CDXC:SessionPersistence 2026-05-05-07:28
                   Session persistence is a provider choice for new terminal and
                   agent launches. Existing panes keep their current process;
-                  new panes can use tmux or zmx so restart restores by attach
-                  first and recreate+resume only when the named session is gone. */
+                  new panes can use tmux, zmx, or zellij so restart restores by
+                  attach first and recreate+resume only when the named session
+                  is gone.
+
+                 CDXC:SessionPersistence 2026-05-06-03:43
+                  zellij shares the same Settings selector and semantics as
+                  tmux/zmx instead of adding a separate mode-specific control. */
               <SelectField
-                description="Choose Off, tmux, or zmx for restart-safe terminal sessions."
+                description="Choose Off, tmux, zmx, or zellij for restart-safe terminal sessions."
                 label="Session Persistence"
+                {...getSettingModificationProps("sessionPersistenceProvider")}
                 onChange={(value) =>
                   updateDraft("sessionPersistenceProvider", value as SessionPersistenceProvider)
                 }
@@ -793,6 +868,7 @@ export function SettingsModal({
               <SliderNumberField
                 description="Scrollback memory per terminal surface. Ghostty default is 10 MB and changes affect new terminals."
                 label="Scrollback limit"
+                {...getSettingModificationProps("terminalScrollbackLimitMb")}
                 max={200}
                 min={1}
                 onCommit={(value) => updateDraft("terminalScrollbackLimitMb", value)}
@@ -805,6 +881,7 @@ export function SettingsModal({
               <SelectField
                 description="Copy selected terminal text automatically."
                 label="Copy on select"
+                {...getSettingModificationProps("terminalCopyOnSelect")}
                 onChange={(value) =>
                   updateDraft("terminalCopyOnSelect", value as GhosttyCopyOnSelect)
                 }
@@ -816,6 +893,7 @@ export function SettingsModal({
               <SelectField
                 description="Confirm before closing terminal surfaces."
                 label="Confirm close"
+                {...getSettingModificationProps("terminalConfirmCloseSurface")}
                 onChange={(value) =>
                   updateDraft("terminalConfirmCloseSurface", value as GhosttyConfirmCloseSurface)
                 }
@@ -831,6 +909,7 @@ export function SettingsModal({
                 checked={draft.terminalClipboardTrimTrailingSpaces}
                 description="Trim trailing whitespace when copying terminal text."
                 label="Trim trailing spaces on copy"
+                {...getSettingModificationProps("terminalClipboardTrimTrailingSpaces")}
                 onChange={(checked) => updateDraft("terminalClipboardTrimTrailingSpaces", checked)}
               />
               ) : null}
@@ -839,6 +918,7 @@ export function SettingsModal({
                 checked={draft.terminalClipboardPasteProtection}
                 description="Ask before pasting text Ghostty considers unsafe."
                 label="Paste protection"
+                {...getSettingModificationProps("terminalClipboardPasteProtection")}
                 onChange={(checked) => updateDraft("terminalClipboardPasteProtection", checked)}
               />
               ) : null}
@@ -847,6 +927,7 @@ export function SettingsModal({
                 checked={draft.terminalMouseHideWhileTyping}
                 description="Hide the pointer while typing in the terminal."
                 label="Hide mouse while typing"
+                {...getSettingModificationProps("terminalMouseHideWhileTyping")}
                 onChange={(checked) => updateDraft("terminalMouseHideWhileTyping", checked)}
               />
               ) : null}
@@ -854,6 +935,7 @@ export function SettingsModal({
               <SelectField
                 description="Control whether Ghostty shows its native scrollback scrollbar."
                 label="Scrollbar"
+                {...getSettingModificationProps("terminalScrollbar")}
                 onChange={(value) => updateDraft("terminalScrollbar", value as GhosttyScrollbar)}
                 options={GHOSTTY_SCROLLBAR_OPTIONS}
                 value={draft.terminalScrollbar}
@@ -874,6 +956,7 @@ export function SettingsModal({
               <SliderNumberField
                 description="Trackpads and high-resolution scroll wheels. Ghostty default is 1."
                 label="Precision scroll multiplier"
+                {...getSettingModificationProps("terminalMouseScrollMultiplierPrecision")}
                 max={8}
                 min={0.25}
                 onCommit={(value) => updateDraft("terminalMouseScrollMultiplierPrecision", value)}
@@ -888,6 +971,7 @@ export function SettingsModal({
               <SliderNumberField
                 description="Traditional notched mouse wheels. Ghostty default is 3."
                 label="Discrete scroll multiplier"
+                {...getSettingModificationProps("terminalMouseScrollMultiplierDiscrete")}
                 max={8}
                 min={0.25}
                 onCommit={(value) => updateDraft("terminalMouseScrollMultiplierDiscrete", value)}
@@ -903,6 +987,7 @@ export function SettingsModal({
                 checked={draft.terminalScrollToBottomWhenTyping}
                 description="Keep the prompt visible while typing."
                 label="Scroll to bottom when typing"
+                {...getSettingModificationProps("terminalScrollToBottomWhenTyping")}
                 onChange={(checked) => updateDraft("terminalScrollToBottomWhenTyping", checked)}
               />
               ) : null}
@@ -915,6 +1000,7 @@ export function SettingsModal({
               <SliderNumberField
                 description="Control spacing between panes."
                 label="Pane Gap"
+                {...getSettingModificationProps("workspacePaneGap")}
                 max={48}
                 min={0}
                 onCommit={(value) => updateDraft("workspacePaneGap", value)}
@@ -927,6 +1013,7 @@ export function SettingsModal({
               <TextField
                 description="CSS color for the focused pane border."
                 label="Active Pane Border"
+                {...getSettingModificationProps("workspaceActivePaneBorderColor")}
                 onChange={(value) => updateDraft("workspaceActivePaneBorderColor", value)}
                 value={draft.workspaceActivePaneBorderColor}
               />
@@ -935,6 +1022,7 @@ export function SettingsModal({
               <ColorField
                 description="Color shown behind terminal panes."
                 label="Terminal Background"
+                {...getSettingModificationProps("workspaceBackgroundColor")}
                 onChange={(value) => updateDraft("workspaceBackgroundColor", value)}
                 value={draft.workspaceBackgroundColor}
               />
@@ -944,6 +1032,7 @@ export function SettingsModal({
                 checked={draft.debuggingMode}
                 description="Expose debugging-only sidebar controls."
                 label="Show debugging UI"
+                {...getSettingModificationProps("debuggingMode")}
                 onChange={(checked) => updateDraft("debuggingMode", checked)}
               />
               ) : null}
@@ -960,6 +1049,7 @@ export function SettingsModal({
               <SelectField
                 description="Choose where browser actions open URLs."
                 label="Open URLs With"
+                {...getSettingModificationProps("browserOpenMode")}
                 onChange={(value) => updateDraft("browserOpenMode", value as BrowserOpenMode)}
                 options={BROWSER_OPEN_MODE_OPTIONS}
                 value={draft.browserOpenMode}
@@ -979,6 +1069,7 @@ export function SettingsModal({
                 checked={draft.zedOverlayEnabled}
                 description="Attach zmux as an overlay to the selected IDE."
                 label="Attach zmux to IDE"
+                {...getSettingModificationProps("zedOverlayEnabled")}
                 onChange={(checked) => updateDraft("zedOverlayEnabled", checked)}
               />
               ) : null}
@@ -987,6 +1078,7 @@ export function SettingsModal({
                 checked={draft.zedOverlayHideTitlebarButton}
                 description="Hide the native Attach/Detach IDE button from the zmux title bar."
                 label="Hide title-bar attach button"
+                {...getSettingModificationProps("zedOverlayHideTitlebarButton")}
                 onChange={(checked) => updateDraft("zedOverlayHideTitlebarButton", checked)}
               />
               ) : null}
@@ -994,6 +1086,7 @@ export function SettingsModal({
               <SelectField
                 description="Select which IDE should receive the overlay."
                 label="Target IDE"
+                {...getSettingModificationProps("zedOverlayTargetApp")}
                 onChange={(value) =>
                   updateDraft("zedOverlayTargetApp", value as ZedOverlayTargetApp)
                 }
@@ -1001,15 +1094,17 @@ export function SettingsModal({
                 value={draft.zedOverlayTargetApp}
               />
               ) : null}
-              {/* CDXC:ZedOverlayWorkspace 2026-04-28-05:18: Project sync is a
-                  separate setting from attachment. When enabled, zmux opens
-                  the active project in Zed after workspace switches instead of
-                  waiting for the native Show Zed button click. */}
+              {/* CDXC:IDEAttachment 2026-05-06-12:49: Project sync is a
+                  separate default-on setting from attachment. When enabled,
+                  zmux opens the active project in the attached IDE after
+                  workspace switches instead of waiting for a title-bar button
+                  click. */}
               {shouldShowSetting(settingsSearch.ideAttachment, "syncOpenProjectWithZed") ? (
               <ToggleField
                 checked={draft.syncOpenProjectWithZed}
-                description="Open the active zmux project in Zed after switching workspaces."
-                label="Sync open project with Zed"
+                description="Open the active zmux project in the attached IDE after switching workspaces."
+                label="Sync active project with IDE"
+                {...getSettingModificationProps("syncOpenProjectWithZed")}
                 onChange={(checked) => updateDraft("syncOpenProjectWithZed", checked)}
               />
               ) : null}
@@ -1023,6 +1118,7 @@ export function SettingsModal({
                 checked={draft.completionBellEnabled}
                 description="Play a completion sound when work finishes."
                 label="Enable completion bell"
+                {...getSettingModificationProps("completionBellEnabled")}
                 onChange={(checked) => updateDraft("completionBellEnabled", checked)}
               />
               ) : null}
@@ -1030,6 +1126,7 @@ export function SettingsModal({
               <SoundField
                 description="Sound for terminal completions."
                 label="Completion Sound"
+                {...getSettingModificationProps("completionSound")}
                 onChange={(value) => updateDraft("completionSound", value)}
                 value={draft.completionSound}
               />
@@ -1038,6 +1135,7 @@ export function SettingsModal({
               <SoundField
                 description="Sound for action completions."
                 label="Action Completion Sound"
+                {...getSettingModificationProps("actionCompletionSound")}
                 onChange={(value) => updateDraft("actionCompletionSound", value)}
                 value={draft.actionCompletionSound}
               />
@@ -1063,7 +1161,8 @@ export function SettingsModal({
               </Button>
             </div>
           </div>
-        </ScrollArea>
+          </ScrollArea>
+        </TooltipProvider>
       </DialogContent>
     </Dialog>
   );
@@ -1211,11 +1310,13 @@ function SettingsSection({ children, title }: { children: ReactNode; title: stri
 
 function SliderNumberField({
   description,
+  isModified,
   label,
   max,
   min,
   onChange,
   onCommit,
+  onResetToDefault,
   step,
   value,
 }: {
@@ -1227,7 +1328,7 @@ function SliderNumberField({
   onCommit: (value: number) => void;
   step: number;
   value: number;
-}) {
+} & SettingModificationProps) {
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [inputText, setInputText] = useState(() => formatSliderNumber(value, step));
@@ -1271,7 +1372,13 @@ function SliderNumberField({
   };
 
   return (
-    <SettingRow description={description} htmlFor={id} label={label}>
+    <SettingRow
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
       <div className="grid grid-cols-[minmax(0,1fr)_4.75rem] items-center gap-3">
         <Slider
           aria-label={label}
@@ -1327,8 +1434,10 @@ function formatSliderNumber(value: number, step: number): string {
 function SelectField({
   contentClassName,
   description,
+  isModified,
   label,
   onChange,
+  onResetToDefault,
   options,
   showScrollButtons,
   value,
@@ -1340,10 +1449,16 @@ function SelectField({
   options: ReadonlyArray<{ label: string; value: string }>;
   showScrollButtons?: boolean;
   value: string;
-}) {
+} & SettingModificationProps) {
   const id = useId();
   return (
-    <SettingRow description={description} htmlFor={id} label={label}>
+    <SettingRow
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
       <Select onValueChange={onChange} value={value}>
         <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
           <SelectValue />
@@ -1364,15 +1479,17 @@ function SelectField({
 
 function SoundField({
   description,
+  isModified,
   label,
   onChange,
+  onResetToDefault,
   value,
 }: {
   description?: string;
   label: string;
   onChange: (value: CompletionSoundSetting) => void;
   value: CompletionSoundSetting;
-}) {
+} & SettingModificationProps) {
   /**
    * CDXC:Settings 2026-04-29-17:01
    * Sound pickers have enough options that Radix hover-scroll buttons can
@@ -1383,8 +1500,10 @@ function SoundField({
     <SelectField
       contentClassName="max-h-72"
       description={description}
+      isModified={isModified}
       label={label}
       onChange={(nextValue) => onChange(nextValue as CompletionSoundSetting)}
+      onResetToDefault={onResetToDefault}
       options={COMPLETION_SOUND_OPTIONS}
       showScrollButtons={false}
       value={value}
@@ -1394,8 +1513,10 @@ function SoundField({
 
 function TextField({
   description,
+  isModified,
   label,
   onChange,
+  onResetToDefault,
   placeholder,
   value,
 }: {
@@ -1404,10 +1525,16 @@ function TextField({
   onChange: (value: string) => void;
   placeholder?: string;
   value: string;
-}) {
+} & SettingModificationProps) {
   const id = useId();
   return (
-    <SettingRow description={description} htmlFor={id} label={label}>
+    <SettingRow
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
       <Input
         id={id}
         className="h-10 px-3 text-sm"
@@ -1421,19 +1548,27 @@ function TextField({
 
 function ColorField({
   description,
+  isModified,
   label,
   onChange,
+  onResetToDefault,
   value,
 }: {
   description?: string;
   label: string;
   onChange: (value: string) => void;
   value: string;
-}) {
+} & SettingModificationProps) {
   const id = useId();
   const colorValue = normalizeColorInputValue(value);
   return (
-    <SettingRow description={description} htmlFor={id} label={label}>
+    <SettingRow
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
       <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-3">
         <Input
           aria-label={`${label} picker`}
@@ -1460,32 +1595,50 @@ function normalizeColorInputValue(value: string): string {
 function ToggleField({
   checked,
   description,
+  isModified,
   label,
   onChange,
+  onResetToDefault,
 }: {
   checked: boolean;
   description?: string;
   label: string;
   onChange: (checked: boolean) => void;
-}) {
+} & SettingModificationProps) {
   const id = useId();
   return (
-    <SettingRow description={description} htmlFor={id} label={label}>
+    <SettingRow
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
       <Switch checked={checked} id={id} onCheckedChange={onChange} />
     </SettingRow>
   );
 }
 
+/**
+ * CDXC:Settings 2026-05-06-12:57
+ * Every changed settings control needs an orange star beside its label. The
+ * star opens a shadcn tooltip with reset copy and resets only that setting to
+ * DEFAULT_zmux_SETTINGS when clicked.
+ */
 function SettingRow({
   children,
   description,
   htmlFor,
+  isModified,
   label,
+  onResetToDefault,
 }: {
   children: ReactNode;
   description?: string;
   htmlFor: string;
+  isModified?: boolean;
   label: string;
+  onResetToDefault?: () => void;
 }) {
   return (
     <Field className="gap-2.5" orientation="vertical">
@@ -1494,6 +1647,9 @@ function SettingRow({
           <FieldLabel className="text-sm" htmlFor={htmlFor}>
             {label}
           </FieldLabel>
+          {isModified && onResetToDefault ? (
+            <ModifiedSettingResetButton label={label} onResetToDefault={onResetToDefault} />
+          ) : null}
         </FieldTitle>
         {description ? (
           <FieldDescription className="text-sm">{description}</FieldDescription>
@@ -1501,5 +1657,37 @@ function SettingRow({
       </FieldContent>
       <div className="min-w-0">{children}</div>
     </Field>
+  );
+}
+
+function ModifiedSettingResetButton({
+  label,
+  onResetToDefault,
+}: {
+  label: string;
+  onResetToDefault: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label={`Reset ${label} to default`}
+          className="settings-modified-reset-button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onResetToDefault();
+          }}
+          size="icon-xs"
+          type="button"
+          variant="ghost"
+        >
+          <IconStarFilled aria-hidden="true" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="whitespace-pre-line text-center" sideOffset={6}>
+        {MODIFIED_SETTING_TOOLTIP}
+      </TooltipContent>
+    </Tooltip>
   );
 }

@@ -1945,6 +1945,21 @@ private final class NativeSettingsStore {
     return .separated
   }
 
+  func readSidebarSide() -> SidebarSide {
+    /**
+     CDXC:SidebarPlacement 2026-05-06-17:32
+     Native startup must place the sidebar from the persisted Settings value
+     before the React sidebar finishes loading, so right-side users do not see
+     an initial left-side layout that later jumps.
+     */
+    guard let settings = readSharedSidebarSettingsDictionary(),
+      let side = settings["sidebarSide"] as? String
+    else {
+      return .left
+    }
+    return SidebarSide(rawValue: side) ?? .left
+  }
+
   func readHotkeys() -> [String: String] {
     guard let settings = readSharedSidebarSettingsDictionary() else {
       return Self.defaultHotkeys
@@ -2173,6 +2188,7 @@ final class zmuxRootView: NSView {
     self.setSessionStatusIndicators = setSessionStatusIndicators
     self.sendHostEvent = sendEvent
     self.sidebarWidth = nativeSettingsStore.readSidebarChrome().width ?? Self.defaultSidebarWidth
+    self.sidebarSide = nativeSettingsStore.readSidebarSide()
     let configuration = WKWebViewConfiguration()
     configuration.userContentController.add(scriptBridge, name: "zmuxNativeHost")
     configuration.userContentController.add(scriptBridge, name: "zmuxAppModalHost")
