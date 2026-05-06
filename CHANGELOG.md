@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.8 - 2026-05-06
+
+<!-- CDXC:Distribution 2026-05-06-19:47: Release notes for 1.4.8 must include
+all commits after v1.4.7 so README, GitHub, Sparkle, and Homebrew release
+metadata describe the same shipped behavior. -->
+
+- Added embedded code-server editor panes so project groups can open a native CEF-backed code editor surface.
+- Added project header controls for opening project-scoped browser panes and project editor panes from the clicked group.
+- Added zellij as an opt-in terminal session persistence provider alongside tmux and zmx.
+- Added a sidebar side setting so users can choose left or right placement from Settings, including startup restore and legacy side migration.
+- Added modified-setting indicators with per-setting reset-to-default tooltips in Settings.
+- Replaced native `title` attributes across sidebar controls with shadcn/Radix app tooltips and shared local brand icons.
+- Improved project editor panes so middle-click closes the editor surface while preserving project diff stats and runtime sleep behavior.
+- Improved code-server editor drag/drop by disabling native pane resize/header reorder interception while editor panes are visible and logging passive CEF drag diagnostics.
+- Fixed right-side sidebar layout so the resize divider sits between the workspace and sidebar instead of on the outside edge.
+- Fixed Combined-mode project groups so empty project groups remain expandable for editor cards while browser and non-project groups still auto-collapse.
+- Removed versioned Sparkle release-note markdown files from the repository.
+
 ## 1.4.7 - 2026-05-06
 
 <!-- CDXC:Distribution 2026-05-06-03:12: Release notes for 1.4.7 must include
