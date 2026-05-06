@@ -184,6 +184,25 @@ export function getEmptyBrowserGroupExpandTooltip({
     : undefined;
 }
 
+export function shouldFocusGroupOnHeaderActivation({
+  hasProjectContext,
+  isActive,
+  shouldSelectEmptyProject,
+}: {
+  hasProjectContext: boolean;
+  isActive: boolean;
+  shouldSelectEmptyProject: boolean;
+}): boolean {
+  /**
+   * CDXC:SidebarMode 2026-05-06-12:49
+   * Combined-mode project headers activate their project even when they also
+   * collapse or expand sessions. That activation drives the debounced attached
+   * IDE workspace sync, while Separated-mode group headers keep their existing
+   * collapse-only behavior.
+   */
+  return shouldSelectEmptyProject || (hasProjectContext && !isActive);
+}
+
 export type SessionGroupSectionProps = {
   autoEdit: boolean;
   canClose: boolean;
@@ -766,14 +785,23 @@ export function SessionGroupSection({
   };
 
   const toggleCollapsedOrSelectEmptyProject = () => {
-    if (shouldSelectEmptyProject) {
+    if (
+      shouldFocusGroupOnHeaderActivation({
+        hasProjectContext: Boolean(projectContext),
+        isActive: group.isActive,
+        shouldSelectEmptyProject,
+      })
+    ) {
       /**
        * CDXC:SidebarMode 2026-05-04-06:52
-       * Empty Combined-mode project groups are project selectors, not empty
-       * session buckets. Selecting one makes the next agent/action launch use
-       * that project, and the placeholder stays hidden.
+       * Empty Combined-mode project groups are project selectors, and non-empty
+       * project headers also activate the project so the attached IDE follows
+       * the active zmux workspace before any later agent/action launch.
        */
       requestFocusGroup();
+    }
+
+    if (shouldSelectEmptyProject) {
       return;
     }
 
