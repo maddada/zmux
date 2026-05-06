@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   expandCollapsedGroupsById,
+  getAutoCollapseGroupIds,
   getBrowserSessionCountsByGroup,
   reconcileCollapsedGroupsById,
 } from "./browser-group-collapse";
@@ -20,6 +21,41 @@ describe("getBrowserSessionCountsByGroup", () => {
       "browser-tabs": 2,
       "preview-tabs": 0,
     });
+  });
+});
+
+describe("getAutoCollapseGroupIds", () => {
+  test("keeps empty project groups out of combined auto-collapse", () => {
+    /**
+     * CDXC:ProjectGroups 2026-05-06-18:42
+     * Empty project groups must remain expandable because their body contains
+     * the editor button. Browser and non-project combined groups can still use
+     * automatic empty-collapse behavior.
+     */
+    expect(
+      getAutoCollapseGroupIds({
+        browserGroupIds: ["browser-tabs"],
+        groupsById: {
+          "combined-chats": {},
+          "project-zmux": { projectContext: {} },
+        },
+        isCombinedSidebarMode: true,
+        workspaceGroupIds: ["combined-chats", "project-zmux"],
+      }),
+    ).toEqual(["browser-tabs", "combined-chats"]);
+  });
+
+  test("only auto-collapses browser groups outside combined mode", () => {
+    expect(
+      getAutoCollapseGroupIds({
+        browserGroupIds: ["browser-tabs"],
+        groupsById: {
+          "group-1": {},
+        },
+        isCombinedSidebarMode: false,
+        workspaceGroupIds: ["group-1"],
+      }),
+    ).toEqual(["browser-tabs"]);
   });
 });
 

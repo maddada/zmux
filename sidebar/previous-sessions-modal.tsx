@@ -1,4 +1,3 @@
-import { Tooltip } from "@base-ui/react/tooltip";
 import { IconStar, IconX } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -12,6 +11,7 @@ import {
   isTextEditingKey,
 } from "./text-input-keyboard";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
+import { TooltipProvider } from "./app-tooltip";
 import type { WebviewApi } from "./webview-api";
 
 export type PreviousSessionsModalProps = {
@@ -155,7 +155,7 @@ export function PreviousSessionsModal({ isOpen, onClose, vscode }: PreviousSessi
   }
 
   return createPortal(
-    <Tooltip.Provider delay={TOOLTIP_DELAY_MS}>
+    <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
       <div className="confirm-modal-root scroll-mask-y" role="presentation">
         <button className="confirm-modal-backdrop" onClick={onClose} type="button" />
         <div
@@ -304,7 +304,7 @@ export function PreviousSessionsModal({ isOpen, onClose, vscode }: PreviousSessi
           />
         </div>
       </div>
-    </Tooltip.Provider>,
+    </TooltipProvider>,
     document.body,
   );
 }

@@ -1,5 +1,6 @@
 import { IconCaretRightFilled } from "@tabler/icons-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { AppTooltip } from "./app-tooltip";
 
 export type SectionHeaderProps = {
   actions?: ReactNode;
@@ -40,32 +41,33 @@ export function SectionHeader({
     >
       <div className="section-titlebar-main">
         {isCollapsible ? (
-          <button
-            aria-label={collapseLabel}
-            className="section-titlebar-toggle"
-            data-collapsed={String(isCollapsed)}
-            data-empty-space-blocking="true"
-            data-has-idle-icon={String(idleIcon !== undefined)}
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggleCollapsed?.();
-            }}
-            title={collapseLabel}
-            type="button"
-          >
-            {idleIcon ? (
-              <span
+          <AppTooltip content={collapseLabel}>
+            <button
+              aria-label={collapseLabel}
+              className="section-titlebar-toggle"
+              data-collapsed={String(isCollapsed)}
+              data-empty-space-blocking="true"
+              data-has-idle-icon={String(idleIcon !== undefined)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleCollapsed?.();
+              }}
+              type="button"
+            >
+              {idleIcon ? (
+                <span
+                  aria-hidden="true"
+                  className="section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
+                >
+                  {idleIcon}
+                </span>
+              ) : null}
+              <IconCaretRightFilled
                 aria-hidden="true"
-                className="section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
-              >
-                {idleIcon}
-              </span>
-            ) : null}
-            <IconCaretRightFilled
-              aria-hidden="true"
-              className="section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
-            />
-          </button>
+                className="section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+              />
+            </button>
+          </AppTooltip>
         ) : null}
         <span className="section-titlebar-label">{title}</span>
       </div>

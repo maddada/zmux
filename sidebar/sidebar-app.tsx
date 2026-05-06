@@ -1,4 +1,3 @@
-import { Tooltip } from "@base-ui/react/tooltip";
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
 import { move } from "@dnd-kit/helpers";
 import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
@@ -7,7 +6,6 @@ import {
   IconBellOff,
   IconArrowsSort,
   IconBookmark,
-  IconBrowser,
   IconCaretRightFilled,
   IconChevronDown,
   IconChevronRight,
@@ -78,6 +76,7 @@ import {
 } from "./sidebar-dnd";
 import {
   expandCollapsedGroupsById,
+  getAutoCollapseGroupIds,
   getSessionCountsByGroup,
   reconcileCollapsedGroupsById,
 } from "./browser-group-collapse";
@@ -88,6 +87,7 @@ import {
   isTextEditingKey,
 } from "./text-input-keyboard";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
+import { AppTooltip, TooltipProvider } from "./app-tooltip";
 import { useScrollGlowState } from "./use-scroll-glow-state";
 import type { WebviewApi } from "./webview-api";
 import { createDisplaySessionLayout } from "../shared/active-sessions-sort";
@@ -238,6 +238,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     customThemeColor,
     debuggingMode,
     groupOrder,
+    groupsById,
     previousSessions,
     recentProjects,
     sectionVisibility,
@@ -260,6 +261,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
       customThemeColor: state.hud.customThemeColor,
       debuggingMode: state.hud.debuggingMode,
       groupOrder: state.groupOrder,
+      groupsById: state.groupsById,
       previousSessions: state.previousSessions,
       recentProjects: state.hud.recentProjects,
       projectHeader: state.hud.projectHeader,
@@ -316,9 +318,12 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   const isCombinedSidebarMode = settings?.sidebarMode === "combined";
 
   useLayoutEffect(() => {
-    const autoCollapseGroupIds = isCombinedSidebarMode
-      ? [...browserGroupIds, ...workspaceGroupIds]
-      : browserGroupIds;
+    const autoCollapseGroupIds = getAutoCollapseGroupIds({
+      browserGroupIds,
+      groupsById,
+      isCombinedSidebarMode,
+      workspaceGroupIds,
+    });
     const nextAutoCollapseSessionCountsByGroup = getSessionCountsByGroup({
       groupIds: autoCollapseGroupIds,
       sessionIdsByGroup: authoritativeSessionIdsByGroup,
@@ -342,6 +347,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     authoritativeSessionIdsByGroup,
     browserGroupIds,
     groupOrder,
+    groupsById,
     isCombinedSidebarMode,
     workspaceGroupIds,
   ]);
@@ -1646,17 +1652,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     vscode.postMessage({ type: "openWorkspaceWelcome" });
   };
 
-  const openBrowserPane = () => {
-    /**
-     * CDXC:ChromiumBrowserPanes 2026-05-04-16:51
-     * The sidebar needs a direct browser-pane creation button for Chromium/CEF
-     * testing. Use the explicit browser-pane message so this button is stable
-     * even when the general browser action setting still targets Chrome Canary.
-     */
-    setIsOverflowMenuOpen(false);
-    vscode.postMessage({ type: "openBrowserPane" });
-  };
-
   const browserAccessSessionId = useMemo(() => {
     const orderedSessionIds = groupOrder.flatMap(
       (groupId) => authoritativeSessionIdsByGroup[groupId] ?? [],
@@ -1689,7 +1684,6 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
     isSessionSearchOpen,
     sessionPersistenceProvider: settings?.sessionPersistenceProvider,
     onMoveSidebar: moveSidebar,
-    onOpenBrowser: openBrowserPane,
     onAccessT3FromBrowser: (sessionId: string) => {
       setIsOverflowMenuOpen(false);
       vscode.postMessage({
@@ -1726,7 +1720,7 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
   } satisfies RenderSidebarTopControlsOptions;
 
   return (
-    <Tooltip.Provider delay={TOOLTIP_DELAY_MS}>
+    <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
       {/* CDXC:SidebarMode 2026-05-04-07:00: Combined mode still shows the
           current-project header because empty project groups act as project
           selectors for subsequent agent/action launches. */}
@@ -1992,36 +1986,36 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
                 <div className="recent-projects-list">
                   {filteredRecentProjects.length > 0 ? (
                     filteredRecentProjects.map((project) => (
-                      <button
-                        className="recent-projects-row group-head"
-                        key={project.projectId}
-                        onClick={() => restoreRecentProject(project.projectId)}
-                        title={project.path}
-                        type="button"
-                      >
-                        <span className="group-title-wrap">
-                          <span className="group-title-row">
-                            <span
-                              aria-hidden="true"
-                              className="recent-projects-row-icon group-collapse-button section-titlebar-toggle"
-                            >
-                              <IconFolder size={16} stroke={1.8} />
-                            </span>
-                            <span className="group-title-handle">
-                              <span className="recent-projects-row-title group-title section-titlebar-label">
-                                {project.title}
+                      <AppTooltip content={project.path} key={project.projectId}>
+                        <button
+                          className="recent-projects-row group-head"
+                          onClick={() => restoreRecentProject(project.projectId)}
+                          type="button"
+                        >
+                          <span className="group-title-wrap">
+                            <span className="group-title-row">
+                              <span
+                                aria-hidden="true"
+                                className="recent-projects-row-icon group-collapse-button section-titlebar-toggle"
+                              >
+                                <IconFolder size={16} stroke={1.8} />
+                              </span>
+                              <span className="group-title-handle">
+                                <span className="recent-projects-row-title group-title section-titlebar-label">
+                                  {project.title}
+                                </span>
+                              </span>
+                              <span className="group-title-spacer" />
+                              <span
+                                aria-label={`${project.sessionCount} preserved sessions`}
+                                className="recent-projects-session-count group-add-button"
+                              >
+                                {project.sessionCount}
                               </span>
                             </span>
-                            <span className="group-title-spacer" />
-                            <span
-                              aria-label={`${project.sessionCount} preserved sessions`}
-                              className="recent-projects-session-count group-add-button"
-                            >
-                              {project.sessionCount}
-                            </span>
                           </span>
-                        </span>
-                      </button>
+                        </button>
+                      </AppTooltip>
                     ))
                   ) : (
                     <div className="recent-projects-empty">No projects match that search.</div>
@@ -2055,21 +2049,22 @@ export function SidebarApp({ messageSource = window, vscode }: SidebarAppProps) 
           }}
         />
         {buildStamp ? (
-          <button
-            aria-label={`Copy build stamp ${buildStamp}`}
-            className="copy-cursor"
-            onClick={() => {
-              void navigator.clipboard.writeText(buildStamp).catch(() => {});
-            }}
-            style={DEBUG_BUILD_STAMP_STYLE}
-            title="Copy build stamp"
-            type="button"
-          >
-            {buildStamp}
-          </button>
+          <AppTooltip content="Copy build stamp">
+            <button
+              aria-label={`Copy build stamp ${buildStamp}`}
+              className="copy-cursor"
+              onClick={() => {
+                void navigator.clipboard.writeText(buildStamp).catch(() => {});
+              }}
+              style={DEBUG_BUILD_STAMP_STYLE}
+              type="button"
+            >
+              {buildStamp}
+            </button>
+          </AppTooltip>
         ) : null}
       </div>
-    </Tooltip.Provider>
+    </TooltipProvider>
   );
 }
 
@@ -2107,43 +2102,33 @@ function ToolbarIconButton({
   triggerDataName,
 }: ToolbarIconButtonProps) {
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger
-        render={
-          <button
-            aria-controls={ariaControls}
-            aria-disabled={isDisabled}
-            aria-expanded={ariaExpanded}
-            aria-haspopup={ariaHasPopup}
-            aria-label={ariaLabel}
-            className={className ? `toolbar-button ${className}` : "toolbar-button"}
-            data-disabled={String(isDisabled)}
-            data-dimmed={dataDimmed ?? String(isDimmed)}
-            data-sidebar-overflow-trigger={triggerDataName}
-            data-selected={String(isSelected)}
-            onClick={(event) => {
-              if (isDisabled) {
-                return;
-              }
+    <AppTooltip content={tooltip}>
+      <button
+        aria-controls={ariaControls}
+        aria-disabled={isDisabled}
+        aria-expanded={ariaExpanded}
+        aria-haspopup={ariaHasPopup}
+        aria-label={ariaLabel}
+        className={className ? `toolbar-button ${className}` : "toolbar-button"}
+        data-disabled={String(isDisabled)}
+        data-dimmed={dataDimmed ?? String(isDimmed)}
+        data-sidebar-overflow-trigger={triggerDataName}
+        data-selected={String(isSelected)}
+        onClick={(event) => {
+          if (isDisabled) {
+            return;
+          }
 
-              onClick(event);
-            }}
-            tabIndex={tabIndex}
-            type="button"
-          >
-            {children}
-          </button>
-        }
-      />
-      <Tooltip.Portal>
-        <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
-          <Tooltip.Popup className="tooltip-popup">{tooltip}</Tooltip.Popup>
-        </Tooltip.Positioner>
-      </Tooltip.Portal>
-    </Tooltip.Root>
+          onClick(event);
+        }}
+        tabIndex={tabIndex}
+        type="button"
+      >
+        {children}
+      </button>
+    </AppTooltip>
   );
 }
-
 function createWorkspaceSessionIdsByGroup(
   workspaceGroupIds: readonly string[],
   sessionIdsByGroup: SessionIdsByGroup,
@@ -2230,7 +2215,6 @@ type RenderSidebarTopControlsOptions = {
   sessionPersistenceProvider?: string;
   onAccessT3FromBrowser: (sessionId: string) => void;
   onMoveSidebar: () => void;
-  onOpenBrowser: () => void;
   onOpenHelp: () => void;
   onOpenHotkeys: () => void;
   onOpenSettings: () => void;
@@ -2259,7 +2243,6 @@ function renderFloatingOverflowMenu({
   sessionPersistenceProvider,
   onAccessT3FromBrowser,
   onMoveSidebar: _onMoveSidebar,
-  onOpenBrowser,
   onOpenHelp,
   onOpenHotkeys,
   onOpenSettings,
@@ -2283,14 +2266,6 @@ function renderFloatingOverflowMenu({
        * are hidden, so its trigger floats at the top-right of the whole sidebar
        * instead of being owned by a header titlebar.
        */}
-      <ToolbarIconButton
-        ariaLabel="Open Chromium browser pane"
-        className="floating-toolbar-button sidebar-floating-browser-trigger"
-        onClick={onOpenBrowser}
-        tooltip="New Browser"
-      >
-        <IconBrowser aria-hidden="true" className="toolbar-tabler-icon" size={14} stroke={2} />
-      </ToolbarIconButton>
       <ToolbarIconButton
         ariaControls="sidebar-overflow-menu"
         ariaExpanded={isOverflowMenuOpen}

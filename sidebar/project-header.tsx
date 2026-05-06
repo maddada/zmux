@@ -1,7 +1,7 @@
-import { Tooltip } from "@base-ui/react/tooltip";
 import { IconFolderFilled } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import type { SidebarProjectHeader as SidebarProjectHeaderData } from "../shared/session-grid-contract";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./app-tooltip";
 
 export type SidebarProjectHeaderProps = {
   projectHeader?: SidebarProjectHeaderData;
@@ -70,8 +70,8 @@ export function SidebarProjectHeader({ projectHeader }: SidebarProjectHeaderProp
               <IconFolderFilled className="sidebar-project-header-icon-fallback" size={18} />
             )}
           </div>
-          <Tooltip.Provider delay={PROJECT_HEADER_TOOLTIP_DELAY_MS}>
-            <Tooltip.Root
+          <TooltipProvider delayDuration={PROJECT_HEADER_TOOLTIP_DELAY_MS}>
+            <Tooltip
               onOpenChange={(open) => {
                 if (!open && isCopied) {
                   return;
@@ -81,46 +81,40 @@ export function SidebarProjectHeader({ projectHeader }: SidebarProjectHeaderProp
               }}
               open={isTooltipOpen}
             >
-              <Tooltip.Trigger
-                render={
-                  <button
-                    aria-label={`Copy project path: ${projectHeader.directory}`}
-                    className="sidebar-project-header-copy copy-cursor"
-                    onBlur={() => {
-                      isFocusedRef.current = false;
-                      if (!isCopied && !isHoveringRef.current) {
-                        setIsTooltipOpen(false);
-                      }
-                    }}
-                    onClick={copyPath}
-                    onFocus={() => {
-                      isFocusedRef.current = true;
-                    }}
-                    onMouseEnter={() => {
-                      isHoveringRef.current = true;
-                    }}
-                    onMouseLeave={() => {
-                      isHoveringRef.current = false;
-                      if (!isCopied && !isFocusedRef.current) {
-                        setIsTooltipOpen(false);
-                      }
-                    }}
-                    type="button"
-                  >
-                    <span className="sidebar-project-header-name">{projectHeader.name}</span>
-                    <span className="sidebar-project-header-directory">{displayDirectory}</span>
-                  </button>
-                }
-              />
-              <Tooltip.Portal>
-                <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
-                  <Tooltip.Popup className="tooltip-popup">
-                    {isCopied ? "Copied path!" : "Click here to copy the path"}
-                  </Tooltip.Popup>
-                </Tooltip.Positioner>
-              </Tooltip.Portal>
-            </Tooltip.Root>
-          </Tooltip.Provider>
+              <TooltipTrigger asChild>
+                <button
+                  aria-label={`Copy project path: ${projectHeader.directory}`}
+                  className="sidebar-project-header-copy copy-cursor"
+                  onBlur={() => {
+                    isFocusedRef.current = false;
+                    if (!isCopied && !isHoveringRef.current) {
+                      setIsTooltipOpen(false);
+                    }
+                  }}
+                  onClick={copyPath}
+                  onFocus={() => {
+                    isFocusedRef.current = true;
+                  }}
+                  onMouseEnter={() => {
+                    isHoveringRef.current = true;
+                  }}
+                  onMouseLeave={() => {
+                    isHoveringRef.current = false;
+                    if (!isCopied && !isFocusedRef.current) {
+                      setIsTooltipOpen(false);
+                    }
+                  }}
+                  type="button"
+                >
+                  <span className="sidebar-project-header-name">{projectHeader.name}</span>
+                  <span className="sidebar-project-header-directory">{displayDirectory}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={8}>
+                {isCopied ? "Copied path!" : "Click here to copy the path"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
     </div>

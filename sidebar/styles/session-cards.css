@@ -13,6 +13,15 @@
  * project editor launcher. It mirrors session-card interaction styling while
  * staying half-height so the files/[+lines|-lines] summary scans as a tool,
  * not as another split pane session.
+ *
+ * CDXC:ProjectGroups 2026-05-06-18:42
+ * The editor launcher should read like a session card title: left-aligned diff
+ * text and the same font sizing/weight used by normal session aliases.
+ *
+ * CDXC:EditorPanes 2026-05-06-18:55
+ * The project editor card mirrors session-card agent identity placement: the
+ * VS Code brand icon lives in the trailing right-side slot, and middle-click
+ * closes the editor surface instead of opening it.
  */
 .project-editor-card-button {
   --project-editor-surface: linear-gradient(
@@ -31,13 +40,14 @@
   border-radius: calc(10px * var(--sidebar-density-scale));
   color: inherit;
   cursor: pointer;
-  display: inline-flex;
-  font-size: calc(12px * var(--sidebar-density-scale));
-  font-weight: 650;
+  display: grid;
+  font-size: calc(13px * var(--sidebar-density-scale));
+  font-weight: 600;
   gap: calc(7px * var(--sidebar-density-scale));
+  grid-template-columns: minmax(0, 1fr) auto;
   height: calc(31px * var(--sidebar-density-scale));
   isolation: isolate;
-  justify-content: center;
+  letter-spacing: 0.02em;
   margin-bottom: calc(4px * var(--sidebar-density-scale));
   min-width: 0;
   outline: 2px solid transparent;
@@ -51,6 +61,7 @@
     outline-color 120ms ease,
     opacity 120ms ease;
   width: 100%;
+  text-align: left;
 }
 
 .project-editor-card-button::before,
@@ -131,13 +142,28 @@
 }
 
 .project-editor-card-icon {
-  color: color-mix(in srgb, var(--app-foreground) 78%, var(--app-button-background) 22%);
-  flex: 0 0 auto;
+  height: calc(15px * var(--sidebar-density-scale));
+  justify-content: center;
+  justify-self: end;
+  opacity: 0.7;
+  width: calc(15px * var(--sidebar-density-scale));
+}
+
+.project-editor-card-button:is(:hover, :focus-visible, [data-open="true"])
+  .project-editor-card-icon {
+  opacity: 1;
+}
+
+.project-editor-card-brand-icon {
+  display: block;
+  height: 100%;
+  width: 100%;
 }
 
 .project-editor-diff-label {
   gap: calc(6px * var(--sidebar-density-scale));
-  line-height: 1;
+  justify-self: start;
+  line-height: 1.3;
 }
 
 .project-editor-diff-files {

@@ -494,6 +494,16 @@ export type SidebarToExtensionMessage =
       type: "openBrowserPane";
     }
   | {
+      /**
+       * CDXC:ProjectGroups 2026-05-06-18:42
+       * Project headers expose New Browser beside the create-session control.
+       * Carry the group id so native can focus that project/group before
+       * creating the browser pane.
+       */
+      groupId: string;
+      type: "openBrowserPaneInGroup";
+    }
+  | {
       type: "openWorkspaceWelcome";
     }
   | {
@@ -558,8 +568,15 @@ export type SidebarToExtensionMessage =
        * Project editor buttons are trusted group-scoped commands. Native
        * resolves the group id to its stored project path before launching the
        * embedded code-server editor or refreshing its diff stats.
+       *
+       * CDXC:EditorPanes 2026-05-06-18:55
+       * The editor card also accepts middle-click close, but the editor is not a
+       * session; route close through the same trusted project/group resolver.
        */
-      type: "openWorkspaceProjectEditorForGroup" | "refreshWorkspaceProjectDiffForGroup";
+      type:
+        | "closeWorkspaceProjectEditorForGroup"
+        | "openWorkspaceProjectEditorForGroup"
+        | "refreshWorkspaceProjectDiffForGroup";
       groupId: string;
     }
   | {

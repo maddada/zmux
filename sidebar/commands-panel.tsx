@@ -1,4 +1,3 @@
-import { Tooltip } from "@base-ui/react/tooltip";
 import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
 import { isSortableOperation, useSortable } from "@dnd-kit/react/sortable";
 import {
@@ -45,6 +44,7 @@ import { postSidebarOrderReproLog } from "./sidebar-order-repro-log";
 import { SectionHeader } from "./section-header";
 import { useSidebarStore } from "./sidebar-store";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
+import { AppTooltip, TooltipProvider } from "./app-tooltip";
 import { useCollapsibleHeight } from "./use-collapsible-height";
 import { SidebarCommandIconGlyph } from "./sidebar-command-icon";
 import type { CommandConfigDraft } from "./command-config-modal";
@@ -723,7 +723,7 @@ export function CommandsPanel({
                   </span>
                 </button>
               ) : (
-                <Tooltip.Provider delay={TOOLTIP_DELAY_MS}>
+                <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
                   <DragDropProvider onDragEnd={handleDragEnd} onDragStart={handleDragStart}>
                     <div
                       className="commands-grid"
@@ -760,7 +760,7 @@ export function CommandsPanel({
                       ))}
                     </div>
                   </DragDropProvider>
-                </Tooltip.Provider>
+                </TooltipProvider>
               )}
             </div>
           </div>
@@ -984,31 +984,31 @@ export function CommandsPanel({
                   </button>
                   <div className="session-context-menu-divider" role="separator" />
                   {contextMenu.worktrees.map((worktree) => (
-                    <button
-                      className="session-context-menu-item"
-                      key={worktree.directory}
-                      onClick={() => {
-                        setContextMenu(undefined);
-                        vscode.postMessage({
-                          commandId: contextMenu.command.commandId,
-                          ...(contextMenu.worktreeRunMode
-                            ? { runMode: contextMenu.worktreeRunMode }
-                            : {}),
-                          type: "runSidebarCommand",
-                          worktreePath: worktree.directory,
-                        });
-                      }}
-                      role="menuitem"
-                      title={worktree.directory}
-                      type="button"
-                    >
-                      <IconPlayerPlayFilled
-                        aria-hidden="true"
-                        className="session-context-menu-icon"
-                        size={14}
-                      />
-                      {formatWorktreeMenuLabel(worktree)}
-                    </button>
+                    <AppTooltip content={worktree.directory} key={worktree.directory}>
+                      <button
+                        className="session-context-menu-item"
+                        onClick={() => {
+                          setContextMenu(undefined);
+                          vscode.postMessage({
+                            commandId: contextMenu.command.commandId,
+                            ...(contextMenu.worktreeRunMode
+                              ? { runMode: contextMenu.worktreeRunMode }
+                              : {}),
+                            type: "runSidebarCommand",
+                            worktreePath: worktree.directory,
+                          });
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <IconPlayerPlayFilled
+                          aria-hidden="true"
+                          className="session-context-menu-icon"
+                          size={14}
+                        />
+                        {formatWorktreeMenuLabel(worktree)}
+                      </button>
+                    </AppTooltip>
                   ))}
                 </>
               )}
@@ -1070,88 +1070,78 @@ function SortableCommandButton({
   };
 
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger
-        render={
-          <div
-            className="command-button-shell"
-            data-sidebar-order-id={command.commandId}
-            ref={setShellRef}
-          >
-            <button
-              aria-busy={runStatus === "running"}
-              aria-label={
-                runStatus === "running"
-                  ? getLoadingCommandButtonAriaLabel(command)
-                  : getCommandButtonAriaLabel(command)
-              }
-              className="command-button"
-              data-configured={String(isConfigured(command))}
-              data-default={String(command.isDefault)}
-              data-dragging={String(Boolean(sortable.isDragging))}
-              data-empty-space-blocking="true"
-              data-has-icon={String(command.icon !== undefined || runStatus === "running")}
-              data-icon-only={String(isIconOnly)}
-              data-has-session-indicator={String(commandSessionIndicator !== undefined)}
-              data-loading={String(runStatus === "running")}
-              data-run-status={runStatus}
-              draggable={false}
-              onClick={runStatus === "running" ? undefined : onRun}
-              onContextMenu={onContextMenu}
-              onMouseDown={(event) => {
-                if (event.button !== 1 || !canEndRun) {
-                  return;
-                }
-
-                event.preventDefault();
-                event.stopPropagation();
-                onEndRun();
-              }}
-              ref={setButtonRef}
-              type="button"
-            >
-              <span aria-hidden="true" className="command-button-kind-badge">
-                {runStatus === "running" ? (
-                  <IconLoader2 className="command-button-loading-icon" size={15} stroke={1.8} />
-                ) : (
-                  <ActionButtonIcon command={command} />
-                )}
-              </span>
-              {trimmedName ? <span className="command-button-label">{trimmedName}</span> : null}
-            </button>
-            {commandSessionIndicator ? (
-              <button
-                aria-label={getCommandSessionIndicatorAriaLabel(command, commandSessionIndicator)}
-                className="command-button-session-indicator"
-                data-active-session={String(isActiveSessionIndicator)}
-                data-session-status={commandSessionIndicator.status}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  vscode.postMessage({
-                    sessionId: commandSessionIndicator.sessionId,
-                    type: "focusSession",
-                  });
-                }}
-                title={getCommandSessionIndicatorTooltip(command, commandSessionIndicator)}
-                type="button"
-              >
-                <span aria-hidden="true" className="command-button-session-indicator-dot" />
-              </button>
-            ) : null}
-          </div>
+    <div className="command-button-shell" data-sidebar-order-id={command.commandId} ref={setShellRef}>
+      <AppTooltip
+        content={
+          runStatus === "running"
+            ? getLoadingCommandButtonTooltip(command)
+            : getCommandButtonTooltip(command)
         }
-      />
-      <Tooltip.Portal>
-        <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
-          <Tooltip.Popup className="tooltip-popup">
-            {runStatus === "running"
-              ? getLoadingCommandButtonTooltip(command)
-              : getCommandButtonTooltip(command)}
-          </Tooltip.Popup>
-        </Tooltip.Positioner>
-      </Tooltip.Portal>
-    </Tooltip.Root>
+      >
+        <button
+          aria-busy={runStatus === "running"}
+          aria-label={
+            runStatus === "running"
+              ? getLoadingCommandButtonAriaLabel(command)
+              : getCommandButtonAriaLabel(command)
+          }
+          className="command-button"
+          data-configured={String(isConfigured(command))}
+          data-default={String(command.isDefault)}
+          data-dragging={String(Boolean(sortable.isDragging))}
+          data-empty-space-blocking="true"
+          data-has-icon={String(command.icon !== undefined || runStatus === "running")}
+          data-icon-only={String(isIconOnly)}
+          data-has-session-indicator={String(commandSessionIndicator !== undefined)}
+          data-loading={String(runStatus === "running")}
+          data-run-status={runStatus}
+          draggable={false}
+          onClick={runStatus === "running" ? undefined : onRun}
+          onContextMenu={onContextMenu}
+          onMouseDown={(event) => {
+            if (event.button !== 1 || !canEndRun) {
+              return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            onEndRun();
+          }}
+          ref={setButtonRef}
+          type="button"
+        >
+          <span aria-hidden="true" className="command-button-kind-badge">
+            {runStatus === "running" ? (
+              <IconLoader2 className="command-button-loading-icon" size={15} stroke={1.8} />
+            ) : (
+              <ActionButtonIcon command={command} />
+            )}
+          </span>
+          {trimmedName ? <span className="command-button-label">{trimmedName}</span> : null}
+        </button>
+      </AppTooltip>
+      {commandSessionIndicator ? (
+        <AppTooltip content={getCommandSessionIndicatorTooltip(command, commandSessionIndicator)}>
+          <button
+            aria-label={getCommandSessionIndicatorAriaLabel(command, commandSessionIndicator)}
+            className="command-button-session-indicator"
+            data-active-session={String(isActiveSessionIndicator)}
+            data-session-status={commandSessionIndicator.status}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              vscode.postMessage({
+                sessionId: commandSessionIndicator.sessionId,
+                type: "focusSession",
+              });
+            }}
+            type="button"
+          >
+            <span aria-hidden="true" className="command-button-session-indicator-dot" />
+          </button>
+        </AppTooltip>
+      ) : null}
+    </div>
   );
 }
 

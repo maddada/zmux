@@ -1224,15 +1224,21 @@ function GhosttySettingsActions({
       <Button className="h-10 px-4 text-sm" onClick={onResetDefaults} type="button" variant="outline">
         Reset Ghostty defaults
       </Button>
-      <Button
-        className="h-10 px-4 text-sm"
-        onClick={onApplyRecommended}
-        title={ZMUX_RECOMMENDED_GHOSTTY_CONFIG_LINES.join("\n")}
-        type="button"
-        variant="outline"
-      >
-        Apply recommended
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            className="h-10 px-4 text-sm"
+            onClick={onApplyRecommended}
+            type="button"
+            variant="outline"
+          >
+            Apply recommended
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="whitespace-pre-line text-left" sideOffset={6}>
+          {ZMUX_RECOMMENDED_GHOSTTY_CONFIG_LINES.join("\n")}
+        </TooltipContent>
+      </Tooltip>
       <Button className="h-10 px-4 text-sm" onClick={onOpenDocs} type="button" variant="outline">
         Open Ghostty docs
       </Button>

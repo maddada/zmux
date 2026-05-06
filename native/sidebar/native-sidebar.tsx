@@ -20,9 +20,11 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { installAppModalGlobalErrorLogging } from "../../sidebar/app-modal-error-log";
+import { AppTooltip, TooltipProvider } from "../../sidebar/app-tooltip";
 import { openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
 import { SidebarApp } from "../../sidebar/sidebar-app";
 import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "../../sidebar/agent-logos";
+import { TOOLTIP_DELAY_MS } from "../../sidebar/tooltip-delay";
 import {
   explainFirstPromptAutoRenameDecision,
   isGenericAgentSessionTitle,
@@ -607,6 +609,13 @@ let storedCommands: StoredSidebarCommand[] = [];
 let storedCommandOrder: string[] = [];
 let deletedDefaultCommandIds: string[] = [];
 let commands: SidebarCommandButton[] = [];
+/**
+ * CDXC:NativeSidebar 2026-05-06-18:20
+ * Settings must initialize before any persisted sidebar chrome state reads from
+ * them. Sidebar side moved into settings, so reading the side before this value
+ * exists crashes startup and leaves the native shell with a blank sidebar.
+ */
+let settings = readStoredSettings();
 let scratchPadContent = readScratchPadContent();
 let pinnedPrompts = readPinnedPrompts();
 let collapsedSections = readCollapsedSections();
@@ -795,13 +804,6 @@ class AgentManagerXNativeBridgeClient {
   }
 }
 
-let settings = readStoredSettings();
-/**
- * CDXC:NativeSidebar 2026-04-29-22:03
- * Debug-gated startup diagnostics can run while reading persisted projects, so
- * settings must initialize first; otherwise the sidebar can fail before React
- * renders and leave only the native shell surface visible.
- */
 const restoredProjectState = readStoredProjects();
 let projects: NativeProject[] = restoredProjectState.projects;
 let activeProjectId = restoredProjectState.activeProjectId;
@@ -8320,6 +8322,29 @@ function openProjectEditorForGroup(groupId: string): void {
   publish();
 }
 
+function closeProjectEditorForGroup(groupId: string): void {
+  const reference = resolveSidebarGroupReference(groupId);
+  const project = reference.project;
+  if (project.isChat === true || project.isRecentProject === true) {
+    return;
+  }
+  const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  if (!surfaceState) {
+    return;
+  }
+  /**
+   * CDXC:EditorPanes 2026-05-06-18:55
+   * Middle-click closes the editor page itself. Keep project diff stats intact
+   * for the sidebar button, but remove the project-owned CEF surface state and
+   * stop the shared code-server runtime when no awake editor surfaces remain.
+   */
+  cancelProjectEditorSleepTimer(project.projectId);
+  projectEditorSurfaceByProjectId.delete(project.projectId);
+  postNative({ projectId: project.projectId, type: "closeProjectEditorPane" });
+  stopCodeServerRuntimeIfEveryEditorSleeping();
+  publish();
+}
+
 function activateWorkspaceSurfaceForProject(projectId: string): void {
   const surfaceState = projectEditorSurfaceByProjectId.get(projectId);
   if (!surfaceState?.isOpen) {
@@ -8644,6 +8669,23 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
        */
       createNativeBrowserSession(DEFAULT_BROWSER_LAUNCH_URL);
       return;
+    case "openBrowserPaneInGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      if (groupReference.isChatCollection) {
+        return;
+      }
+      if (activeProjectId !== groupReference.project.projectId) {
+        focusProject(groupReference.project.projectId);
+      }
+      /**
+       * CDXC:ProjectGroups 2026-05-06-18:42
+       * The project header browser button is scoped to the clicked project.
+       * Focus the resolved project first, then create the browser pane in the
+       * resolved workspace group when one exists.
+       */
+      createNativeBrowserSession(DEFAULT_BROWSER_LAUNCH_URL, groupReference.groupId);
+      return;
+    }
     case "openWorkspaceWelcome":
       openNativeExternalUrl("https://github.com/maddada/zmux");
       return;
@@ -8778,6 +8820,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     }
     case "openWorkspaceProjectEditorForGroup":
       openProjectEditorForGroup(message.groupId);
+      return;
+    case "closeWorkspaceProjectEditorForGroup":
+      closeProjectEditorForGroup(message.groupId);
       return;
     case "refreshWorkspaceProjectDiffForGroup": {
       const groupReference = resolveSidebarGroupReference(message.groupId);
@@ -10136,43 +10181,45 @@ export function WorkspaceDock({
     : undefined;
 
   return (
-    <aside className="workspace-dock" ref={dockRef}>
-      <div className="workspace-dock-scroll">
-        {state.projects.map((project, index) => (
+    <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
+      <aside className="workspace-dock" ref={dockRef}>
+        <div className="workspace-dock-scroll">
+          {state.projects.map((project, index) => (
+            <AppTooltip content={workspaceDockTitle(project)} key={project.projectId}>
+              <button
+                aria-label={`Open ${project.title}`}
+                className="workspace-dock-button"
+                data-active={String(project.isActive)}
+                data-dragging={String(dragVisual.sourceProjectId === project.projectId)}
+                data-project-id={project.projectId}
+                data-workspace-theme={project.theme ?? "dark-blue"}
+                onContextMenu={(event) => openMenu(event, project.projectId)}
+                onPointerCancel={() => {
+                  dragRef.current = undefined;
+                  setDragVisual({ ghostText: "", isDragging: false, pointerX: 0, pointerY: 0 });
+                }}
+                onPointerDown={(event) => handlePointerDown(event, project)}
+                onPointerMove={handlePointerMove}
+                onPointerUp={(event) => handlePointerUp(event, project.projectId)}
+                style={getWorkspaceDockThemeStyle(project.themeColor)}
+                type="button"
+              >
+                <WorkspaceDockProjectIcon project={project} projectIndex={index} />
+                <WorkspaceDockIndicators project={project} />
+              </button>
+            </AppTooltip>
+          ))}
+        </div>
+        <AppTooltip content="Add Workspace">
           <button
-            aria-label={`Open ${project.title}`}
-            className="workspace-dock-button"
-            data-active={String(project.isActive)}
-            data-dragging={String(dragVisual.sourceProjectId === project.projectId)}
-            data-project-id={project.projectId}
-            data-workspace-theme={project.theme ?? "dark-blue"}
-            key={project.projectId}
-            onContextMenu={(event) => openMenu(event, project.projectId)}
-            onPointerCancel={() => {
-              dragRef.current = undefined;
-              setDragVisual({ ghostText: "", isDragging: false, pointerX: 0, pointerY: 0 });
-            }}
-            onPointerDown={(event) => handlePointerDown(event, project)}
-            onPointerMove={handlePointerMove}
-            onPointerUp={(event) => handlePointerUp(event, project.projectId)}
-            style={getWorkspaceDockThemeStyle(project.themeColor)}
-            title={workspaceDockTitle(project)}
+            aria-label="Add workspace"
+            className="workspace-dock-add-button"
+            onClick={workspaceActions.pickWorkspaceFolder}
             type="button"
           >
-            <WorkspaceDockProjectIcon project={project} projectIndex={index} />
-            <WorkspaceDockIndicators project={project} />
+            <IconPlus aria-hidden="true" size={18} stroke={2.4} />
           </button>
-        ))}
-      </div>
-      <button
-        aria-label="Add workspace"
-        className="workspace-dock-add-button"
-        onClick={workspaceActions.pickWorkspaceFolder}
-        title="Add workspace"
-        type="button"
-      >
-        <IconPlus aria-hidden="true" size={18} stroke={2.4} />
-      </button>
+        </AppTooltip>
       {dragVisual.isDragging ? (
         <div
           aria-hidden="true"
@@ -10408,7 +10455,8 @@ export function WorkspaceDock({
           )}
         </div>
       ) : null}
-    </aside>
+      </aside>
+    </TooltipProvider>
   );
 }
 

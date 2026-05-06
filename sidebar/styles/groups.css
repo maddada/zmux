@@ -33,6 +33,16 @@
   margin-bottom: var(--sidebar-section-expanded-spacing);
 }
 
+.group[data-project-group="true"][data-collapsed="false"] {
+  /*
+   * CDXC:ProjectGroups 2026-05-06-18:42
+   * Project groups show the editor card as the first body row. Keep the header
+   * to editor spacing tighter than normal session stacks so the editor button
+   * reads as part of the project header controls instead of a separated card.
+   */
+  gap: calc(5px * var(--sidebar-density-scale));
+}
+
 .group[data-dragging="true"] {
   opacity: 0.72;
 }
@@ -623,10 +633,10 @@
   /*
    * CDXC:SidebarHover 2026-05-04-07:00
    * The group trailing controls should end flush with the header surface. The
-   * sidebar runs under CSS zoom, so a 56px cap resolves to about 50px visually:
-   * enough for two 22px controls plus the scaled inter-button gap.
+   * sidebar runs under CSS zoom, so an 84px cap resolves to about 76px visually:
+   * enough for visible-count, browser, and plus controls in project headers.
    */
-  max-width: 56px;
+  max-width: 84px;
   opacity: 1;
   /*
    * CDXC:SidebarHover 2026-05-04-08:28

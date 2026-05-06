@@ -15,6 +15,7 @@ import {
   type SidebarGitAction,
   type SidebarGitState,
 } from "../shared/sidebar-git";
+import { AppTooltip } from "./app-tooltip";
 import type { WebviewApi } from "./webview-api";
 
 export type GitActionRowProps = {
@@ -148,49 +149,51 @@ export function GitActionRow({ git, vscode }: GitActionRowProps) {
   return (
     <div className="git-action-row" onMouseEnter={requestRefresh} ref={wrapperRef}>
       <div className="git-action-split-button">
-        <button
-          aria-label={primaryDescription}
-          className="git-action-main-button"
-          data-disabled={String(primaryAction.disabled)}
-          data-empty-space-blocking="true"
-          onClick={() => runAction(primaryAction.action)}
-          title={primaryDescription}
-          type="button"
-        >
-          <span aria-hidden="true" className="git-action-main-icon-shell">
-            {git.isBusy ? (
-              <IconLoader2
-                className="git-action-main-icon git-action-main-icon-spinning"
-                size={16}
-              />
-            ) : (
-              <GitActionIcon action={primaryAction.action} />
-            )}
-          </span>
-          <span className="git-action-main-label">{primaryAction.label}</span>
-          <span aria-hidden="true" className="git-action-diff-stat">
-            <span className="git-action-diff-stat-additions">+{git.additions}</span>
-            <span className="git-action-diff-stat-divider">/</span>
-            <span className="git-action-diff-stat-deletions">-{git.deletions}</span>
-          </span>
-        </button>
-        <button
-          aria-expanded={isMenuOpen}
-          aria-haspopup="menu"
-          aria-label="Git action options"
-          className="git-action-toggle-button"
-          data-empty-space-blocking="true"
-          onClick={() => {
-            if (!isMenuOpen) {
-              requestRefresh();
-            }
-            setIsMenuOpen((previous) => !previous);
-          }}
-          title="Git action options"
-          type="button"
-        >
-          <IconChevronDown aria-hidden="true" className="git-action-toggle-icon" size={16} />
-        </button>
+        <AppTooltip content={primaryDescription}>
+          <button
+            aria-label={primaryDescription}
+            className="git-action-main-button"
+            data-disabled={String(primaryAction.disabled)}
+            data-empty-space-blocking="true"
+            onClick={() => runAction(primaryAction.action)}
+            type="button"
+          >
+            <span aria-hidden="true" className="git-action-main-icon-shell">
+              {git.isBusy ? (
+                <IconLoader2
+                  className="git-action-main-icon git-action-main-icon-spinning"
+                  size={16}
+                />
+              ) : (
+                <GitActionIcon action={primaryAction.action} />
+              )}
+            </span>
+            <span className="git-action-main-label">{primaryAction.label}</span>
+            <span aria-hidden="true" className="git-action-diff-stat">
+              <span className="git-action-diff-stat-additions">+{git.additions}</span>
+              <span className="git-action-diff-stat-divider">/</span>
+              <span className="git-action-diff-stat-deletions">-{git.deletions}</span>
+            </span>
+          </button>
+        </AppTooltip>
+        <AppTooltip content="Git action options">
+          <button
+            aria-expanded={isMenuOpen}
+            aria-haspopup="menu"
+            aria-label="Git action options"
+            className="git-action-toggle-button"
+            data-empty-space-blocking="true"
+            onClick={() => {
+              if (!isMenuOpen) {
+                requestRefresh();
+              }
+              setIsMenuOpen((previous) => !previous);
+            }}
+            type="button"
+          >
+            <IconChevronDown aria-hidden="true" className="git-action-toggle-icon" size={16} />
+          </button>
+        </AppTooltip>
       </div>
       {isMenuOpen && menuPosition
         ? createPortal(
@@ -205,87 +208,93 @@ export function GitActionRow({ git, vscode }: GitActionRowProps) {
               }}
             >
               {menuItems.map((item) => (
-                <button
-                  aria-label={item.disabledReason ?? item.label}
-                  className="git-action-menu-item"
-                  data-disabled={String(item.disabled)}
-                  key={item.action}
-                  onClick={() => {
-                    setPrimaryAction(item.action);
-                    setIsMenuOpen(false);
-                  }}
-                  role="menuitem"
-                  title={item.disabledReason ?? item.label}
-                  type="button"
-                >
-                  <GitActionIcon action={item.action} />
-                  <span className="git-action-menu-item-label">{item.label}</span>
-                  {item.action === "pr" && git.pr?.state === "open" ? (
-                    <IconExternalLink
-                      aria-hidden="true"
-                      className="git-action-menu-item-trailing-icon"
-                      size={14}
-                    />
-                  ) : null}
-                </button>
+                <AppTooltip content={item.disabledReason ?? item.label} key={item.action}>
+                  <button
+                    aria-label={item.disabledReason ?? item.label}
+                    className="git-action-menu-item"
+                    data-disabled={String(item.disabled)}
+                    onClick={() => {
+                      setPrimaryAction(item.action);
+                      setIsMenuOpen(false);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <GitActionIcon action={item.action} />
+                    <span className="git-action-menu-item-label">{item.label}</span>
+                    {item.action === "pr" && git.pr?.state === "open" ? (
+                      <IconExternalLink
+                        aria-hidden="true"
+                        className="git-action-menu-item-trailing-icon"
+                        size={14}
+                      />
+                    ) : null}
+                  </button>
+                </AppTooltip>
               ))}
               <div aria-hidden="true" className="git-action-menu-divider" />
-              <button
-                aria-label={
-                  git.confirmSuggestedCommit
-                    ? "Disable suggested commit review"
-                    : "Enable suggested commit review"
-                }
-                className="git-action-menu-item git-action-menu-toggle-item"
-                onClick={() => setCommitConfirmationEnabled(!git.confirmSuggestedCommit)}
-                role="menuitemcheckbox"
-                title={
+              <AppTooltip
+                content={
                   git.confirmSuggestedCommit
                     ? "Review suggested commit message before running the git action"
                     : "Use the suggested commit message immediately without opening the review modal"
                 }
-                type="button"
               >
-                <span
-                  aria-hidden="true"
-                  className="git-action-menu-toggle-check"
-                  data-selected={String(git.confirmSuggestedCommit)}
+                <button
+                  aria-label={
+                    git.confirmSuggestedCommit
+                      ? "Disable suggested commit review"
+                      : "Enable suggested commit review"
+                  }
+                  className="git-action-menu-item git-action-menu-toggle-item"
+                  onClick={() => setCommitConfirmationEnabled(!git.confirmSuggestedCommit)}
+                  role="menuitemcheckbox"
+                  type="button"
                 >
-                  {git.confirmSuggestedCommit ? <IconCheck size={14} /> : null}
-                </span>
-                <span className="git-action-menu-item-label">Review Commit Title</span>
-                <span className="git-action-menu-toggle-state">
-                  {git.confirmSuggestedCommit ? "On" : "Off"}
-                </span>
-              </button>
-              <button
-                aria-label={
-                  git.generateCommitBody
-                    ? "Disable generated commit body in the review modal"
-                    : "Enable generated commit body in the review modal"
-                }
-                className="git-action-menu-item git-action-menu-toggle-item"
-                onClick={() => setGenerateCommitBodyEnabled(!git.generateCommitBody)}
-                role="menuitemcheckbox"
-                title={
+                  <span
+                    aria-hidden="true"
+                    className="git-action-menu-toggle-check"
+                    data-selected={String(git.confirmSuggestedCommit)}
+                  >
+                    {git.confirmSuggestedCommit ? <IconCheck size={14} /> : null}
+                  </span>
+                  <span className="git-action-menu-item-label">Review Commit Title</span>
+                  <span className="git-action-menu-toggle-state">
+                    {git.confirmSuggestedCommit ? "On" : "Off"}
+                  </span>
+                </button>
+              </AppTooltip>
+              <AppTooltip
+                content={
                   git.generateCommitBody
                     ? "Include generated bullet points in the suggested commit message"
                     : "Only suggest the commit title without generated bullet points"
                 }
-                type="button"
               >
-                <span
-                  aria-hidden="true"
-                  className="git-action-menu-toggle-check"
-                  data-selected={String(git.generateCommitBody)}
+                <button
+                  aria-label={
+                    git.generateCommitBody
+                      ? "Disable generated commit body in the review modal"
+                      : "Enable generated commit body in the review modal"
+                  }
+                  className="git-action-menu-item git-action-menu-toggle-item"
+                  onClick={() => setGenerateCommitBodyEnabled(!git.generateCommitBody)}
+                  role="menuitemcheckbox"
+                  type="button"
                 >
-                  {git.generateCommitBody ? <IconCheck size={14} /> : null}
-                </span>
-                <span className="git-action-menu-item-label">Generate commit body</span>
-                <span className="git-action-menu-toggle-state">
-                  {git.generateCommitBody ? "On" : "Off"}
-                </span>
-              </button>
+                  <span
+                    aria-hidden="true"
+                    className="git-action-menu-toggle-check"
+                    data-selected={String(git.generateCommitBody)}
+                  >
+                    {git.generateCommitBody ? <IconCheck size={14} /> : null}
+                  </span>
+                  <span className="git-action-menu-item-label">Generate commit body</span>
+                  <span className="git-action-menu-toggle-state">
+                    {git.generateCommitBody ? "On" : "Off"}
+                  </span>
+                </button>
+              </AppTooltip>
             </div>,
             document.body,
           )

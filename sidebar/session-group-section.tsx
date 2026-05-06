@@ -1,5 +1,5 @@
-import { Tooltip } from "@base-ui/react/tooltip";
 import {
+  IconBrowser,
   IconCaretRightFilled,
   IconCheck,
   IconChevronLeft,
@@ -35,6 +35,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { AppTooltip } from "./app-tooltip";
 import {
   getSidebarSessionLifecycleState,
   type SidebarTheme,
@@ -58,6 +59,7 @@ import { useSidebarStore } from "./sidebar-store";
 import { SortableSessionCard } from "./sortable-session-card";
 import { useCollapsibleHeight } from "./use-collapsible-height";
 import type { WebviewApi } from "./webview-api";
+import { VisualStudioCodeIcon } from "./brand-icons";
 import {
   DEFAULT_WORKSPACE_THEME_COLOR,
   normalizeWorkspaceThemeColor,
@@ -409,17 +411,33 @@ export function SessionGroupSection({
     sessionDropIndicatorGroupId === groupId;
   const showSessionGroupConnector = shouldShowSessionGroupConnector({
     groupKind: group.kind,
+    hasProjectEditor: Boolean(projectContext),
     sessions: groupSessions,
   });
   const emptyStateLabel = isBrowserGroup ? "No browsers" : "No sessions";
   const shouldSelectEmptyProject = Boolean(projectContext && actualSessionCount === 0);
   /**
-   * CDXC:SidebarGroups 2026-05-05-04:48
-   * Empty project and Chats sections are not expandable; they stay collapsed
-   * until a session appears. Keep their real folder/chat icon visible instead
-   * of exposing a chevron that cannot expand anything.
+   * CDXC:ProjectGroups 2026-05-06-18:42
+   * Project groups remain expandable even with no sessions because their body
+   * contains the editor card. Browser groups still block empty expansion, and
+   * non-project empty groups keep the old static header behavior.
    */
-  const canToggleCollapsed = actualSessionCount > 0 && emptyBrowserExpandTooltip === undefined;
+  const canToggleCollapsed =
+    (actualSessionCount > 0 || Boolean(projectContext)) && emptyBrowserExpandTooltip === undefined;
+  const groupTitleActionLabel =
+    emptyBrowserExpandTooltip ??
+    (shouldSelectEmptyProject
+      ? `Select ${group.title}`
+      : canToggleCollapsed
+        ? `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
+        : group.title);
+  const splitCountTooltip = "Select Split Count";
+  const createBrowserPaneTooltip = "Create a Browser";
+  const createSessionTooltip = isBrowserGroup
+    ? "Open a Browser"
+    : isChatCollection
+      ? "Create a Chat"
+      : "Create a Terminal";
 
   useEffect(() => {
     postGroupDebugLog("group.sectionMounted", {
@@ -624,6 +642,17 @@ export function SessionGroupSection({
     });
   };
 
+  const requestCreateBrowserPane = () => {
+    if (!projectContext) {
+      return;
+    }
+
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "openBrowserPaneInGroup",
+    });
+  };
+
   const setVisibleCount = (visibleCount: VisibleSessionCount) => {
     if (isBrowserGroup) {
       return;
@@ -733,6 +762,22 @@ export function SessionGroupSection({
     });
   };
 
+  const closeProjectEditor = () => {
+    if (!projectContext) {
+      return;
+    }
+    /**
+     * CDXC:EditorPanes 2026-05-06-18:55
+     * Middle-clicking the project editor card closes that project-owned editor
+     * surface. It is not a session card, so send a group-scoped editor command
+     * instead of reusing closeSession.
+     */
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "closeWorkspaceProjectEditorForGroup",
+    });
+  };
+
   const refreshProjectDiffStats = () => {
     if (!projectContext) {
       return;
@@ -826,10 +871,6 @@ export function SessionGroupSection({
       requestFocusGroup();
     }
 
-    if (shouldSelectEmptyProject) {
-      return;
-    }
-
     toggleCollapsed();
   };
 
@@ -857,6 +898,7 @@ export function SessionGroupSection({
         data-drop-target={String(isGroupDropTarget)}
         data-empty-space-blocking="true"
         data-empty-project={String(shouldSelectEmptyProject)}
+        data-project-group={String(Boolean(projectContext))}
         data-session-connector={String(showSessionGroupConnector)}
         data-sidebar-group-id={group.groupId}
         data-workspace-custom-theme={String(Boolean(projectContext?.themeColor))}
@@ -904,147 +946,107 @@ export function SessionGroupSection({
             ) : (
               <div className="group-title-row">
                 {emptyBrowserExpandTooltip ? (
-                  <Tooltip.Provider delay={100}>
-                    <Tooltip.Root>
-                      <Tooltip.Trigger
-                        render={
-                          <button
-                            aria-controls={canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined}
-                            aria-disabled="true"
-                            aria-expanded={canToggleCollapsed ? !isCollapsed : undefined}
-                            aria-label={emptyBrowserExpandTooltip}
-                            className="group-collapse-button section-titlebar-toggle"
-                            data-collapsed={String(isCollapsed)}
-                            data-empty-browser-group="true"
-                            data-has-idle-icon={String(canToggleCollapsed)}
-                            data-static-icon={String(!canToggleCollapsed)}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              toggleCollapsedOrSelectEmptyProject();
-                            }}
-                            type="button"
-                          >
-                            <span
-                              aria-hidden="true"
-                              className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
-                            >
-                              <IconWorld size={16} stroke={1.8} />
-                            </span>
-                            {canToggleCollapsed ? (
-                              <IconCaretRightFilled
-                                aria-hidden="true"
-                                className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
-                                size={16}
-                              />
-                            ) : null}
-                          </button>
-                        }
-                      />
-                      <Tooltip.Portal>
-                        <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
-                          <Tooltip.Popup className="tooltip-popup">
-                            {emptyBrowserExpandTooltip}
-                          </Tooltip.Popup>
-                        </Tooltip.Positioner>
-                      </Tooltip.Portal>
-                    </Tooltip.Root>
-                  </Tooltip.Provider>
+                  <AppTooltip content={emptyBrowserExpandTooltip} delayDuration={100}>
+                    <button
+                      aria-controls={canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined}
+                      aria-disabled="true"
+                      aria-expanded={canToggleCollapsed ? !isCollapsed : undefined}
+                      aria-label={emptyBrowserExpandTooltip}
+                      className="group-collapse-button section-titlebar-toggle"
+                      data-collapsed={String(isCollapsed)}
+                      data-empty-browser-group="true"
+                      data-has-idle-icon={String(canToggleCollapsed)}
+                      data-static-icon={String(!canToggleCollapsed)}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleCollapsedOrSelectEmptyProject();
+                      }}
+                      type="button"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
+                      >
+                        <IconWorld size={16} stroke={1.8} />
+                      </span>
+                      {canToggleCollapsed ? (
+                        <IconCaretRightFilled
+                          aria-hidden="true"
+                          className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+                          size={16}
+                        />
+                      ) : null}
+                    </button>
+                  </AppTooltip>
                 ) : (
-                  <Tooltip.Root>
-                    <Tooltip.Trigger
-                      render={
-                        <button
-                          aria-controls={
-                            canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined
-                          }
-                          aria-disabled={!canToggleCollapsed && !shouldSelectEmptyProject}
-                          aria-expanded={canToggleCollapsed ? !isCollapsed : undefined}
-                          aria-label={
-                            shouldSelectEmptyProject
-                              ? `Select ${group.title}`
-                              : canToggleCollapsed
-                                ? `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
-                                : group.title
-                          }
-                          className="group-collapse-button section-titlebar-toggle"
-                          data-collapsed={String(isCollapsed)}
-                          data-empty-project={String(shouldSelectEmptyProject)}
-                          data-has-idle-icon={String(canToggleCollapsed)}
-                          data-static-icon={String(!canToggleCollapsed)}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            toggleCollapsedOrSelectEmptyProject();
-                          }}
-                          type="button"
-                        >
-                          <span
-                            aria-hidden="true"
-                            className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
-                          >
-                            {isBrowserGroup ? (
-                              <IconWorld size={16} stroke={1.8} />
-                            ) : isChatCollection ? (
-                              <IconMessageCircle size={16} stroke={1.8} />
-                            ) : isCollapsed ? (
-                              <IconFolder size={16} stroke={1.8} />
-                            ) : (
-                              <IconFolderOpen size={16} stroke={1.8} />
-                            )}
-                          </span>
-                          {canToggleCollapsed ? (
-                            <IconCaretRightFilled
-                              aria-hidden="true"
-                              className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
-                              size={16}
-                            />
-                          ) : null}
-                        </button>
-                      }
-                    />
-                  </Tooltip.Root>
+                  <button
+                    aria-controls={canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined}
+                    aria-disabled={!canToggleCollapsed && !shouldSelectEmptyProject}
+                    aria-expanded={canToggleCollapsed ? !isCollapsed : undefined}
+                    aria-label={groupTitleActionLabel}
+                    className="group-collapse-button section-titlebar-toggle"
+                    data-collapsed={String(isCollapsed)}
+                    data-empty-project={String(shouldSelectEmptyProject)}
+                    data-has-idle-icon={String(canToggleCollapsed)}
+                    data-static-icon={String(!canToggleCollapsed)}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      toggleCollapsedOrSelectEmptyProject();
+                    }}
+                    type="button"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
+                    >
+                      {isBrowserGroup ? (
+                        <IconWorld size={16} stroke={1.8} />
+                      ) : isChatCollection ? (
+                        <IconMessageCircle size={16} stroke={1.8} />
+                      ) : isCollapsed ? (
+                        <IconFolder size={16} stroke={1.8} />
+                      ) : (
+                        <IconFolderOpen size={16} stroke={1.8} />
+                      )}
+                    </span>
+                    {canToggleCollapsed ? (
+                      <IconCaretRightFilled
+                        aria-hidden="true"
+                        className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+                        size={16}
+                      />
+                    ) : null}
+                  </button>
                 )}
                 <div
                   className="group-title-handle"
                   data-draggable={String(!isBrowserGroup && !isChatCollection)}
                   ref={isBrowserGroup || isChatCollection ? undefined : sortable.handleRef}
                 >
-                  <button
-                    aria-controls={canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined}
-                    aria-disabled={
-                      emptyBrowserExpandTooltip !== undefined ||
-                      (!canToggleCollapsed && !shouldSelectEmptyProject)
-                    }
-                    aria-expanded={canToggleCollapsed ? !isCollapsed : undefined}
-                    aria-label={
-                      emptyBrowserExpandTooltip ??
-                      (shouldSelectEmptyProject
-                        ? `Select ${group.title}`
-                        : canToggleCollapsed
-                          ? `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
-                          : group.title)
-                    }
-                    className="group-title-button"
-                    data-empty-browser-group={String(emptyBrowserExpandTooltip !== undefined)}
-                    data-empty-project={String(shouldSelectEmptyProject)}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      toggleCollapsedOrSelectEmptyProject();
-                    }}
-                    title={
-                      emptyBrowserExpandTooltip ??
-                      (shouldSelectEmptyProject
-                        ? `Select ${group.title}`
-                        : canToggleCollapsed
-                          ? `${isCollapsed ? "Expand" : "Collapse"} ${group.title}`
-                          : group.title)
-                    }
-                    type="button"
-                  >
-                    <span className="group-title section-titlebar-label">{group.title}</span>
-                  </button>
+                  <AppTooltip content={groupTitleActionLabel}>
+                    <button
+                      aria-controls={canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined}
+                      aria-disabled={
+                        emptyBrowserExpandTooltip !== undefined ||
+                        (!canToggleCollapsed && !shouldSelectEmptyProject)
+                      }
+                      aria-expanded={canToggleCollapsed ? !isCollapsed : undefined}
+                      aria-label={groupTitleActionLabel}
+                      className="group-title-button"
+                      data-empty-browser-group={String(emptyBrowserExpandTooltip !== undefined)}
+                      data-empty-project={String(shouldSelectEmptyProject)}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleCollapsedOrSelectEmptyProject();
+                      }}
+                      type="button"
+                    >
+                      <span className="group-title section-titlebar-label">{group.title}</span>
+                    </button>
+                  </AppTooltip>
                 </div>
                 <div className="group-title-spacer" />
                 {/*
@@ -1065,60 +1067,84 @@ export function SessionGroupSection({
                     {group.isActive && !isBrowserGroup && !isChatCollection ? (
                       <div className="group-layout-controls">
                         <div className="group-control-anchor">
-                          <button
-                            aria-expanded={openControlMenu === "visible-count"}
-                            aria-haspopup="menu"
-                            aria-label={`Select split count for ${group.title}`}
-                            className="group-add-button group-control-button"
-                            data-open={String(openControlMenu === "visible-count")}
-                            onClick={() => {
-                              setOpenControlMenu((previous) =>
-                                previous === "visible-count" ? undefined : "visible-count",
-                              );
-                            }}
-                            onContextMenu={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              setOpenControlMenu((previous) =>
-                                previous === "visible-count" ? undefined : "visible-count",
-                              );
-                            }}
-                            ref={visibleCountButtonRef}
-                            title={`Select split count for ${group.title}`}
-                            type="button"
-                          >
-                            <span className="group-control-count-value">
-                              {String(group.layoutVisibleCount)}
-                            </span>
-                          </button>
+                          <AppTooltip content={splitCountTooltip}>
+                            <button
+                              aria-expanded={openControlMenu === "visible-count"}
+                              aria-haspopup="menu"
+                              aria-label={`Select split count for ${group.title}`}
+                              className="group-add-button group-control-button"
+                              data-open={String(openControlMenu === "visible-count")}
+                              onClick={() => {
+                                setOpenControlMenu((previous) =>
+                                  previous === "visible-count" ? undefined : "visible-count",
+                                );
+                              }}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setOpenControlMenu((previous) =>
+                                  previous === "visible-count" ? undefined : "visible-count",
+                                );
+                              }}
+                              ref={visibleCountButtonRef}
+                              type="button"
+                            >
+                              <span className="group-control-count-value">
+                                {String(group.layoutVisibleCount)}
+                              </span>
+                            </button>
+                          </AppTooltip>
                         </div>
                       </div>
                     ) : null}
-                    <button
-                      aria-label={
-                        isBrowserGroup
-                          ? `Open a browser in ${group.title}`
-                          : isChatCollection
-                            ? `Create a chat in ${group.title}`
-                          : `Create a session in ${group.title}`
-                      }
-                      className="group-add-button"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        requestCreateSession();
-                      }}
-                      title={
-                        isBrowserGroup
-                          ? `Open a browser in ${group.title}`
-                          : isChatCollection
-                            ? `Create a chat in ${group.title}`
-                          : `Create a session in ${group.title}`
-                      }
-                      type="button"
-                    >
-                      <IconPlus aria-hidden="true" className="group-add-icon" size={14} stroke={2} />
-                    </button>
+                    {projectContext ? (
+                      /**
+                       * CDXC:ProjectGroups 2026-05-06-18:42
+                       * Project headers own the New Browser action. Keep it
+                       * immediately left of the create-session plus button so
+                       * browser panes are created from the project context
+                       * instead of a floating global sidebar control.
+                       */
+                      <AppTooltip content={createBrowserPaneTooltip}>
+                        <button
+                          aria-label={`Create a browser pane in ${group.title}`}
+                          className="group-add-button group-browser-button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            requestCreateBrowserPane();
+                          }}
+                          type="button"
+                        >
+                          <IconBrowser
+                            aria-hidden="true"
+                            className="group-add-icon"
+                            size={14}
+                            stroke={2}
+                          />
+                        </button>
+                      </AppTooltip>
+                    ) : null}
+                    <AppTooltip content={createSessionTooltip}>
+                      <button
+                        aria-label={
+                          isBrowserGroup
+                            ? `Open a browser in ${group.title}`
+                            : isChatCollection
+                              ? `Create a chat in ${group.title}`
+                            : `Create a session in ${group.title}`
+                        }
+                        className="group-add-button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          requestCreateSession();
+                        }}
+                        type="button"
+                      >
+                        <IconPlus aria-hidden="true" className="group-add-icon" size={14} stroke={2} />
+                      </button>
+                    </AppTooltip>
                   </div>
                 ) : null}
               </div>
@@ -1170,42 +1196,52 @@ export function SessionGroupSection({
              * a normal split session card.
              */}
             {projectContext ? (
-              <button
-                aria-label={`Open code editor for ${group.title}: ${formatProjectEditorButtonLabel(
-                  projectContext.editor.diffStats,
-                )}`}
-                className="project-editor-card-button"
-                data-open={String(projectContext.editor.isOpen)}
-                data-sleeping={String(projectContext.editor.isSleeping)}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  openProjectEditor();
-                }}
-                onMouseEnter={refreshProjectDiffStats}
-                title={`Open code editor for ${group.title}`}
-                type="button"
-              >
-                <span aria-hidden="true" className="project-editor-card-icon">
-                  <IconCode size={14} stroke={1.9} />
-                </span>
-                <span className="project-editor-diff-label">
-                  <span className="project-editor-diff-files">
-                    {projectContext.editor.diffStats.files}
-                  </span>
-                  <span aria-hidden="true" className="project-editor-diff-stat">
-                    [
-                    <span className="project-editor-diff-stat-additions">
-                      +{projectContext.editor.diffStats.additions}
+              <AppTooltip content="Open Code Editor">
+                <button
+                  aria-label={`Open code editor for ${group.title}: ${formatProjectEditorButtonLabel(
+                    projectContext.editor.diffStats,
+                  )}`}
+                  className="project-editor-card-button"
+                  data-open={String(projectContext.editor.isOpen)}
+                  data-sleeping={String(projectContext.editor.isSleeping)}
+                  onAuxClick={(event) => {
+                    if (event.button !== 1) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeProjectEditor();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openProjectEditor();
+                  }}
+                  onMouseEnter={refreshProjectDiffStats}
+                  type="button"
+                >
+                  <span className="project-editor-diff-label">
+                    <span className="project-editor-diff-files">
+                      {projectContext.editor.diffStats.files}
                     </span>
-                    <span className="project-editor-diff-stat-divider">|</span>
-                    <span className="project-editor-diff-stat-deletions">
-                      -{projectContext.editor.diffStats.deletions}
+                    <span aria-hidden="true" className="project-editor-diff-stat">
+                      [
+                      <span className="project-editor-diff-stat-additions">
+                        +{projectContext.editor.diffStats.additions}
+                      </span>
+                      <span className="project-editor-diff-stat-divider">|</span>
+                      <span className="project-editor-diff-stat-deletions">
+                        -{projectContext.editor.diffStats.deletions}
+                      </span>
+                      ]
                     </span>
-                    ]
                   </span>
-                </span>
-              </button>
+                  <span aria-hidden="true" className="project-editor-card-icon">
+                    <VisualStudioCodeIcon className="project-editor-card-brand-icon" />
+                  </span>
+                </button>
+              </AppTooltip>
             ) : null}
             {orderedSessionIds.length > 0 ? (
               orderedSessionIds.map((sessionId, sessionIndex) => (
@@ -1567,19 +1603,19 @@ export function SessionGroupSection({
               style={getPortalMenuStyle(visibleCountButtonRef.current)}
             >
               {COUNT_OPTIONS.map((visibleCount) => (
-                <button
-                  aria-pressed={group.layoutVisibleCount === visibleCount}
-                  aria-label={getVisibleCountMenuLabel(visibleCount)}
-                  className="session-context-menu-item group-control-menu-item"
-                  data-selected={String(group.layoutVisibleCount === visibleCount)}
-                  key={visibleCount}
-                  onClick={() => setVisibleCount(visibleCount)}
-                  role="menuitem"
-                  title={getVisibleCountMenuLabel(visibleCount)}
-                  type="button"
-                >
-                  <span className="group-control-count-option-value">{String(visibleCount)}</span>
-                </button>
+                <AppTooltip content={getVisibleCountMenuLabel(visibleCount)} key={visibleCount}>
+                  <button
+                    aria-pressed={group.layoutVisibleCount === visibleCount}
+                    aria-label={getVisibleCountMenuLabel(visibleCount)}
+                    className="session-context-menu-item group-control-menu-item"
+                    data-selected={String(group.layoutVisibleCount === visibleCount)}
+                    onClick={() => setVisibleCount(visibleCount)}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <span className="group-control-count-option-value">{String(visibleCount)}</span>
+                  </button>
+                </AppTooltip>
               ))}
             </div>,
             document.body,

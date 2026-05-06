@@ -1,4 +1,3 @@
-import { Tooltip } from "@base-ui/react/tooltip";
 import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
 import { isSortableOperation, useSortable } from "@dnd-kit/react/sortable";
 import {
@@ -17,7 +16,6 @@ import { createPortal } from "react-dom";
 import {
   forwardRef,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -29,12 +27,14 @@ import type { SidebarAgentButton } from "../shared/sidebar-agents";
 import type { SidebarCommandButton } from "../shared/sidebar-commands";
 import { getZedOverlayTargetAppLabel, type ZedOverlayTargetApp } from "../shared/zmux-settings";
 import { AGENT_LOGOS } from "./agent-logos";
+import { VisualStudioCodeIcon } from "./brand-icons";
 import { getSidebarButtonGridColumnCount } from "./button-grid";
 import { SidebarCommandIconGlyph } from "./sidebar-command-icon";
 import { postSidebarOrderReproLog } from "./sidebar-order-repro-log";
 import { SectionHeader } from "./section-header";
 import { useSidebarStore } from "./sidebar-store";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
+import { AppTooltip, TooltipProvider } from "./app-tooltip";
 import { useCollapsibleHeight } from "./use-collapsible-height";
 import type { AgentConfigDraft } from "./agent-config-modal";
 import { openAppModal } from "./app-modal-host-bridge";
@@ -606,7 +606,7 @@ export function AgentsPanel({
                   menuLabel="Choose action"
                   onPrimaryClick={() => runCommand(primaryCommand)}
                   onToggleClick={(event) => openQuickActionMenu("command", event)}
-                  title={primaryCommand ? quickCommandLabel(primaryCommand) : "Action"}
+                  tooltip={primaryCommand ? quickCommandLabel(primaryCommand) : "Action"}
                 />
                 <QuickActionSplitButton
                   ariaLabel={`Open in ${primaryOpenInLabel}`}
@@ -614,7 +614,7 @@ export function AgentsPanel({
                   menuLabel="Choose open target"
                   onPrimaryClick={() => runOpenIn(primaryOpenInTarget)}
                   onToggleClick={(event) => openQuickActionMenu("openIn", event)}
-                  title={primaryOpenInLabel}
+                  tooltip={primaryOpenInLabel}
                 />
               </div>
               {shouldShowEmptyState ? (
@@ -635,7 +635,7 @@ export function AgentsPanel({
                   </span>
                 </button>
               ) : (
-                <Tooltip.Provider delay={TOOLTIP_DELAY_MS}>
+                <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
                   <DragDropProvider onDragEnd={handleDragEnd} onDragStart={handleDragStart}>
                     <div
                       className="agents-grid"
@@ -666,7 +666,7 @@ export function AgentsPanel({
                       ))}
                     </div>
                   </DragDropProvider>
-                </Tooltip.Provider>
+                </TooltipProvider>
               )}
             </div>
           </div>
@@ -767,7 +767,7 @@ type QuickActionSplitButtonProps = {
   menuLabel: string;
   onPrimaryClick: () => void;
   onToggleClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
-  title: string;
+  tooltip: string;
 };
 
 function QuickActionSplitButton({
@@ -776,28 +776,30 @@ function QuickActionSplitButton({
   menuLabel,
   onPrimaryClick,
   onToggleClick,
-  title,
+  tooltip,
 }: QuickActionSplitButtonProps) {
   return (
     <div className="quick-action-split-button">
-      <button
-        aria-label={ariaLabel}
-        className="quick-action-main-button"
-        onClick={onPrimaryClick}
-        title={title}
-        type="button"
-      >
-        <span className="quick-action-main-icon-shell">{icon}</span>
-      </button>
-      <button
-        aria-label={menuLabel}
-        className="quick-action-toggle-button"
-        onClick={onToggleClick}
-        title={menuLabel}
-        type="button"
-      >
-        <IconChevronDown aria-hidden="true" className="quick-action-toggle-icon" size={16} />
-      </button>
+      <AppTooltip content={tooltip}>
+        <button
+          aria-label={ariaLabel}
+          className="quick-action-main-button"
+          onClick={onPrimaryClick}
+          type="button"
+        >
+          <span className="quick-action-main-icon-shell">{icon}</span>
+        </button>
+      </AppTooltip>
+      <AppTooltip content={menuLabel}>
+        <button
+          aria-label={menuLabel}
+          className="quick-action-toggle-button"
+          onClick={onToggleClick}
+          type="button"
+        >
+          <IconChevronDown aria-hidden="true" className="quick-action-toggle-icon" size={16} />
+        </button>
+      </AppTooltip>
     </div>
   );
 }
@@ -947,126 +949,6 @@ function OpenInQuickActionIcon({ target }: { target: OpenInQuickActionTarget }) 
   return <ZedIcon className="quick-action-icon quick-action-brand-icon quick-action-zed-icon" />;
 }
 
-/**
- * CDXC:SidebarActions 2026-05-05-04:07
- * Open In must show the actual Visual Studio Code and Zed brand icons from
- * SVGL instead of a generic code glyph. Icons are embedded locally so the
- * native sidebar renders them with the correct brand colors offline.
- */
-function VisualStudioCodeIcon({ className }: { className?: string }) {
-  const id = useId();
-  const maskId = `${id}-vscode-mask`;
-  const filterBottomId = `${id}-vscode-filter-bottom`;
-  const filterRightId = `${id}-vscode-filter-right`;
-  const gradientId = `${id}-vscode-overlay`;
-
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      viewBox="0 0 100 100"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <mask
-        height="100"
-        id={maskId}
-        maskUnits="userSpaceOnUse"
-        style={{ maskType: "alpha" }}
-        width="100"
-        x="0"
-        y="0"
-      >
-        <path
-          clipRule="evenodd"
-          d="M70.912 99.317a6.223 6.223 0 0 0 4.96-.19l20.589-9.907A6.25 6.25 0 0 0 100 83.587V16.413a6.25 6.25 0 0 0-3.54-5.632L75.874.874a6.226 6.226 0 0 0-7.104 1.21L29.355 38.04 12.187 25.01a4.162 4.162 0 0 0-5.318.236l-5.506 5.009a4.168 4.168 0 0 0-.004 6.162L16.247 50 1.36 63.583a4.168 4.168 0 0 0 .004 6.162l5.506 5.01a4.162 4.162 0 0 0 5.318.236l17.168-13.032L68.77 97.917a6.217 6.217 0 0 0 2.143 1.4ZM75.015 27.3 45.11 50l29.906 22.701V27.3Z"
-          fill="#fff"
-          fillRule="evenodd"
-        />
-      </mask>
-      <g mask={`url(#${maskId})`}>
-        <path
-          d="M96.461 10.796 75.857.876a6.23 6.23 0 0 0-7.107 1.207l-67.451 61.5a4.167 4.167 0 0 0 .004 6.162l5.51 5.009a4.167 4.167 0 0 0 5.32.236l81.228-61.62c2.725-2.067 6.639-.124 6.639 3.297v-.24a6.25 6.25 0 0 0-3.539-5.63Z"
-          fill="#0065A9"
-        />
-        <g filter={`url(#${filterBottomId})`}>
-          <path
-            d="m96.461 89.204-20.604 9.92a6.229 6.229 0 0 1-7.107-1.207l-67.451-61.5a4.167 4.167 0 0 1 .004-6.162l5.51-5.009a4.167 4.167 0 0 1 5.32-.236l81.228 61.62c2.725 2.067 6.639.124 6.639-3.297v.24a6.25 6.25 0 0 1-3.539 5.63Z"
-            fill="#007ACC"
-          />
-        </g>
-        <g filter={`url(#${filterRightId})`}>
-          <path
-            d="M75.858 99.126a6.232 6.232 0 0 1-7.108-1.21c2.306 2.307 6.25.674 6.25-2.588V4.672c0-3.262-3.944-4.895-6.25-2.589a6.232 6.232 0 0 1 7.108-1.21l20.6 9.908A6.25 6.25 0 0 1 100 16.413v67.174a6.25 6.25 0 0 1-3.541 5.633l-20.601 9.906Z"
-            fill="#1F9CF0"
-          />
-        </g>
-        <path
-          clipRule="evenodd"
-          d="M70.851 99.317a6.224 6.224 0 0 0 4.96-.19L96.4 89.22a6.25 6.25 0 0 0 3.54-5.633V16.413a6.25 6.25 0 0 0-3.54-5.632L75.812.874a6.226 6.226 0 0 0-7.104 1.21L29.294 38.04 12.126 25.01a4.162 4.162 0 0 0-5.317.236l-5.507 5.009a4.168 4.168 0 0 0-.004 6.162L16.186 50 1.298 63.583a4.168 4.168 0 0 0 .004 6.162l5.507 5.009a4.162 4.162 0 0 0 5.317.236L29.294 61.96l39.414 35.958a6.218 6.218 0 0 0 2.143 1.4ZM74.954 27.3 45.048 50l29.906 22.701V27.3Z"
-          fill={`url(#${gradientId})`}
-          fillRule="evenodd"
-          opacity=".25"
-          style={{ mixBlendMode: "overlay" }}
-        />
-      </g>
-      <defs>
-        <filter
-          colorInterpolationFilters="sRGB"
-          filterUnits="userSpaceOnUse"
-          height="92.246"
-          id={filterBottomId}
-          width="116.727"
-          x="-8.394"
-          y="15.829"
-        >
-          <feFlood floodOpacity="0" result="BackgroundImageFix" />
-          <feColorMatrix
-            in="SourceAlpha"
-            values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
-          />
-          <feOffset />
-          <feGaussianBlur stdDeviation="4.167" />
-          <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0" />
-          <feBlend in2="BackgroundImageFix" mode="overlay" result="effect1_dropShadow" />
-          <feBlend in="SourceGraphic" in2="effect1_dropShadow" result="shape" />
-        </filter>
-        <filter
-          colorInterpolationFilters="sRGB"
-          filterUnits="userSpaceOnUse"
-          height="116.151"
-          id={filterRightId}
-          width="47.917"
-          x="60.417"
-          y="-8.076"
-        >
-          <feFlood floodOpacity="0" result="BackgroundImageFix" />
-          <feColorMatrix
-            in="SourceAlpha"
-            values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
-          />
-          <feOffset />
-          <feGaussianBlur stdDeviation="4.167" />
-          <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0" />
-          <feBlend in2="BackgroundImageFix" mode="overlay" result="effect1_dropShadow" />
-          <feBlend in="SourceGraphic" in2="effect1_dropShadow" result="shape" />
-        </filter>
-        <linearGradient
-          gradientUnits="userSpaceOnUse"
-          id={gradientId}
-          x1="49.939"
-          x2="49.939"
-          y1=".258"
-          y2="99.742"
-        >
-          <stop stopColor="#fff" />
-          <stop offset="1" stopColor="#fff" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-    </svg>
-  );
-}
-
 function ZedIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -1145,70 +1027,55 @@ function SortableAgentButton({
   };
 
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger
-        render={
-          <button
-            aria-busy={isLaunching}
-            aria-label={isLaunching ? `Starting ${agent.name}` : `Launch ${agent.name}`}
-            className="agent-button"
-            data-dragging={String(Boolean(sortable.isDragging))}
-            data-empty-space-blocking="true"
-            data-icon-only="true"
-            data-loading={String(isLaunching)}
-            data-sidebar-order-id={agent.agentId}
-            disabled={isLaunching}
-            draggable={false}
-            onClick={isLaunching ? undefined : onRun}
-            onContextMenu={isLaunching ? undefined : onContextMenu}
-            ref={setButtonRef}
-            type="button"
-          >
-            <span className="agent-button-icon-shell">
-              {isLaunching ? (
-                <IconLoader2
-                  aria-hidden="true"
-                  className="agent-button-loading-icon"
-                  size={18}
-                  stroke={1.8}
-                />
-              ) : (
-                <>
-                  {agent.icon ? (
-                    <img
-                      alt=""
-                      aria-hidden="true"
-                      className="agent-button-icon"
-                      data-agent-icon={agent.icon}
-                      draggable={false}
-                      src={AGENT_LOGOS[agent.icon]}
-                    />
-                  ) : (
-                    <IconCodeDots
-                      aria-hidden="true"
-                      className="agent-button-fallback-icon"
-                      size={18}
-                      stroke={1.8}
-                    />
-                  )}
-                </>
-              )}
-            </span>
-          </button>
-        }
-      />
-      <Tooltip.Portal>
-        <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
-          <Tooltip.Popup className="tooltip-popup">
-            {isLaunching
-              ? `Starting ${agent.name}`
-              : agent.command
-                ? agent.name
-                : `Configure ${agent.name}`}
-          </Tooltip.Popup>
-        </Tooltip.Positioner>
-      </Tooltip.Portal>
-    </Tooltip.Root>
+    <AppTooltip
+      content={
+        isLaunching ? `Starting ${agent.name}` : agent.command ? agent.name : `Configure ${agent.name}`
+      }
+    >
+      <button
+        aria-busy={isLaunching}
+        aria-label={isLaunching ? `Starting ${agent.name}` : `Launch ${agent.name}`}
+        className="agent-button"
+        data-dragging={String(Boolean(sortable.isDragging))}
+        data-empty-space-blocking="true"
+        data-icon-only="true"
+        data-loading={String(isLaunching)}
+        data-sidebar-order-id={agent.agentId}
+        disabled={isLaunching}
+        draggable={false}
+        onClick={isLaunching ? undefined : onRun}
+        onContextMenu={isLaunching ? undefined : onContextMenu}
+        ref={setButtonRef}
+        type="button"
+      >
+        <span className="agent-button-icon-shell">
+          {isLaunching ? (
+            <IconLoader2
+              aria-hidden="true"
+              className="agent-button-loading-icon"
+              size={18}
+              stroke={1.8}
+            />
+          ) : agent.icon ? (
+            <img
+              alt=""
+              aria-hidden="true"
+              className="agent-button-icon"
+              data-agent-icon={agent.icon}
+              draggable={false}
+              src={AGENT_LOGOS[agent.icon]}
+            />
+          ) : (
+            <IconCodeDots
+              aria-hidden="true"
+              className="agent-button-fallback-icon"
+              size={18}
+              stroke={1.8}
+            />
+          )}
+        </span>
+      </button>
+    </AppTooltip>
   );
 }
 

@@ -1,5 +1,4 @@
 import { IconBrowser, IconLoader2 } from "@tabler/icons-react";
-import { Tooltip } from "@base-ui/react/tooltip";
 import {
   cloneElement,
   useEffect,
@@ -11,6 +10,7 @@ import {
   type ReactElement,
   type RefObject,
 } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./app-tooltip";
 import { type SidebarSessionItem } from "../shared/session-grid-contract";
 import { getSidebarAgentNameByIcon, type SidebarAgentIcon } from "../shared/sidebar-agents";
 import { AGENT_LOGOS } from "./agent-logos";
@@ -597,14 +597,10 @@ export function OverflowTooltipText({
   });
 
   return (
-    <Tooltip.Root onOpenChange={(open) => !open && closeTooltip()} open={isOpen}>
-      <Tooltip.Trigger disabled render={trigger} />
-      <Tooltip.Portal>
-        <Tooltip.Positioner className="tooltip-positioner" sideOffset={8}>
-          <Tooltip.Popup className="tooltip-popup">{tooltip ?? text}</Tooltip.Popup>
-        </Tooltip.Positioner>
-      </Tooltip.Portal>
-    </Tooltip.Root>
+    <Tooltip onOpenChange={(open) => !open && closeTooltip()} open={isOpen}>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipContent sideOffset={8}>{tooltip ?? text}</TooltipContent>
+    </Tooltip>
   );
 }
 
