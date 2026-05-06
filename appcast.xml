@@ -5,6 +5,16 @@
         <link>https://github.com/maddada/zmux/releases</link>
         <description>Sparkle appcast for zmux macOS releases.</description>
         <item>
+            <title>1.4.8</title>
+            <pubDate>Wed, 06 May 2026 22:09:39 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/zmux/releases/tag/v1.4.8</sparkle:fullReleaseNotesLink>
+            <sparkle:version>10408</sparkle:version>
+            <sparkle:shortVersionString>1.4.8</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/maddada/zmux/releases/download/v1.4.8/zmux-1.4.8.dmg" length="172171299" type="application/octet-stream" sparkle:edSignature="Iw2TEpIEdBkm8szracWw3jeP+8KTZ8M93rpwiJdnlbNkbaO8433GiO0TpuXC+GXUyrUGnDGCdsOx7fOJje/xCw=="/>
+        </item>
+        <item>
             <title>1.4.7</title>
             <pubDate>Wed, 06 May 2026 03:22:34 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/zmux/releases/tag/v1.4.7</sparkle:fullReleaseNotesLink>
@@ -59,20 +69,9 @@
             <sparkle:releaseNotesLink sparkle:edSignature="xtNE5nnvIhHYHA2+9HkBFUgS44UPM/MzoME8vlPSG5rxug6O3N3rW+/VFehqS8DXfdjsORBck4PF/OXk/s2bCg==" sparkle:length="407">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.3.md</sparkle:releaseNotesLink>
             <enclosure url="https://github.com/maddada/zmux/releases/download/v1.4.3/zmux-1.4.3.dmg" length="24009650" type="application/octet-stream" sparkle:edSignature="C+xJtw8mfe0Ehgq5t6Am/5Es3z8186Jvs54fHQyizZnSwunPeGJHjOGiExZl7Bda2NjNrZt1iZn5VdzmAKNwAg=="/>
         </item>
-        <item>
-            <title>1.4.2</title>
-            <pubDate>Sat, 02 May 2026 11:32:19 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/zmux/releases/tag/v1.4.2</sparkle:fullReleaseNotesLink>
-            <sparkle:version>10402</sparkle:version>
-            <sparkle:shortVersionString>1.4.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <sparkle:releaseNotesLink sparkle:edSignature="ZrpJF7C/iXAAROoIR1s9/E9BUufGb708U8uR16Agl3VORgEl2z6ljy3xpi6HWRV/a8oE0D1QIReTLHVe+5BoAw==" sparkle:length="164">https://raw.githubusercontent.com/maddada/zmux/main/zmux-1.4.2.md</sparkle:releaseNotesLink>
-            <enclosure url="https://github.com/maddada/zmux/releases/download/v1.4.2/zmux-1.4.2.dmg" length="23926695" type="application/octet-stream" sparkle:edSignature="0+DqQqhDhABrXy/cRoaSJ5GsFa3y8Zf55DSRrOcpJ23DWVWKGN5IN6uelNHj1YODlLvMadX0LyD0yZ22OGWGAw=="/>
-        </item>
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: C5iV1wc0U3gSVDiJi4h8gRorch+25Wm9b63nekA5q5kcaUoahXE0P7i6hB3k4e8RJkvIJvuQoIB1C4aSkQIHAg==
-length: 6738
+edSignature: toRMUvhPpVF82uI8Fgy58c4qf3NRMmufvLjPTNfvJhkXxNHfxtxmLHBkHMiVg0X3jppIy23/HQh7SzZqVVYJDA==
+length: 6476
 -->
