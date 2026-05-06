@@ -242,6 +242,7 @@ final class TerminalWorkspaceView: NSView {
   private static let paneHeaderDragThreshold: CGFloat = 6
   private static let paneHeaderDragGhostMaxWidth: CGFloat = 230
   private static let browserPaneApplicationNameForUserAgent = "Version/18.4 Safari/605.1.15"
+  private static let projectEditorDndConsolePrefix = "[zmux-project-editor-dnd]"
   private static let defaultWorkspaceBackgroundColor = NSColor(
     calibratedRed: 0.071, green: 0.071, blue: 0.071, alpha: 1)
   private let ghostty: Ghostty.App
@@ -279,6 +280,46 @@ final class TerminalWorkspaceView: NSView {
   private var exitPollTimer: Timer?
 
   /**
+   CDXC:EditorPanes 2026-05-06-18:51
+   Project editor panes embed code-server, whose VS Code workbench owns
+   browser-native drag/drop inside the primary sidebar. While an editor pane is
+   active, the native pane resize/header-reorder layer must stand down so it
+   cannot decorate or inspect the mouse stream before VS Code receives drop.
+   CDXC:EditorPanes 2026-05-06-19:05
+   The pane-header event monitor is uninstalled while code-server is visible,
+   not just gated in the callback, so AppKit does not keep a native drag
+   observer in the same window event stream as VS Code's HTML drag/drop.
+   CDXC:EditorPanes 2026-05-06-19:19
+   Treat a visibly hosted project editor as the source of truth for drag/drop
+   ownership. Native state can briefly lag focus/layout updates, but VS Code
+   sidebar drops must still receive an unintercepted mouse stream.
+   */
+  private var isProjectEditorInteractionSurfaceActive: Bool {
+    if let activeProjectEditorId, projectEditorPaneSessions[activeProjectEditorId] != nil {
+      return true
+    }
+    return !visibleProjectEditorInteractionSessionIds.isEmpty
+  }
+
+  private var visibleProjectEditorInteractionSessionIds: [String] {
+    projectEditorPaneSessions.values
+      .filter(isProjectEditorInteractionSurfaceVisible)
+      .map(\.projectId)
+      .sorted()
+  }
+
+  private func isProjectEditorInteractionSurfaceVisible(_ session: ProjectEditorPaneSession) -> Bool {
+    guard session.hostView.superview === self, !session.hostView.isHidden else {
+      return false
+    }
+    let hostFrame = session.hostView.frame
+    guard hostFrame.width > 1, hostFrame.height > 1 else {
+      return false
+    }
+    return bounds.intersects(hostFrame)
+  }
+
+  /**
    CDXC:NativeTerminals 2026-04-26-06:44
    Project switching should show only the selected project's terminals.
    Inactive terminal surfaces are moved offscreen, and sidebar/native id
@@ -305,9 +346,7 @@ final class TerminalWorkspaceView: NSView {
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     uninstallPaneHeaderEventMonitor()
-    if window != nil {
-      installPaneHeaderEventMonitor()
-    }
+    syncPaneHeaderEventMonitorForCurrentSurface(reason: "viewDidMoveToWindow")
   }
 
   func createTerminal(_ command: CreateTerminal) {
@@ -1008,6 +1047,7 @@ final class TerminalWorkspaceView: NSView {
     let view = session.browserContentView
     let hadActiveProjectEditor = activeProjectEditorId != nil
     activeProjectEditorId = nil
+    syncPaneHeaderEventMonitorForCurrentSurface(reason: "focusWebPane")
     if hadActiveProjectEditor {
       needsLayout = true
       layoutSubtreeIfNeeded()
@@ -1038,6 +1078,10 @@ final class TerminalWorkspaceView: NSView {
         loadProjectEditorPaneWhenReady(
           projectId: command.projectId, url: command.url, reason: "createProjectEditorPaneReroute")
       }
+      configureProjectEditorChromiumDiagnostics(
+        existingSession.chromiumView,
+        projectId: command.projectId,
+        reason: "createProjectEditorPaneExisting")
       focusProjectEditorPane(projectId: command.projectId, reason: "createProjectEditorPaneExisting")
       return
     }
@@ -1079,6 +1123,10 @@ final class TerminalWorkspaceView: NSView {
       title: command.title,
       url: command.url
     )
+    configureProjectEditorChromiumDiagnostics(
+      chromiumView,
+      projectId: command.projectId,
+      reason: "createProjectEditorPaneNew")
     addSubview(hostView)
     moveOffscreen(hostView)
     loadProjectEditorPaneWhenReady(
@@ -1103,13 +1151,15 @@ final class TerminalWorkspaceView: NSView {
      Editor panes are full-workspace project surfaces. Focusing one hides every
      terminal/browser split view and brings the project's Chromium code-server
      view forward without changing the saved terminal split layout.
-     */
+   */
     activeProjectEditorId = projectId
+    syncPaneHeaderEventMonitorForCurrentSurface(reason: "focusProjectEditorPane")
     focusedSessionId = nil
     hideSplitSessionSurfacesForActiveEditor()
     session.hostView.isHidden = false
     layoutProjectEditorPane(session)
     orderProjectEditorPaneToFront(session)
+    injectProjectEditorDragDiagnostics(projectId: projectId, reason: reason)
     _ = window?.makeFirstResponder(session.chromiumView)
     needsLayout = true
     NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.focus.applied", [
@@ -1132,6 +1182,7 @@ final class TerminalWorkspaceView: NSView {
     session.hostView.removeFromSuperview()
     if activeProjectEditorId == projectId {
       activeProjectEditorId = nil
+      syncPaneHeaderEventMonitorForCurrentSurface(reason: "closeProjectEditorPane")
       needsLayout = true
     }
   }
@@ -1222,6 +1273,7 @@ final class TerminalWorkspaceView: NSView {
     }
     let hadActiveProjectEditor = activeProjectEditorId != nil
     activeProjectEditorId = nil
+    syncPaneHeaderEventMonitorForCurrentSurface(reason: "focusTerminal")
     if hadActiveProjectEditor {
       needsLayout = true
       layoutSubtreeIfNeeded()
@@ -1405,6 +1457,7 @@ final class TerminalWorkspaceView: NSView {
     sessionActivities = command.sessionActivities ?? [:]
     sessionTitles = command.sessionTitles ?? [:]
     activeProjectEditorId = command.activeProjectEditorId
+    syncPaneHeaderEventMonitorForCurrentSurface(reason: "setActiveTerminalSet")
     focusedSessionId = command.focusedSessionId
     terminalLayout = command.layout
     paneGap = Self.clampedPaneGap(command.paneGap)
@@ -1686,6 +1739,8 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func hideSplitSessionSurfacesForActiveEditor() {
+    paneResizeDrag = nil
+    resetPaneHeaderInteractionState()
     for session in sessions.values {
       moveOffscreen(session.scrollView)
       moveOffscreen(session.searchBarView)
@@ -1717,8 +1772,160 @@ final class TerminalWorkspaceView: NSView {
         ])
         session.chromiumView.loadURLString(url)
         session.hostView.refreshHostedWebView(reason: reason)
+        self.injectProjectEditorDragDiagnostics(projectId: projectId, reason: reason)
       }
     }
+  }
+
+  private func configureProjectEditorChromiumDiagnostics(
+    _ chromiumView: ZmuxCEFBrowserView,
+    projectId: String,
+    reason: String
+  ) {
+    /**
+     CDXC:EditorPanes 2026-05-06-19:05
+     VS Code view movement is implemented by browser drag/drop inside
+     code-server. Install passive in-page diagnostics on editor panes so failed
+     sidebar drops can be distinguished from native AppKit event interception.
+     */
+    chromiumView.consoleMessageHandler = { [weak self] message, source, line in
+      self?.handleProjectEditorDndConsoleMessage(
+        message,
+        source: source,
+        line: line,
+        projectId: projectId)
+    }
+    chromiumView.navigationStateChangedHandler = { [weak self] _, _, isLoading in
+      guard !isLoading else {
+        return
+      }
+      self?.injectProjectEditorDragDiagnostics(
+        projectId: projectId,
+        reason: "projectEditorNavigationIdle")
+    }
+    NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.dnd.diagnosticsConfigured", [
+      "projectId": projectId,
+      "reason": reason,
+      "url": chromiumView.currentURLString ?? NSNull(),
+    ])
+  }
+
+  private func injectProjectEditorDragDiagnostics(projectId: String, reason: String) {
+    guard let session = projectEditorPaneSessions[projectId] else {
+      return
+    }
+    session.chromiumView.executeJavaScript(Self.projectEditorDragDiagnosticsScript(projectId: projectId))
+    NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.dnd.injectRequested", [
+      "projectId": projectId,
+      "reason": reason,
+      "url": session.chromiumView.currentURLString ?? NSNull(),
+      "windowNumber": window?.windowNumber ?? NSNull(),
+    ])
+  }
+
+  private func handleProjectEditorDndConsoleMessage(
+    _ message: String,
+    source: String,
+    line: Int,
+    projectId: String
+  ) {
+    guard message.hasPrefix(Self.projectEditorDndConsolePrefix) else {
+      return
+    }
+    var details: [String: Any] = [
+      "line": line,
+      "projectId": projectId,
+      "source": source,
+    ]
+    let rawPayload = message.dropFirst(Self.projectEditorDndConsolePrefix.count)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    if let data = rawPayload.data(using: .utf8),
+      let object = try? JSONSerialization.jsonObject(with: data),
+      let payload = object as? [String: Any]
+    {
+      for (key, value) in payload {
+        details[key] = value
+      }
+    } else {
+      details["raw"] = String(rawPayload)
+    }
+    NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.dnd.pageEvent", details)
+  }
+
+  private static func projectEditorDragDiagnosticsScript(projectId: String) -> String {
+    let projectIdLiteral = javascriptStringLiteral(projectId)
+    let prefixLiteral = javascriptStringLiteral(projectEditorDndConsolePrefix)
+    return """
+      (() => {
+        const projectId = \(projectIdLiteral);
+        const prefix = \(prefixLiteral);
+        if (window.__zmuxProjectEditorDndDiagnosticsInstalled) {
+          console.info(`${prefix} ${JSON.stringify({ event: "alreadyInstalled", projectId, href: location.href })}`);
+          return;
+        }
+        window.__zmuxProjectEditorDndDiagnosticsInstalled = true;
+        const lastLogByKey = new Map();
+        const describeElement = (element) => {
+          if (!(element instanceof Element)) {
+            return null;
+          }
+          const classes = Array.from(element.classList || []).slice(0, 6);
+          const text = (element.textContent || "").replace(/\\s+/g, " ").trim().slice(0, 90);
+          return {
+            ariaLabel: element.getAttribute("aria-label") || undefined,
+            classes,
+            draggable: element.getAttribute("draggable") || undefined,
+            id: element.id || undefined,
+            role: element.getAttribute("role") || undefined,
+            tag: element.tagName.toLowerCase(),
+            text: text || undefined,
+            title: element.getAttribute("title") || undefined
+          };
+        };
+        const closestInteresting = (target) => {
+          const element = target instanceof Element ? target : target?.parentElement;
+          return element?.closest?.([
+            "[draggable='true']",
+            ".pane-header",
+            ".pane",
+            ".monaco-pane-view",
+            ".split-view-view",
+            ".composite",
+            ".part.sidebar",
+            "#workbench\\\\.parts\\\\.sidebar"
+          ].join(",")) || null;
+        };
+        const logEvent = (phase, event) => {
+          const key = `${phase}:${event.type}`;
+          const now = performance.now();
+          if ((event.type === "dragover" || event.type === "drag") && now - (lastLogByKey.get(key) || 0) < 250) {
+            return;
+          }
+          lastLogByKey.set(key, now);
+          const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+          const dataTransfer = event.dataTransfer;
+          console.info(`${prefix} ${JSON.stringify({
+            dataTypes: dataTransfer ? Array.from(dataTransfer.types || []) : [],
+            defaultPrevented: event.defaultPrevented,
+            dropEffect: dataTransfer?.dropEffect,
+            effectAllowed: dataTransfer?.effectAllowed,
+            event: event.type,
+            href: location.href,
+            phase,
+            projectId,
+            target: describeElement(target),
+            closest: describeElement(closestInteresting(target)),
+            x: event.clientX,
+            y: event.clientY
+          })}`);
+        };
+        for (const type of ["dragstart", "dragenter", "dragover", "dragleave", "drop", "dragend"]) {
+          window.addEventListener(type, (event) => logEvent("capture", event), true);
+          window.addEventListener(type, (event) => logEvent("bubble", event), false);
+        }
+        console.info(`${prefix} ${JSON.stringify({ event: "installed", projectId, href: location.href })}`);
+      })();
+      """
   }
 
   private func projectEditorProfileIdentifier(projectId: String) -> String {
@@ -1937,6 +2144,9 @@ final class TerminalWorkspaceView: NSView {
    priority so split resizing is not converted into pane dragging.
    */
   override func hitTest(_ point: NSPoint) -> NSView? {
+    guard !isProjectEditorInteractionSurfaceActive else {
+      return super.hitTest(point)
+    }
     if let titleBarHitView = paneTitleBarHitView(at: point) {
       return titleBarHitView
     }
@@ -1974,6 +2184,10 @@ final class TerminalWorkspaceView: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
+    guard !isProjectEditorInteractionSurfaceActive else {
+      super.mouseDown(with: event)
+      return
+    }
     guard beginPaneResize(with: event) else {
       super.mouseDown(with: event)
       return
@@ -1982,6 +2196,9 @@ final class TerminalWorkspaceView: NSView {
 
   @discardableResult
   private func beginPaneResize(with event: NSEvent) -> Bool {
+    guard !isProjectEditorInteractionSurfaceActive else {
+      return false
+    }
     let point = convert(event.locationInWindow, from: nil)
     guard let hit = paneResizeHit(at: point) else {
       return false
@@ -2012,6 +2229,10 @@ final class TerminalWorkspaceView: NSView {
   }
 
   override func mouseDragged(with event: NSEvent) {
+    guard !isProjectEditorInteractionSurfaceActive else {
+      super.mouseDragged(with: event)
+      return
+    }
     guard continuePaneResize(with: event) else {
       super.mouseDragged(with: event)
       return
@@ -2020,6 +2241,10 @@ final class TerminalWorkspaceView: NSView {
 
   @discardableResult
   private func continuePaneResize(with event: NSEvent) -> Bool {
+    guard !isProjectEditorInteractionSurfaceActive else {
+      paneResizeDrag = nil
+      return false
+    }
     guard let drag = paneResizeDrag else {
       return false
     }
@@ -2043,6 +2268,10 @@ final class TerminalWorkspaceView: NSView {
   }
 
   override func mouseUp(with event: NSEvent) {
+    guard !isProjectEditorInteractionSurfaceActive else {
+      super.mouseUp(with: event)
+      return
+    }
     if endPaneResize(with: event) {
       return
     }
@@ -2053,6 +2282,10 @@ final class TerminalWorkspaceView: NSView {
 
   @discardableResult
   private func endPaneResize(with event: NSEvent) -> Bool {
+    guard !isProjectEditorInteractionSurfaceActive else {
+      paneResizeDrag = nil
+      return false
+    }
     guard paneResizeDrag != nil else {
       return false
     }
@@ -2103,7 +2336,37 @@ final class TerminalWorkspaceView: NSView {
     self.paneHeaderEventMonitor = nil
   }
 
+  private func syncPaneHeaderEventMonitorForCurrentSurface(reason: String) {
+    let shouldMonitor = window != nil && !isProjectEditorInteractionSurfaceActive
+    let hadMonitor = paneHeaderEventMonitor != nil
+    if shouldMonitor {
+      installPaneHeaderEventMonitor()
+    } else {
+      uninstallPaneHeaderEventMonitor()
+    }
+    let hasMonitor = paneHeaderEventMonitor != nil
+    if hadMonitor != hasMonitor {
+      NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.dnd.nativeMonitorSync", [
+        "activeProjectEditorId": activeProjectEditorId ?? NSNull(),
+        "hasPaneHeaderMonitor": hasMonitor,
+        "reason": reason,
+        "visibleProjectEditorIds": visibleProjectEditorInteractionSessionIds,
+        "windowNumber": window?.windowNumber ?? NSNull(),
+      ])
+    }
+  }
+
   private func handlePaneHeaderMonitorEvent(_ event: NSEvent) {
+    guard !isProjectEditorInteractionSurfaceActive else {
+      resetPaneHeaderInteractionState()
+      NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.dnd.nativeMonitorBypassed", [
+        "activeProjectEditorId": activeProjectEditorId ?? NSNull(),
+        "eventType": Self.describeMouseEventType(event.type),
+        "visibleProjectEditorIds": visibleProjectEditorInteractionSessionIds,
+        "windowNumber": window?.windowNumber ?? NSNull(),
+      ])
+      return
+    }
     switch event.type {
     case .leftMouseDown:
       let point = convert(event.locationInWindow, from: nil)
@@ -2162,6 +2425,25 @@ final class TerminalWorkspaceView: NSView {
       }
     default:
       return
+    }
+  }
+
+  private func resetPaneHeaderInteractionState() {
+    paneHeaderActionPress = nil
+    paneHeaderDrag = nil
+    endPaneHeaderDragFeedback(restoresCursor: false)
+  }
+
+  private static func describeMouseEventType(_ type: NSEvent.EventType) -> String {
+    switch type {
+    case .leftMouseDown:
+      return "leftMouseDown"
+    case .leftMouseDragged:
+      return "leftMouseDragged"
+    case .leftMouseUp:
+      return "leftMouseUp"
+    default:
+      return "\(type.rawValue)"
     }
   }
 
@@ -2385,13 +2667,13 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
-  private func endPaneHeaderDragFeedback() {
+  private func endPaneHeaderDragFeedback(restoresCursor: Bool = true) {
     let hadDragFeedback = paneHeaderDragGhostView != nil || paneHeaderDragTargetView != nil
     paneHeaderDragGhostView?.removeFromSuperview()
     paneHeaderDragGhostView = nil
     paneHeaderDragTargetView?.removeFromSuperview()
     paneHeaderDragTargetView = nil
-    if hadDragFeedback {
+    if hadDragFeedback && restoresCursor {
       NSCursor.openHand.set()
     }
   }

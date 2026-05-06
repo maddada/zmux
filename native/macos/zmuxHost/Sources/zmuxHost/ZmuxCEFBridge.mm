@@ -286,6 +286,11 @@ class ZmuxCEFBrowserClient : public CefClient,
   void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString& url) override;
   void OnFaviconURLChange(CefRefPtr<CefBrowser> browser, const std::vector<CefString>& icon_urls) override;
   void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) override;
+  bool OnConsoleMessage(CefRefPtr<CefBrowser> browser,
+                        cef_log_severity_t level,
+                        const CefString& message,
+                        const CefString& source,
+                        int line) override;
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
   bool DoClose(CefRefPtr<CefBrowser> browser) override;
   void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
@@ -553,6 +558,12 @@ static NSString* StringFromCefString(const CefString& value) {
   }
 }
 
+- (void)zmuxCEFHandleConsoleMessage:(NSString*)message source:(NSString*)source line:(NSInteger)line {
+  if (self.consoleMessageHandler) {
+    self.consoleMessageHandler(message ?: @"", source ?: @"", line);
+  }
+}
+
 @end
 
 void ZmuxCEFBrowserClient::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) {
@@ -587,6 +598,25 @@ void ZmuxCEFBrowserClient::OnLoadingStateChange(CefRefPtr<CefBrowser> browser, b
   dispatch_async(dispatch_get_main_queue(), ^{
     [owner_ zmuxCEFSetLoading:isLoading canGoBack:canGoBack canGoForward:canGoForward];
   });
+}
+
+bool ZmuxCEFBrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser,
+                                            cef_log_severity_t level,
+                                            const CefString& message,
+                                            const CefString& source,
+                                            int line) {
+  /**
+   CDXC:EditorPanes 2026-05-06-19:05
+   Project editor drag/drop diagnostics are injected into code-server as
+   passive console messages. Forward CEF console output to Swift so the native
+   log can correlate browser drop events with AppKit monitor state.
+   */
+  NSString* messageString = StringFromCefString(message);
+  NSString* sourceString = StringFromCefString(source);
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [owner_ zmuxCEFHandleConsoleMessage:messageString source:sourceString line:line];
+  });
+  return false;
 }
 
 void ZmuxCEFBrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {}

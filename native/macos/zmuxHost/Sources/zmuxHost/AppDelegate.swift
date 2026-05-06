@@ -3034,15 +3034,31 @@ final class zmuxRootView: NSView {
     let chromeX: CGFloat = sidebarSide == .left ? 0 : max(bounds.width - chromeWidth, 0)
     let workspaceX: CGFloat = sidebarSide == .left ? chromeWidth : 0
     let workspaceWidth = max(bounds.width - chromeWidth, 1)
+    /**
+     CDXC:SidebarPlacement 2026-05-06-18:26
+     The resize handle must sit between the workspace and sidebar. Left-side
+     sidebars keep the handle on their right edge; right-side sidebars put the
+     same handle on their left edge so dragging grows/shrinks the visible
+     sidebar boundary instead of the outside window edge.
+     */
+    let sidebarX: CGFloat
+    let dividerX: CGFloat
+    if sidebarSide == .left {
+      sidebarX = chromeX
+      dividerX = chromeX + workspaceBarWidth + sidebarWidth
+    } else {
+      sidebarX = chromeX + Self.dividerWidth
+      dividerX = chromeX
+    }
 
     sidebarView.frame = CGRect(
-      x: chromeX,
+      x: sidebarX,
       y: 0,
       width: workspaceBarWidth + sidebarWidth,
       height: bounds.height
     )
     divider.frame = CGRect(
-      x: chromeX + workspaceBarWidth + sidebarWidth,
+      x: dividerX,
       y: 0,
       width: Self.dividerWidth,
       height: bounds.height
