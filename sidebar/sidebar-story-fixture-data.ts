@@ -1,5 +1,6 @@
 import type { SidebarStoryFixture } from "./sidebar-story-fixtures";
 import { createStorySession, type SidebarStoryGroup } from "./sidebar-story-fixture-helpers";
+import { createDefaultSidebarProjectDiffStats } from "../shared/project-diff-stats";
 
 function minutesAgo(minutes: number): string {
   return new Date(Date.now() - minutes * 60 * 1000).toISOString();
@@ -7,6 +8,24 @@ function minutesAgo(minutes: number): string {
 
 function secondsAgo(seconds: number): string {
   return new Date(Date.now() - seconds * 1000).toISOString();
+}
+
+function createStoryProjectContext(projectId: string): NonNullable<SidebarStoryGroup["projectContext"]> {
+  return {
+    canRemoveProject: true,
+    /**
+     * CDXC:EditorPanes 2026-05-06-14:21
+     * Sidebar stories model the project editor launcher as project context so
+     * visual fixtures keep matching production expanded project cards.
+     */
+    editor: {
+      diffStats: createDefaultSidebarProjectDiffStats(),
+      isOpen: false,
+      isSleeping: false,
+      projectId,
+    },
+    theme: "plain-dark",
+  };
 }
 
 const DEFAULT_GROUPS: SidebarStoryGroup[] = [
@@ -530,10 +549,7 @@ const COMBINED_HEADER_ALIGNMENT_GROUPS: SidebarStoryGroup[] = [
     groupId: "combined-project-root",
     isActive: false,
     kind: "workspace",
-    projectContext: {
-      canRemoveProject: true,
-      theme: "plain-dark",
-    },
+    projectContext: createStoryProjectContext("combined-project-root"),
     sessions: [],
     title: "/",
   },
@@ -541,10 +557,7 @@ const COMBINED_HEADER_ALIGNMENT_GROUPS: SidebarStoryGroup[] = [
     groupId: "combined-project-zmux",
     isActive: false,
     kind: "workspace",
-    projectContext: {
-      canRemoveProject: true,
-      theme: "plain-dark",
-    },
+    projectContext: createStoryProjectContext("combined-project-zmux"),
     sessions: [
       createStorySession({
         alias: "Terminal Session",
@@ -561,10 +574,7 @@ const COMBINED_HEADER_ALIGNMENT_GROUPS: SidebarStoryGroup[] = [
     groupId: "combined-project-agent-manager",
     isActive: false,
     kind: "workspace",
-    projectContext: {
-      canRemoveProject: true,
-      theme: "plain-dark",
-    },
+    projectContext: createStoryProjectContext("combined-project-agent-manager"),
     sessions: [],
     title: "agent-manager-x",
   },

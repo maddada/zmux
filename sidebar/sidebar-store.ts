@@ -572,7 +572,25 @@ function haveSameSidebarProjectContext(
     return left === right;
   }
 
-  return left.canRemoveProject === right.canRemoveProject && left.theme === right.theme;
+  /**
+   * CDXC:EditorPanes 2026-05-06-14:21
+   * Project editor buttons update from native diff-stat refreshes and open
+   * state changes. Include editor context in group equality so the store does
+   * not suppress those project-card updates as duplicate hydration payloads.
+   */
+  return (
+    left.canRemoveProject === right.canRemoveProject &&
+    left.theme === right.theme &&
+    left.themeColor === right.themeColor &&
+    left.editor.projectId === right.editor.projectId &&
+    left.editor.isOpen === right.editor.isOpen &&
+    left.editor.isSleeping === right.editor.isSleeping &&
+    left.editor.diffStats.additions === right.editor.diffStats.additions &&
+    left.editor.diffStats.deletions === right.editor.diffStats.deletions &&
+    left.editor.diffStats.files === right.editor.diffStats.files &&
+    left.editor.diffStats.isLoading === right.editor.diffStats.isLoading &&
+    left.editor.diffStats.isRepo === right.editor.diffStats.isRepo
+  );
 }
 
 function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSessionItem): boolean {

@@ -42,6 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   private let nativeSettingsStore = NativeSettingsStore()
   private let updaterController: SPUStandardUpdaterController
   private var t3CodeRuntimeProcess: Process?
+  private var codeServerRuntimeProcess: Process?
+  private var codeServerRuntimeStartedAt: Date?
 
   override init() {
     let configSelection = Self.preferredGhosttyConfig()
@@ -99,6 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     NativeT3RuntimeLauncher.touchAppHeartbeat(reason: "applicationWillTerminate")
     t3RuntimeHeartbeatTimer?.invalidate()
     t3RuntimeHeartbeatTimer = nil
+    stopCodeServerRuntime(logPrefix: "nativeHost.applicationWillTerminate")
+    (window?.contentView as? zmuxRootView)?.stopCodeServerRuntimeForAppTermination()
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -966,6 +970,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
       startT3CodeRuntime(command)
     case .stopT3CodeRuntime:
       stopT3CodeRuntime(logPrefix: "nativeHost")
+    case .startCodeServerRuntime(let command):
+      startCodeServerRuntime(command)
+    case .stopCodeServerRuntime:
+      stopCodeServerRuntime(logPrefix: "nativeHost")
+    case .createProjectEditorPane(let command):
+      workspaceView?.createProjectEditorPane(command)
+    case .focusProjectEditorPane(let command):
+      workspaceView?.focusProjectEditorPane(projectId: command.projectId)
+    case .closeProjectEditorPane(let command):
+      workspaceView?.closeProjectEditorPane(projectId: command.projectId)
     case .activateApp:
       activateAppWindow()
     case .writeTerminalText(let command):
@@ -1214,6 +1228,103 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(
       logPrefix: "\(logPrefix).stop",
       forceOwnedRuntimeStop: true)
+  }
+
+  /**
+   CDXC:EditorPanes 2026-05-06-14:21
+   Embedded project editors use one shared code-server process. The native host
+   verifies the localhost listener before reusing a tracked process so editor
+   panes attach to a live VS Code runtime instead of a stale port or dead child.
+   */
+  @MainActor
+  private func startCodeServerRuntime(_ command: StartCodeServerRuntime) {
+    if let process = codeServerRuntimeProcess, process.isRunning {
+      guard NativeCodeServerRuntimeLauncher.hasResponsiveRuntimeListener() else {
+        if let startedAt = codeServerRuntimeStartedAt,
+          Date().timeIntervalSince(startedAt)
+            < NativeCodeServerRuntimeLauncher.startupGraceInterval
+        {
+          NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.booting", [
+            "cwd": command.cwd,
+            "pid": process.processIdentifier,
+            "startedAt": startedAt.timeIntervalSince1970,
+          ])
+          return
+        }
+        NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.runningUnhealthy", [
+          "cwd": command.cwd,
+          "pid": process.processIdentifier,
+        ])
+        process.terminate()
+        codeServerRuntimeProcess = nil
+        codeServerRuntimeStartedAt = nil
+        return startCodeServerRuntime(command)
+      }
+      NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.reused", [
+        "cwd": command.cwd,
+        "pid": process.processIdentifier,
+      ])
+      return
+    }
+
+    if NativeCodeServerRuntimeLauncher.hasResponsiveRuntimeListener() {
+      /**
+       CDXC:EditorPanes 2026-05-06-15:00
+       code-server settings-link options are process launch arguments. Do not
+       adopt an untracked listener on the editor port because it may have been
+       started without the selected VS Code config flags.
+       */
+      NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.portBusy", [
+        "cwd": command.cwd,
+        "origin": NativeCodeServerRuntimeLauncher.origin,
+      ])
+      _ = NativeCodeServerRuntimeLauncher.waitUntilNotResponsive(timeout: 2.0)
+    }
+
+    do {
+      let launch = try NativeCodeServerRuntimeLauncher.createLaunch(
+        cwd: command.cwd,
+        linkVscodeUserConfig: command.linkVscodeUserConfig ?? true,
+        vscodeUserConfigDir: command.vscodeUserConfigDir)
+      let process = launch.process
+      try process.run()
+      codeServerRuntimeProcess = process
+      codeServerRuntimeStartedAt = Date()
+      NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.spawned", [
+        "args": process.arguments ?? [],
+        "cwd": command.cwd,
+        "executable": process.executableURL?.path ?? NSNull(),
+        "pid": process.processIdentifier,
+      ])
+      process.terminationHandler = { [outputCapture = launch.outputCapture] terminatedProcess in
+        var details = outputCapture.finish()
+        details["pid"] = terminatedProcess.processIdentifier
+        details["reason"] = terminatedProcess.terminationReason.rawValue
+        details["status"] = terminatedProcess.terminationStatus
+        NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.exit", details)
+      }
+    } catch {
+      NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.failed", [
+        "cwd": command.cwd,
+        "error": error.localizedDescription,
+      ])
+      Self.logger.error("Failed to start code-server runtime: \(error.localizedDescription)")
+    }
+  }
+
+  @MainActor
+  private func stopCodeServerRuntime(logPrefix: String) {
+    if let process = codeServerRuntimeProcess {
+      NativeT3CodePaneReproLog.append("\(logPrefix).codeServerRuntime.stop.tracked", [
+        "isRunning": process.isRunning,
+        "pid": process.processIdentifier,
+      ])
+      if process.isRunning {
+        process.terminate()
+      }
+      codeServerRuntimeProcess = nil
+      codeServerRuntimeStartedAt = nil
+    }
   }
 
   /**
@@ -2141,6 +2252,8 @@ final class zmuxRootView: NSView {
   private var pendingHotkeyPrefix: String?
   private var pendingHotkeyPrefixExpiresAt: Date?
   private var t3CodeRuntimeProcess: Process?
+  private var codeServerRuntimeProcess: Process?
+  private var codeServerRuntimeStartedAt: Date?
   private var sidebarWidth: CGFloat
   private var sidebarSide: SidebarSide = .left
 
@@ -2359,6 +2472,16 @@ final class zmuxRootView: NSView {
       startT3CodeRuntime(command)
     case .stopT3CodeRuntime:
       stopT3CodeRuntime(logPrefix: "nativeSidebar")
+    case .startCodeServerRuntime(let command):
+      startCodeServerRuntime(command)
+    case .stopCodeServerRuntime:
+      stopCodeServerRuntime(logPrefix: "nativeSidebar")
+    case .createProjectEditorPane(let command):
+      workspaceView.createProjectEditorPane(command)
+    case .focusProjectEditorPane(let command):
+      workspaceView.focusProjectEditorPane(projectId: command.projectId)
+    case .closeProjectEditorPane(let command):
+      workspaceView.closeProjectEditorPane(projectId: command.projectId)
     case .activateApp:
       activateAppWindow()
     case .writeTerminalText(let command):
@@ -2592,6 +2715,105 @@ final class zmuxRootView: NSView {
     NativeT3RuntimeLauncher.clearStaleRuntimeIfNeeded(
       logPrefix: "\(logPrefix).stop",
       forceOwnedRuntimeStop: true)
+  }
+
+  /**
+   CDXC:EditorPanes 2026-05-06-14:21
+   Sidebar editor buttons open a project-owned VS Code surface while sharing a
+   single code-server process. Reuse only a responsive localhost runtime so the
+   no-address-bar Chromium embed always points at live editor UI.
+   */
+  private func startCodeServerRuntime(_ command: StartCodeServerRuntime) {
+    if let process = codeServerRuntimeProcess, process.isRunning {
+      guard NativeCodeServerRuntimeLauncher.hasResponsiveRuntimeListener() else {
+        if let startedAt = codeServerRuntimeStartedAt,
+          Date().timeIntervalSince(startedAt)
+            < NativeCodeServerRuntimeLauncher.startupGraceInterval
+        {
+          NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.booting", [
+            "cwd": command.cwd,
+            "pid": process.processIdentifier,
+            "startedAt": startedAt.timeIntervalSince1970,
+          ])
+          return
+        }
+        NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.runningUnhealthy", [
+          "cwd": command.cwd,
+          "pid": process.processIdentifier,
+        ])
+        process.terminate()
+        codeServerRuntimeProcess = nil
+        codeServerRuntimeStartedAt = nil
+        return startCodeServerRuntime(command)
+      }
+      NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.reused", [
+        "cwd": command.cwd,
+        "pid": process.processIdentifier,
+      ])
+      return
+    }
+
+    if NativeCodeServerRuntimeLauncher.hasResponsiveRuntimeListener() {
+      /**
+       CDXC:EditorPanes 2026-05-06-15:00
+       code-server settings-link options are process launch arguments. Do not
+       adopt an untracked listener on the editor port because it may have been
+       started without the selected VS Code config flags.
+       */
+      NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.portBusy", [
+        "cwd": command.cwd,
+        "origin": NativeCodeServerRuntimeLauncher.origin,
+      ])
+      _ = NativeCodeServerRuntimeLauncher.waitUntilNotResponsive(timeout: 2.0)
+    }
+
+    do {
+      let launch = try NativeCodeServerRuntimeLauncher.createLaunch(
+        cwd: command.cwd,
+        linkVscodeUserConfig: command.linkVscodeUserConfig ?? true,
+        vscodeUserConfigDir: command.vscodeUserConfigDir)
+      let process = launch.process
+      try process.run()
+      codeServerRuntimeProcess = process
+      codeServerRuntimeStartedAt = Date()
+      NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.spawned", [
+        "args": process.arguments ?? [],
+        "cwd": command.cwd,
+        "executable": process.executableURL?.path ?? NSNull(),
+        "pid": process.processIdentifier,
+      ])
+      process.terminationHandler = { [outputCapture = launch.outputCapture] terminatedProcess in
+        var details = outputCapture.finish()
+        details["pid"] = terminatedProcess.processIdentifier
+        details["reason"] = terminatedProcess.terminationReason.rawValue
+        details["status"] = terminatedProcess.terminationStatus
+        NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.exit", details)
+      }
+    } catch {
+      NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.failed", [
+        "cwd": command.cwd,
+        "error": error.localizedDescription,
+      ])
+      zmuxRootView.logger.error("Failed to start code-server runtime: \(error.localizedDescription)")
+    }
+  }
+
+  private func stopCodeServerRuntime(logPrefix: String) {
+    if let process = codeServerRuntimeProcess {
+      NativeT3CodePaneReproLog.append("\(logPrefix).codeServerRuntime.stop.tracked", [
+        "isRunning": process.isRunning,
+        "pid": process.processIdentifier,
+      ])
+      if process.isRunning {
+        process.terminate()
+      }
+      codeServerRuntimeProcess = nil
+      codeServerRuntimeStartedAt = nil
+    }
+  }
+
+  func stopCodeServerRuntimeForAppTermination() {
+    stopCodeServerRuntime(logPrefix: "nativeSidebar.applicationWillTerminate")
   }
 
   private func activateAppWindow() {

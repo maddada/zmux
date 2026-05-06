@@ -59,6 +59,41 @@ export type NativeGhosttyHostCommand =
       type: "stopT3CodeRuntime";
     }
   | {
+      /**
+       * CDXC:EditorPanes 2026-05-06-14:21
+       * Project editor buttons launch a shared embedded code-server runtime,
+       * then native AppKit creates one persistent Chromium editor surface per
+       * project. These commands stay separate from terminal/web-pane sessions
+       * because editor panes must not participate in split layout.
+       *
+       * CDXC:EditorPanes 2026-05-06-15:00
+       * The runtime command carries the VS Code user-config link setting so the
+       * native launcher can pass code-server's CLI flags before the editor
+       * process starts instead of mutating the embedded VS Code UI later.
+       */
+      cwd: string;
+      linkVscodeUserConfig?: boolean;
+      type: "startCodeServerRuntime";
+      vscodeUserConfigDir?: string;
+    }
+  | {
+      type: "stopCodeServerRuntime";
+    }
+  | {
+      projectId: string;
+      title: string;
+      type: "createProjectEditorPane";
+      url: string;
+    }
+  | {
+      projectId: string;
+      type: "focusProjectEditorPane";
+    }
+  | {
+      projectId: string;
+      type: "closeProjectEditorPane";
+    }
+  | {
       sessionId: string;
       text: string;
       type: "writeTerminalText";
@@ -66,6 +101,21 @@ export type NativeGhosttyHostCommand =
   | {
       layout: NativeTerminalLayout;
       type: "setTerminalLayout";
+    }
+  | {
+      activeProjectEditorId?: string;
+      activeSessionIds: string[];
+      attentionSessionIds?: string[];
+      backgroundColor?: string;
+      focusRequestId?: number;
+      focusedSessionId?: string;
+      layout?: NativeTerminalLayout;
+      paneGap?: number;
+      sessionActivities?: Record<string, "attention" | "working">;
+      sessionAgentIconColors?: Record<string, string>;
+      sessionAgentIconDataUrls?: Record<string, string>;
+      sessionTitles?: Record<string, string>;
+      type: "setActiveTerminalSet";
     }
   | {
       sessionId: string;

@@ -7,6 +7,162 @@
   z-index: 1;
 }
 
+/*
+ * CDXC:EditorPanes 2026-05-06-14:21
+ * Expanded project groups reserve the first card-list row for a compact
+ * project editor launcher. It mirrors session-card interaction styling while
+ * staying half-height so the files/[+lines|-lines] summary scans as a tool,
+ * not as another split pane session.
+ */
+.project-editor-card-button {
+  --project-editor-surface: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--app-card) 94%, #ffffff 6%),
+    color-mix(in srgb, var(--app-card) 98%, #000000 2%)
+  );
+  --project-editor-visible-surface: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--app-button-background) 10%, var(--app-card-active) 90%),
+    color-mix(in srgb, var(--app-button-background) 6%, var(--app-card) 94%)
+  );
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: calc(10px * var(--sidebar-density-scale));
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: calc(12px * var(--sidebar-density-scale));
+  font-weight: 650;
+  gap: calc(7px * var(--sidebar-density-scale));
+  height: calc(31px * var(--sidebar-density-scale));
+  isolation: isolate;
+  justify-content: center;
+  margin-bottom: calc(4px * var(--sidebar-density-scale));
+  min-width: 0;
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+  overflow: hidden;
+  padding: 0 calc(11px * var(--sidebar-density-scale));
+  position: relative;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    outline-color 120ms ease,
+    opacity 120ms ease;
+  width: 100%;
+}
+
+.project-editor-card-button::before,
+.project-editor-card-button::after {
+  border-radius: inherit;
+  box-sizing: border-box;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transition:
+    opacity 180ms ease,
+    background 180ms ease;
+}
+
+.project-editor-card-button::before {
+  inset: -42%;
+  z-index: -2;
+}
+
+.project-editor-card-button::after {
+  background: var(--project-editor-surface);
+  inset: 1px;
+  z-index: -1;
+}
+
+.project-editor-card-button:is(:hover, :focus-visible, [data-open="true"]) {
+  border-color: var(--app-border);
+}
+
+.project-editor-card-button:is(:hover, :focus-visible, [data-open="true"])::after {
+  opacity: 1;
+}
+
+.project-editor-card-button[data-open="true"] {
+  --project-editor-surface: var(--project-editor-visible-surface);
+  border-color: color-mix(in srgb, var(--app-button-background) 42%, var(--app-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-button-background) 52%, transparent);
+}
+
+.project-editor-card-button[data-open="true"]::before {
+  background:
+    radial-gradient(
+      circle at 16% 18%,
+      color-mix(in srgb, var(--app-button-background) 9%, transparent),
+      transparent 54%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--app-button-background) 8%, transparent),
+      transparent 62%
+    );
+  opacity: 0.72;
+}
+
+.project-editor-card-button:focus-visible {
+  outline-color: color-mix(in srgb, var(--app-button-background) 72%, #ffffff 28%);
+}
+
+.project-editor-card-button[data-sleeping="true"] {
+  opacity: 0.52;
+}
+
+.group[data-session-connector="true"] .project-editor-card-button {
+  margin-left: calc(19px * var(--sidebar-density-scale));
+  width: calc(100% - calc(19px * var(--sidebar-density-scale)));
+  z-index: 1;
+}
+
+.project-editor-card-icon,
+.project-editor-diff-label,
+.project-editor-diff-stat {
+  align-items: center;
+  display: inline-flex;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.project-editor-card-icon {
+  color: color-mix(in srgb, var(--app-foreground) 78%, var(--app-button-background) 22%);
+  flex: 0 0 auto;
+}
+
+.project-editor-diff-label {
+  gap: calc(6px * var(--sidebar-density-scale));
+  line-height: 1;
+}
+
+.project-editor-diff-files {
+  color: var(--app-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.project-editor-diff-stat {
+  color: var(--app-muted);
+  font-variant-numeric: tabular-nums;
+  gap: calc(5px * var(--sidebar-density-scale));
+}
+
+.project-editor-diff-stat-additions {
+  color: #31d978;
+}
+
+.project-editor-diff-stat-deletions {
+  color: #ff5c65;
+}
+
+.project-editor-diff-stat-divider {
+  color: color-mix(in srgb, var(--app-muted) 78%, transparent);
+}
+
 .session-drop-target-surface {
   inset-inline: 0;
   pointer-events: none;

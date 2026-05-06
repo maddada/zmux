@@ -199,6 +199,14 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
+  private struct ProjectEditorPaneSession {
+    let chromiumView: ZmuxCEFBrowserView
+    let hostView: WebPaneHostView
+    let projectId: String
+    let title: String
+    let url: String
+  }
+
   private struct PaneResizeHit {
     let availableLength: CGFloat
     let boundaryIndex: Int
@@ -240,6 +248,7 @@ final class TerminalWorkspaceView: NSView {
   private let sendEvent: (HostEvent) -> Void
   private var sessions: [String: TerminalSession] = [:]
   private var webPaneSessions: [String: WebPaneSession] = [:]
+  private var projectEditorPaneSessions: [String: ProjectEditorPaneSession] = [:]
   private var webPaneFaviconTasksBySessionId: [String: Task<Void, Never>] = [:]
   private var completedWebPaneLoadSessionIds = Set<String>()
   private var pendingAuthenticatedWebPaneLoadSessionIds = Set<String>()
@@ -250,6 +259,7 @@ final class TerminalWorkspaceView: NSView {
   private var sessionAgentIconDataUrls = [String: String]()
   private var sessionActivities = [String: NativeTerminalActivity]()
   private var sessionTitles = [String: String]()
+  private var activeProjectEditorId: String?
   private var focusedSessionId: String?
   private var lastEmittedFocusedSessionId: String?
   private var lastAppliedLayoutFocusRequestId: Int?
@@ -617,6 +627,7 @@ final class TerminalWorkspaceView: NSView {
     TerminalFocusDebugLog.append(
       event: "nativeWorkspace.closeTerminal.start",
       details: [
+        "activeProjectEditorId": nullableString(activeProjectEditorId),
         "activeSessionIds": Array(activeSessionIds).sorted(),
         "hasSurface": session.view.surface != nil,
         "processExited": processExited,
@@ -995,6 +1006,12 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     let view = session.browserContentView
+    let hadActiveProjectEditor = activeProjectEditorId != nil
+    activeProjectEditorId = nil
+    if hadActiveProjectEditor {
+      needsLayout = true
+      layoutSubtreeIfNeeded()
+    }
     focusedSessionId = sessionId
     orderWebPaneViewsToFront(session)
     updateAllTerminalBorders()
@@ -1005,6 +1022,118 @@ final class TerminalWorkspaceView: NSView {
       "sessionId": sessionId,
     ])
     sendEvent(.terminalFocused(sessionId: sessionId))
+  }
+
+  func createProjectEditorPane(_ command: CreateProjectEditorPane) {
+    if let existingSession = projectEditorPaneSessions[command.projectId] {
+      let nextSession = ProjectEditorPaneSession(
+        chromiumView: existingSession.chromiumView,
+        hostView: existingSession.hostView,
+        projectId: command.projectId,
+        title: command.title,
+        url: command.url
+      )
+      projectEditorPaneSessions[command.projectId] = nextSession
+      if existingSession.url != command.url {
+        loadProjectEditorPaneWhenReady(
+          projectId: command.projectId, url: command.url, reason: "createProjectEditorPaneReroute")
+      }
+      focusProjectEditorPane(projectId: command.projectId, reason: "createProjectEditorPaneExisting")
+      return
+    }
+
+    guard ZmuxCEFIsRuntimeAvailable() else {
+      /**
+       CDXC:EditorPanes 2026-05-06-14:21
+       Project editors must embed code-server through Chromium without browser
+       chrome. If CEF is unavailable, fail visibly instead of creating a WebKit
+       substitute that would have different VS Code rendering and websocket
+       behavior.
+       */
+      sendEvent(
+        .terminalError(
+          sessionId: "project-editor-\(command.projectId)",
+          message: "Chromium runtime is not bundled for editor panes"))
+      return
+    }
+
+    let chromiumView = ZmuxCEFBrowserView(
+      frame: .zero,
+      initialURL: "about:blank",
+      profileIdentifier: projectEditorProfileIdentifier(projectId: command.projectId))
+    chromiumView.translatesAutoresizingMaskIntoConstraints = true
+    let hostView = WebPaneHostView(
+      browserView: chromiumView,
+      chromiumView: chromiumView,
+      showsBrowserToolbar: false,
+      initialAddress: command.url,
+      onFocus: { [weak self] in
+        self?.focusProjectEditorPane(projectId: command.projectId, reason: "projectEditorHostFocus")
+      }
+    )
+    hostView.translatesAutoresizingMaskIntoConstraints = true
+    projectEditorPaneSessions[command.projectId] = ProjectEditorPaneSession(
+      chromiumView: chromiumView,
+      hostView: hostView,
+      projectId: command.projectId,
+      title: command.title,
+      url: command.url
+    )
+    addSubview(hostView)
+    moveOffscreen(hostView)
+    loadProjectEditorPaneWhenReady(
+      projectId: command.projectId, url: command.url, reason: "createProjectEditorPaneNew")
+    focusProjectEditorPane(projectId: command.projectId, reason: "createProjectEditorPaneNew")
+  }
+
+  func focusProjectEditorPane(
+    projectId: String,
+    reason: String = "explicitFocusProjectEditorPaneCommand"
+  ) {
+    guard let session = projectEditorPaneSessions[projectId] else {
+      NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.focus.missing", [
+        "knownProjectIds": Array(projectEditorPaneSessions.keys).sorted(),
+        "projectId": projectId,
+        "reason": reason,
+      ])
+      return
+    }
+    /**
+     CDXC:EditorPanes 2026-05-06-14:21
+     Editor panes are full-workspace project surfaces. Focusing one hides every
+     terminal/browser split view and brings the project's Chromium code-server
+     view forward without changing the saved terminal split layout.
+     */
+    activeProjectEditorId = projectId
+    focusedSessionId = nil
+    hideSplitSessionSurfacesForActiveEditor()
+    session.hostView.isHidden = false
+    layoutProjectEditorPane(session)
+    orderProjectEditorPaneToFront(session)
+    _ = window?.makeFirstResponder(session.chromiumView)
+    needsLayout = true
+    NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.focus.applied", [
+      "projectId": projectId,
+      "reason": reason,
+      "title": session.title,
+      "url": session.url,
+    ])
+  }
+
+  func closeProjectEditorPane(projectId: String) {
+    guard let session = projectEditorPaneSessions.removeValue(forKey: projectId) else {
+      return
+    }
+    NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.close", [
+      "projectId": projectId,
+      "url": session.url,
+    ])
+    session.chromiumView.closeBrowser()
+    session.hostView.removeFromSuperview()
+    if activeProjectEditorId == projectId {
+      activeProjectEditorId = nil
+      needsLayout = true
+    }
   }
 
   func openBrowserDevTools(sessionId: String) {
@@ -1088,8 +1217,14 @@ final class TerminalWorkspaceView: NSView {
           "reason": reason,
           "requestedSessionId": sessionId,
           "responderBefore": responderSnapshot(),
-        ])
+      ])
       return
+    }
+    let hadActiveProjectEditor = activeProjectEditorId != nil
+    activeProjectEditorId = nil
+    if hadActiveProjectEditor {
+      needsLayout = true
+      layoutSubtreeIfNeeded()
     }
     focusedSessionId = sessionId
     updateAllTerminalBorders()
@@ -1269,6 +1404,7 @@ final class TerminalWorkspaceView: NSView {
     sessionAgentIconDataUrls = command.sessionAgentIconDataUrls ?? [:]
     sessionActivities = command.sessionActivities ?? [:]
     sessionTitles = command.sessionTitles ?? [:]
+    activeProjectEditorId = command.activeProjectEditorId
     focusedSessionId = command.focusedSessionId
     terminalLayout = command.layout
     paneGap = Self.clampedPaneGap(command.paneGap)
@@ -1277,12 +1413,16 @@ final class TerminalWorkspaceView: NSView {
      The terminal workspace background is user-configurable from Settings.
      Apply the chosen color directly to the AppKit backing layer so the
      visible space created by Pane Gap uses the user's color.
-     */
+    */
     layer?.backgroundColor = Self.workspaceBackgroundColor(command.backgroundColor).cgColor
+    let isProjectEditorActive = activeProjectEditorId != nil
     for session in sessions.values {
       session.scrollView.isHidden = false
       session.searchBarView.isHidden =
-        !activeSessionIds.contains(session.sessionId) || session.view.searchState == nil
+        (
+          isProjectEditorActive || !activeSessionIds.contains(session.sessionId)
+            || session.view.searchState == nil
+        )
       session.titleBarView.isHidden = false
       session.borderView.isHidden = false
       if let title = sessionTitles[session.sessionId] {
@@ -1293,7 +1433,7 @@ final class TerminalWorkspaceView: NSView {
       session.titleBarView.setAgentIconDataUrl(
         sessionAgentIconDataUrls[session.sessionId],
         colorHex: sessionAgentIconColors[session.sessionId])
-      if !activeSessionIds.contains(session.sessionId) {
+      if isProjectEditorActive || !activeSessionIds.contains(session.sessionId) {
         moveOffscreen(session.scrollView)
         moveOffscreen(session.searchBarView)
         moveOffscreen(session.titleBarView)
@@ -1307,10 +1447,19 @@ final class TerminalWorkspaceView: NSView {
       session.titleBarView.setAgentIconDataUrl(
         sessionAgentIconDataUrls[session.sessionId],
         colorHex: sessionAgentIconColors[session.sessionId])
-      if !activeSessionIds.contains(session.sessionId) {
+      if isProjectEditorActive || !activeSessionIds.contains(session.sessionId) {
         moveOffscreen(session.hostView)
         moveOffscreen(session.titleBarView)
         moveOffscreen(session.borderView)
+      }
+    }
+    for session in projectEditorPaneSessions.values {
+      session.hostView.isHidden = false
+      if activeProjectEditorId == session.projectId {
+        layoutProjectEditorPane(session)
+        orderProjectEditorPaneToFront(session)
+      } else {
+        moveOffscreen(session.hostView)
       }
     }
     needsLayout = true
@@ -1320,6 +1469,7 @@ final class TerminalWorkspaceView: NSView {
     TerminalFocusDebugLog.append(
       event: "nativeWorkspace.setActiveTerminalSet.applied",
       details: [
+        "activeProjectEditorId": nullableString(activeProjectEditorId),
         "activeSessionIds": Array(activeSessionIds).sorted(),
         "attentionSessionIds": Array(attentionSessionIds).sorted(),
         "backgroundColor": command.backgroundColor ?? "default",
@@ -1396,6 +1546,15 @@ final class TerminalWorkspaceView: NSView {
   override func layout() {
     super.layout()
     paneResizeHits.removeAll()
+    if let activeProjectEditorId,
+      let editorSession = projectEditorPaneSessions[activeProjectEditorId]
+    {
+      hideSplitSessionSurfacesForActiveEditor()
+      editorSession.hostView.isHidden = false
+      layoutProjectEditorPane(editorSession)
+      orderProjectEditorPaneToFront(editorSession)
+      return
+    }
     let visibleSessionIds = orderedVisibleSessionIds()
     guard !visibleSessionIds.isEmpty else {
       hidePaneResizeHandleViews()
@@ -1511,6 +1670,63 @@ final class TerminalWorkspaceView: NSView {
   private func layoutBounds(forVisibleCount visibleCount: Int) -> CGRect {
     let inset = visibleCount <= 1 ? Self.singlePaneInset : paneGap
     return bounds.insetBy(dx: inset, dy: inset)
+  }
+
+  private func layoutProjectEditorPane(_ session: ProjectEditorPaneSession) {
+    session.hostView.frame = bounds
+    session.hostView.refreshHostedWebView(reason: "layoutProjectEditorPane")
+  }
+
+  private func orderProjectEditorPaneToFront(_ session: ProjectEditorPaneSession) {
+    if session.hostView.superview !== self {
+      addSubview(session.hostView)
+    }
+    session.hostView.removeFromSuperview()
+    addSubview(session.hostView, positioned: .above, relativeTo: nil)
+  }
+
+  private func hideSplitSessionSurfacesForActiveEditor() {
+    for session in sessions.values {
+      moveOffscreen(session.scrollView)
+      moveOffscreen(session.searchBarView)
+      moveOffscreen(session.titleBarView)
+      moveOffscreen(session.borderView)
+    }
+    for session in webPaneSessions.values {
+      moveOffscreen(session.hostView)
+      moveOffscreen(session.titleBarView)
+      moveOffscreen(session.borderView)
+    }
+    hidePaneResizeHandleViews()
+    discardCursorRects()
+  }
+
+  private func loadProjectEditorPaneWhenReady(projectId: String, url: String, reason: String) {
+    Task.detached { [weak self] in
+      let isReady = NativeCodeServerRuntimeLauncher.waitUntilResponsive(timeout: 12.0)
+      await MainActor.run {
+        guard let self, let session = self.projectEditorPaneSessions[projectId], session.url == url
+        else {
+          return
+        }
+        NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.load", [
+          "isRuntimeReady": isReady,
+          "projectId": projectId,
+          "reason": reason,
+          "url": url,
+        ])
+        session.chromiumView.loadURLString(url)
+        session.hostView.refreshHostedWebView(reason: reason)
+      }
+    }
+  }
+
+  private func projectEditorProfileIdentifier(projectId: String) -> String {
+    let allowedScalars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+    let normalized = projectId.unicodeScalars
+      .map { allowedScalars.contains($0) ? String($0) : "-" }
+      .joined()
+    return "editor-\(String(normalized.prefix(80)))"
   }
 
   private func orderedVisibleSessionIds() -> [String] {

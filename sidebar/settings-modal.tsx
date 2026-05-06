@@ -132,6 +132,18 @@ export function SettingsModal({
         title: "Open URLs With",
       },
     ]),
+    editor: getSettingsSectionSearch(settingsSearchQuery, "Editor", [
+      {
+        key: "codeServerLinkVscodeUserConfig",
+        subtitle: "Use the VS Code settings from the local VS Code install.",
+        title: "Use VS Code settings",
+      },
+      {
+        key: "codeServerUseVscodeInsidersUserConfig",
+        subtitle: "Use the VS Code Insiders user settings directory.",
+        title: "Use VS Code Insiders settings",
+      },
+    ]),
     ideAttachment: getSettingsSectionSearch(settingsSearchQuery, "IDE Attachment", [
       {
         key: "zedOverlayEnabled",
@@ -1058,6 +1070,34 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
+            {shouldShowSettingsSection(settingsSearch.editor) ? (
+            <SettingsSection title="Editor">
+              {/* CDXC:EditorPanes 2026-05-06-15:00: Embedded code-server
+                  panes pass --link-vscode-user-config by default so editor
+                  sessions inherit local VS Code user settings. The Insiders
+                  checkbox only changes the linked config directory. */}
+              {shouldShowSetting(settingsSearch.editor, "codeServerLinkVscodeUserConfig") ? (
+              <ToggleField
+                checked={draft.codeServerLinkVscodeUserConfig}
+                description="Use the VS Code settings from the local VS Code install."
+                label="Use VS Code settings"
+                onChange={(checked) => updateDraft("codeServerLinkVscodeUserConfig", checked)}
+              />
+              ) : null}
+              {shouldShowSetting(settingsSearch.editor, "codeServerUseVscodeInsidersUserConfig") ? (
+              <ToggleField
+                checked={draft.codeServerUseVscodeInsidersUserConfig}
+                description="Use the VS Code Insiders user settings directory."
+                disabled={!draft.codeServerLinkVscodeUserConfig}
+                label="Use VS Code Insiders settings"
+                onChange={(checked) =>
+                  updateDraft("codeServerUseVscodeInsidersUserConfig", checked)
+                }
+              />
+              ) : null}
+            </SettingsSection>
+            ) : null}
+
             {shouldShowSettingsSection(settingsSearch.ideAttachment) ? (
             <SettingsSection title="IDE Attachment">
               {/* CDXC:IDEAttachment 2026-04-26-22:38: Settings select the IDE
@@ -1595,6 +1635,7 @@ function normalizeColorInputValue(value: string): string {
 function ToggleField({
   checked,
   description,
+  disabled,
   isModified,
   label,
   onChange,
@@ -1602,6 +1643,7 @@ function ToggleField({
 }: {
   checked: boolean;
   description?: string;
+  disabled?: boolean;
   label: string;
   onChange: (checked: boolean) => void;
 } & SettingModificationProps) {
@@ -1614,7 +1656,7 @@ function ToggleField({
       label={label}
       onResetToDefault={onResetToDefault}
     >
-      <Switch checked={checked} id={id} onCheckedChange={onChange} />
+      <Switch checked={checked} disabled={disabled} id={id} onCheckedChange={onChange} />
     </SettingRow>
   );
 }

@@ -143,6 +143,452 @@ struct NativeT3RuntimeLaunch {
   let process: Process
 }
 
+struct NativeCodeServerRuntimeLaunch {
+  let outputCapture: NativeT3RuntimeOutputCapture
+  let process: Process
+}
+
+enum NativeCodeServerRuntimeLauncher {
+  static let host = "127.0.0.1"
+  static let port = 3775
+  static var origin: String { "http://\(host):\(port)" }
+  private struct NodeRuntimeVersion {
+    let major: Int
+    let raw: String
+  }
+  /**
+   CDXC:EditorPanes 2026-05-06-15:00
+   code-server can take a few seconds to fork its IPC child and bind the local
+   editor port. Repeated editor-open commands during that window should observe
+   the in-flight launch instead of treating the missing health endpoint as a
+   dead runtime.
+   */
+  static let startupGraceInterval: TimeInterval = 10.0
+
+  /**
+   CDXC:EditorPanes 2026-05-06-14:21
+   zmux project editor panes embed the user's custom code-server checkout as a
+   shared localhost VS Code runtime. Native owns launch, storage directories,
+   auth disabling, and localhost binding so each project can attach a clean
+   Chromium view without browser chrome or split-pane participation.
+   */
+  static func createLaunch(
+    cwd: String,
+    linkVscodeUserConfig: Bool,
+    vscodeUserConfigDir: String?
+  ) throws -> NativeCodeServerRuntimeLaunch {
+    let repoRoot = try resolveCodeServerRepoRoot()
+    let entrypoint = repoRoot.appendingPathComponent("out/node/entry.js").path
+    let nodePath = try resolveCodeServerNodePath(repoRoot: repoRoot)
+    let storage = try runtimeStorage()
+    let userDataDir = storage.appendingPathComponent("user-data", isDirectory: true).path
+    let extensionsDir = storage.appendingPathComponent("extensions", isDirectory: true).path
+    let linkedVscodeUserConfigDir: String? =
+      linkVscodeUserConfig ? normalizedVscodeUserConfigDirectory(vscodeUserConfigDir) : nil
+    var launchArguments = [
+      "exec",
+      shellQuote(nodePath),
+      shellQuote(entrypoint),
+    ]
+    if let linkedVscodeUserConfigDir {
+      /**
+       CDXC:EditorPanes 2026-05-06-15:00
+       code-server editor panes should use the user's local VS Code settings
+       by default. The sidebar chooses stable VS Code or Insiders and native
+       passes code-server's supported CLI flags during process launch.
+       */
+      launchArguments.append("--link-vscode-user-config")
+      launchArguments.append("--vscode-user-config-dir \(shellQuote(linkedVscodeUserConfigDir))")
+    }
+    launchArguments.append(contentsOf: [
+      "--auth none",
+      "--bind-addr \(host):\(port)",
+      "--disable-telemetry",
+      "--disable-update-check",
+      "--disable-workspace-trust",
+      "--disable-getting-started-override",
+      "--ignore-last-opened",
+      "--app-name \(shellQuote("zmux Code"))",
+      "--user-data-dir \(shellQuote(userDataDir))",
+      "--extensions-dir \(shellQuote(extensionsDir))",
+    ])
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    process.arguments = [
+      "-lc",
+      launchArguments.joined(separator: " "),
+    ]
+    process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+    process.environment = runtimeEnvironment(repoRoot: repoRoot)
+    process.standardInput = FileHandle.nullDevice
+    let outputCapture = NativeT3RuntimeOutputCapture()
+    outputCapture.attach(to: process)
+    NativeT3CodePaneReproLog.append("nativeCodeServerRuntime.launch.created", [
+      "cwd": cwd,
+      "entrypoint": entrypoint,
+      "linkVscodeUserConfig": linkVscodeUserConfig,
+      "node": nodePath,
+      "origin": origin,
+      "repoRoot": repoRoot.path,
+      "storage": storage.path,
+      "vscodeUserConfigDir": linkedVscodeUserConfigDir ?? NSNull(),
+    ])
+    return NativeCodeServerRuntimeLaunch(outputCapture: outputCapture, process: process)
+  }
+
+  static func hasResponsiveRuntimeListener() -> Bool {
+    guard let url = URL(string: "\(origin)/healthz") else {
+      return false
+    }
+    var request = URLRequest(url: url)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.timeoutInterval = 1.0
+
+    let semaphore = DispatchSemaphore(value: 0)
+    var isResponsive = false
+    URLSession.shared.dataTask(with: request) { data, response, error in
+      defer { semaphore.signal() }
+      let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+      isResponsive = error == nil && statusCode == 200
+      NativeT3CodePaneReproLog.append("nativeCodeServerRuntime.health", [
+        "bodyBytes": data?.count ?? 0,
+        "error": error?.localizedDescription ?? NSNull(),
+        "responsive": isResponsive,
+        "statusCode": statusCode,
+        "url": url.absoluteString,
+      ])
+    }.resume()
+
+    let result = semaphore.wait(timeout: .now() + 1.5)
+    if result == .timedOut {
+      NativeT3CodePaneReproLog.append("nativeCodeServerRuntime.health.timeout", [
+        "url": url.absoluteString
+      ])
+      return false
+    }
+    return isResponsive
+  }
+
+  static func waitUntilResponsive(timeout: TimeInterval) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+      if hasResponsiveRuntimeListener() {
+        return true
+      }
+      Thread.sleep(forTimeInterval: 0.2)
+    }
+    return hasResponsiveRuntimeListener()
+  }
+
+  static func waitUntilNotResponsive(timeout: TimeInterval) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+      if !hasResponsiveRuntimeListener() {
+        return true
+      }
+      Thread.sleep(forTimeInterval: 0.2)
+    }
+    return !hasResponsiveRuntimeListener()
+  }
+
+  private static func resolveCodeServerRepoRoot() throws -> URL {
+    let environment = ProcessInfo.processInfo.environment
+    let configuredRoot =
+      environment["ZMUX_CODE_SERVER_ROOT"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+      ?? environment["zmux_CODE_SERVER_ROOT"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let candidates =
+      configuredRoot?.isEmpty == false
+      ? [configuredRoot!]
+      : [
+        home.appendingPathComponent("dev/custom/code-server", isDirectory: true).path,
+        home.appendingPathComponent("dev/_custom/code-server", isDirectory: true).path,
+      ]
+    for candidate in candidates {
+      let repoRoot = URL(fileURLWithPath: candidate, isDirectory: true)
+      if FileManager.default.fileExists(
+        atPath: repoRoot.appendingPathComponent("out/node/entry.js").path)
+      {
+        return repoRoot
+      }
+    }
+    throw NSError(
+      domain: "NativeCodeServerRuntimeLauncher",
+      code: 1,
+      userInfo: [
+        NSLocalizedDescriptionKey:
+          "Unable to resolve the custom code-server checkout. Set ZMUX_CODE_SERVER_ROOT or place it at ~/dev/custom/code-server."
+      ])
+  }
+
+  private static func runtimeStorage() throws -> URL {
+    let storage = ZmuxAppStorage.sharedRootDirectory
+      .appendingPathComponent("code-server-runtime", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: storage.appendingPathComponent("user-data", isDirectory: true),
+      withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(
+      at: storage.appendingPathComponent("extensions", isDirectory: true),
+      withIntermediateDirectories: true)
+    return storage
+  }
+
+  private static func normalizedVscodeUserConfigDirectory(_ candidate: String?) -> String {
+    let trimmedCandidate = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !trimmedCandidate.isEmpty {
+      return trimmedCandidate
+    }
+    return FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent("Library/Application Support/Code/User", isDirectory: true).path
+  }
+
+  private static func resolveCodeServerNodePath(repoRoot: URL) throws -> String {
+    let requiredMajor = codeServerRequiredNodeMajor(repoRoot: repoRoot) ?? 22
+    let configuredNodePath = configuredCodeServerNodePath()
+
+    /**
+     CDXC:EditorPanes 2026-05-06-17:36
+     The custom code-server checkout is built and tested against its declared
+     Node major. Launching it with the Homebrew `node` symlink can silently pick
+     a newer major, which leaves the remote extension host reconnecting and
+     extension commands stuck on activation. Resolve a matching Node runtime
+     before falling back to PATH.
+     */
+    if let configuredNodePath {
+      let nodePath = expandedPath(configuredNodePath)
+      guard let version = nodeRuntimeVersion(at: nodePath), version.major == requiredMajor else {
+        throw NSError(
+          domain: "NativeCodeServerRuntimeLauncher",
+          code: 3,
+          userInfo: [
+            NSLocalizedDescriptionKey:
+              "Configured code-server Node runtime must be Node \(requiredMajor): \(nodePath)."
+          ])
+      }
+      appendResolvedCodeServerNodeLog(
+        nodePath: nodePath, requiredMajor: requiredMajor, source: "configured", version: version)
+      return nodePath
+    }
+
+    var attemptedVersions: [[String: Any]] = []
+    for candidate in codeServerNodeCandidates(requiredMajor: requiredMajor) {
+      let nodePath = expandedPath(candidate)
+      guard FileManager.default.isExecutableFile(atPath: nodePath),
+        let version = nodeRuntimeVersion(at: nodePath)
+      else {
+        continue
+      }
+      if version.major == requiredMajor {
+        appendResolvedCodeServerNodeLog(
+          nodePath: nodePath, requiredMajor: requiredMajor, source: "auto", version: version)
+        return nodePath
+      }
+      attemptedVersions.append([
+        "node": nodePath,
+        "version": version.raw,
+      ])
+    }
+
+    throw NSError(
+      domain: "NativeCodeServerRuntimeLauncher",
+      code: 4,
+      userInfo: [
+        NSLocalizedDescriptionKey:
+          "Unable to resolve Node \(requiredMajor) for code-server. Set ZMUX_CODE_SERVER_NODE_PATH to a compatible node binary.",
+        "attemptedVersions": attemptedVersions,
+      ])
+  }
+
+  private static func configuredCodeServerNodePath() -> String? {
+    let environment = ProcessInfo.processInfo.environment
+    let configuredPath =
+      environment["ZMUX_CODE_SERVER_NODE_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+      ?? environment["zmux_CODE_SERVER_NODE_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let configuredPath, !configuredPath.isEmpty {
+      return configuredPath
+    }
+    return nil
+  }
+
+  private static func codeServerRequiredNodeMajor(repoRoot: URL) -> Int? {
+    let packageJsonURL = repoRoot.appendingPathComponent("package.json")
+    guard let data = try? Data(contentsOf: packageJsonURL),
+      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let engines = json["engines"] as? [String: Any],
+      let nodeEngine = engines["node"] as? String
+    else {
+      return nil
+    }
+    return firstInteger(in: nodeEngine)
+  }
+
+  private static func codeServerNodeCandidates(requiredMajor: Int) -> [String] {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    var candidates: [String] = []
+
+    candidates.append(contentsOf: nodeInstallCandidates(
+      in: home.appendingPathComponent(".local/node", isDirectory: true),
+      requiredMajor: requiredMajor))
+    candidates.append(contentsOf: nodeInstallCandidates(
+      in: home.appendingPathComponent(".local/share/mise/installs/node", isDirectory: true),
+      requiredMajor: requiredMajor))
+    candidates.append(contentsOf: nodeInstallCandidates(
+      in: home.appendingPathComponent(".asdf/installs/nodejs", isDirectory: true),
+      requiredMajor: requiredMajor))
+    candidates.append(contentsOf: nodeInstallCandidates(
+      in: home.appendingPathComponent(".nvm/versions/node", isDirectory: true),
+      requiredMajor: requiredMajor))
+
+    candidates.append(contentsOf: [
+      "/opt/homebrew/opt/node@\(requiredMajor)/bin/node",
+      "/usr/local/opt/node@\(requiredMajor)/bin/node",
+    ])
+
+    if let pathNode = try? resolveCommandPath("node") {
+      candidates.append(pathNode)
+    }
+
+    var seen: Set<String> = []
+    return candidates.filter { candidate in
+      let nodePath = expandedPath(candidate)
+      return seen.insert(nodePath).inserted
+    }
+  }
+
+  private static func nodeInstallCandidates(in directory: URL, requiredMajor: Int) -> [String] {
+    guard
+      let entries = try? FileManager.default.contentsOfDirectory(
+        at: directory,
+        includingPropertiesForKeys: [.isDirectoryKey],
+        options: [.skipsHiddenFiles])
+    else {
+      return []
+    }
+
+    return entries
+      .filter { entry in
+        let name = entry.lastPathComponent
+        return name.hasPrefix("node-v\(requiredMajor).")
+          || name.hasPrefix("v\(requiredMajor).")
+          || name.hasPrefix("\(requiredMajor).")
+      }
+      .sorted { lhs, rhs in lhs.lastPathComponent.localizedStandardCompare(rhs.lastPathComponent) == .orderedDescending }
+      .map { entry in entry.appendingPathComponent("bin/node").path }
+  }
+
+  private static func nodeRuntimeVersion(at nodePath: String) -> NodeRuntimeVersion? {
+    let process = Process()
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: nodePath)
+    process.arguments = ["-v"]
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+    } catch {
+      return nil
+    }
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+      return nil
+    }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    guard let rawVersion = String(data: data, encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines),
+      let major = firstInteger(in: rawVersion)
+    else {
+      return nil
+    }
+    return NodeRuntimeVersion(major: major, raw: rawVersion)
+  }
+
+  private static func firstInteger(in value: String) -> Int? {
+    var digits = ""
+    for character in value {
+      if character.isNumber {
+        digits.append(character)
+        continue
+      }
+      if !digits.isEmpty {
+        break
+      }
+    }
+    return digits.isEmpty ? nil : Int(digits)
+  }
+
+  private static func expandedPath(_ path: String) -> String {
+    (path as NSString).expandingTildeInPath
+  }
+
+  private static func appendResolvedCodeServerNodeLog(
+    nodePath: String,
+    requiredMajor: Int,
+    source: String,
+    version: NodeRuntimeVersion
+  ) {
+    NativeT3CodePaneReproLog.append("nativeCodeServerRuntime.node.resolved", [
+      "node": nodePath,
+      "requiredMajor": requiredMajor,
+      "source": source,
+      "version": version.raw,
+    ])
+  }
+
+  private static func runtimeEnvironment(repoRoot: URL) -> [String: String] {
+    var environment = ProcessInfo.processInfo.environment
+    environment["VSCODE_IPC_HOOK_CLI"] = ""
+    /**
+     CDXC:EditorPanes 2026-05-06-15:00
+     code-server's entrypoint treats CODE_SERVER_PARENT_PID as proof that it is
+     the already-forked IPC child. Native zmux must launch the parent wrapper
+     without that variable so code-server can create its IPC child itself and
+     bind the embedded editor port.
+    */
+    environment.removeValue(forKey: "CODE_SERVER_PARENT_PID")
+    /**
+     CDXC:EditorPanes 2026-05-06-15:00
+     The configured custom code-server checkout serves VS Code from source.
+     Launch it in VS Code dev mode so the workbench-dev shell installs the CSS
+     module import map; otherwise CEF receives CSS files as JavaScript modules
+     and the embedded editor renders blank.
+     */
+    environment["VSCODE_DEV"] = "1"
+    environment["NODE_ENV"] = "development"
+    environment["PATH"] = [
+      repoRoot.appendingPathComponent("node_modules/.bin").path,
+      environment["PATH"] ?? "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    ].joined(separator: ":")
+    return environment
+  }
+
+  private static func resolveCommandPath(_ command: String) throws -> String {
+    let process = Process()
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    process.arguments = ["-lc", "command -v \(shellQuote(command))"]
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    let resolved = String(data: data, encoding: .utf8)?
+      .split(whereSeparator: \.isNewline)
+      .first
+      .map(String.init)
+    if process.terminationStatus == 0, let resolved, !resolved.isEmpty {
+      return resolved
+    }
+    throw NSError(
+      domain: "NativeCodeServerRuntimeLauncher",
+      code: 2,
+      userInfo: [NSLocalizedDescriptionKey: "Unable to resolve required runtime command: \(command)."])
+  }
+
+  private static func shellQuote(_ value: String) -> String {
+    "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+  }
+}
+
 private struct NativeT3RuntimeCommand {
   let command: String
   let entrypoint: String

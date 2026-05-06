@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  formatProjectEditorButtonLabel,
   getEmptyBrowserGroupExpandTooltip,
   shouldFocusGroupOnHeaderActivation,
 } from "./session-group-section";
@@ -75,5 +76,19 @@ describe("shouldFocusGroupOnHeaderActivation", () => {
         shouldSelectEmptyProject: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("formatProjectEditorButtonLabel", () => {
+  test("formats the compact files and changed-lines summary", () => {
+    expect(
+      formatProjectEditorButtonLabel({
+        additions: 9,
+        deletions: 11,
+        files: 1,
+        isLoading: false,
+        isRepo: true,
+      }),
+    ).toBe("1 [+9 | -11]");
   });
 });

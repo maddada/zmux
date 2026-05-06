@@ -40,6 +40,7 @@ import {
   type SidebarTheme,
   type VisibleSessionCount,
 } from "../shared/session-grid-contract";
+import type { SidebarProjectDiffStats } from "../shared/project-diff-stats";
 import {
   DEFAULT_zmux_SETTINGS,
   getZedOverlayTargetAppLabel,
@@ -201,6 +202,10 @@ export function shouldFocusGroupOnHeaderActivation({
    * collapse-only behavior.
    */
   return shouldSelectEmptyProject || (hasProjectContext && !isActive);
+}
+
+export function formatProjectEditorButtonLabel(stats: SidebarProjectDiffStats): string {
+  return `${stats.files} [+${stats.additions} | -${stats.deletions}]`;
 }
 
 export type SessionGroupSectionProps = {
@@ -718,6 +723,26 @@ export function SessionGroupSection({
     });
   };
 
+  const openProjectEditor = () => {
+    if (!projectContext) {
+      return;
+    }
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "openWorkspaceProjectEditorForGroup",
+    });
+  };
+
+  const refreshProjectDiffStats = () => {
+    if (!projectContext) {
+      return;
+    }
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "refreshWorkspaceProjectDiffForGroup",
+    });
+  };
+
   const chooseProjectTheme = (theme: SidebarTheme) => {
     setContextMenuPosition(undefined);
     vscode.postMessage({
@@ -1136,6 +1161,51 @@ export function SessionGroupSection({
                   type="button"
                 />
               </>
+            ) : null}
+            {/*
+             * CDXC:EditorPanes 2026-05-06-14:21
+             * Expanded project cards need a half-height editor affordance at
+             * the top of the card list. It shows files/additions/deletions and
+             * opens the project-owned code-server surface instead of creating
+             * a normal split session card.
+             */}
+            {projectContext ? (
+              <button
+                aria-label={`Open code editor for ${group.title}: ${formatProjectEditorButtonLabel(
+                  projectContext.editor.diffStats,
+                )}`}
+                className="project-editor-card-button"
+                data-open={String(projectContext.editor.isOpen)}
+                data-sleeping={String(projectContext.editor.isSleeping)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openProjectEditor();
+                }}
+                onMouseEnter={refreshProjectDiffStats}
+                title={`Open code editor for ${group.title}`}
+                type="button"
+              >
+                <span aria-hidden="true" className="project-editor-card-icon">
+                  <IconCode size={14} stroke={1.9} />
+                </span>
+                <span className="project-editor-diff-label">
+                  <span className="project-editor-diff-files">
+                    {projectContext.editor.diffStats.files}
+                  </span>
+                  <span aria-hidden="true" className="project-editor-diff-stat">
+                    [
+                    <span className="project-editor-diff-stat-additions">
+                      +{projectContext.editor.diffStats.additions}
+                    </span>
+                    <span className="project-editor-diff-stat-divider">|</span>
+                    <span className="project-editor-diff-stat-deletions">
+                      -{projectContext.editor.diffStats.deletions}
+                    </span>
+                    ]
+                  </span>
+                </span>
+              </button>
             ) : null}
             {orderedSessionIds.length > 0 ? (
               orderedSessionIds.map((sessionId, sessionIndex) => (

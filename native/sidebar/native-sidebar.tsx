@@ -84,6 +84,14 @@ import {
   type SidebarGitState,
 } from "../../shared/sidebar-git";
 import {
+  createDefaultSidebarProjectDiffStats,
+  mergeSidebarProjectDiffStats,
+  parseGitNumstatDiffStats,
+  parseGitZeroDelimitedPaths,
+  parseWcLineCountStdout,
+  type SidebarProjectDiffStats,
+} from "../../shared/project-diff-stats";
+import {
   createGroupFromSessionInSimpleWorkspace,
   createGroupInSimpleWorkspace,
   createSessionInSimpleWorkspace,
@@ -216,6 +224,21 @@ type NativeHostCommand =
   | { sessionId: string; type: "reloadWebPane" }
   | { cwd: string; type: "startT3CodeRuntime" }
   | { type: "stopT3CodeRuntime" }
+  | {
+      cwd: string;
+      linkVscodeUserConfig?: boolean;
+      type: "startCodeServerRuntime";
+      vscodeUserConfigDir?: string;
+    }
+  | { type: "stopCodeServerRuntime" }
+  | {
+      projectId: string;
+      title: string;
+      type: "createProjectEditorPane";
+      url: string;
+    }
+  | { projectId: string; type: "focusProjectEditorPane" }
+  | { projectId: string; type: "closeProjectEditorPane" }
   | { type: "activateApp" }
   | { sessionId: string; text: string; type: "writeTerminalText" }
   | { sessionId: string; type: "sendTerminalEnter" }
@@ -223,6 +246,7 @@ type NativeHostCommand =
       activeSessionIds: string[];
       attentionSessionIds?: string[];
       backgroundColor?: string;
+      activeProjectEditorId?: string;
       focusRequestId?: number;
       focusedSessionId?: string;
       layout?: NativeTerminalLayout;
@@ -323,6 +347,11 @@ type NativeHostCommand =
       type: "openZedWorkspace";
       workspacePath: string;
     };
+
+type NativeSetActiveTerminalSetCommand = Extract<
+  NativeHostCommand,
+  { type: "setActiveTerminalSet" }
+>;
 
 export type WorkspaceBarProject = {
   icon?: WorkspaceDockIcon;
@@ -592,6 +621,28 @@ let gitState = createDefaultSidebarGitState(
   gitConfirmCommit,
   gitGenerateCommitBody,
 );
+/**
+ * CDXC:EditorPanes 2026-05-06-14:21
+ * Code-server editor panes are project surfaces, not split sessions. Keep
+ * their active/sleeping state beside project diff stats so switching projects
+ * preserves each live editor webview without adding it to session ordering.
+ * The existing managed-runtime sleep window is five minutes; inactive editor
+ * webviews use the same delay before closing their native Chromium surface.
+ */
+const CODE_SERVER_EDITOR_ORIGIN = "http://127.0.0.1:3775";
+const PROJECT_EDITOR_SLEEP_TIMEOUT_MS = 5 * 60 * 1000;
+const PROJECT_DIFF_UNTRACKED_WC_CHUNK_SIZE = 100;
+const projectDiffStatsByProjectId = new Map<string, SidebarProjectDiffStats>();
+const pendingProjectDiffRefreshProjectIds = new Set<string>();
+let lastNativeLayoutSyncKey: string | undefined;
+const projectEditorSleepTimeoutByProjectId = new Map<string, number>();
+const projectEditorSurfaceByProjectId = new Map<
+  string,
+  {
+    isOpen: boolean;
+    isSleeping: boolean;
+  }
+>();
 let isChromeCanaryRunning = false;
 const pendingProcessResults = new Map<
   string,
@@ -1174,6 +1225,7 @@ function browserPaneTitleFromUrl(url: string): string {
 
 function createNativeBrowserSession(url: string, groupId?: string): BrowserSessionRecord | undefined {
   const project = activeProject();
+  activateWorkspaceSurfaceForProject(project.projectId);
   const normalizedUrl = normalizeBrowserPaneUrl(url);
   const targetWorkspace = groupId
     ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
@@ -1304,8 +1356,16 @@ async function runGit(
   args: string[],
   options: { allowFailure?: boolean } = {},
 ): Promise<NativeProcessResult> {
+  return runGitInProject(activeProject(), args, options);
+}
+
+async function runGitInProject(
+  project: NativeProject,
+  args: string[],
+  options: { allowFailure?: boolean } = {},
+): Promise<NativeProcessResult> {
   const result = await runNativeProcess("/usr/bin/env", ["git", ...args], {
-    cwd: activeProject().path,
+    cwd: project.path,
   });
   if (!options.allowFailure && result.exitCode !== 0) {
     throw new Error(result.stderr.trim() || result.stdout.trim() || `git ${args.join(" ")} failed`);
@@ -1468,6 +1528,7 @@ function saveSettings(nextSettings: zmuxSettings): void {
   syncNativeSidebarSide(settings.sidebarSide, previousSettings.sidebarSide);
   syncGhosttyTerminalSettings(settings, previousSettings);
   postZedOverlaySettings();
+  syncCodeServerRuntimeSettings(settings, previousSettings);
   publish();
   previewNativeSoundSettingChange(previousSettings, settings);
 }
@@ -1487,6 +1548,38 @@ function syncNativeSidebarSide(
    */
   sidebarSide = nextSidebarSide;
   postNative({ side: sidebarSide, type: "setSidebarSide" });
+}
+
+function syncCodeServerRuntimeSettings(
+  nextSettings: zmuxSettings,
+  previousSettings: zmuxSettings,
+): void {
+  const codeServerSettingsChanged =
+    previousSettings.codeServerLinkVscodeUserConfig !== nextSettings.codeServerLinkVscodeUserConfig ||
+    previousSettings.codeServerUseVscodeInsidersUserConfig !==
+      nextSettings.codeServerUseVscodeInsidersUserConfig;
+  if (!codeServerSettingsChanged) {
+    return;
+  }
+  const awakeProjectIds = Array.from(projectEditorSurfaceByProjectId.entries())
+    .filter(([, surfaceState]) => surfaceState.isOpen === true && surfaceState.isSleeping !== true)
+    .map(([projectId]) => projectId);
+  if (!awakeProjectIds.length) {
+    return;
+  }
+  /**
+   * CDXC:EditorPanes 2026-05-06-15:00
+   * code-server settings-link flags are process launch options. Restart the
+   * shared runtime for currently awake editor panes when these settings change
+   * so the embedded editor starts with the selected VS Code config source.
+   */
+  postNative({ type: "stopCodeServerRuntime" });
+  for (const projectId of awakeProjectIds) {
+    const project = findProject(projectId);
+    if (project) {
+      wakeProjectEditorSurface(project);
+    }
+  }
 }
 
 function nextSessionPersistenceProvider(
@@ -2149,20 +2242,104 @@ async function refreshGitState(): Promise<void> {
 }
 
 function parseGitNumstat(stdout: string): { additions: number; deletions: number } {
-  return stdout
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .reduce(
-      (totals, line) => {
-        const [additions, deletions] = line.split(/\s+/);
-        return {
-          additions: totals.additions + (Number(additions) || 0),
-          deletions: totals.deletions + (Number(deletions) || 0),
-        };
-      },
-      { additions: 0, deletions: 0 },
+  const stats = parseGitNumstatDiffStats(stdout);
+  return { additions: stats.additions, deletions: stats.deletions };
+}
+
+function getProjectDiffStats(projectId: string): SidebarProjectDiffStats {
+  return projectDiffStatsByProjectId.get(projectId) ?? createDefaultSidebarProjectDiffStats();
+}
+
+async function refreshVisibleProjectDiffStats(): Promise<void> {
+  await Promise.all(
+    projects
+      .filter((project) => project.isChat !== true && project.isRecentProject !== true)
+      .map((project) => refreshProjectDiffStats(project.projectId)),
+  );
+}
+
+async function refreshProjectDiffStats(projectId: string): Promise<void> {
+  const project = findProject(projectId);
+  if (!project || project.isChat === true) {
+    return;
+  }
+  if (pendingProjectDiffRefreshProjectIds.has(projectId)) {
+    return;
+  }
+
+  pendingProjectDiffRefreshProjectIds.add(projectId);
+  projectDiffStatsByProjectId.set(projectId, {
+    ...getProjectDiffStats(projectId),
+    isLoading: true,
+  });
+  publish();
+
+  try {
+    const repoCheck = await runGitInProject(project, ["rev-parse", "--is-inside-work-tree"], {
+      allowFailure: true,
+    });
+    if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
+      projectDiffStatsByProjectId.set(projectId, createDefaultSidebarProjectDiffStats(false));
+      return;
+    }
+
+    const [trackedDiff, untrackedFiles] = await Promise.all([
+      runGitInProject(project, ["diff", "--numstat", "HEAD"], { allowFailure: true }),
+      runGitInProject(project, ["ls-files", "--others", "--exclude-standard", "-z"], {
+        allowFailure: true,
+      }),
+    ]);
+    const trackedStats = parseGitNumstatDiffStats(trackedDiff.stdout);
+    const untrackedPaths = parseGitZeroDelimitedPaths(untrackedFiles.stdout);
+    const untrackedStats: SidebarProjectDiffStats = {
+      additions: await countUntrackedProjectLines(project, untrackedPaths),
+      deletions: 0,
+      files: untrackedPaths.length,
+      isLoading: false,
+      isRepo: true,
+    };
+
+    projectDiffStatsByProjectId.set(
+      projectId,
+      mergeSidebarProjectDiffStats(trackedStats, untrackedStats),
     );
+  } catch (error) {
+    appendRestoreDebugLog("nativeSidebar.projectDiff.refreshFailed", {
+      error: error instanceof Error ? error.message : String(error),
+      projectId,
+      projectPath: project.path,
+    });
+    projectDiffStatsByProjectId.set(projectId, {
+      ...getProjectDiffStats(projectId),
+      isLoading: false,
+    });
+  } finally {
+    pendingProjectDiffRefreshProjectIds.delete(projectId);
+    publish();
+  }
+}
+
+async function countUntrackedProjectLines(
+  project: NativeProject,
+  paths: readonly string[],
+): Promise<number> {
+  let lines = 0;
+  for (let index = 0; index < paths.length; index += PROJECT_DIFF_UNTRACKED_WC_CHUNK_SIZE) {
+    const chunk = paths.slice(index, index + PROJECT_DIFF_UNTRACKED_WC_CHUNK_SIZE);
+    if (chunk.length === 0) {
+      continue;
+    }
+    const result = await runNativeProcess(
+      "/usr/bin/wc",
+      ["-l", ...chunk.map((path) => (path.startsWith("-") ? `./${path}` : path))],
+      { cwd: project.path },
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || "wc -l failed");
+    }
+    lines += parseWcLineCountStdout(result.stdout);
+  }
+  return lines;
 }
 
 function parseGitHubPullRequest(stdout: string, success: boolean): SidebarGitState["pr"] {
@@ -3209,6 +3386,7 @@ function createCombinedProjectSidebarGroup(project: NativeProject): SidebarSessi
     layoutVisibleCount: activeGroup?.layoutVisibleCount ?? 1,
     projectContext: {
       canRemoveProject: true,
+      editor: createSidebarProjectEditorState(project),
       theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
       themeColor: project.themeColor,
     },
@@ -3216,6 +3394,18 @@ function createCombinedProjectSidebarGroup(project: NativeProject): SidebarSessi
     title: project.name,
     viewMode: activeGroup?.viewMode ?? "grid",
     visibleCount: activeGroup?.visibleCount ?? 1,
+  };
+}
+
+function createSidebarProjectEditorState(
+  project: NativeProject,
+): NonNullable<SidebarSessionGroup["projectContext"]>["editor"] {
+  const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  return {
+    diffStats: getProjectDiffStats(project.projectId),
+    isOpen: surfaceState?.isOpen === true,
+    isSleeping: surfaceState?.isSleeping === true,
+    projectId: project.projectId,
   };
 }
 
@@ -3524,7 +3714,7 @@ function handleAgentManagerXSessionCommand(rawData: unknown): void {
 }
 
 function publish(): void {
-  ensureVisibleNativeSessions("publish");
+  const didCreateNativeSession = ensureVisibleNativeSessions("publish");
   const sidebarMessage = buildSidebarMessage();
   sidebarBus.post(sidebarMessage);
   agentManagerXBridgeClient.publish(createAgentManagerXWorkspaceSnapshots());
@@ -3533,14 +3723,15 @@ function publish(): void {
    * App-level modals need the same sidebar store data as the sidebar webview.
    * Mirror each authoritative sidebar snapshot into the full-window modal host
    * instead of letting modals read stale duplicated state.
-   */
+  */
   postAppModalHost({ message: sidebarMessage, type: "sidebarState" });
   postWorkspaceBarState();
-  syncNativeLayout();
+  syncNativeLayout({ force: didCreateNativeSession });
   syncNativeSessionStatusIndicators();
 }
 
-function ensureVisibleNativeSessions(reason: string): void {
+function ensureVisibleNativeSessions(reason: string): boolean {
+  let didCreateNativeSession = false;
   /**
    * CDXC:SessionRestore 2026-04-29-09:16
    * Native zmux only recreates terminal processes for sessions that are actually
@@ -3568,12 +3759,14 @@ function ensureVisibleNativeSessions(reason: string): void {
         if (session.kind === "t3") {
           if (!nativeSessionIdBySidebarSessionId.has(session.sessionId)) {
             restoreNativeT3Session(project, session, reason);
+            didCreateNativeSession = true;
           }
           continue;
         }
         if (session.kind === "browser") {
           if (!nativeSessionIdBySidebarSessionId.has(session.sessionId)) {
             restoreNativeBrowserSession(project, session, reason);
+            didCreateNativeSession = true;
           }
           continue;
         }
@@ -3584,9 +3777,11 @@ function ensureVisibleNativeSessions(reason: string): void {
           continue;
         }
         restoreNativeTerminalSession(project, session, reason);
+        didCreateNativeSession = true;
       }
     }
   }
+  return didCreateNativeSession;
 }
 
 function restoreNativeTerminalSession(
@@ -3935,6 +4130,17 @@ function nativeHomeDirectory(): string {
     inferHomeDirectoryFromPath(initialWorkspacePath) ||
     nativeFallbackHomeDirectory()
   );
+}
+
+function codeServerVscodeUserConfigDirectory(): string {
+  /**
+   * CDXC:EditorPanes 2026-05-06-15:00
+   * code-server receives the local VS Code user settings directory at launch.
+   * Stable VS Code is the default; the Insiders checkbox switches only this
+   * path while keeping --link-vscode-user-config enabled.
+   */
+  const appName = settings.codeServerUseVscodeInsidersUserConfig ? "Code - Insiders" : "Code";
+  return `${nativeHomeDirectory()}/Library/Application Support/${appName}/User`;
 }
 
 function nativeZmuxHomeDirectory(): string {
@@ -4578,6 +4784,7 @@ function createTerminal(
   },
 ): TerminalSessionRecord | undefined {
   const project = activeProject();
+  activateWorkspaceSurfaceForProject(project.projectId);
   if (project.isChat === true) {
     const existingChatSession = findFirstTerminalSessionInProject(project);
     if (existingChatSession) {
@@ -4729,6 +4936,7 @@ function createTerminal(
 
 function createNativeT3Session(groupId?: string): T3SessionRecord | undefined {
   const project = activeProject();
+  activateWorkspaceSurfaceForProject(project.projectId);
   const targetWorkspace = groupId
     ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
     : project.workspace;
@@ -4816,6 +5024,7 @@ function findNativeT3SessionBoundToThread(
   threadId: string,
   options: { excludeSessionId?: string } = {},
 ): T3SessionRecord | undefined {
+  activateWorkspaceSurfaceForProject(project.projectId);
   /**
    * CDXC:T3Code 2026-05-04-03:06
    * Native T3 sidebar cards are durable bindings to one T3 thread. When the
@@ -5887,6 +6096,7 @@ function focusTerminal(sessionId: string): void {
   if (activeProjectId !== reference.project.projectId) {
     focusProject(reference.project.projectId);
   }
+  activateWorkspaceSurfaceForProject(reference.project.projectId);
   updateActiveProjectWorkspace(
     (workspace) => focusSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot,
   );
@@ -7686,6 +7896,7 @@ function removeProject(projectId: string): void {
     return;
   }
   const project = projects[projectIndex]!;
+  disposeProjectEditorSurface(project.projectId);
   /**
    * CDXC:WorkspaceDock 2026-04-27-08:45
    * Right-click removal belongs to the React workspace dock context menu. When
@@ -7733,6 +7944,7 @@ function closeProjectToRecent(projectId: string): void {
   if (project.isChat === true) {
     return;
   }
+  disposeProjectEditorSurface(project.projectId);
 
   /**
    * CDXC:RecentProjects 2026-05-04-14:25
@@ -7971,19 +8183,164 @@ function focusProject(projectId: string): void {
   if (!projects.some((project) => project.projectId === projectId)) {
     return;
   }
+  const previousActiveProjectId = activeProjectId;
   const didSwitchProject = activeProjectId !== projectId;
   activeProjectId = projectId;
+  if (didSwitchProject) {
+    scheduleProjectEditorSleep(previousActiveProjectId);
+    cancelProjectEditorSleepTimer(projectId);
+  }
   writeStoredProjects("focusProject");
   postZedOverlaySettings("workspace-focus");
   if (didSwitchProject) {
     scheduleSyncOpenProjectWithZed("focusProject");
   }
   void refreshGitState();
+  void refreshProjectDiffStats(projectId);
   const focusedSessionId = activeSnapshot().focusedSessionId;
   if (focusedSessionId) {
     queueNativeLayoutFocusRequest(focusedSessionId, "focusProject");
   }
+  const editorSurfaceState = projectEditorSurfaceByProjectId.get(projectId);
+  if (editorSurfaceState?.isOpen === true) {
+    if (editorSurfaceState.isSleeping === true) {
+      const project = findProject(projectId);
+      if (project) {
+        wakeProjectEditorSurface(project);
+      }
+    }
+    publish();
+    postNative({ projectId, type: "focusProjectEditorPane" });
+    return;
+  }
   publish();
+}
+
+function createCodeServerProjectEditorUrl(projectPath: string): string {
+  const url = new URL(CODE_SERVER_EDITOR_ORIGIN);
+  url.searchParams.set("folder", projectPath);
+  return url.toString();
+}
+
+function cancelProjectEditorSleepTimer(projectId: string): void {
+  const timeout = projectEditorSleepTimeoutByProjectId.get(projectId);
+  if (timeout !== undefined) {
+    window.clearTimeout(timeout);
+    projectEditorSleepTimeoutByProjectId.delete(projectId);
+  }
+}
+
+function scheduleProjectEditorSleep(projectId: string): void {
+  const surfaceState = projectEditorSurfaceByProjectId.get(projectId);
+  if (!surfaceState || surfaceState.isSleeping === true) {
+    return;
+  }
+  cancelProjectEditorSleepTimer(projectId);
+  const timeout = window.setTimeout(() => {
+    sleepProjectEditorSurface(projectId);
+  }, PROJECT_EDITOR_SLEEP_TIMEOUT_MS);
+  projectEditorSleepTimeoutByProjectId.set(projectId, timeout);
+}
+
+function sleepProjectEditorSurface(projectId: string): void {
+  const surfaceState = projectEditorSurfaceByProjectId.get(projectId);
+  if (!surfaceState || (activeProjectId === projectId && surfaceState.isOpen)) {
+    return;
+  }
+  /**
+   * CDXC:EditorPanes 2026-05-06-14:21
+   * Project editors stay live across project switches, then sleep after the
+   * existing five-minute managed-runtime window. Sleeping closes only the
+   * native Chromium surface; the sidebar keeps the project editor preference so
+   * focusing the project can wake code-server back into the same folder.
+   */
+  projectEditorSurfaceByProjectId.set(projectId, {
+    ...surfaceState,
+    isSleeping: true,
+  });
+  projectEditorSleepTimeoutByProjectId.delete(projectId);
+  postNative({ projectId, type: "closeProjectEditorPane" });
+  stopCodeServerRuntimeIfEveryEditorSleeping();
+  publish();
+}
+
+function stopCodeServerRuntimeIfEveryEditorSleeping(): void {
+  const hasAwakeEditorSurface = Array.from(projectEditorSurfaceByProjectId.values()).some(
+    (surfaceState) => surfaceState.isSleeping !== true,
+  );
+  if (!hasAwakeEditorSurface) {
+    postNative({ type: "stopCodeServerRuntime" });
+  }
+}
+
+function wakeProjectEditorSurface(project: NativeProject): void {
+  const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  cancelProjectEditorSleepTimer(project.projectId);
+  projectEditorSurfaceByProjectId.set(project.projectId, {
+    isOpen: surfaceState?.isOpen === true,
+    isSleeping: false,
+  });
+  postNative({
+    cwd: project.path,
+    linkVscodeUserConfig: settings.codeServerLinkVscodeUserConfig,
+    type: "startCodeServerRuntime",
+    vscodeUserConfigDir: codeServerVscodeUserConfigDirectory(),
+  });
+  postNative({
+    projectId: project.projectId,
+    title: project.name,
+    type: "createProjectEditorPane",
+    url: createCodeServerProjectEditorUrl(project.path),
+  });
+}
+
+function openProjectEditorForGroup(groupId: string): void {
+  const reference = resolveSidebarGroupReference(groupId);
+  const project = reference.project;
+  if (project.isChat === true || project.isRecentProject === true) {
+    return;
+  }
+  if (activeProjectId !== project.projectId) {
+    focusProject(project.projectId);
+  }
+  /**
+   * CDXC:EditorPanes 2026-05-06-14:21
+   * Opening a project editor should replace the workspace surface without
+   * becoming a split session. Start the shared code-server runtime once, then
+   * bind a project-owned CEF view to the folder URL and keep that view alive
+   * across later project switches.
+   */
+  projectEditorSurfaceByProjectId.set(project.projectId, {
+    isOpen: true,
+    isSleeping: false,
+  });
+  wakeProjectEditorSurface(project);
+  postNative({ projectId: project.projectId, type: "focusProjectEditorPane" });
+  void refreshProjectDiffStats(project.projectId);
+  publish();
+}
+
+function activateWorkspaceSurfaceForProject(projectId: string): void {
+  const surfaceState = projectEditorSurfaceByProjectId.get(projectId);
+  if (!surfaceState?.isOpen) {
+    return;
+  }
+  projectEditorSurfaceByProjectId.set(projectId, {
+    ...surfaceState,
+    isOpen: false,
+  });
+  scheduleProjectEditorSleep(projectId);
+}
+
+function disposeProjectEditorSurface(projectId: string): void {
+  cancelProjectEditorSleepTimer(projectId);
+  projectEditorSurfaceByProjectId.delete(projectId);
+  projectDiffStatsByProjectId.delete(projectId);
+  pendingProjectDiffRefreshProjectIds.delete(projectId);
+  postNative({ projectId, type: "closeProjectEditorPane" });
+  if (projectEditorSurfaceByProjectId.size === 0) {
+    postNative({ type: "stopCodeServerRuntime" });
+  }
 }
 
 function reorderProjects(projectIds: string[]): void {
@@ -8419,6 +8776,14 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       openNativeWorkspaceInSelectedIde(groupReference.project.path);
       return;
     }
+    case "openWorkspaceProjectEditorForGroup":
+      openProjectEditorForGroup(message.groupId);
+      return;
+    case "refreshWorkspaceProjectDiffForGroup": {
+      const groupReference = resolveSidebarGroupReference(message.groupId);
+      void refreshProjectDiffStats(groupReference.project.projectId);
+      return;
+    }
     case "openActiveWorkspaceProjectInFinder":
       openNativeWorkspaceInFinder(activeProject().path);
       return;
@@ -8781,7 +9146,53 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
   }
 }
 
-function syncNativeLayout(): void {
+/**
+ * CDXC:EditorPanes 2026-05-06-16:02
+ * Sidebar-only publishes, including project diff refreshes triggered by
+ * hovering the editor launcher, must not reapply the native AppKit pane layout.
+ * Active project editors are CEF surfaces; redundant setActiveTerminalSet
+ * commands reorder and reframe the hosted editor view, which causes visible
+ * flicker even though no layout state changed. Send native layout sync only
+ * when the actual layout payload changes, while still allowing explicit focus
+ * requests and newly recreated native surfaces through.
+ */
+function postNativeLayoutSync(
+  command: NativeSetActiveTerminalSetCommand,
+  options: { force?: boolean } = {},
+): void {
+  const layoutSyncKey = createNativeLayoutSyncKey(command);
+  if (
+    options.force !== true &&
+    command.focusRequestId === undefined &&
+    layoutSyncKey === lastNativeLayoutSyncKey
+  ) {
+    return;
+  }
+  lastNativeLayoutSyncKey = layoutSyncKey;
+  postNative(command);
+}
+
+function createNativeLayoutSyncKey(command: NativeSetActiveTerminalSetCommand): string {
+  const { focusRequestId: _focusRequestId, ...layoutCommand } = command;
+  return JSON.stringify(normalizeNativeLayoutSyncValue(layoutCommand));
+}
+
+function normalizeNativeLayoutSyncValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeNativeLayoutSyncValue);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+      .map(([key, entryValue]) => [key, normalizeNativeLayoutSyncValue(entryValue)]),
+  );
+}
+
+function syncNativeLayout(options: { force?: boolean } = {}): void {
   const sidebarSessionsById = new Map(
     createProjectedSidebarSessionsForGroup(activeWorkspaceGroup()).map((session) => [
       session.sessionId,
@@ -8878,8 +9289,13 @@ function syncNativeLayout(): void {
    * focusRequestId only for explicit user focus commands such as sidebar
    * session focus, hotkeys, or project switching.
    */
-  postNative({
+  const command: NativeSetActiveTerminalSetCommand = {
     activeSessionIds: visibleSessionIds,
+    activeProjectEditorId:
+      projectEditorSurfaceByProjectId.get(activeProjectId)?.isOpen === true &&
+      projectEditorSurfaceByProjectId.get(activeProjectId)?.isSleeping !== true
+        ? activeProjectId
+        : undefined,
     attentionSessionIds,
     backgroundColor: settings.workspaceBackgroundColor,
     ...(focusRequestId !== undefined ? { focusRequestId } : {}),
@@ -8897,7 +9313,8 @@ function syncNativeLayout(): void {
     sessionActivities,
     sessionTitles,
     type: "setActiveTerminalSet",
-  });
+  };
+  postNativeLayoutSync(command, options);
   if (shouldConsumeFocusRequest) {
     pendingNativeLayoutFocusRequest = undefined;
   }
@@ -10132,6 +10549,7 @@ if (rootElement && !isStorybookPreview) {
     startChromeCanaryRunningMonitor();
     startFirstPromptAutoRenameMonitor();
     void refreshGitState();
+    void refreshVisibleProjectDiffStats();
     if (activeSnapshot().sessions.length === 0) {
       createTerminal(DEFAULT_TERMINAL_SESSION_TITLE);
     } else {

@@ -49,6 +49,8 @@ export type zmuxSettings = {
   actionCompletionSound: CompletionSoundSetting;
   agentManagerZoomPercent: number;
   browserOpenMode: BrowserOpenMode;
+  codeServerLinkVscodeUserConfig: boolean;
+  codeServerUseVscodeInsidersUserConfig: boolean;
   completionBellEnabled: boolean;
   completionSound: CompletionSoundSetting;
   createSessionOnSidebarDoubleClick: boolean;
@@ -119,6 +121,14 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
    * chooses in-app browser panes from Settings.
    */
   browserOpenMode: "chrome-canary",
+  /**
+   * CDXC:EditorPanes 2026-05-06-15:00
+   * Embedded code-server editor panes should reuse the user's local VS Code
+   * user settings by default. A separate Insiders toggle switches the linked
+   * source directory without disabling the shared project editor runtime.
+   */
+  codeServerLinkVscodeUserConfig: true,
+  codeServerUseVscodeInsidersUserConfig: false,
   completionBellEnabled: false,
   completionSound: DEFAULT_COMPLETION_SOUND,
   createSessionOnSidebarDoubleClick: false,
@@ -354,6 +364,21 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
      */
     browserOpenMode: normalizeBrowserOpenMode(
       readString(source, "browserOpenMode", DEFAULT_zmux_SETTINGS.browserOpenMode),
+    ),
+    /**
+     * CDXC:EditorPanes 2026-05-06-15:00
+     * Normalize the code-server VS Code settings-link toggles on every read so
+     * older settings files gain the default local VS Code settings behavior.
+     */
+    codeServerLinkVscodeUserConfig: readBoolean(
+      source,
+      "codeServerLinkVscodeUserConfig",
+      DEFAULT_zmux_SETTINGS.codeServerLinkVscodeUserConfig,
+    ),
+    codeServerUseVscodeInsidersUserConfig: readBoolean(
+      source,
+      "codeServerUseVscodeInsidersUserConfig",
+      DEFAULT_zmux_SETTINGS.codeServerUseVscodeInsidersUserConfig,
     ),
     completionBellEnabled: readBoolean(
       source,

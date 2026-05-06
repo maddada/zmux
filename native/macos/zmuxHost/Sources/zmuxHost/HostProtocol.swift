@@ -10,6 +10,11 @@ enum HostCommand: Decodable {
   case reloadWebPane(SessionCommand)
   case startT3CodeRuntime(StartT3CodeRuntime)
   case stopT3CodeRuntime
+  case startCodeServerRuntime(StartCodeServerRuntime)
+  case stopCodeServerRuntime
+  case createProjectEditorPane(CreateProjectEditorPane)
+  case focusProjectEditorPane(ProjectEditorCommand)
+  case closeProjectEditorPane(ProjectEditorCommand)
   case activateApp
   case writeTerminalText(WriteTerminalText)
   case sendTerminalEnter(SessionCommand)
@@ -59,6 +64,11 @@ enum HostCommand: Decodable {
     case reloadWebPane
     case startT3CodeRuntime
     case stopT3CodeRuntime
+    case startCodeServerRuntime
+    case stopCodeServerRuntime
+    case createProjectEditorPane
+    case focusProjectEditorPane
+    case closeProjectEditorPane
     case activateApp
     case writeTerminalText
     case sendTerminalEnter
@@ -116,6 +126,16 @@ enum HostCommand: Decodable {
       self = .startT3CodeRuntime(try StartT3CodeRuntime(from: decoder))
     case .stopT3CodeRuntime:
       self = .stopT3CodeRuntime
+    case .startCodeServerRuntime:
+      self = .startCodeServerRuntime(try StartCodeServerRuntime(from: decoder))
+    case .stopCodeServerRuntime:
+      self = .stopCodeServerRuntime
+    case .createProjectEditorPane:
+      self = .createProjectEditorPane(try CreateProjectEditorPane(from: decoder))
+    case .focusProjectEditorPane:
+      self = .focusProjectEditorPane(try ProjectEditorCommand(from: decoder))
+    case .closeProjectEditorPane:
+      self = .closeProjectEditorPane(try ProjectEditorCommand(from: decoder))
     case .activateApp:
       self = .activateApp
     case .writeTerminalText:
@@ -219,12 +239,39 @@ struct StartT3CodeRuntime: Decodable {
   let cwd: String
 }
 
+struct StartCodeServerRuntime: Decodable {
+  /**
+   CDXC:EditorPanes 2026-05-06-14:21
+   The sidebar opens project editors by starting one shared code-server runtime,
+   then binding project-specific Chromium surfaces to folder URLs. Keep this
+   separate from terminal/web-pane commands because editors are not split panes.
+
+   CDXC:EditorPanes 2026-05-06-15:00
+   The sidebar sends VS Code settings-link choices with the runtime command so
+   the native launcher can pass code-server CLI flags before the process starts.
+   */
+  let cwd: String
+  let linkVscodeUserConfig: Bool?
+  let vscodeUserConfigDir: String?
+}
+
+struct CreateProjectEditorPane: Decodable {
+  let projectId: String
+  let title: String
+  let url: String
+}
+
+struct ProjectEditorCommand: Decodable {
+  let projectId: String
+}
+
 struct WriteTerminalText: Decodable {
   let sessionId: String
   let text: String
 }
 
 struct SetActiveTerminalSet: Decodable {
+  let activeProjectEditorId: String?
   let activeSessionIds: [String]
   let attentionSessionIds: [String]?
   let backgroundColor: String?

@@ -8,6 +8,7 @@ import type {
   SidebarCommandRunMode,
 } from "./sidebar-commands";
 import type { SidebarGitAction, SidebarGitState } from "./sidebar-git";
+import type { SidebarProjectDiffStats } from "./project-diff-stats";
 import type { ZedOverlayTargetApp, zmuxSettings } from "./zmux-settings";
 import type { SidebarPinnedPrompt } from "./sidebar-pinned-prompts";
 import type {
@@ -128,6 +129,18 @@ export type SidebarSessionGroup = {
   layoutVisibleCount: VisibleSessionCount;
   projectContext?: {
     canRemoveProject: boolean;
+    /**
+     * CDXC:EditorPanes 2026-05-06-14:21
+     * Combined project cards expose one project-owned code editor surface.
+     * The editor is not a split session, so sidebar state carries it through
+     * project context instead of mixing it into session card records.
+     */
+    editor: {
+      diffStats: SidebarProjectDiffStats;
+      isOpen: boolean;
+      isSleeping: boolean;
+      projectId: string;
+    };
     theme?: SidebarTheme;
     themeColor?: string;
   };
@@ -537,6 +550,16 @@ export type SidebarToExtensionMessage =
        * trusted stored workspace path instead of accepting a client path.
        */
       type: "openWorkspaceProjectInFinderForGroup" | "openWorkspaceProjectInIdeForGroup";
+      groupId: string;
+    }
+  | {
+      /**
+       * CDXC:EditorPanes 2026-05-06-14:21
+       * Project editor buttons are trusted group-scoped commands. Native
+       * resolves the group id to its stored project path before launching the
+       * embedded code-server editor or refreshing its diff stats.
+       */
+      type: "openWorkspaceProjectEditorForGroup" | "refreshWorkspaceProjectDiffForGroup";
       groupId: string;
     }
   | {
