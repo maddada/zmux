@@ -234,6 +234,16 @@ final class TerminalWorkspaceView: NSView {
     var targetSessionId: String?
   }
 
+  private struct CEFNativeDragSourceRelease {
+    let chromiumView: ZmuxCEFBrowserView
+    let startWindowPoint: CGPoint
+    var didDrag: Bool
+    var didStartHoverBridge: Bool
+    var lastHoverEventTime: TimeInterval
+    var lastHoverWindowPoint: CGPoint?
+    var lastHoverLogEventTime: TimeInterval
+  }
+
   private static let terminalTitleBarHeight: CGFloat = 33
   private static let defaultPaneGap: CGFloat = 12
   private static let singlePaneInset: CGFloat = 1
@@ -241,8 +251,10 @@ final class TerminalWorkspaceView: NSView {
   private static let paneResizeMinimumWidth: CGFloat = 220
   private static let paneHeaderDragThreshold: CGFloat = 6
   private static let paneHeaderDragGhostMaxWidth: CGFloat = 230
+  private static let cefNativeDragHoverInterval: TimeInterval = 1.0 / 30.0
+  private static let cefNativeDragStationaryHoverInterval: TimeInterval = 0.12
+  private static let cefNativeDragHoverMinimumDistance: CGFloat = 3
   private static let browserPaneApplicationNameForUserAgent = "Version/18.4 Safari/605.1.15"
-  private static let projectEditorDndConsolePrefix = "[zmux-project-editor-dnd]"
   private static let defaultWorkspaceBackgroundColor = NSColor(
     calibratedRed: 0.071, green: 0.071, blue: 0.071, alpha: 1)
   private let ghostty: Ghostty.App
@@ -276,6 +288,9 @@ final class TerminalWorkspaceView: NSView {
   private var paneHeaderEventMonitor: Any?
   private var paneHeaderDragGhostView: TerminalPaneHeaderDragGhostView?
   private var paneHeaderDragTargetView: TerminalPaneHeaderDragTargetView?
+  private var cefNativeDragSourceRelease: CEFNativeDragSourceRelease?
+  private var cefNativeDragSourceReleaseEventMonitor: Any?
+  private var cefNativeDragHoverTimer: Timer?
   private var resizeLogSignatureBySessionId = [String: String]()
   private var exitPollTimer: Timer?
 
@@ -341,12 +356,17 @@ final class TerminalWorkspaceView: NSView {
     if let paneHeaderEventMonitor {
       NSEvent.removeMonitor(paneHeaderEventMonitor)
     }
+    if let cefNativeDragSourceReleaseEventMonitor {
+      NSEvent.removeMonitor(cefNativeDragSourceReleaseEventMonitor)
+    }
+    cefNativeDragHoverTimer?.invalidate()
   }
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     uninstallPaneHeaderEventMonitor()
     syncPaneHeaderEventMonitorForCurrentSurface(reason: "viewDidMoveToWindow")
+    syncCEFNativeDragSourceReleaseMonitor(reason: "viewDidMoveToWindow")
   }
 
   func createTerminal(_ command: CreateTerminal) {
@@ -394,13 +414,19 @@ final class TerminalWorkspaceView: NSView {
     }
 
     let sessionPersistenceProvider = NativeSessionPersistenceProvider.resolve(command)
-    let sessionPersistenceName = sessionPersistenceProvider == nil
-      ? nil
-      : (NativeSessionPersistenceMode.normalizedSessionName(
-        command.sessionPersistenceName ?? command.tmuxSessionName)
+    let sessionPersistenceName: String?
+    if let sessionPersistenceProvider {
+      sessionPersistenceName =
+        NativeSessionPersistenceMode.normalizedSessionName(
+          command.sessionPersistenceName ?? command.tmuxSessionName,
+          provider: sessionPersistenceProvider)
         ?? NativeSessionPersistenceMode.sessionName(
+          provider: sessionPersistenceProvider,
           sessionId: command.sessionId,
-          title: command.title))
+          title: command.title)
+    } else {
+      sessionPersistenceName = nil
+    }
     var config = Ghostty.SurfaceConfiguration()
     config.workingDirectory = command.cwd
     config.environmentVariables = nativeGhosttyTerminalEnvironment(command.env)
@@ -628,7 +654,10 @@ final class TerminalWorkspaceView: NSView {
        */
       return currentSessionName
     }
-    let nextSessionName = NativeSessionPersistenceMode.sessionName(sessionId: sessionId, title: title)
+    let nextSessionName = NativeSessionPersistenceMode.sessionName(
+      provider: provider,
+      sessionId: sessionId,
+      title: title)
     guard nextSessionName != currentSessionName else {
       return currentSessionName
     }
@@ -1014,7 +1043,22 @@ final class TerminalWorkspaceView: NSView {
       )
       webView.stopLoading()
     }
+    /**
+     CDXC:ChromiumBrowserPanes 2026-05-07-07:31
+     Middle-clicking a browser card must close only that sidebar pane. The
+     2026-05-07 07:08 log showed pane close entering Chromium teardown and then
+     closing the top-level app window, so keep explicit before/after logs around
+     the embedded browser close request.
+     */
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.close.browserTeardown.start", [
+      "hasChromiumView": session.chromiumView != nil,
+      "hasWebView": session.webView != nil,
+      "sessionId": sessionId,
+    ])
     session.chromiumView?.closeBrowser()
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.close.browserTeardown.completed", [
+      "sessionId": sessionId,
+    ])
     session.hostView.removeFromSuperview()
     session.titleBarView.removeFromSuperview()
     session.borderView.removeFromSuperview()
@@ -1025,6 +1069,12 @@ final class TerminalWorkspaceView: NSView {
     }
     needsLayout = true
     sendEvent(.terminalExited(sessionId: sessionId, exitCode: nil))
+    NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.close.completed", [
+      "activeSessionIds": Array(activeSessionIds).sorted(),
+      "focusedSessionId": nullableString(focusedSessionId),
+      "sessionId": sessionId,
+      "visibleSessionIds": orderedVisibleSessionIds(),
+    ])
   }
 
   func focusWebPane(sessionId: String, reason: String = "explicitFocusWebPaneCommand") {
@@ -1101,10 +1151,18 @@ final class TerminalWorkspaceView: NSView {
       return
     }
 
+    /**
+     CDXC:EditorPanes 2026-05-07-07:53
+     Embedded VS Code panel positions must survive app restarts without making
+     code-server boot in a fresh browser profile. The VS Code workbench stores
+     layout in browser-side origin storage, so project editor CEF views use the
+     persistent default Chromium profile; project ownership stays in the native
+     editor session and code-server folder URL, not in a separate CEF profile.
+     */
     let chromiumView = ZmuxCEFBrowserView(
       frame: .zero,
       initialURL: "about:blank",
-      profileIdentifier: projectEditorProfileIdentifier(projectId: command.projectId))
+      profileIdentifier: "default")
     chromiumView.translatesAutoresizingMaskIntoConstraints = true
     let hostView = WebPaneHostView(
       browserView: chromiumView,
@@ -1159,7 +1217,6 @@ final class TerminalWorkspaceView: NSView {
     session.hostView.isHidden = false
     layoutProjectEditorPane(session)
     orderProjectEditorPaneToFront(session)
-    injectProjectEditorDragDiagnostics(projectId: projectId, reason: reason)
     _ = window?.makeFirstResponder(session.chromiumView)
     needsLayout = true
     NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.focus.applied", [
@@ -1772,7 +1829,6 @@ final class TerminalWorkspaceView: NSView {
         ])
         session.chromiumView.loadURLString(url)
         session.hostView.refreshHostedWebView(reason: reason)
-        self.injectProjectEditorDragDiagnostics(projectId: projectId, reason: reason)
       }
     }
   }
@@ -1783,157 +1839,18 @@ final class TerminalWorkspaceView: NSView {
     reason: String
   ) {
     /**
-     CDXC:EditorPanes 2026-05-06-19:05
-     VS Code view movement is implemented by browser drag/drop inside
-     code-server. Install passive in-page diagnostics on editor panes so failed
-     sidebar drops can be distinguished from native AppKit event interception.
+     CDXC:EditorPanes 2026-05-07-05:18
+     VS Code view movement depends on browser drag/drop retargeting for live
+     sidebar drop indicators and hold-before-release interactions. CEF Alloy
+     panes receive native mouse movement but can miss in-page `dragover`
+     retargeting, so zmux keeps code-server free of load-time injected drag
+     diagnostics and uses a scoped active-drag hover bridge only while dragging.
      */
-    chromiumView.consoleMessageHandler = { [weak self] message, source, line in
-      self?.handleProjectEditorDndConsoleMessage(
-        message,
-        source: source,
-        line: line,
-        projectId: projectId)
-    }
-    chromiumView.navigationStateChangedHandler = { [weak self] _, _, isLoading in
-      guard !isLoading else {
-        return
-      }
-      self?.injectProjectEditorDragDiagnostics(
-        projectId: projectId,
-        reason: "projectEditorNavigationIdle")
-    }
     NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.dnd.diagnosticsConfigured", [
       "projectId": projectId,
       "reason": reason,
       "url": chromiumView.currentURLString ?? NSNull(),
     ])
-  }
-
-  private func injectProjectEditorDragDiagnostics(projectId: String, reason: String) {
-    guard let session = projectEditorPaneSessions[projectId] else {
-      return
-    }
-    session.chromiumView.executeJavaScript(Self.projectEditorDragDiagnosticsScript(projectId: projectId))
-    NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.dnd.injectRequested", [
-      "projectId": projectId,
-      "reason": reason,
-      "url": session.chromiumView.currentURLString ?? NSNull(),
-      "windowNumber": window?.windowNumber ?? NSNull(),
-    ])
-  }
-
-  private func handleProjectEditorDndConsoleMessage(
-    _ message: String,
-    source: String,
-    line: Int,
-    projectId: String
-  ) {
-    guard message.hasPrefix(Self.projectEditorDndConsolePrefix) else {
-      return
-    }
-    var details: [String: Any] = [
-      "line": line,
-      "projectId": projectId,
-      "source": source,
-    ]
-    let rawPayload = message.dropFirst(Self.projectEditorDndConsolePrefix.count)
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    if let data = rawPayload.data(using: .utf8),
-      let object = try? JSONSerialization.jsonObject(with: data),
-      let payload = object as? [String: Any]
-    {
-      for (key, value) in payload {
-        details[key] = value
-      }
-    } else {
-      details["raw"] = String(rawPayload)
-    }
-    NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.dnd.pageEvent", details)
-  }
-
-  private static func projectEditorDragDiagnosticsScript(projectId: String) -> String {
-    let projectIdLiteral = javascriptStringLiteral(projectId)
-    let prefixLiteral = javascriptStringLiteral(projectEditorDndConsolePrefix)
-    return """
-      (() => {
-        const projectId = \(projectIdLiteral);
-        const prefix = \(prefixLiteral);
-        if (window.__zmuxProjectEditorDndDiagnosticsInstalled) {
-          console.info(`${prefix} ${JSON.stringify({ event: "alreadyInstalled", projectId, href: location.href })}`);
-          return;
-        }
-        window.__zmuxProjectEditorDndDiagnosticsInstalled = true;
-        const lastLogByKey = new Map();
-        const describeElement = (element) => {
-          if (!(element instanceof Element)) {
-            return null;
-          }
-          const classes = Array.from(element.classList || []).slice(0, 6);
-          const text = (element.textContent || "").replace(/\\s+/g, " ").trim().slice(0, 90);
-          return {
-            ariaLabel: element.getAttribute("aria-label") || undefined,
-            classes,
-            draggable: element.getAttribute("draggable") || undefined,
-            id: element.id || undefined,
-            role: element.getAttribute("role") || undefined,
-            tag: element.tagName.toLowerCase(),
-            text: text || undefined,
-            title: element.getAttribute("title") || undefined
-          };
-        };
-        const closestInteresting = (target) => {
-          const element = target instanceof Element ? target : target?.parentElement;
-          return element?.closest?.([
-            "[draggable='true']",
-            ".pane-header",
-            ".pane",
-            ".monaco-pane-view",
-            ".split-view-view",
-            ".composite",
-            ".part.sidebar",
-            "#workbench\\\\.parts\\\\.sidebar"
-          ].join(",")) || null;
-        };
-        const logEvent = (phase, event) => {
-          const key = `${phase}:${event.type}`;
-          const now = performance.now();
-          if ((event.type === "dragover" || event.type === "drag") && now - (lastLogByKey.get(key) || 0) < 250) {
-            return;
-          }
-          lastLogByKey.set(key, now);
-          const target = event.target instanceof Element ? event.target : event.target?.parentElement;
-          const dataTransfer = event.dataTransfer;
-          console.info(`${prefix} ${JSON.stringify({
-            dataTypes: dataTransfer ? Array.from(dataTransfer.types || []) : [],
-            defaultPrevented: event.defaultPrevented,
-            dropEffect: dataTransfer?.dropEffect,
-            effectAllowed: dataTransfer?.effectAllowed,
-            event: event.type,
-            href: location.href,
-            phase,
-            projectId,
-            target: describeElement(target),
-            closest: describeElement(closestInteresting(target)),
-            x: event.clientX,
-            y: event.clientY
-          })}`);
-        };
-        for (const type of ["dragstart", "dragenter", "dragover", "dragleave", "drop", "dragend"]) {
-          window.addEventListener(type, (event) => logEvent("capture", event), true);
-          window.addEventListener(type, (event) => logEvent("bubble", event), false);
-        }
-        console.info(`${prefix} ${JSON.stringify({ event: "installed", projectId, href: location.href })}`);
-      })();
-      """
-  }
-
-  private func projectEditorProfileIdentifier(projectId: String) -> String {
-    let allowedScalars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
-    let normalized = projectId.unicodeScalars
-      .map { allowedScalars.contains($0) ? String($0) : "-" }
-      .joined()
-    return "editor-\(String(normalized.prefix(80)))"
   }
 
   private func orderedVisibleSessionIds() -> [String] {
@@ -2445,6 +2362,287 @@ final class TerminalWorkspaceView: NSView {
     default:
       return "\(type.rawValue)"
     }
+  }
+
+  private func syncCEFNativeDragSourceReleaseMonitor(reason _: String) {
+    let shouldMonitor = window != nil
+    if shouldMonitor {
+      installCEFNativeDragSourceReleaseMonitorIfNeeded()
+    } else {
+      uninstallCEFNativeDragSourceReleaseMonitor()
+    }
+  }
+
+  private func installCEFNativeDragSourceReleaseMonitorIfNeeded() {
+    guard cefNativeDragSourceReleaseEventMonitor == nil else {
+      return
+    }
+    /**
+     CDXC:ChromiumBrowserPanes 2026-05-07-05:18
+     CEF's renderer handles real pointer movement during in-page drags. zmux
+     observes the native mouse stream and, after a real CEF drag-length
+     movement releases, asks CEF to complete its drag source so the renderer
+     receives the native end.
+
+     CDXC:ChromiumBrowserPanes 2026-05-07-05:33
+     CEF Alloy panes show native mouse movement during HTML drags, but VS Code's
+     composite/view drop targets do not always receive browser `dragover`
+     retargeting while the pointer moves. Bridge only the in-drag hover/drop
+     retargeting into the page; Chromium still owns the original drag source
+     and the native source-ended completion.
+
+     CDXC:ChromiumBrowserPanes 2026-05-07-06:32
+     Chromium's native drag loop can suppress AppKit's normal
+     `leftMouseDragged` delivery to local monitors, so one-shot dragover
+     forwarding only reacts at drag start/release. Poll the current mouse
+     location in common run-loop modes during an active CEF drag so VS Code
+     drop targets keep receiving hover updates while the user holds or moves.
+
+     CDXC:ChromiumBrowserPanes 2026-05-07-07:22
+     VS Code drop indicators flicker when bridged hover events retarget every
+     small DOM child under the pointer or arrive faster than the workbench's
+     drop observer needs. Coalesce native hover dispatch to a stable cadence and
+     let the in-page bridge stabilize dragenter/dragleave targets while still
+     sending periodic dragover events for hold-to-drop workflows.
+
+     CDXC:ChromiumBrowserPanes 2026-05-07-07:33
+     A 07:31 failed editor drag had no CEF hover bridge log entries while the
+     07:33 successful drag did. Chromium can start its native HTML drag before
+     AppKit delivers a threshold-crossing `leftMouseDragged` event, so arm the
+     poller on mouse-down and let the poller detect the drag threshold itself.
+     */
+    cefNativeDragSourceReleaseEventMonitor = NSEvent.addLocalMonitorForEvents(
+      matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+    ) { [weak self] event in
+      guard let self else {
+        return event
+      }
+      self.handleCEFNativeDragSourceReleaseMonitorEvent(event)
+      return event
+    }
+  }
+
+  private func uninstallCEFNativeDragSourceReleaseMonitor() {
+    cefNativeDragSourceRelease = nil
+    stopCEFNativeDragHoverTimer()
+    guard let cefNativeDragSourceReleaseEventMonitor else {
+      return
+    }
+    NSEvent.removeMonitor(cefNativeDragSourceReleaseEventMonitor)
+    self.cefNativeDragSourceReleaseEventMonitor = nil
+  }
+
+  private func handleCEFNativeDragSourceReleaseMonitorEvent(_ event: NSEvent) {
+    guard let windowPoint = windowPoint(forCEFNativeDragEvent: event) else {
+      return
+    }
+    switch event.type {
+    case .leftMouseDown:
+      guard let chromiumView = chromiumBrowserView(atWindowPoint: windowPoint) else {
+        cefNativeDragSourceRelease = nil
+        return
+      }
+      cefNativeDragSourceRelease = CEFNativeDragSourceRelease(
+        chromiumView: chromiumView,
+        startWindowPoint: windowPoint,
+        didDrag: false,
+        didStartHoverBridge: false,
+        lastHoverEventTime: 0,
+        lastHoverWindowPoint: nil,
+        lastHoverLogEventTime: 0)
+      startCEFNativeDragHoverTimerIfNeeded()
+    case .leftMouseDragged:
+      guard var release = cefNativeDragSourceRelease else {
+        return
+      }
+      if !release.didDrag,
+        hypot(
+          windowPoint.x - release.startWindowPoint.x,
+          windowPoint.y - release.startWindowPoint.y) >= Self.paneHeaderDragThreshold
+      {
+        release.didDrag = true
+        startCEFNativeDragHoverTimerIfNeeded()
+      }
+      guard release.didDrag else {
+        cefNativeDragSourceRelease = release
+        return
+      }
+      if !release.didStartHoverBridge {
+        dispatchCEFDragHoverUpdate(
+          for: &release,
+          windowPoint: windowPoint,
+          eventTime: event.timestamp,
+          phase: "start")
+        release.didStartHoverBridge = true
+      }
+      cefNativeDragSourceRelease = release
+    case .leftMouseUp:
+      finishCEFNativeDragRelease(windowPoint: windowPoint, eventTime: event.timestamp)
+    default:
+      return
+    }
+  }
+
+  private func startCEFNativeDragHoverTimerIfNeeded() {
+    guard cefNativeDragHoverTimer == nil else {
+      return
+    }
+    let timer = Timer(timeInterval: Self.cefNativeDragHoverInterval, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated {
+        self?.pumpCEFNativeDragHoverTimer()
+      }
+    }
+    cefNativeDragHoverTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+  }
+
+  private func stopCEFNativeDragHoverTimer() {
+    cefNativeDragHoverTimer?.invalidate()
+    cefNativeDragHoverTimer = nil
+  }
+
+  private func pumpCEFNativeDragHoverTimer() {
+    guard var release = cefNativeDragSourceRelease else {
+      stopCEFNativeDragHoverTimer()
+      return
+    }
+    guard let windowPoint = currentCEFNativeDragWindowPoint() else {
+      return
+    }
+    guard NSEvent.pressedMouseButtons & 1 == 1 else {
+      guard release.didDrag else {
+        cefNativeDragSourceRelease = nil
+        stopCEFNativeDragHoverTimer()
+        return
+      }
+      finishCEFNativeDragRelease(windowPoint: windowPoint, eventTime: CACurrentMediaTime())
+      return
+    }
+    if !release.didDrag {
+      guard hypot(
+        windowPoint.x - release.startWindowPoint.x,
+        windowPoint.y - release.startWindowPoint.y) >= Self.paneHeaderDragThreshold
+      else {
+        cefNativeDragSourceRelease = release
+        return
+      }
+      release.didDrag = true
+    }
+    dispatchCEFDragHoverUpdate(
+      for: &release,
+      windowPoint: windowPoint,
+      eventTime: CACurrentMediaTime(),
+      phase: release.didStartHoverBridge ? "over" : "start")
+    release.didStartHoverBridge = true
+    cefNativeDragSourceRelease = release
+  }
+
+  private func finishCEFNativeDragRelease(windowPoint: CGPoint, eventTime: TimeInterval) {
+    guard var release = cefNativeDragSourceRelease else {
+      return
+    }
+    cefNativeDragSourceRelease = nil
+    stopCEFNativeDragHoverTimer()
+    guard release.didDrag else {
+      return
+    }
+    dispatchCEFDragHoverUpdate(
+      for: &release,
+      windowPoint: windowPoint,
+      eventTime: eventTime,
+      phase: "drop",
+      force: true)
+    release.chromiumView.completeCurrentDrag(atWindowPoint: windowPoint)
+    NativeT3CodePaneReproLog.append("nativeWorkspace.cef.dnd.nativeSourceReleaseCompleted", [
+      "windowNumber": window?.windowNumber ?? NSNull(),
+      "x": windowPoint.x,
+      "y": windowPoint.y,
+    ])
+  }
+
+  private func dispatchCEFDragHoverUpdate(
+    for release: inout CEFNativeDragSourceRelease,
+    windowPoint: CGPoint,
+    eventTime: TimeInterval,
+    phase: String,
+    force: Bool = false
+  ) {
+    let localPoint = release.chromiumView.convert(windowPoint, from: nil)
+    guard release.chromiumView.bounds.contains(localPoint) else {
+      guard force || release.didStartHoverBridge else {
+        return
+      }
+      release.chromiumView.executeJavaScript(
+        Self.cefDragHoverBridgeScript(
+          x: 0,
+          y: 0,
+          phase: "cancel",
+          sourceX: nil,
+          sourceY: nil))
+      return
+    }
+    if !force, phase == "over", let lastPoint = release.lastHoverWindowPoint {
+      let elapsed = eventTime - release.lastHoverEventTime
+      let distance = hypot(windowPoint.x - lastPoint.x, windowPoint.y - lastPoint.y)
+      if distance < Self.cefNativeDragHoverMinimumDistance {
+        guard elapsed >= Self.cefNativeDragStationaryHoverInterval else {
+          return
+        }
+      } else {
+        guard elapsed >= Self.cefNativeDragHoverInterval else {
+          return
+        }
+      }
+    }
+    release.lastHoverEventTime = eventTime
+    release.lastHoverWindowPoint = windowPoint
+    release.chromiumView.executeJavaScript(
+      Self.cefDragHoverBridgeScript(
+        x: localPoint.x,
+        y: localPoint.y,
+        phase: phase,
+        sourceX: release.chromiumView.convert(release.startWindowPoint, from: nil).x,
+        sourceY: release.chromiumView.convert(release.startWindowPoint, from: nil).y))
+    if phase != "over" || eventTime - release.lastHoverLogEventTime >= 0.25 {
+      release.lastHoverLogEventTime = eventTime
+      NativeT3CodePaneReproLog.append("nativeWorkspace.cef.dnd.hoverBridgeDispatched", [
+        "phase": phase,
+        "windowNumber": window?.windowNumber ?? NSNull(),
+        "x": windowPoint.x,
+        "y": windowPoint.y,
+      ])
+    }
+  }
+
+  private func windowPoint(forCEFNativeDragEvent event: NSEvent) -> CGPoint? {
+    if event.window === window {
+      return event.locationInWindow
+    }
+    guard event.window == nil, let window else {
+      return nil
+    }
+    return window.convertPoint(fromScreen: NSEvent.mouseLocation)
+  }
+
+  private func currentCEFNativeDragWindowPoint() -> CGPoint? {
+    guard let window else {
+      return nil
+    }
+    return window.convertPoint(fromScreen: NSEvent.mouseLocation)
+  }
+
+  private func chromiumBrowserView(atWindowPoint windowPoint: CGPoint) -> ZmuxCEFBrowserView? {
+    guard let hitView = window?.contentView?.hitTest(windowPoint) else {
+      return nil
+    }
+    var currentView: NSView? = hitView
+    while let view = currentView {
+      if let chromiumView = view as? ZmuxCEFBrowserView {
+        return chromiumView
+      }
+      currentView = view.superview
+    }
+    return nil
   }
 
   private func paneResizeHit(at point: CGPoint) -> PaneResizeHit? {
@@ -3823,6 +4021,139 @@ final class TerminalWorkspaceView: NSView {
     return String(json.dropFirst().dropLast())
   }
 
+  private static func cefDragHoverBridgeScript(
+    x: CGFloat,
+    y: CGFloat,
+    phase: String,
+    sourceX: CGFloat?,
+    sourceY: CGFloat?
+  ) -> String {
+    let xLiteral = String(format: "%.2f", Double(x))
+    let yLiteral = String(format: "%.2f", Double(y))
+    let phaseLiteral = javascriptStringLiteral(phase)
+    let sourceXLiteral = sourceX.map { String(format: "%.2f", Double($0)) } ?? "null"
+    let sourceYLiteral = sourceY.map { String(format: "%.2f", Double($0)) } ?? "null"
+    return """
+      (() => {
+        const x = \(xLiteral);
+        const y = \(yLiteral);
+        const phase = \(phaseLiteral);
+        const sourceX = \(sourceXLiteral);
+        const sourceY = \(sourceYLiteral);
+        const bridge = window.__zmuxCEFDragHoverBridge ||= {
+          dataTransfer: null,
+          lastTarget: null,
+          sourceTarget: null
+        };
+        const stableTargetSelectors = [
+          ".pane",
+          ".composite",
+          ".part.sidebar",
+          ".part.activitybar",
+          ".monaco-list-row",
+          ".monaco-list",
+          ".action-item",
+          "[role='treeitem']",
+          "[draggable='true']"
+        ];
+        const sourceTargetSelectors = [
+          "[draggable='true']",
+          ".pane-header",
+          ".action-item",
+          ".monaco-list-row",
+          ".pane"
+        ];
+        const asElement = (node) => node instanceof Element ? node : node?.parentElement || null;
+        const closestByPriority = (element, selectors) => {
+          for (const selector of selectors) {
+            const match = element.closest(selector);
+            if (match) {
+              return match;
+            }
+          }
+          return null;
+        };
+        const stableTargetFor = (rawTarget, selectors = stableTargetSelectors) => {
+          const element = asElement(rawTarget);
+          if (!element) {
+            return null;
+          }
+          return closestByPriority(element, selectors) || element;
+        };
+        const makeDataTransfer = () => {
+          if (bridge.dataTransfer) {
+            return bridge.dataTransfer;
+          }
+          try {
+            bridge.dataTransfer = new DataTransfer();
+            try {
+              bridge.dataTransfer.effectAllowed = "move";
+              bridge.dataTransfer.dropEffect = "move";
+            } catch {}
+            return bridge.dataTransfer;
+          } catch {
+            return null;
+          }
+        };
+        const dispatchDragEvent = (target, type) => {
+          if (!target) {
+            return false;
+          }
+          const dataTransfer = makeDataTransfer();
+          const init = {
+            bubbles: true,
+            cancelable: true,
+            clientX: x,
+            clientY: y,
+            composed: true,
+            dataTransfer,
+            screenX: window.screenX + x,
+            screenY: window.screenY + y,
+            view: window
+          };
+          let event;
+          try {
+            event = new DragEvent(type, init);
+          } catch {
+            event = document.createEvent("DragEvent");
+            event.initMouseEvent(type, true, true, window, 0, 0, 0, x, y, false, false, false, false, 0, null);
+          }
+          return target.dispatchEvent(event);
+        };
+        if (phase === "cancel") {
+          dispatchDragEvent(bridge.lastTarget, "dragleave");
+          dispatchDragEvent(bridge.sourceTarget || bridge.lastTarget, "dragend");
+          bridge.lastTarget = null;
+          bridge.sourceTarget = null;
+          bridge.dataTransfer = null;
+          return;
+        }
+        const target = document.elementFromPoint(x, y);
+        const stableTarget = stableTargetFor(target);
+        if (!stableTarget) {
+          return;
+        }
+        if (phase === "start") {
+          const sourceTarget = sourceX === null || sourceY === null ? null : document.elementFromPoint(sourceX, sourceY);
+          bridge.sourceTarget = stableTargetFor(sourceTarget, sourceTargetSelectors) || stableTarget;
+        }
+        if (bridge.lastTarget !== stableTarget) {
+          dispatchDragEvent(bridge.lastTarget, "dragleave");
+          dispatchDragEvent(stableTarget, "dragenter");
+          bridge.lastTarget = stableTarget;
+        }
+        dispatchDragEvent(stableTarget, "dragover");
+        if (phase === "drop") {
+          dispatchDragEvent(stableTarget, "drop");
+          dispatchDragEvent(bridge.sourceTarget || stableTarget, "dragend");
+          bridge.lastTarget = null;
+          bridge.sourceTarget = null;
+          bridge.dataTransfer = null;
+        }
+      })();
+      """
+  }
+
   private static let t3WebPaneDiagnosticsScript = """
     (() => {
       const handler = window.webkit?.messageHandlers?.\(T3CodePaneDiagnosticsBridge.messageHandlerName);
@@ -4574,6 +4905,8 @@ private enum NativeSessionPersistenceProvider: String {
 }
 
 private enum NativeSessionPersistenceMode {
+  private static let zellijSessionNameMaxLength = 25
+
   static func attachCommand(
     provider: NativeSessionPersistenceProvider,
     cwd: String,
@@ -4641,39 +4974,41 @@ private enum NativeSessionPersistenceMode {
       zmx_session=\(shellQuote(sessionName))
       zmx_cwd=\(shellQuote(cwd))
       zmx_initial_command=\(shellQuote(shellCommand(fromInitialInput: initialInput)))
+      unset ZMX_SESSION ZMX_SESSION_PREFIX
       if ! command -v zmx >/dev/null 2>&1; then
         printf '%s\\n' 'session persistence is set to zmx, but zmx was not found on PATH.'
         exit 127
       fi
-      if ! zmx list --short 2>/dev/null | grep -F -x -- "$zmx_session" >/dev/null 2>&1; then
+      if [ -z "$zmx_initial_command" ]; then
         cd "$zmx_cwd" || exit
-        if [ -n "$zmx_initial_command" ]; then
-          zmx run "$zmx_session" /bin/zsh -lc "$zmx_initial_command" >/dev/null 2>&1 &
-        else
-          zmx run "$zmx_session" /bin/zsh -lc ':' >/dev/null 2>&1 &
-        fi
-        zmx_ready=0
-        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-          if zmx list --short 2>/dev/null | grep -F -x -- "$zmx_session" >/dev/null 2>&1; then
-            zmx_ready=1
-            break
-          fi
-          sleep 0.05
-        done
-        if [ "$zmx_ready" != "1" ]; then
-          printf '%s\\n' 'zmx session was not ready for attach.'
-          exit 1
-        fi
+        exec zmx attach "$zmx_session"
       fi
-      exec zmx attach "$zmx_session"
+      if zmx list --short 2>/dev/null | grep -F -x -- "$zmx_session" >/dev/null 2>&1; then
+        exec zmx attach "$zmx_session"
+      fi
+      cd "$zmx_cwd" || exit
+      exec zmx attach "$zmx_session" /bin/zsh -lc "$zmx_initial_command"
       """
     /**
      CDXC:SessionPersistence 2026-05-05-07:28
-     zmx `run` creates a named session and sends a command, but it waits for that
-     command to complete. Agent resume commands are long-running, so creation
-     launches `zmx run` in the background, waits only for the session to appear,
-     then execs `zmx attach`. Existing sessions skip `run` entirely so restart
-     attaches without replaying resume input.
+     zmx `attach` creates a missing session and attaches to an existing one.
+     Empty terminals must use plain attach so the user sees a normal shell
+     instead of zmx task wrapper text. Initial agent commands are passed only
+     when the named session does not already exist, so app restart attaches
+     without replaying resume input into the live session.
+
+     CDXC:SessionPersistence 2026-05-06-23:13
+     Empty zmx-backed terminals must never create placeholder tasks such as
+     `zmx run <name> /bin/zsh -lc :`. zmx surfaces task wrapper text such as
+     `ZMX_TASK_COMPLETED` whenever a command is sent; direct attach creates the
+     shell session without rendering a fake command or completion marker.
+
+     CDXC:SessionPersistence 2026-05-06-23:31
+     zmux can itself be launched from inside zmx. Inherited ZMX_SESSION makes
+     `zmx attach <target>` exit immediately, and inherited ZMX_SESSION_PREFIX
+     rewrites app-managed names. Clear only those client/session variables so
+     persistence still uses the user's zmx socket directory but attaches the
+     exact sidebar session name.
      */
     return "/bin/zsh -lc \(shellQuote(script))"
   }
@@ -4694,10 +5029,12 @@ private enum NativeSessionPersistenceMode {
       if zellij list-sessions --short --no-formatting 2>/dev/null | grep -F -x -- "$zellij_session" >/dev/null 2>&1; then
         exec zellij attach "$zellij_session"
       fi
-      exec zellij --session "$zellij_session" --layout <(cat <<'ZMUX_ZELLIJ_LAYOUT'
+      zellij_layout_file="$(mktemp "${TMPDIR:-/tmp}/zmux-zellij-layout.XXXXXX")" || exit 1
+      trap 'rm -f "$zellij_layout_file"' EXIT
+      cat >"$zellij_layout_file" <<'ZMUX_ZELLIJ_LAYOUT'
       \(layout)
       ZMUX_ZELLIJ_LAYOUT
-      )
+      zellij --session "$zellij_session" --new-session-with-layout "$zellij_layout_file"
       """
     /**
      CDXC:SessionPersistence 2026-05-06-03:43
@@ -4706,6 +5043,14 @@ private enum NativeSessionPersistenceMode {
      command inside that first pane. Ghostty initialInput remains disabled for
      persistence providers so app restart never replays resume text into an
      already running session.
+
+     CDXC:SessionPersistence 2026-05-06-22:16
+     Zellij `--session --layout` does not create a missing session, and
+     `attach --create` with a top-level `--layout` starts a generated-name
+     session instead of the requested attach target on zellij 0.44. Write the
+     generated layout to a real temporary file, then launch
+     `zellij --session <name> --new-session-with-layout <file>` so new sessions
+     are created under the same name that restart attach will later target.
      */
     return "/bin/zsh -lc \(shellQuote(script))"
   }
@@ -4750,6 +5095,27 @@ private enum NativeSessionPersistenceMode {
     }
   }
 
+  static func sessionName(
+    provider: NativeSessionPersistenceProvider,
+    sessionId: String,
+    title: String?
+  ) -> String {
+    guard provider == .zellij else {
+      return sessionName(sessionId: sessionId, title: title)
+    }
+
+    let identitySlug = slug(sessionId) ?? "session"
+    let identitySuffix = String(identitySlug.suffix(10))
+    let titleSlug = slug(title) ?? "terminal"
+    let maxTitleLength = max(
+      1,
+      zellijSessionNameMaxLength - "zmux".count - identitySuffix.count - 2)
+    let limitedTitleSlug = String(titleSlug.prefix(maxTitleLength)).trimmingCharacters(
+      in: CharacterSet(charactersIn: "-_"))
+    let visibleTitleSlug = limitedTitleSlug.isEmpty ? "terminal" : limitedTitleSlug
+    return "zmux-\(visibleTitleSlug)-\(identitySuffix)"
+  }
+
   static func sessionName(sessionId: String, title: String?) -> String {
     let identitySlug = slug(sessionId) ?? "session"
     let identitySuffix = String(identitySlug.suffix(12))
@@ -4760,7 +5126,10 @@ private enum NativeSessionPersistenceMode {
     return "zmux-\(visibleTitleSlug)-\(identitySuffix)"
   }
 
-  static func normalizedSessionName(_ value: String?) -> String? {
+  static func normalizedSessionName(
+    _ value: String?,
+    provider: NativeSessionPersistenceProvider
+  ) -> String? {
     let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     guard !trimmed.isEmpty else {
       return nil
@@ -4773,6 +5142,17 @@ private enum NativeSessionPersistenceMode {
      provider target.
      */
     guard trimmed.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else {
+      return nil
+    }
+    if provider == .zellij && trimmed.count > zellijSessionNameMaxLength {
+      /**
+       CDXC:SessionPersistence 2026-05-06-22:30
+       Zellij 0.44 rejects names at 29+ characters and launch checks did not
+       reliably publish 26-28 character names. Keep zellij backing identities
+       at 25 characters or less so create, list, and restart attach all target
+       the same provider session instead of falling into generated-name
+       sessions.
+       */
       return nil
     }
     return trimmed

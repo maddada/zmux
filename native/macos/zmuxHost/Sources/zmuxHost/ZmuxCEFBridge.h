@@ -44,6 +44,7 @@ int ZmuxCEFRemoteDebuggingPort(void);
 - (void)reload;
 - (void)stopLoading;
 - (void)executeJavaScript:(NSString*)javaScript;
+- (void)completeCurrentDragAtWindowPoint:(NSPoint)windowPoint;
 - (void)toggleDevTools;
 - (void)closeBrowser;
 

@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -147,22 +148,25 @@ static CefRefPtr<CefRequestContext> ZmuxCEFRequestContextForProfile(NSString* pr
 
   /**
    CDXC:ChromiumBrowserPanes 2026-05-04-17:09
-   Electrobun keeps CEF custom partitions outside Chromium's own `Default`
-   profile folder and reuses each request context. Chrome runtime can reject
-   duplicate or colliding cache paths, so custom zmux profiles use cached CEF
-   contexts under `cef/partitions/<profile-id>` while the built-in default
-   profile stays on Chromium's global context.
+   Electrobun keeps CEF custom profiles outside Chromium's own `Default` profile
+   folder and reuses each request context. Chrome runtime can reject duplicate or
+   colliding cache paths, so the built-in default profile stays on Chromium's
+   global context while named zmux profiles get their own cached CEF contexts.
+
+   Chromium only allows Chrome profile directories directly under the CEF
+   user-data root. Keep named profile cache paths as direct
+   `~/.zmux/cef/<profile-id>` children; nested `cef/partitions/<profile-id>`
+   paths are rejected and create non-persistent profiles.
    */
-  NSString* partitionPath = [[ZmuxCEFStorageDirectory() stringByAppendingPathComponent:@"partitions"]
-    stringByAppendingPathComponent:identifier];
-  [[NSFileManager defaultManager] createDirectoryAtPath:partitionPath
+  NSString* profilePath = [ZmuxCEFStorageDirectory() stringByAppendingPathComponent:identifier];
+  [[NSFileManager defaultManager] createDirectoryAtPath:profilePath
                             withIntermediateDirectories:YES
                                              attributes:nil
                                                   error:nil];
 
   CefRequestContextSettings contextSettings;
   contextSettings.persist_session_cookies = true;
-  CefString(&contextSettings.cache_path) = [partitionPath UTF8String];
+  CefString(&contextSettings.cache_path) = [profilePath UTF8String];
   CefRefPtr<CefRequestContext> context = CefRequestContext::CreateContext(contextSettings, nullptr);
   if (!context) {
     NSLog(@"[CEF] Failed to create persistent request context for profile %@; using global context.", identifier);
@@ -317,6 +321,7 @@ class ZmuxCEFBrowserClient : public CefClient,
                             int command_id,
                             CefContextMenuHandler::EventFlags event_flags) override;
 
+  void MarkClosingFromZmux();
   void ToggleRemoteDevTools(CefRefPtr<CefBrowser> browser);
   void CloseRemoteDevTools();
 
@@ -331,6 +336,7 @@ class ZmuxCEFBrowserClient : public CefClient,
   CefRefPtr<CefBrowser> devToolsBrowser_;
   CefRefPtr<ZmuxRemoteDevToolsClient> devToolsClient_;
   bool devToolsOpen_ = false;
+  bool closingFromZmux_ = false;
   std::string lastTitle_;
 
   IMPLEMENT_REFCOUNTING(ZmuxCEFBrowserClient);
@@ -429,6 +435,14 @@ static NSString* StringFromCefString(const CefString& value) {
   didCreateBrowser_ = YES;
 
   CefWindowInfo windowInfo;
+  /**
+   CDXC:ChromiumBrowserPanes 2026-05-07-05:18
+   code-server panes need VS Code's live drag indicators during in-page view
+   movement. CEF's Chrome runtime cannot be used for zmux's embedded child
+   NSView panes because CEF forces Alloy style whenever `parent_view` is set;
+   keep child panes on Alloy and let TerminalWorkspaceView handle only the
+   active-drag hover/drop retargeting gap.
+   */
   windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
   CefRect rect(0, 0, static_cast<int>(MAX(1, self.bounds.size.width)), static_cast<int>(MAX(1, self.bounds.size.height)));
   windowInfo.SetAsChild((__bridge void*)self, rect);
@@ -505,6 +519,28 @@ static NSString* StringFromCefString(const CefString& value) {
   }
 }
 
+- (void)completeCurrentDragAtWindowPoint:(NSPoint)windowPoint {
+  if (!browser_) {
+    return;
+  }
+  NSPoint localPoint = [self convertPoint:windowPoint fromView:nil];
+  if (!NSPointInRect(localPoint, self.bounds)) {
+    return;
+  }
+  /**
+   CDXC:ChromiumBrowserPanes 2026-05-07-05:18
+   Embedded CEF panes must keep Chromium's live drag/drop target feedback. When
+   macOS does not deliver CEF's final source-ended callback for an in-page drag,
+   complete the native CEF drag source after TerminalWorkspaceView has sent any
+   scoped in-page hover/drop retargeting required for VS Code's DnD state.
+   */
+  browser_->GetHost()->DragSourceEndedAt(
+    static_cast<int>(std::round(localPoint.x)),
+    static_cast<int>(std::round(localPoint.y)),
+    DRAG_OPERATION_MOVE);
+  browser_->GetHost()->DragSourceSystemDragEnded();
+}
+
 - (void)toggleDevTools {
   if (browser_ && client_) {
     client_->ToggleRemoteDevTools(browser_);
@@ -516,7 +552,17 @@ static NSString* StringFromCefString(const CefString& value) {
     client_->CloseRemoteDevTools();
   }
   if (browser_) {
-    browser_->GetHost()->CloseBrowser(false);
+    /**
+     CDXC:ChromiumBrowserPanes 2026-05-07-07:31
+     Sidebar middle-click closes only the embedded browser pane. CEF Alloy's
+     default DoClose path sends `performClose:` to the top-level NSWindow when
+     CloseBrowser(false) is allowed to fall through, which made the app quit at
+     2026-05-07 07:08:56. Keep the app-owned close flag on the CEF client
+     because DoClose can arrive after Swift has removed the view owner; DoClose
+     must still suppress the top-level window close and remove only this pane.
+     */
+    client_->MarkClosingFromZmux();
+    browser_->GetHost()->CloseBrowser(true);
     browser_ = nullptr;
   }
   if (cefView_) {
@@ -606,10 +652,11 @@ bool ZmuxCEFBrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser,
                                             const CefString& source,
                                             int line) {
   /**
-   CDXC:EditorPanes 2026-05-06-19:05
-   Project editor drag/drop diagnostics are injected into code-server as
-   passive console messages. Forward CEF console output to Swift so the native
-   log can correlate browser drop events with AppKit monitor state.
+   CDXC:ChromiumBrowserPanes 2026-05-07-05:18
+   CEF console messages remain forwarded for browser/editor diagnostics, but
+   zmux does not install persistent page-level drag diagnostics into code-server.
+   Drag behavior comes from Chromium plus the scoped native hover/drop bridge
+   used only during active CEF drags.
    */
   NSString* messageString = StringFromCefString(message);
   NSString* sourceString = StringFromCefString(source);
@@ -622,11 +669,18 @@ bool ZmuxCEFBrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser,
 void ZmuxCEFBrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {}
 
 bool ZmuxCEFBrowserClient::DoClose(CefRefPtr<CefBrowser> browser) {
+  if (closingFromZmux_) {
+    return true;
+  }
   return false;
 }
 
 void ZmuxCEFBrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   CloseRemoteDevTools();
+}
+
+void ZmuxCEFBrowserClient::MarkClosingFromZmux() {
+  closingFromZmux_ = true;
 }
 
 bool ZmuxCEFBrowserClient::OnBeforePopup(CefRefPtr<CefBrowser> browser,
@@ -824,7 +878,7 @@ bool ZmuxCEFInitialize(int argc, char* _Nullable argv[]) {
    when the app-level cache_path is set; root_cache_path alone stores
    installation data. Use ~/.zmux[-dev]/cef as both the CEF root and default
    browser profile cache so the built-in profile survives process restarts and
-   custom profile caches under cef/partitions/<profile-id> still share the same
+   named custom profile caches can live as direct children under the same
    required root.
    */
   CefString(&settings.cache_path) = [cachePath UTF8String];
