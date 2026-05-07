@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.9 - 2026-05-07
+
+<!-- CDXC:Distribution 2026-05-07-08:01: Release notes for 1.4.9 must include
+all commits after v1.4.8 so README, GitHub, Sparkle, and Homebrew release
+metadata describe the same shipped behavior. -->
+
+- Improved embedded code-server editor panes so VS Code panel/sidebar drag and drop keeps live hover and drop targeting while using CEF.
+- Fixed embedded browser/editor pane teardown so closing a pane from the sidebar does not close the top-level app window.
+- Improved project editor persistence so VS Code workbench layout survives app restarts without putting code-server into a fresh Chromium profile.
+- Improved zmx session persistence so empty sessions attach directly, startup commands run only for new sessions, and inherited zmx session variables do not hijack app-managed names.
+- Improved zellij session persistence so generated session names stay within provider limits and new sessions launch under the same name used for restart attach.
+- Enlarged README screenshots for clearer GitHub documentation.
+
 ## 1.4.8 - 2026-05-06
 
 <!-- CDXC:Distribution 2026-05-06-19:47: Release notes for 1.4.8 must include

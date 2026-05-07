@@ -38,10 +38,13 @@ brew install --cask maddada/tap/zmux
 - Native T3 Code panes with managed runtime bootstrap, authenticated thread routing, and remote/browser access links.
 - Optional Browser Panes mode opens browser actions as workspace panes with address navigation, reload, DevTools, React Grab, profiles, and favicon-backed sidebar cards.
 - Embedded code-server editor panes open project-scoped code surfaces with diff stats and native CEF hosting.
+- Embedded editor panes preserve VS Code workbench layout across app restarts through persistent Chromium storage.
+- Embedded editor panes keep VS Code sidebar and panel drag/drop targets responsive while moving views inside code-server.
+- Browser and editor pane close actions stay scoped to the pane instead of closing the top-level app window.
 - Project headers can create scoped browser panes and open or close project editor panes directly from the group row.
 - Chromium CEF browser panes keep native browser storage and cookies across app restarts.
 - Shared Ghostty settings keep terminal configuration consistent between the native host and sidebar settings UI.
-- Zellij, tmux, and zmx session persistence providers can keep terminal sessions restart-safe.
+- Zellij, tmux, and zmx session persistence providers can keep terminal sessions restart-safe, with stable zellij names and direct zmx attach behavior.
 - Sidebar Actions and Open In split controls can run the primary command or show React-rendered dropdown menus for Finder, Visual Studio Code, and Zed.
 - Configure Actions modal supports readable project-action rows plus create, edit, and delete flows.
 - Settings show modified values with reset-to-default tooltips, and sidebar placement can be set to the left or right side.
