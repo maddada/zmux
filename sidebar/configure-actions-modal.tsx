@@ -1,4 +1,4 @@
-import { IconBrowser, IconPlus, IconTerminal2, IconX } from "@tabler/icons-react";
+import { IconPlus, IconTerminal2, IconWorld, IconX } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useState } from "react";
 import {
@@ -195,8 +195,13 @@ function ConfigureActionIcon({ command }: { command: SidebarCommandButton }) {
     );
   }
 
+  /**
+   * CDXC:SidebarBrowserIcon 2026-05-07-19:44
+   * Browser actions use IconWorld to match the sidebar's browser session and
+   * group affordances.
+   */
   return command.actionType === "browser" ? (
-    <IconBrowser aria-hidden="true" size={16} stroke={1.8} />
+    <IconWorld aria-hidden="true" size={16} stroke={1.8} />
   ) : (
     <IconTerminal2 aria-hidden="true" size={16} stroke={1.8} />
   );

@@ -391,7 +391,8 @@
 
 .session-frame[data-dragging="true"] .session-floating-agent-icon,
 .session-frame[data-dragging="true"] .session-floating-agent-tabler-icon,
-.session-frame[data-dragging="true"] .session-floating-reloading-icon {
+.session-frame[data-dragging="true"] .session-floating-reloading-icon,
+.session-frame[data-dragging="true"] .session-persistence-provider-badge[data-slot="floating"] {
   opacity: 0;
 }
 
@@ -476,7 +477,8 @@
 }
 
 .session-frame:not(.session-history-frame) .session-floating-agent-icon,
-.session-frame:not(.session-history-frame) .session-floating-agent-tabler-icon {
+.session-frame:not(.session-history-frame) .session-floating-agent-tabler-icon,
+.session-frame:not(.session-history-frame) .session-persistence-provider-badge[data-slot="floating"] {
   display: none;
 }
 
@@ -715,6 +717,42 @@
   z-index: 3;
 }
 
+.session-persistence-provider-badge {
+  color: rgba(255, 255, 255, 0.84);
+  display: grid;
+  font-size: calc(9px * var(--sidebar-density-scale));
+  font-weight: 850;
+  height: calc(15px * var(--sidebar-density-scale));
+  letter-spacing: 0;
+  line-height: 1;
+  opacity: 0.7;
+  place-items: center;
+  pointer-events: none;
+  -webkit-text-stroke: calc(0.6px * var(--sidebar-density-scale)) rgba(0, 0, 0, 0.88);
+  paint-order: stroke fill;
+  text-shadow:
+    0 0 1px rgba(0, 0, 0, 0.98),
+    0 1px 1px rgba(0, 0, 0, 0.9),
+    1px 0 1px rgba(0, 0, 0, 0.8),
+    -1px 0 1px rgba(0, 0, 0, 0.8);
+  text-transform: lowercase;
+  transform: translate(0.5px, -0.5px);
+  transition: opacity 120ms ease;
+  width: calc(15px * var(--sidebar-density-scale));
+  z-index: 4;
+}
+
+.session-persistence-provider-badge[data-slot="floating"] {
+  left: calc(-4px * var(--sidebar-density-scale));
+  position: absolute;
+  top: calc(5px * var(--sidebar-density-scale));
+}
+
+.session-persistence-provider-badge[data-slot="header"] {
+  grid-area: 1 / 1;
+  justify-self: end;
+}
+
 .session-header-agent-icon {
   width: calc(15px * var(--sidebar-density-scale));
   height: calc(15px * var(--sidebar-density-scale));
@@ -800,6 +838,27 @@
   --session-agent-icon-color: #82b7ff;
 }
 
+.session-floating-agent-tabler-icon[data-agent-icon="terminal"],
+.session-header-agent-tabler-icon[data-agent-icon="terminal"] {
+  --session-agent-icon-color: #ffffff;
+  /*
+   * CDXC:SidebarSessions 2026-05-07-15:18
+   * The agentless terminal glyph should read slightly stronger than the
+   * browser Tabler glyph. Grow only the terminal icon by 1px on every side.
+   */
+  height: calc(16px * var(--sidebar-density-scale));
+  width: calc(16px * var(--sidebar-density-scale));
+}
+
+.session-floating-agent-tabler-icon[data-agent-icon="terminal"] {
+  left: calc(-5px * var(--sidebar-density-scale));
+  top: calc(4px * var(--sidebar-density-scale));
+}
+
+.session-header-agent-tabler-icon[data-agent-icon="terminal"] {
+  margin-inline-end: calc(-1px * var(--sidebar-density-scale));
+}
+
 .session-floating-agent-tabler-icon[data-agent-icon="browser"][data-icon-variant="favicon"],
 .session-header-agent-tabler-icon[data-agent-icon="browser"][data-icon-variant="favicon"] {
   border-radius: 3px;
@@ -845,13 +904,18 @@
 
 .session-frame:hover .session-floating-agent-icon,
 .session-frame:hover .session-floating-agent-tabler-icon,
-.session-frame:hover .session-floating-reloading-icon {
+.session-frame:hover .session-floating-reloading-icon,
+.session-frame:hover .session-persistence-provider-badge[data-slot="floating"] {
   opacity: 0.74;
 }
 
 .session-frame:hover .session-floating-agent-icon[data-favorite="true"],
 .session-frame:hover .session-floating-agent-tabler-icon[data-favorite="true"] {
   opacity: 1;
+}
+
+.session-frame:hover .session-persistence-provider-badge[data-slot="floating"] {
+  opacity: 0.66;
 }
 
 .session-head {
@@ -1001,6 +1065,47 @@
   .session-head-trailing[data-hover-trailing-display="icon"]
   .session-header-reloading-icon {
   opacity: 0.74;
+}
+
+.session-head-trailing[data-default-trailing-display="icon"]
+  .session-persistence-provider-badge[data-slot="header"] {
+  opacity: 0.7;
+}
+
+.session-frame:not(.session-history-frame):hover
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-persistence-provider-badge[data-slot="header"],
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-persistence-provider-badge[data-slot="header"],
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-persistence-provider-badge[data-slot="header"],
+.session-frame:not(.session-history-frame)
+  .session:has(:focus-visible)
+  .session-head-trailing[data-hover-trailing-display="time"]
+  .session-persistence-provider-badge[data-slot="header"] {
+  opacity: 0;
+}
+
+.session-frame:not(.session-history-frame):hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-persistence-provider-badge[data-slot="header"],
+.session-frame:not(.session-history-frame)
+  .session:hover
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-persistence-provider-badge[data-slot="header"],
+.session-frame:not(.session-history-frame)
+  .session:focus-visible
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-persistence-provider-badge[data-slot="header"],
+.session-frame:not(.session-history-frame)
+  .session:has(:focus-visible)
+  .session-head-trailing[data-hover-trailing-display="icon"]
+  .session-persistence-provider-badge[data-slot="header"] {
+  opacity: 0.78;
 }
 
 /*

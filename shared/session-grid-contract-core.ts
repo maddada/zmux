@@ -65,6 +65,7 @@ export type SidebarThemeVariant = "light" | "dark";
 
 export type SessionKind = "browser" | "terminal" | "t3";
 export type TerminalEngine = "ghostty-native";
+export type TerminalSessionPersistenceProvider = "tmux" | "zmx" | "zellij";
 
 export type T3SessionMetadata = {
   boundThreadId?: string;
@@ -99,6 +100,7 @@ export type TerminalSessionRecord = BaseSessionRecord & {
   agentName?: string;
   kind: "terminal";
   sessionPersistenceName?: string;
+  sessionPersistenceProvider?: TerminalSessionPersistenceProvider;
   terminalEngine: TerminalEngine;
   /** @deprecated use sessionPersistenceName for tmux, zmx, and zellij providers. */
   tmuxSessionName?: string;
@@ -133,6 +135,7 @@ export type CreateSessionRecordOptions =
       kind?: "terminal";
       sessionId?: string;
       sessionPersistenceName?: string;
+      sessionPersistenceProvider?: TerminalSessionPersistenceProvider;
       terminalEngine?: TerminalEngine;
       /** @deprecated use sessionPersistenceName for tmux, zmx, and zellij providers. */
       tmuxSessionName?: string;

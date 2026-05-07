@@ -41,6 +41,7 @@ import {
   OverflowTooltipText,
   SessionCardContent,
   SessionFloatingAgentIcon,
+  shouldShowTerminalSessionIcon,
 } from "./session-card-content";
 import { getSessionStatusAnchorName } from "./session-status-anchor";
 import {
@@ -175,6 +176,9 @@ export function SortableSessionCard({
   const canCopyResumeCommand = session
     ? !isBrowserSession && supportsResumeCommandCopy(session)
     : false;
+  const canCopyAttachCommand =
+    !isBrowserSession &&
+    Boolean(session?.sessionPersistenceProvider && session.sessionPersistenceName);
   const canFullReloadSession = session ? !isBrowserSession && supportsFullReload(session) : false;
   const canGenerateSessionName = session
     ? !isBrowserSession && supportsGeneratedName(session)
@@ -264,6 +268,9 @@ export function SortableSessionCard({
     showDebugSessionNumbers,
   });
   const lifecycleState = getSidebarSessionLifecycleState(session);
+  const showTerminalSessionIcon = shouldShowTerminalSessionIcon(session);
+  const hasSessionCardIcon =
+    Boolean(session.agentIcon) || showTerminalSessionIcon || session.isReloading === true;
   const sessionAnchorStyle = {
     anchorName: getSessionStatusAnchorName(sessionId),
   } as CSSProperties;
@@ -317,14 +324,15 @@ export function SortableSessionCard({
   }, [dropPosition, postSessionDragDebugLog, sortable.isDragging, sortable.isDropTarget]);
 
   useEffect(() => {
-    if (!session.agentIcon && session.isReloading !== true) {
+    if (!hasSessionCardIcon) {
       return;
     }
 
     const hasLastInteractionLabel = Boolean(session.lastInteractionAt);
     const showHeaderLoadingSpinner =
       session.isReloading === true || session.isGeneratingFirstPromptTitle === true;
-    const hasHeaderAgentIcon = Boolean(session.agentIcon) || showHeaderLoadingSpinner;
+    const hasHeaderAgentIcon =
+      Boolean(session.agentIcon) || showTerminalSessionIcon || showHeaderLoadingSpinner;
     const defaultTrailingDisplay =
       !showLastInteractionTime && hasHeaderAgentIcon
         ? "icon"
@@ -351,6 +359,7 @@ export function SortableSessionCard({
       isReloading: session.isReloading === true,
       primaryTitle: session.primaryTitle,
       sessionId: session.sessionId,
+      showTerminalSessionIcon,
       showLastInteractionTime,
       terminalTitle: session.terminalTitle,
     });
@@ -415,6 +424,7 @@ export function SortableSessionCard({
     };
   }, [
     groupId,
+    hasSessionCardIcon,
     session.activity,
     session.agentIcon,
     session.isGeneratingFirstPromptTitle,
@@ -424,6 +434,7 @@ export function SortableSessionCard({
     session.sessionId,
     session.sessionKind,
     session.terminalTitle,
+    showTerminalSessionIcon,
     showLastInteractionTime,
     vscode,
   ]);
@@ -534,6 +545,20 @@ export function SortableSessionCard({
     vscode.postMessage({
       sessionId: session.sessionId,
       type: "copyResumeCommand",
+    });
+  };
+
+  const requestCopyAttachCommand = () => {
+    setContextMenuPosition(undefined);
+    /**
+     * CDXC:SessionPersistence 2026-05-07-20:32
+     * Provider-backed tmux/zmx/zellij session cards expose the native attach
+     * command alongside resume copying, using the stored provider/name pair
+     * rather than the current global Settings provider.
+     */
+    vscode.postMessage({
+      sessionId: session.sessionId,
+      type: "copyAttachCommand",
     });
   };
 
@@ -791,6 +816,16 @@ export function SortableSessionCard({
       onClick: requestCopyResumeCommand,
     });
   }
+  if (canCopyAttachCommand) {
+    sessionActions.push({
+      icon: (
+        <IconCopy aria-hidden="true" className="session-context-menu-icon" size={16} stroke={1.8} />
+      ),
+      key: "copy-attach",
+      label: "Copy attach command",
+      onClick: requestCopyAttachCommand,
+    });
+  }
   if (canForkSession) {
     sessionActions.push({
       icon: (
@@ -918,7 +953,7 @@ export function SortableSessionCard({
           data-drop-target={String(isVisibleDropTarget)}
           data-focused={String(session.isFocused)}
           data-group-connector={String(showGroupConnector)}
-          data-has-agent-icon={String(Boolean(session.agentIcon) || session.isReloading === true)}
+          data-has-agent-icon={String(hasSessionCardIcon)}
           data-lifecycle-state={lifecycleState}
           data-running={String(lifecycleState === "running")}
           data-sleeping={String(Boolean(session.isSleeping))}
@@ -940,6 +975,9 @@ export function SortableSessionCard({
             faviconDataUrl={session.faviconDataUrl}
             isFavorite={session.isFavorite}
             isReloading={session.isReloading}
+            sessionPersistenceName={session.sessionPersistenceName}
+            sessionPersistenceProvider={session.sessionPersistenceProvider}
+            showTerminalIcon={showTerminalSessionIcon}
           />
           <article
             aria-expanded={contextMenuPosition ? true : undefined}
@@ -954,7 +992,7 @@ export function SortableSessionCard({
                   : "odd"
                 : undefined
             }
-            data-has-agent-icon={String(Boolean(session.agentIcon) || session.isReloading === true)}
+            data-has-agent-icon={String(hasSessionCardIcon)}
             data-dragging={String(Boolean(sortable.isDragging))}
             data-drop-position={visibleDropPosition}
             data-drop-target={String(isVisibleDropTarget)}

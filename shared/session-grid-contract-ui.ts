@@ -125,6 +125,12 @@ export function createSidebarSessionItems(
     sessionId: session.sessionId,
     sessionKind: session.kind,
     sessionNumber: getVisibleSessionNumber(session),
+    sessionPersistenceName:
+      session.kind === "terminal"
+        ? session.sessionPersistenceName ?? session.tmuxSessionName
+        : undefined,
+    sessionPersistenceProvider:
+      session.kind === "terminal" ? session.sessionPersistenceProvider : undefined,
     shortcutLabel: getSessionShortcutLabel(session.slotIndex, platform),
   }));
 }

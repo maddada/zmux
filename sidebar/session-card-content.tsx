@@ -1,4 +1,4 @@
-import { IconBrowser, IconLoader2 } from "@tabler/icons-react";
+import { IconLoader2, IconTerminal2, IconWorld } from "@tabler/icons-react";
 import {
   cloneElement,
   useEffect,
@@ -11,7 +11,10 @@ import {
   type RefObject,
 } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./app-tooltip";
-import { type SidebarSessionItem } from "../shared/session-grid-contract";
+import {
+  DEFAULT_TERMINAL_SESSION_TITLE,
+  type SidebarSessionItem,
+} from "../shared/session-grid-contract";
 import { getSidebarAgentNameByIcon, type SidebarAgentIcon } from "../shared/sidebar-agents";
 import { AGENT_LOGOS } from "./agent-logos";
 import { formatRelativeTime, getRelativeTimeColor } from "./relative-time";
@@ -32,6 +35,7 @@ let activeOverflowTooltipId: symbol | undefined;
 let activeOverflowTooltipClose: (() => void) | undefined;
 const TERMINAL_TITLE_MARKER = "∗";
 const UNSYNCED_TITLE_LABEL = "(Unsynced title)";
+const GHOST_PLACEHOLDER_TITLE_PATTERN = /^👻(?:\s+Terminal Session)?$/u;
 
 export type SessionCardContentProps = {
   aliasHeadingRef?: RefObject<HTMLDivElement | null>;
@@ -56,7 +60,9 @@ export function SessionCardContent({
   });
   const hasLastInteractionTime = Boolean(session.lastInteractionAt);
   const showHeaderLoadingSpinner = session.isReloading === true || isGeneratingFirstPromptTitle;
-  const hasHeaderAgentIcon = Boolean(session.agentIcon) || showHeaderLoadingSpinner;
+  const showTerminalSessionIcon = shouldShowTerminalSessionIcon(session);
+  const hasHeaderAgentIcon =
+    Boolean(session.agentIcon) || showTerminalSessionIcon || showHeaderLoadingSpinner;
   useRelativeTimeTick(hasLastInteractionTime);
   const lastInteractionLabel =
     hasLastInteractionTime && session.lastInteractionAt
@@ -70,9 +76,13 @@ export function SessionCardContent({
       : undefined;
   /**
    * CDXC:SidebarSessions 2026-04-28-05:18
-   * Settings selects the default trailing mode. Agent Icon mode must
-   * not fall back to showing Last Active for iconless sessions; keep the default
-   * slot blank and reveal the timestamp only on hover.
+   * Settings selects the default trailing mode. Agent Icon mode must keep
+   * the icon slot as the default display and reveal Last Active only on hover.
+   *
+   * CDXC:SidebarSessions 2026-05-07-14:57
+   * Agentless terminal sessions use the terminal glyph as the default icon
+   * slot, so new plain terminals have visible card identity before detection
+   * assigns a real agent icon.
    *
    * CDXC:Sidebar-overflow-menu 2026-05-04-03:54
    * Agent Icon/Last Active is a settings preference, not an overflow-menu
@@ -119,6 +129,9 @@ export function SessionCardContent({
                 isFavorite={session.isFavorite}
                 isGeneratingFirstPromptTitle={session.isGeneratingFirstPromptTitle}
                 isReloading={session.isReloading}
+                sessionPersistenceName={session.sessionPersistenceName}
+                sessionPersistenceProvider={session.sessionPersistenceProvider}
+                showTerminalIcon={showTerminalSessionIcon}
               />
             ) : null}
           </div>
@@ -175,6 +188,8 @@ export function getSessionCardTitleTooltip({
     | "isPrimaryTitleTerminalTitle"
     | "primaryTitle"
     | "sessionKind"
+    | "sessionPersistenceName"
+    | "sessionPersistenceProvider"
     | "sessionNumber"
     | "terminalTitle"
   >;
@@ -204,7 +219,12 @@ export function getSessionCardTitleTooltip({
     terminalTitle: session.terminalTitle,
     alias: session.alias,
   });
-  const secondaryText = getSessionTooltipSecondaryText(session);
+  const tooltipMetadata = [
+    getSessionTooltipSecondaryText(session),
+    getSessionPersistenceTooltipText(session),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
   const debugSessionNumberTooltip =
     showDebugSessionNumbers && session.sessionNumber !== undefined
       ? `Session number: ${session.sessionNumber}`
@@ -212,7 +232,7 @@ export function getSessionCardTitleTooltip({
   const titleTooltip = buildSessionTitleTooltip({
     debugSessionNumberTooltip,
     headingText: tooltipHeadingText,
-    secondaryText,
+    secondaryText: tooltipMetadata,
   });
   const titleTooltipOptions = getSessionTitleTooltipOptions({
     alwaysShowTitleTooltip,
@@ -247,10 +267,18 @@ export function formatSessionHeadingText({
 > & {
   includeUnsyncedTitleLabel?: boolean;
 }): string {
-  const normalizedPrimaryTitle = primaryTitle?.trim();
-  const normalizedTerminalTitle = terminalTitle?.trim();
-  const baseHeadingText = normalizedPrimaryTitle || alias;
+  const primaryHeadingTitle = normalizeSessionCardHeadingTitle(primaryTitle);
+  const terminalHeadingTitle = normalizeSessionCardHeadingTitle(terminalTitle);
+  const aliasHeadingTitle = normalizeSessionCardHeadingTitle(alias);
+  const normalizedPrimaryTitle = primaryHeadingTitle.text;
+  const normalizedTerminalTitle = terminalHeadingTitle.text;
+  const baseHeadingTitle = normalizedPrimaryTitle ? primaryHeadingTitle : aliasHeadingTitle;
+  const baseHeadingText = baseHeadingTitle.text || alias;
   const isBrowserSession = kind === "browser" || sessionKind === "browser";
+  if (baseHeadingTitle.isGhostPlaceholder) {
+    return formatNonPersistentSessionHeadingText(baseHeadingText, includeUnsyncedTitleLabel);
+  }
+
   if (
     isBrowserSession ||
     agentIcon === "t3" ||
@@ -261,9 +289,45 @@ export function formatSessionHeadingText({
     return baseHeadingText;
   }
 
+  return formatNonPersistentSessionHeadingText(baseHeadingText, includeUnsyncedTitleLabel);
+}
+
+function formatNonPersistentSessionHeadingText(
+  headingText: string,
+  includeUnsyncedTitleLabel: boolean,
+): string {
   return includeUnsyncedTitleLabel
-    ? `${TERMINAL_TITLE_MARKER} ${baseHeadingText} ${UNSYNCED_TITLE_LABEL}`
-    : `${TERMINAL_TITLE_MARKER} ${baseHeadingText}`;
+    ? `${TERMINAL_TITLE_MARKER} ${headingText} ${UNSYNCED_TITLE_LABEL}`
+    : `${TERMINAL_TITLE_MARKER} ${headingText}`;
+}
+
+function normalizeSessionCardHeadingTitle(title: string | undefined): {
+  isGhostPlaceholder: boolean;
+  text?: string;
+} {
+  const normalizedTitle = title?.trim().replace(/\s+/g, " ");
+  if (!normalizedTitle) {
+    return { isGhostPlaceholder: false };
+  }
+
+  /**
+   * CDXC:SidebarSessions 2026-05-07-14:48
+   * Ghost placeholder titles are UI-only session defaults, not meaningful
+   * terminal titles. Sidebar cards must render them with the existing
+   * non-persistent title marker as `∗ Terminal Session` instead of exposing
+   * the ghost emoji as the card title.
+   */
+  if (GHOST_PLACEHOLDER_TITLE_PATTERN.test(normalizedTitle)) {
+    return {
+      isGhostPlaceholder: true,
+      text: DEFAULT_TERMINAL_SESSION_TITLE,
+    };
+  }
+
+  return {
+    isGhostPlaceholder: false,
+    text: normalizedTitle,
+  };
 }
 
 export function buildSessionTitleTooltip({
@@ -275,19 +339,33 @@ export function buildSessionTitleTooltip({
   headingText: string;
   secondaryText?: string;
 }): string {
+  /**
+   * CDXC:Tooltips 2026-05-07-18:16
+   * Session title tooltips can wrap inside the narrow sidebar, so separate each
+   * logical metadata row with a blank line. Splitting metadata blocks first keeps
+   * authored line breaks visible while making row boundaries readable after
+   * wrapping.
+   */
   const uniqueLines = [headingText, secondaryText, debugSessionNumberTooltip].reduce<string[]>(
-    (lines, line) => {
-      const normalizedLine = line?.trim();
-      if (!normalizedLine || lines.includes(normalizedLine)) {
-        return lines;
-      }
+    (lines, block) => {
+      const normalizedBlockLines =
+        block
+          ?.split(/\r?\n/u)
+          .map((line) => line.trim())
+          .filter(Boolean) ?? [];
 
-      return [...lines, normalizedLine];
+      return normalizedBlockLines.reduce<string[]>((nextLines, normalizedLine) => {
+        if (nextLines.includes(normalizedLine)) {
+          return nextLines;
+        }
+
+        return [...nextLines, normalizedLine];
+      }, lines);
     },
     [],
   );
 
-  return uniqueLines.join("\n");
+  return uniqueLines.join("\n\n");
 }
 
 export function getSessionTooltipSecondaryText(
@@ -298,7 +376,10 @@ export function getSessionTooltipSecondaryText(
     return detail;
   }
 
-  const terminalTitle = stripAgentTooltipText(session.terminalTitle, session.agentIcon);
+  const terminalHeadingTitle = normalizeSessionCardHeadingTitle(session.terminalTitle);
+  const terminalTitle = terminalHeadingTitle.isGhostPlaceholder
+    ? undefined
+    : stripAgentTooltipText(terminalHeadingTitle.text, session.agentIcon);
   if (terminalTitle) {
     return terminalTitle;
   }
@@ -338,6 +419,9 @@ type SessionAgentIconProps = {
   isFavorite?: boolean;
   isGeneratingFirstPromptTitle?: boolean;
   isReloading?: boolean;
+  sessionPersistenceName?: string;
+  sessionPersistenceProvider?: SidebarSessionItem["sessionPersistenceProvider"];
+  showTerminalIcon?: boolean;
 };
 
 type SessionAgentLogoStyle = CSSProperties & {
@@ -358,6 +442,7 @@ function SessionAgentIconDecoration({
   isGeneratingFirstPromptTitle = false,
   isReloading = false,
   loadingClassName,
+  showTerminalIcon = false,
   tablerClassName,
 }: SessionAgentIconDecorationProps) {
   if (isReloading || isGeneratingFirstPromptTitle) {
@@ -370,9 +455,13 @@ function SessionAgentIconDecoration({
       /**
        * CDXC:BrowserPanes 2026-05-03-11:28
        * Browser-pane cards identify the loaded tab with the page favicon when
-       * available. Keep the Tabler browser glyph as the fallback so cards still
+       * available. Keep a Tabler world glyph as the fallback so cards still
        * have a stable browser affordance before favicon discovery or for pages
        * without icons.
+       *
+       * CDXC:SidebarBrowserIcon 2026-05-07-19:44
+       * Browser affordances in the sidebar use the Tabler world glyph so
+       * browser sessions share the same globe cue as browser groups.
        */
       return (
         <img
@@ -387,10 +476,29 @@ function SessionAgentIconDecoration({
       );
     }
     return (
-      <IconBrowser
+      <IconWorld
         aria-hidden="true"
         className={tablerClassName}
         data-agent-icon="browser"
+        data-favorite={favoriteState}
+        size={14}
+        stroke={1.8}
+      />
+    );
+  }
+
+  if (showTerminalIcon && !agentIcon) {
+    /**
+     * CDXC:SidebarSessions 2026-05-07-14:57
+     * Plain terminal sessions still need a visible card identity before an
+     * agent is detected. Render the Tabler terminal glyph as a white
+     * non-agent icon instead of leaving the Agent Icon slot blank.
+     */
+    return (
+      <IconTerminal2
+        aria-hidden="true"
+        className={tablerClassName}
+        data-agent-icon="terminal"
         data-favorite={favoriteState}
         size={14}
         stroke={1.8}
@@ -421,16 +529,27 @@ export function SessionFloatingAgentIcon({
   agentIcon,
   faviconDataUrl,
   isFavorite = false,
+  sessionPersistenceName,
+  sessionPersistenceProvider,
+  showTerminalIcon = false,
 }: SessionAgentIconProps) {
   return (
-    <SessionAgentIconDecoration
-      agentIcon={agentIcon}
-      className="session-floating-agent-icon"
-      faviconDataUrl={faviconDataUrl}
-      isFavorite={isFavorite}
-      loadingClassName="session-floating-reloading-icon"
-      tablerClassName="session-floating-agent-tabler-icon"
-    />
+    <>
+      <SessionAgentIconDecoration
+        agentIcon={agentIcon}
+        className="session-floating-agent-icon"
+        faviconDataUrl={faviconDataUrl}
+        isFavorite={isFavorite}
+        loadingClassName="session-floating-reloading-icon"
+        showTerminalIcon={showTerminalIcon}
+        tablerClassName="session-floating-agent-tabler-icon"
+      />
+      <SessionPersistenceProviderBadge
+        sessionPersistenceName={sessionPersistenceName}
+        sessionPersistenceProvider={sessionPersistenceProvider}
+        slot="floating"
+      />
+    </>
   );
 }
 
@@ -440,18 +559,97 @@ function SessionHeaderAgentIcon({
   isFavorite = false,
   isGeneratingFirstPromptTitle = false,
   isReloading = false,
+  sessionPersistenceName,
+  sessionPersistenceProvider,
+  showTerminalIcon = false,
 }: SessionAgentIconProps) {
   return (
-    <SessionAgentIconDecoration
-      agentIcon={agentIcon}
-      className="session-header-agent-icon"
-      faviconDataUrl={faviconDataUrl}
-      isFavorite={isFavorite}
-      isGeneratingFirstPromptTitle={isGeneratingFirstPromptTitle}
-      isReloading={isReloading}
-      loadingClassName="session-header-reloading-icon"
-      tablerClassName="session-header-agent-tabler-icon"
-    />
+    <>
+      <SessionAgentIconDecoration
+        agentIcon={agentIcon}
+        className="session-header-agent-icon"
+        faviconDataUrl={faviconDataUrl}
+        isFavorite={isFavorite}
+        isGeneratingFirstPromptTitle={isGeneratingFirstPromptTitle}
+        isReloading={isReloading}
+        loadingClassName="session-header-reloading-icon"
+        showTerminalIcon={showTerminalIcon}
+        tablerClassName="session-header-agent-tabler-icon"
+      />
+      <SessionPersistenceProviderBadge
+        sessionPersistenceName={sessionPersistenceName}
+        sessionPersistenceProvider={sessionPersistenceProvider}
+        slot="header"
+      />
+    </>
+  );
+}
+
+function SessionPersistenceProviderBadge({
+  sessionPersistenceName,
+  sessionPersistenceProvider,
+  slot,
+}: {
+  sessionPersistenceName?: string;
+  sessionPersistenceProvider?: SidebarSessionItem["sessionPersistenceProvider"];
+  slot: "floating" | "header";
+}) {
+  const label = getSessionPersistenceProviderBadgeLabel(sessionPersistenceProvider);
+  if (!label) {
+    return null;
+  }
+  /**
+   * CDXC:SessionPersistence 2026-05-07-20:32
+   * Provider-backed cards show a tiny low-opacity provider letter centered on
+   * the existing agent icon. The badge stays subtle while the tooltip and
+   * context menu expose the exact tmux/zmx/zellij attach identity.
+   *
+   * CDXC:SessionPersistence 2026-05-07-21:00
+   * The visible badge is keyed by provider, not by native-confirmed session
+   * name, so a newly mounted provider-backed card shows its t/z/j identity
+   * immediately while attach copying still waits for the durable name.
+   */
+  return (
+    <span
+      aria-hidden="true"
+      className="session-persistence-provider-badge"
+      data-provider={sessionPersistenceProvider}
+      data-slot={slot}
+    >
+      {label}
+    </span>
+  );
+}
+
+function getSessionPersistenceProviderBadgeLabel(
+  provider: SidebarSessionItem["sessionPersistenceProvider"],
+): string | undefined {
+  switch (provider) {
+    case "tmux":
+      return "t";
+    case "zmx":
+      return "z";
+    case "zellij":
+      return "j";
+    default:
+      return undefined;
+  }
+}
+
+function getSessionPersistenceTooltipText(
+  session: Pick<SidebarSessionItem, "sessionPersistenceName" | "sessionPersistenceProvider">,
+): string | undefined {
+  if (!session.sessionPersistenceName || !session.sessionPersistenceProvider) {
+    return undefined;
+  }
+  return `${session.sessionPersistenceProvider} session: ${session.sessionPersistenceName}`;
+}
+
+export function shouldShowTerminalSessionIcon(
+  session: Pick<SidebarSessionItem, "agentIcon" | "sessionKind">,
+): boolean {
+  return (
+    !session.agentIcon && (session.sessionKind === undefined || session.sessionKind === "terminal")
   );
 }
 

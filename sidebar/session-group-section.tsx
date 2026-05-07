@@ -1,5 +1,4 @@
 import {
-  IconBrowser,
   IconCaretRightFilled,
   IconCheck,
   IconChevronLeft,
@@ -1116,7 +1115,7 @@ export function SessionGroupSection({
                           }}
                           type="button"
                         >
-                          <IconBrowser
+                          <IconWorld
                             aria-hidden="true"
                             className="group-add-icon"
                             size={14}

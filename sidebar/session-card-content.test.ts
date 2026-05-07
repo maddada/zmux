@@ -28,7 +28,19 @@ describe("buildSessionTitleTooltip", () => {
         headingText: "Browser ignore",
         secondaryText: "https://example.com",
       }),
-    ).toBe("Browser ignore\nhttps://example.com\nSession number: 02");
+    ).toBe("Browser ignore\n\nhttps://example.com\n\nSession number: 02");
+  });
+
+  test("should separate metadata block lines with blank lines", () => {
+    expect(
+      buildSessionTitleTooltip({
+        debugSessionNumberTooltip: "Session number: 02",
+        headingText: "Browser ignore",
+        secondaryText: "https://example.com\nzmx session: zmux-session-1",
+      }),
+    ).toBe(
+      "Browser ignore\n\nhttps://example.com\n\nzmx session: zmux-session-1\n\nSession number: 02",
+    );
   });
 
   test("should trim values before deduping", () => {
@@ -38,7 +50,7 @@ describe("buildSessionTitleTooltip", () => {
         headingText: " Browser ignore ",
         secondaryText: "Browser ignore",
       }),
-    ).toBe("Browser ignore\nSession number: 02");
+    ).toBe("Browser ignore\n\nSession number: 02");
   });
 });
 
@@ -110,7 +122,7 @@ describe("getSessionCardTitleTooltip", () => {
       }),
     ).toEqual({
       headingText: "∗ A very long session title",
-      tooltip: "∗ A very long session title (Unsynced title)\nrepo sweep\nSession number: 3",
+      tooltip: "∗ A very long session title (Unsynced title)\n\nrepo sweep\n\nSession number: 3",
       tooltipWhen: "always",
     });
   });
@@ -137,6 +149,28 @@ describe("getSessionCardTitleTooltip", () => {
     });
   });
 
+  test("should swap ghost placeholder card titles to the non-persistent terminal session title", () => {
+    expect(
+      getSessionCardTitleTooltip({
+        session: {
+          activityLabel: undefined,
+          agentIcon: undefined,
+          alias: "Session 1",
+          detail: undefined,
+          isPrimaryTitleTerminalTitle: true,
+          primaryTitle: "👻",
+          sessionNumber: undefined,
+          terminalTitle: "👻",
+        },
+        showDebugSessionNumbers: false,
+      }),
+    ).toEqual({
+      headingText: "∗ Terminal Session",
+      tooltip: "∗ Terminal Session (Unsynced title)",
+      tooltipWhen: "always",
+    });
+  });
+
   test("should keep browser titles unmarked in the browser area", () => {
     expect(
       getSessionCardTitleTooltip({
@@ -156,7 +190,31 @@ describe("getSessionCardTitleTooltip", () => {
       }),
     ).toEqual({
       headingText: "Project docs",
-      tooltip: "Project docs\nhttps://example.com",
+      tooltip: "Project docs\n\nhttps://example.com",
+      tooltipWhen: "always",
+    });
+  });
+
+  test("should include persistence provider session names in the tooltip", () => {
+    expect(
+      getSessionCardTitleTooltip({
+        session: {
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "Session 1",
+          detail: "OpenAI Codex",
+          isPrimaryTitleTerminalTitle: true,
+          primaryTitle: "Fix restore",
+          sessionNumber: undefined,
+          sessionPersistenceName: "zmux-session-1",
+          sessionPersistenceProvider: "zmx",
+          terminalTitle: undefined,
+        },
+        showDebugSessionNumbers: false,
+      }),
+    ).toEqual({
+      headingText: "Fix restore",
+      tooltip: "Fix restore\n\nzmx session: zmux-session-1",
       tooltipWhen: "always",
     });
   });
@@ -186,6 +244,33 @@ describe("SessionFloatingAgentIcon", () => {
     expect(markup).toContain('data-agent-icon="browser"');
     expect(markup).not.toContain("data-icon-variant");
   });
+
+  test("should render a subtle persistence provider badge when a provider session is stored", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionFloatingAgentIcon, {
+        agentIcon: "codex",
+        sessionPersistenceName: "zmux-session-1",
+        sessionPersistenceProvider: "zmx",
+      }),
+    );
+
+    expect(markup).toContain("session-persistence-provider-badge");
+    expect(markup).toContain('data-provider="zmx"');
+    expect(markup).toContain(">z</span>");
+  });
+
+  test("should render the persistence badge as soon as the provider is known", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionFloatingAgentIcon, {
+        agentIcon: "codex",
+        sessionPersistenceProvider: "tmux",
+      }),
+    );
+
+    expect(markup).toContain("session-persistence-provider-badge");
+    expect(markup).toContain('data-provider="tmux"');
+    expect(markup).toContain(">t</span>");
+  });
 });
 
 describe("formatSessionHeadingText", () => {
@@ -214,6 +299,17 @@ describe("formatSessionHeadingText", () => {
         primaryTitle: "Codex Session",
       }),
     ).toBe("∗ Codex Session");
+  });
+
+  test("should swap ghost placeholder titles to the existing unsynced marker", () => {
+    expect(
+      formatSessionHeadingText({
+        alias: "s-260427-090032-rma",
+        isPrimaryTitleTerminalTitle: true,
+        primaryTitle: "👻 Terminal Session",
+        terminalTitle: "👻 Terminal Session",
+      }),
+    ).toBe("∗ Terminal Session");
   });
 
   test("should keep terminal-derived titles unmarked", () => {
@@ -299,7 +395,7 @@ describe("getSessionTooltipSecondaryText", () => {
 });
 
 describe("SessionCardContent", () => {
-  test("should keep iconless sessions blank by default in agent icon mode and reveal time on hover", () => {
+  test("should show the terminal icon for agentless terminal sessions and reveal time on hover", () => {
     const markup = renderToStaticMarkup(
       createElement(SessionCardContent, {
         session: {
@@ -313,6 +409,7 @@ describe("SessionCardContent", () => {
           lastInteractionAt: "2026-04-18T10:00:00.000Z",
           row: 0,
           sessionId: "session-1",
+          sessionKind: "terminal",
           shortcutLabel: "1",
         },
         showCloseButton: false,
@@ -324,8 +421,9 @@ describe("SessionCardContent", () => {
 
     expect(markup).toContain('data-default-trailing-display="icon"');
     expect(markup).toContain('data-hover-trailing-display="time"');
+    expect(markup).toContain('data-agent-icon="terminal"');
     expect(markup).toContain("session-last-interaction-time");
-    expect(markup).not.toContain("session-header-agent-icon");
+    expect(markup).toContain("session-header-agent-tabler-icon");
   });
 
   test("should reveal the agent icon on hover when last active is the selected default mode", () => {

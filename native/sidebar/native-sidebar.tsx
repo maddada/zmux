@@ -49,6 +49,7 @@ import {
   DEFAULT_TERMINAL_SESSION_TITLE,
   createSidebarSessionItems,
   getSessionCardPrimaryTitle,
+  isGhostPlaceholderSessionTitle,
   normalizeTerminalTitle,
   getVisiblePrimaryTitle,
   getVisibleTerminalTitle,
@@ -70,6 +71,7 @@ import {
   type SidebarSessionItem,
   type SidebarTheme,
   type SidebarToExtensionMessage,
+  type TerminalSessionPersistenceProvider,
   type TerminalSessionRecord,
   type T3SessionRecord,
   type VisibleSessionCount,
@@ -114,6 +116,7 @@ import {
   setT3SessionMetadataInSimpleWorkspace,
   setTerminalSessionAgentNameInSimpleWorkspace,
   setTerminalSessionPersistenceNameInSimpleWorkspace,
+  setTerminalSessionPersistenceProviderInSimpleWorkspace,
   setViewModeInSimpleWorkspace,
   setVisibleCountInSimpleWorkspace,
   swapVisibleSessionsInSimpleWorkspace,
@@ -269,6 +272,13 @@ type NativeHostCommand =
       attentionCount: number;
       availableCount: number;
       runningCount: number;
+      /**
+       * CDXC:SessionStatusIndicators 2026-05-07-18:20
+       * The native AppKit indicator receives the persisted named size with the
+       * counts message so each sidebar publish resizes the floating chrome from
+       * the same authoritative settings snapshot.
+       */
+      size: zmuxSettings["sessionStatusIndicatorSize"];
       type: "setSessionStatusIndicators";
     }
   | { layout?: NativeTerminalLayout; type: "setTerminalLayout" }
@@ -686,6 +696,26 @@ type NativeCliSessionSelector = {
   sessionNumber?: number;
 };
 
+type NativeCliSessionListItem = {
+  agent?: string;
+  alias: number;
+  attachCommand?: string;
+  groupId: string;
+  groupTitle: string;
+  isFocused: boolean;
+  isVisible: boolean;
+  lastInteractionAt: string;
+  projectId: string;
+  projectName: string;
+  projectPath: string;
+  provider?: TerminalSessionPersistenceProvider;
+  providerSessionName?: string;
+  resumeCommand?: string;
+  sessionId: string;
+  status: "attention" | "done" | "error" | "idle" | "sleep" | "working";
+  title: string;
+};
+
 type AgentManagerXMuxSource = "zmux";
 
 type AgentManagerXWorkspaceSession = {
@@ -825,8 +855,9 @@ const terminalStateById = new Map<
     firstUserMessage?: string;
     lastActivityAt?: string;
     lifecycleState: "done" | "error" | "running" | "sleeping";
+    protectStoredTitleFromAutomation?: boolean;
     sessionPersistenceName?: string;
-    sessionPersistenceProvider?: zmuxSettings["sessionPersistenceProvider"];
+    sessionPersistenceProvider?: TerminalSessionPersistenceProvider;
     sessionStateFilePath?: string;
     terminalTitle?: string;
   }
@@ -1603,6 +1634,39 @@ function nextSessionPersistenceProvider(
     case "zellij":
       return "off";
   }
+}
+
+function activeSessionPersistenceProviderFromSettings(): TerminalSessionPersistenceProvider | undefined {
+  return settings.sessionPersistenceProvider === "tmux" ||
+    settings.sessionPersistenceProvider === "zmx" ||
+    settings.sessionPersistenceProvider === "zellij"
+    ? settings.sessionPersistenceProvider
+    : undefined;
+}
+
+function resolveTerminalSessionPersistenceProvider(
+  session: Pick<
+    TerminalSessionRecord,
+    "sessionPersistenceName" | "sessionPersistenceProvider" | "tmuxSessionName"
+  >,
+): TerminalSessionPersistenceProvider | undefined {
+  /**
+   * CDXC:SessionPersistence 2026-05-07-20:32
+   * Reconnect semantics are per session, not per current Settings value. Prefer
+   * the stored provider/name pair, keep legacy tmuxSessionName records on tmux,
+   * and only use the active Settings provider for records that predate provider
+   * persistence.
+   */
+  if (session.sessionPersistenceProvider) {
+    return session.sessionPersistenceProvider;
+  }
+  if (session.tmuxSessionName) {
+    return "tmux";
+  }
+  if (session.sessionPersistenceName) {
+    return activeSessionPersistenceProviderFromSettings();
+  }
+  return activeSessionPersistenceProviderFromSettings();
 }
 
 function syncGhosttyTerminalSettings(
@@ -2772,6 +2836,10 @@ function restorePreviousTerminalSession(
     initialInput,
     groupId,
     archivedRecord.agentName,
+    {
+      sessionPersistenceName: archivedRecord.sessionPersistenceName ?? archivedRecord.tmuxSessionName,
+      sessionPersistenceProvider: resolveTerminalSessionPersistenceProvider(archivedRecord),
+    },
   );
   if (!restoredSession) {
     return false;
@@ -2786,6 +2854,14 @@ function restorePreviousTerminalSession(
   if (terminalState) {
     terminalState.agentName = restoredRecord.agentName;
     terminalState.firstUserMessage = restoredRecord.firstUserMessage;
+    /**
+     * CDXC:SessionTitleSync 2026-05-07-16:41
+     * Restored previous sessions can carry trusted terminal-auto titles from a
+     * real Codex/Claude thread. Treat that persisted name as authoritative so a
+     * later prompt hook cannot auto-generate over it after restore.
+     */
+    terminalState.protectStoredTitleFromAutomation =
+      getNativeStoredTrustedResumeTitle(restoredRecord).title !== undefined;
     terminalState.terminalTitle = restoredRecord.title;
   }
   publish();
@@ -2861,6 +2937,10 @@ function mergeArchivedTerminalDetails(
       archivedRecord.sessionPersistenceName ??
       archivedRecord.tmuxSessionName ??
       restoredSession.sessionPersistenceName,
+    sessionPersistenceProvider:
+      archivedRecord.sessionPersistenceProvider ??
+      resolveTerminalSessionPersistenceProvider(archivedRecord) ??
+      restoredSession.sessionPersistenceProvider,
     terminalEngine: archivedRecord.terminalEngine ?? restoredSession.terminalEngine,
     title: archivedRecord.title || restoredSession.title,
     titleSource: archivedRecord.titleSource ?? restoredSession.titleSource,
@@ -3171,6 +3251,21 @@ function setTerminalSessionPersistenceName(
   );
 }
 
+function setTerminalSessionPersistenceProvider(
+  sessionId: string,
+  sessionPersistenceProvider: TerminalSessionPersistenceProvider | undefined,
+): void {
+  updateActiveProjectWorkspace(
+    (workspace) =>
+      setTerminalSessionPersistenceProviderInSimpleWorkspace(
+        workspace,
+        sessionId,
+        sessionPersistenceProvider,
+      )
+        .snapshot,
+  );
+}
+
 function nativeSessionIdForSidebarSession(sessionId: string): string {
   const reference = resolveSidebarSessionReference(sessionId);
   return nativeSessionIdForProjectSidebarSession(reference.project.projectId, reference.sessionId);
@@ -3475,6 +3570,10 @@ function createProjectedSidebarSessionsForGroup(group: SessionGroupRecord): Side
         (Boolean(visibleTerminalTitle) && (!visiblePrimaryTitle || shouldPreferTerminalTitle)) ||
         (!visibleTerminalTitle && hasTrustedStoredResumeTitle),
       primaryTitle,
+      sessionPersistenceName:
+        terminalState?.sessionPersistenceName ?? session.sessionPersistenceName,
+      sessionPersistenceProvider:
+        terminalState?.sessionPersistenceProvider ?? session.sessionPersistenceProvider,
       /**
        * CDXC:NativeSidebar 2026-04-28-05:14
        * Session-card hover timestamps follow agent-tiler's projection rule:
@@ -3800,12 +3899,36 @@ function restoreNativeTerminalSession(
   if (initialInput.trim()) {
     suppressNativeSessionActivityIndicators(session.sessionId, "restore-resume-command");
   }
+  const sessionPersistenceProvider = resolveTerminalSessionPersistenceProvider(session);
+  if (
+    sessionPersistenceProvider &&
+    session.sessionPersistenceProvider !== sessionPersistenceProvider
+  ) {
+    updateProjectWorkspace(
+      project.projectId,
+      (workspace) =>
+        setTerminalSessionPersistenceProviderInSimpleWorkspace(
+          workspace,
+          session.sessionId,
+          sessionPersistenceProvider,
+        )
+          .snapshot,
+    );
+  }
   terminalStateById.set(session.sessionId, {
     activity: "idle",
     agentName: session.agentName,
     lifecycleState: "running",
+    /**
+     * CDXC:SessionTitleSync 2026-05-07-16:41
+     * App-start/session-persistence restore reattaches existing named agent
+     * conversations. Their stored trusted titles must not be treated like fresh
+     * terminal-auto titles that first-prompt generation may claim.
+     */
+    protectStoredTitleFromAutomation:
+      getNativeStoredTrustedResumeTitle(session).title !== undefined,
     sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
-    sessionPersistenceProvider: settings.sessionPersistenceProvider,
+    sessionPersistenceProvider,
     sessionStateFilePath,
     terminalTitle: session.title,
   });
@@ -3818,7 +3941,7 @@ function restoreNativeTerminalSession(
     sessionId: session.sessionId,
     sessionStateFilePath,
     sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
-    sessionPersistenceProvider: settings.sessionPersistenceProvider,
+    sessionPersistenceProvider,
     terminalTitle: session.title,
   });
   const nativeEnvironment = createNativeAgentSessionEnvironment({
@@ -3849,10 +3972,7 @@ function restoreNativeTerminalSession(
     initialInput,
     sessionId: nativeSessionId,
     sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
-    sessionPersistenceProvider:
-      settings.sessionPersistenceProvider === "off"
-        ? undefined
-        : settings.sessionPersistenceProvider,
+    sessionPersistenceProvider,
     title: session.title,
     type: "createTerminal",
   });
@@ -4007,6 +4127,7 @@ function syncNativeSessionStatusIndicators(): void {
     attentionCount: counts.attention,
     availableCount: counts.available,
     runningCount: counts.running,
+    size: settings.sessionStatusIndicatorSize,
     type: "setSessionStatusIndicators",
   });
 }
@@ -4692,9 +4813,16 @@ function isRejectedNativeResumeTitle(title: string): boolean {
    * briefly publish the launched agent command (`x`, `codex`, etc.) or mojibake
    * status bytes as the title; those values are display noise, not persisted
    * agent session names.
+   *
+   * CDXC:SessionTitleSync 2026-05-07-17:27
+   * zmx reconnect can also publish the Ghostty ghost placeholder before the
+   * persisted pane title is available. Reject it here even though shared
+   * visibility filtering also handles it, so native resume/title-sync callers
+   * cannot persist the placeholder if they bypass that visibility step.
    */
   return (
     normalizedTitle === "ð^ß^Ñ»" ||
+    isGhostPlaceholderSessionTitle(normalizedTitle) ||
     /[\u0000-\u001f\u007f]/u.test(normalizedTitle) ||
     (normalizedTitle.startsWith("ð") && normalizedTitle.endsWith("»")) ||
     getNativeAgentCommandExecutableNames().has(normalizedLowerTitle) ||
@@ -4783,6 +4911,8 @@ function createTerminal(
   options?: {
     initialPresentation?: "background" | "focused";
     focusAfterCreate?: boolean;
+    sessionPersistenceName?: string;
+    sessionPersistenceProvider?: TerminalSessionPersistenceProvider;
   },
 ): TerminalSessionRecord | undefined {
   const project = activeProject();
@@ -4831,9 +4961,19 @@ function createTerminal(
     title,
     visibleSessionIdsBefore: beforeSnapshot?.visibleSessionIds,
   });
+  /**
+   * CDXC:SessionPersistence 2026-05-07-20:32
+   * New and reloaded terminals persist the selected provider on the session
+   * record at creation time. Later Settings changes must not change which
+   * tmux/zmx/zellij backend an existing card reconnects to.
+   */
+  const sessionPersistenceProvider =
+    options?.sessionPersistenceProvider ?? activeSessionPersistenceProviderFromSettings();
   const result = createSessionInSimpleWorkspace(targetWorkspace, {
     agentName,
     initialPresentation: options?.initialPresentation,
+    sessionPersistenceName: options?.sessionPersistenceName,
+    sessionPersistenceProvider,
     terminalEngine: "ghostty-native",
     title,
   });
@@ -4866,7 +5006,7 @@ function createTerminal(
     agentName,
     lifecycleState: "running",
     sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
-    sessionPersistenceProvider: settings.sessionPersistenceProvider,
+    sessionPersistenceProvider,
     sessionStateFilePath,
     terminalTitle: title,
   });
@@ -4905,7 +5045,8 @@ function createTerminal(
     colorEnv: readAgentColorEnvironmentSnapshot(nativeEnvironment),
     nativeSessionId,
     projectId: project.projectId,
-    sessionPersistenceProvider: settings.sessionPersistenceProvider,
+    sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
+    sessionPersistenceProvider,
     sessionId: session.sessionId,
   });
   postNative({
@@ -4922,10 +5063,7 @@ function createTerminal(
     initialInput,
     sessionId: nativeSessionId,
     sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
-    sessionPersistenceProvider:
-      settings.sessionPersistenceProvider === "off"
-        ? undefined
-        : settings.sessionPersistenceProvider,
+    sessionPersistenceProvider,
     title,
     type: "createTerminal",
   });
@@ -5517,6 +5655,28 @@ function syncSessionTitleFromNativeTerminalTitle(
     });
     return;
   }
+  if (
+    session.kind === "terminal" &&
+    terminalState.protectStoredTitleFromAutomation === true &&
+    getNativeStoredTrustedResumeTitle(session).title !== undefined
+  ) {
+    /**
+     * CDXC:SessionTitleSync 2026-05-07-16:41
+     * Restored trusted titles are already persisted session names. Native
+     * terminal-title events can still reflect Codex's automatic thread retitles
+     * after a new prompt, so they must not replace the stored card title.
+     */
+    appendSessionTitleDebugLog("nativeSidebar.sessionRenameSkipped", {
+      agentName: terminalState.agentName,
+      currentSessionTitle: session.title,
+      previousTerminalTitle,
+      rawTitle,
+      reason: "protected-stored-title",
+      sessionId,
+      visibleTitle,
+    });
+    return;
+  }
   const decision = getNativeTerminalTitleSessionSyncDecision({
     agentName: terminalState.agentName,
     previousTerminalTitle,
@@ -5692,10 +5852,17 @@ async function processNativeFirstPromptAutoRename(
    * its thread title before the native poller processes the hook state; treating
    * that terminal-auto title as the current user title makes auto-generation
    * clear the prompt as stale instead of sending `/rename <generated title>`.
+   *
+   * CDXC:SessionTitleSync 2026-05-07-16:41
+   * This claim only applies to fresh sessions. Restored trusted titles are
+   * persisted names, so first-prompt automation must treat them as real current
+   * titles and skip generation.
    */
   const shouldLetFirstPromptAutoRenameClaimTitle =
     Boolean(pendingPrompt) &&
-    (session.titleSource === "terminal-auto" || isGenericAgentSessionTitle(agentName, session.title));
+    terminalState.protectStoredTitleFromAutomation !== true &&
+    (session.titleSource === "terminal-auto" ||
+      isGenericAgentSessionTitle(agentName, session.title));
   const currentTitle = shouldLetFirstPromptAutoRenameClaimTitle
     ? undefined
     : persistedState.title || session.title || terminalState.terminalTitle;
@@ -6728,6 +6895,10 @@ function restartNativeSession(sessionId: string): void {
     initialInput,
     groupId,
     session.agentName,
+    {
+      sessionPersistenceName: session.sessionPersistenceName ?? session.tmuxSessionName,
+      sessionPersistenceProvider: resolveTerminalSessionPersistenceProvider(session),
+    },
   );
 }
 
@@ -6762,6 +6933,109 @@ function findSidebarSessionForCli(
   return focusedSessionId
     ? sessions.find((session) => session.sessionId === focusedSessionId)
     : sessions[0];
+}
+
+function listNativeCliSessions(): NativeCliSessionListItem[] {
+  const items: NativeCliSessionListItem[] = [];
+  const orderedProjects = orderNativeProjectsForSidebar(projects).filter(
+    (project) => project.isRecentProject !== true,
+  );
+  for (const project of orderedProjects) {
+    for (const group of project.workspace.groups) {
+      const projectedSessionsById = new Map(
+        createProjectedSidebarSessionsForGroup(group).map((session) => [session.sessionId, session]),
+      );
+      for (const session of group.snapshot.sessions) {
+        if (session.kind !== "terminal") {
+          continue;
+        }
+        const projectedSession = projectedSessionsById.get(session.sessionId);
+        const terminalState = terminalStateById.get(session.sessionId);
+        const provider =
+          terminalState?.sessionPersistenceProvider ??
+          session.sessionPersistenceProvider ??
+          (session.tmuxSessionName ? "tmux" : undefined);
+        const providerSessionName =
+          terminalState?.sessionPersistenceName ??
+          session.sessionPersistenceName ??
+          session.tmuxSessionName;
+        const status = getNativeCliSessionStatus(session, projectedSession, terminalState);
+        /**
+         * CDXC:CliSessions 2026-05-07-21:22
+         * The human CLI session area needs one stable live-session inventory
+         * from the sidebar runtime. It includes global aliases, project context,
+         * activity, provider attach commands, and agent resume commands so the
+         * Node CLI can render tables and exec the correct local command without
+         * scraping debug state.
+         */
+        items.push({
+          agent: terminalState?.agentName ?? session.agentName,
+          alias: items.length + 1,
+          attachCommand:
+            provider && providerSessionName
+              ? buildNativeCliAttachCommand(provider, providerSessionName)
+              : undefined,
+          groupId: group.groupId,
+          groupTitle: group.title,
+          isFocused: group.snapshot.focusedSessionId === session.sessionId,
+          isVisible: Boolean(projectedSession?.isVisible),
+          lastInteractionAt:
+            projectedSession?.lastInteractionAt ?? terminalState?.lastActivityAt ?? session.createdAt,
+          projectId: project.projectId,
+          projectName: project.name,
+          projectPath: project.path,
+          provider,
+          providerSessionName,
+          resumeCommand: buildNativeCopyResumeCommand(session),
+          sessionId: createCombinedProjectSessionId(project.projectId, session.sessionId),
+          status,
+          title:
+            projectedSession?.primaryTitle ??
+            getSessionCardPrimaryTitle(session) ??
+            session.title ??
+            DEFAULT_TERMINAL_SESSION_TITLE,
+        });
+      }
+    }
+  }
+  return items;
+}
+
+function getNativeCliSessionStatus(
+  session: TerminalSessionRecord,
+  projectedSession: SidebarSessionItem | undefined,
+  terminalState:
+    | {
+        activity: "attention" | "idle" | "working";
+        lifecycleState: "done" | "error" | "running" | "sleeping";
+      }
+    | undefined,
+): NativeCliSessionListItem["status"] {
+  if (session.isSleeping === true || terminalState?.lifecycleState === "sleeping") {
+    return "sleep";
+  }
+  if (terminalState?.lifecycleState === "error") {
+    return "error";
+  }
+  if (terminalState?.lifecycleState === "done") {
+    return "done";
+  }
+  return projectedSession?.activity ?? terminalState?.activity ?? "idle";
+}
+
+function buildNativeCliAttachCommand(
+  provider: TerminalSessionPersistenceProvider,
+  sessionName: string,
+): string {
+  const quotedName = quoteNativeShellArg(sessionName);
+  switch (provider) {
+    case "tmux":
+      return `tmux attach-session -t ${quotedName}`;
+    case "zmx":
+      return `zmx attach ${quotedName}`;
+    case "zellij":
+      return `zellij attach ${quotedName}`;
+  }
 }
 
 function requireCliSession(payload: Record<string, unknown>): SidebarSessionItem {
@@ -6902,6 +7176,10 @@ function runCliAgent(agentId: string, groupId?: string): SessionRecord | undefin
  */
 function promptFindPreviousSession(queryInput?: string): void {
   const query = queryInput?.trim();
+  appendAgentDetectionDebugLog("nativeSidebar.promptFindPreviousSession.received", {
+    hasQuery: Boolean(query),
+    queryLength: query?.length ?? 0,
+  });
   if (!query) {
     showNativeMessage("info", "Type what you remember in the Previous Sessions search field.");
     return;
@@ -6909,6 +7187,9 @@ function promptFindPreviousSession(queryInput?: string): void {
 
   const agent = resolveFindPreviousSessionAgent();
   if (!agent) {
+    appendAgentDetectionDebugLog("nativeSidebar.promptFindPreviousSession.missingAgent", {
+      requestedAgentId: FIND_PREVIOUS_SESSION_AGENT_ID,
+    });
     showNativeMessage(
       "info",
       "zmux could not find Codex for Find a session. Restore the Codex agent button.",
@@ -6923,6 +7204,10 @@ function promptFindPreviousSession(queryInput?: string): void {
     agent.agentId,
   );
   if (!session) {
+    appendAgentDetectionDebugLog("nativeSidebar.promptFindPreviousSession.createSessionFailed", {
+      agentId: agent.agentId,
+      queryLength: query.length,
+    });
     return;
   }
 
@@ -6932,6 +7217,19 @@ function promptFindPreviousSession(queryInput?: string): void {
   );
   window.setTimeout(() => {
     const nativeSessionId = nativeSessionIdForSidebarSession(session.sessionId);
+    /**
+     * CDXC:PreviousSessions 2026-05-07-16:02
+     * The Find Session button crosses React, the modal-host WebKit bridge, and
+     * native sidebar command dispatch before terminal input is written. Keep
+     * debug breadcrumbs at session creation and prompt staging so Computer Use
+     * repros can identify the exact boundary that stopped the action.
+     */
+    appendAgentDetectionDebugLog("nativeSidebar.promptFindPreviousSession.stagingPrompt", {
+      agentId: agent.agentId,
+      nativeSessionId,
+      queryLength: query.length,
+      sessionId: session.sessionId,
+    });
     postNative({
       sessionId: nativeSessionId,
       text: `/rename Search: ${query}`,
@@ -7193,6 +7491,8 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       case "state":
       case "dumpState":
         return { ok: true, state: summarizeCliState() };
+      case "listSessions":
+        return { ok: true, revision, sessions: listNativeCliSessions() };
       case "createSession": {
         const groupId = typeof payload.groupId === "string" ? payload.groupId : undefined;
         if (groupId === COMBINED_CHATS_GROUP_ID || (!groupId && activeProject().isChat === true)) {
@@ -7442,6 +7742,35 @@ function copyResumeCommand(sessionId: string): void {
   }
   const text = `cd ${quoteNativeShellArg(reference.project.path)} && ${resumeCommand}`;
   void navigator.clipboard?.writeText(text).catch(() => undefined);
+}
+
+function copyAttachCommand(sessionId: string): void {
+  const reference = resolveSidebarSessionReference(sessionId);
+  const session = findTerminalSessionInProject(reference.project, reference.sessionId);
+  if (!session) {
+    return;
+  }
+  const provider = resolveTerminalSessionPersistenceProvider(session);
+  const sessionPersistenceName = session.sessionPersistenceName ?? session.tmuxSessionName;
+  if (!provider || !sessionPersistenceName) {
+    showNativeMessage("info", "No persistence attach command is available for this session.");
+    return;
+  }
+  /**
+   * CDXC:SessionPersistence 2026-05-07-20:32
+   * Provider-backed session cards expose a copyable attach command that uses
+   * the stored provider/name pair, not the current Settings provider. This lets
+   * users attach from an external terminal to the exact tmux/zmx/zellij session
+   * backing the sidebar card.
+   */
+  const quotedName = quoteNativeShellArg(sessionPersistenceName);
+  const attachCommand =
+    provider === "tmux"
+      ? `tmux attach-session -t ${quotedName}`
+      : provider === "zmx"
+        ? `zmx attach ${quotedName}`
+        : `zellij attach ${quotedName}`;
+  void navigator.clipboard?.writeText(attachCommand).catch(() => undefined);
 }
 
 function resolveNativeBrowserAccessT3Session(preferredSessionId?: string): T3SessionRecord | undefined {
@@ -8892,6 +9221,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "copyResumeCommand":
       copyResumeCommand(message.sessionId);
       return;
+    case "copyAttachCommand":
+      copyAttachCommand(message.sessionId);
+      return;
     case "requestT3SessionBrowserAccess":
       void requestNativeT3SessionBrowserAccess(message.sessionId);
       return;
@@ -9601,9 +9933,18 @@ window.addEventListener("zmux-native-host-event", (event) => {
          * Native persistence names are the durable reconnect identity. Persist
          * them separately from the visible card title so app restart can attach
          * to a live provider session before recreating and resuming the agent.
+         *
+         * CDXC:SessionPersistence 2026-05-07-20:32
+         * Persist the provider from the mounted terminal state together with
+         * the native-confirmed session name so restored cards can copy attach
+         * commands and reconnect even after Settings changes.
          */
         terminalState.sessionPersistenceName = hostEvent.sessionPersistenceName;
         setTerminalSessionPersistenceName(sidebarSessionId, hostEvent.sessionPersistenceName);
+        setTerminalSessionPersistenceProvider(
+          sidebarSessionId,
+          terminalState.sessionPersistenceProvider,
+        );
       }
       /**
        * CDXC:AgentDetection 2026-04-26-10:50
@@ -9677,6 +10018,10 @@ window.addEventListener("zmux-native-host-event", (event) => {
       if (hostEvent.sessionPersistenceName !== undefined) {
         terminalState.sessionPersistenceName = hostEvent.sessionPersistenceName;
         setTerminalSessionPersistenceName(sidebarSessionId, hostEvent.sessionPersistenceName);
+        setTerminalSessionPersistenceProvider(
+          sidebarSessionId,
+          terminalState.sessionPersistenceProvider,
+        );
       }
     }
   }

@@ -8,6 +8,7 @@ import {
   getSlotPosition,
   isSessionGridFocusModeActive,
   normalizeTerminalSessionAgentName,
+  normalizeTerminalSessionPersistenceProvider,
   normalizeTerminalEngine,
   type SessionGridDirection,
   type SessionGridSnapshot,
@@ -283,6 +284,9 @@ export function normalizeSessionRecord(session: SessionRecord): SessionRecord {
       session.kind === "terminal"
         ? (session.sessionPersistenceName ?? session.tmuxSessionName)
         : undefined,
+    ),
+    sessionPersistenceProvider: normalizeTerminalSessionPersistenceProvider(
+      session.kind === "terminal" ? session.sessionPersistenceProvider : undefined,
     ),
     title,
     titleSource,

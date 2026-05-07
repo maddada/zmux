@@ -15,6 +15,7 @@ import {
   type SessionRecord,
   type SessionTitleSource,
   type TerminalEngine,
+  type TerminalSessionPersistenceProvider,
   type T3SessionMetadata,
   type TerminalViewMode,
   type VisibleSessionCount,
@@ -596,6 +597,32 @@ export function setTerminalSessionPersistenceNameInSimpleWorkspace(
     return {
       ...session,
       sessionPersistenceName: nextSessionPersistenceName,
+    };
+  });
+}
+
+export function setTerminalSessionPersistenceProviderInSimpleWorkspace(
+  snapshot: GroupedSessionWorkspaceSnapshot,
+  sessionId: string,
+  sessionPersistenceProvider: TerminalSessionPersistenceProvider | undefined,
+): WorkspaceMutationResult {
+  /**
+   * CDXC:SessionPersistence 2026-05-07-20:32
+   * Provider-backed sessions reconnect by a provider/name pair. Store the
+   * provider on the terminal record so changing Settings later cannot wake a
+   * tmux session through zmx or a zmx session through zellij.
+   */
+  return updateSession(snapshot, sessionId, (session) => {
+    if (
+      session.kind !== "terminal" ||
+      session.sessionPersistenceProvider === sessionPersistenceProvider
+    ) {
+      return session;
+    }
+
+    return {
+      ...session,
+      sessionPersistenceProvider,
     };
   });
 }

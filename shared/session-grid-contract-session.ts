@@ -17,6 +17,7 @@ import {
   type SidebarThemeSetting,
   type SidebarThemeVariant,
   type TerminalEngine,
+  type TerminalSessionPersistenceProvider,
   type TerminalSessionRecord,
   type T3SessionRecord,
   type BrowserSessionRecord,
@@ -72,6 +73,7 @@ const WINDOWS_DEFAULT_POWERSHELL_TITLE_PATTERN =
   /^[a-z]:\\windows\\system32\\windowspowershell\\v1\.0\\powershell\.exe(?:\s+\.)?$/iu;
 const AGENT_STATUS_WORD_TITLE_PATTERN =
   /^(?:[\s.:[\](){}!|/\\_-]*)(?:done|error|idle|thinking|working)(?:[\s.:[\](){}!|/\\_-]*)$/iu;
+const GHOST_PLACEHOLDER_SESSION_TITLE_PATTERN = /^👻(?:\s+Terminal Session)?$/u;
 
 export function clampVisibleSessionCount(value: number): VisibleSessionCount {
   if (value <= 1) {
@@ -391,6 +393,9 @@ export function createSessionRecord(
     sessionPersistenceName: normalizeTerminalSessionPersistenceName(
       options?.sessionPersistenceName ?? options?.tmuxSessionName,
     ),
+    sessionPersistenceProvider: normalizeTerminalSessionPersistenceProvider(
+      options?.sessionPersistenceProvider,
+    ),
     title,
     titleSource,
   };
@@ -420,6 +425,20 @@ export function normalizeTerminalSessionAgentName(value: string | undefined): st
 function normalizeTerminalSessionPersistenceName(value: string | undefined): string | undefined {
   const normalizedValue = value?.trim();
   return normalizedValue && normalizedValue.length > 0 ? normalizedValue : undefined;
+}
+
+export function normalizeTerminalSessionPersistenceProvider(
+  provider: TerminalSessionPersistenceProvider | undefined,
+): TerminalSessionPersistenceProvider | undefined {
+  /**
+   * CDXC:SessionPersistence 2026-05-07-20:32
+   * Provider-backed terminal records persist the provider with the provider
+   * session name. Restore, wake, reload, and sidebar badges must not reinterpret
+   * a stored tmux/zmx/zellij name through the current global Settings provider.
+   */
+  return provider === "tmux" || provider === "zmx" || provider === "zellij"
+    ? provider
+    : undefined;
 }
 
 export function normalizeTerminalEngine(value: string | undefined): TerminalEngine {
@@ -485,12 +504,25 @@ export function getSessionCardPrimaryTitle(
   if (
     !normalizedTitle ||
     /^Session \d+$/iu.test(normalizedTitle) ||
+    isGhostPlaceholderSessionTitle(normalizedTitle) ||
     isPathLikeTerminalTitle(normalizedTitle)
   ) {
     return createAgentSessionDefaultTitle(session.agentName);
   }
 
   return normalizedTitle;
+}
+
+/**
+ * CDXC:SessionTitleSync 2026-05-07-17:27
+ * zmx reconnect can emit the Ghostty placeholder title as `👻` before the pane
+ * reports a persisted session title. Treat the ghost forms as placeholders in
+ * the shared title contract so they cannot outrank known stored names, render
+ * as real card titles, or be persisted by terminal-title sync.
+ */
+export function isGhostPlaceholderSessionTitle(title: string): boolean {
+  const normalizedTitle = title.trim().replace(/\s+/g, " ");
+  return GHOST_PLACEHOLDER_SESSION_TITLE_PATTERN.test(normalizedTitle);
 }
 
 export function normalizeTerminalTitle(title: string | undefined): string | undefined {
@@ -546,6 +578,7 @@ function isIgnoredPlaceholderSessionTitle(title: string): boolean {
    */
   return (
     /^Session \d+$/iu.test(normalizedTitle) ||
+    isGhostPlaceholderSessionTitle(normalizedTitle) ||
     AGENT_STATUS_WORD_TITLE_PATTERN.test(normalizedTitle) ||
     IGNORED_PLACEHOLDER_SESSION_TITLES.has(normalizedTitle.toLowerCase()) ||
     isPathLikeTerminalTitle(normalizedTitle)

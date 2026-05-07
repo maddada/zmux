@@ -16,6 +16,7 @@ import type {
   SessionGridSnapshot,
   SessionRecord,
   SidebarTheme,
+  TerminalSessionPersistenceProvider,
   TerminalViewMode,
   VisibleSessionCount,
 } from "./session-grid-contract-core";
@@ -67,6 +68,8 @@ export type SidebarSessionItem = {
   lastInteractionAt?: string;
   sessionId: string;
   sessionNumber?: string;
+  sessionPersistenceName?: string;
+  sessionPersistenceProvider?: TerminalSessionPersistenceProvider;
   primaryTitle?: string;
   isPrimaryTitleTerminalTitle?: boolean;
   terminalTitle?: string;
@@ -647,6 +650,10 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "copyResumeCommand";
+      sessionId: string;
+    }
+  | {
+      type: "copyAttachCommand";
       sessionId: string;
     }
   | {

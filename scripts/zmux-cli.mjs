@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -12,8 +12,22 @@ const DEV_PORT = 58744;
 const ZMUX_HOME = path.join(homedir(), ".zmux");
 const LOG_DIR = path.join(ZMUX_HOME, "logs");
 const CLI_DIR = path.join(ZMUX_HOME, "cli");
+const SESSION_ALIAS_CACHE_PATH = path.join(CLI_DIR, "session-aliases.json");
 
 const COMMANDS = new Map([
+  ["sessions", sessionsCommand],
+  ["s", sessionsCommand],
+  ["list-sessions", sessionsCommand],
+  ["ls", sessionsCommand],
+  ["attach", attachSessionCommand],
+  ["a", attachSessionCommand],
+  ["resume", attachSessionCommand],
+  ["r", attachSessionCommand],
+  ["kill", sessionActionCommand("closeSession", "killed")],
+  ["k", sessionActionCommand("closeSession", "killed")],
+  ["sleep", sessionActionCommand("sleepSession", "slept", { sleeping: true })],
+  ["wake", sessionActionCommand("sleepSession", "woke", { sleeping: false })],
+  ["focus", focusSmartSessionCommand],
   ["state", bridgeAction("state")],
   ["dump-state", bridgeAction("dumpState")],
   ["create-session", bridgeAction("createSession", parseCreateSession)],
@@ -58,9 +72,17 @@ main().catch((error) => {
 
 async function main() {
   const [commandName = "help", ...args] = process.argv.slice(2);
+  if (commandName === "-h" || commandName === "--help") {
+    helpCommand();
+    return;
+  }
   const command = COMMANDS.get(commandName);
   if (!command) {
     throw new Error(`Unknown command: ${commandName}\n\n${usage()}`);
+  }
+  if (args.includes("-h") || args.includes("--help")) {
+    helpCommand();
+    return;
   }
   await command(args);
 }
@@ -181,6 +203,305 @@ async function collectLogs(lines) {
     result[file] = text.split(/\r?\n/).filter(Boolean).slice(-lines);
   }
   return result;
+}
+
+async function sessionsCommand(args) {
+  const { flags } = parseArgs(args);
+  const result = await fetchSessionList(flags, { writeCache: true });
+  if (flags.json) {
+    printJson(result);
+    return;
+  }
+  printSessionList(result.sessions ?? [], {
+    grouped: flags.ungrouped !== true && flags.u !== true,
+  });
+}
+
+async function attachSessionCommand(args) {
+  const { flags, rest } = parseArgs(args);
+  const selector = rest.join(" ").trim();
+  const result = await fetchSessionList(flags);
+  const session = await resolveOneListedSession(selector, result.sessions ?? []);
+  const command = session.attachCommand || session.resumeCommand;
+  if (!command) {
+    throw new Error(
+      `Session ${session.alias} has no provider attach command or supported agent resume command.`,
+    );
+  }
+  await runInteractiveShellCommand(command, session.projectPath);
+}
+
+function sessionActionCommand(action, pastTense, extraPayload = {}) {
+  return async (args) => {
+    const { flags, rest } = parseArgs(args);
+    const selector = rest.join(" ").trim();
+    const result = await fetchSessionList(flags);
+    const sessions =
+      selector.toLowerCase() === "all"
+        ? (result.sessions ?? [])
+        : [await resolveOneListedSession(selector, result.sessions ?? [])];
+    if (sessions.length === 0) {
+      throw new Error("No running terminal sessions matched.");
+    }
+    const affected = [];
+    for (const session of sessions) {
+      const actionResult = await sendSidebarCliCommand(
+        action,
+        {
+          ...extraPayload,
+          sessionId: session.sessionId,
+        },
+        flags,
+      );
+      if (actionResult.ok === false) {
+        throw new Error(actionResult.error ?? `Could not ${action} ${session.title}.`);
+      }
+      affected.push({ ok: actionResult.ok !== false, session });
+    }
+    if (flags.json) {
+      printJson({ ok: affected.every((item) => item.ok), sessions: affected });
+      return;
+    }
+    for (const item of affected) {
+      console.log(`${pastTense} ${item.session.alias}: ${item.session.title}`);
+    }
+  };
+}
+
+async function focusSmartSessionCommand(args) {
+  const { flags, rest } = parseArgs(args);
+  const selector = rest.join(" ").trim();
+  const result = await fetchSessionList(flags);
+  const session = await resolveOneListedSession(selector, result.sessions ?? []);
+  const actionResult = await sendSidebarCliCommand(
+    "focusSession",
+    { sessionId: session.sessionId },
+    flags,
+  );
+  if (flags.json) {
+    printJson(actionResult);
+    return;
+  }
+  console.log(`focused ${session.alias}: ${session.title}`);
+}
+
+async function fetchSessionList(flags = {}, options = {}) {
+  const result = await sendSidebarCliCommand("listSessions", {}, flags);
+  if (result.ok === false) {
+    throw new Error(result.error ?? "Could not list zmux sessions.");
+  }
+  const sessions = Array.isArray(result.sessions) ? result.sessions : [];
+  if (options.writeCache === true) {
+    await writeSessionAliasCache({
+      createdAt: new Date().toISOString(),
+      revision: result.revision,
+      sessions,
+    });
+  }
+  return { ...result, sessions };
+}
+
+async function writeSessionAliasCache(cache) {
+  /**
+   * CDXC:CliSessions 2026-05-07-21:22
+   * The human sessions CLI uses global aliases from the last printed live list
+   * so follow-up commands such as `zmux a 2` and `zmux k 4` target the rows the
+   * user just saw, independent of grouped or ungrouped table formatting.
+   */
+  await mkdir(CLI_DIR, { recursive: true });
+  await writeFile(SESSION_ALIAS_CACHE_PATH, JSON.stringify(cache, null, 2));
+}
+
+async function readSessionAliasCache() {
+  const text = await readFile(SESSION_ALIAS_CACHE_PATH, "utf8").catch(() => undefined);
+  return text ? parseJson(text) : undefined;
+}
+
+async function resolveOneListedSession(selector, sessions) {
+  const matches = await resolveListedSessions(selector, sessions);
+  if (matches.length === 1) {
+    return matches[0];
+  }
+  if (matches.length === 0) {
+    throw new Error(`No matching session found for "${selector}". Run "zmux sessions" to list sessions.`);
+  }
+  throw new Error(`Multiple sessions matched "${selector}":\n${formatSessionMatches(matches)}`);
+}
+
+async function resolveListedSessions(selector, sessions) {
+  const normalizedSelector = selector.trim();
+  if (!normalizedSelector) {
+    throw new Error("Provide a session alias, id, title, or project:title selector.");
+  }
+  if (/^\d+$/.test(normalizedSelector)) {
+    const alias = Number(normalizedSelector);
+    const cache = await readSessionAliasCache();
+    const cachedSessionId = cache?.sessions?.find?.((session) => session.alias === alias)?.sessionId;
+    if (cachedSessionId) {
+      const liveSession = sessions.find((session) => session.sessionId === cachedSessionId);
+      if (liveSession) {
+        return [liveSession];
+      }
+    }
+    const liveAliasMatch = sessions.find((session) => session.alias === alias);
+    return liveAliasMatch ? [liveAliasMatch] : [];
+  }
+  const exactId = sessions.find((session) => session.sessionId === normalizedSelector);
+  if (exactId) {
+    return [exactId];
+  }
+  const projectSeparatorIndex = normalizedSelector.indexOf(":");
+  if (projectSeparatorIndex > 0) {
+    const projectSelector = normalizedSelector.slice(0, projectSeparatorIndex).trim().toLowerCase();
+    const titleSelector = normalizedSelector.slice(projectSeparatorIndex + 1).trim().toLowerCase();
+    return rankSessionTitleMatches(
+      sessions.filter(
+        (session) =>
+          session.projectName?.toLowerCase() === projectSelector ||
+          session.projectPath?.toLowerCase().includes(projectSelector),
+      ),
+      titleSelector,
+    );
+  }
+  return rankSessionTitleMatches(sessions, normalizedSelector.toLowerCase());
+}
+
+function rankSessionTitleMatches(sessions, selector) {
+  const exact = sessions.filter((session) => session.title?.toLowerCase() === selector);
+  if (exact.length > 0) {
+    return exact;
+  }
+  return sessions.filter((session) => session.title?.toLowerCase().includes(selector));
+}
+
+function formatSessionMatches(sessions) {
+  return sessions
+    .map((session) => `${session.alias}. ${session.projectName} - ${session.title}`)
+    .join("\n");
+}
+
+function printSessionList(sessions, { grouped }) {
+  if (sessions.length === 0) {
+    console.log("No running terminal sessions.");
+    return;
+  }
+  if (!grouped) {
+    printTable(
+      ["#", "Project", "Active", "Title", "Status", "Provider", "Agent"],
+      sessions.map((session) => [
+        String(session.alias),
+        session.projectName || "-",
+        formatActiveTime(session.lastInteractionAt),
+        session.title || "-",
+        session.status || "-",
+        session.provider || "-",
+        session.agent || "-",
+      ]),
+    );
+    return;
+  }
+  const groupedSessions = groupSessionsByProject(sessions);
+  groupedSessions.forEach((group, index) => {
+    if (index > 0) {
+      console.log("");
+    }
+    console.log(group.projectName);
+    printTable(
+      ["#", "Active", "Title", "Status", "Provider", "Agent"],
+      group.sessions.map((session) => [
+        String(session.alias),
+        formatActiveTime(session.lastInteractionAt),
+        session.title || "-",
+        session.status || "-",
+        session.provider || "-",
+        session.agent || "-",
+      ]),
+    );
+  });
+}
+
+function groupSessionsByProject(sessions) {
+  const groups = [];
+  const groupsByProjectId = new Map();
+  for (const session of sessions) {
+    let group = groupsByProjectId.get(session.projectId);
+    if (!group) {
+      group = {
+        projectName: session.projectName || session.projectPath || "Project",
+        sessions: [],
+      };
+      groupsByProjectId.set(session.projectId, group);
+      groups.push(group);
+    }
+    group.sessions.push(session);
+  }
+  return groups;
+}
+
+function printTable(headers, rows) {
+  const widths = headers.map((header, columnIndex) =>
+    Math.max(
+      header.length,
+      ...rows.map((row) => visibleLength(String(row[columnIndex] ?? ""))),
+    ),
+  );
+  console.log(formatTableRow(headers, widths));
+  for (const row of rows) {
+    console.log(formatTableRow(row, widths));
+  }
+}
+
+function formatTableRow(row, widths) {
+  return row
+    .map((value, index) => {
+      const text = String(value ?? "");
+      const padding = " ".repeat(Math.max(0, widths[index] - visibleLength(text)));
+      return index === row.length - 1 ? text : `${text}${padding}`;
+    })
+    .join("  ");
+}
+
+function visibleLength(value) {
+  return value.length;
+}
+
+function formatActiveTime(value) {
+  const timestamp = Date.parse(value ?? "");
+  if (!Number.isFinite(timestamp)) {
+    return "-";
+  }
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) {
+    return `${seconds}s ago`;
+  }
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) {
+    return `${hours}h ago`;
+  }
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+async function runInteractiveShellCommand(command, cwd) {
+  await new Promise((resolve, reject) => {
+    const child = spawn("/bin/zsh", ["-lc", command], {
+      cwd,
+      stdio: "inherit",
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (signal) {
+        process.kill(process.pid, signal);
+        return;
+      }
+      process.exitCode = code ?? 0;
+      resolve();
+    });
+  });
 }
 
 function parseCreateSession(rest, flags) {
@@ -305,6 +626,12 @@ function parseArgs(args) {
   const rest = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg.startsWith("-") && !arg.startsWith("--") && arg.length > 1) {
+      for (const shortFlag of arg.slice(1)) {
+        flags[shortFlag] = true;
+      }
+      continue;
+    }
     if (!arg.startsWith("--")) {
       rest.push(arg);
       continue;
@@ -371,6 +698,36 @@ function usage() {
 
 Usage:
   bun scripts/zmux-cli.mjs <command> [args] [--flags]
+  bun scripts/zmux-cli.mjs --help | -h
+
+Session commands:
+  sessions | s | list-sessions | ls [--ungrouped|-u] [--json]
+      List running terminal sessions grouped by project by default.
+      Columns are: # Active Title Status Provider Agent.
+      --ungrouped/-u adds the Project column and prints one flat table.
+
+  attach | a <alias|id|title|project:title>
+  resume | r <alias|id|title|project:title>
+      Attach to the stored tmux/zmx/zellij provider session when present.
+      If no provider is stored, run the supported agent resume command in the
+      session project directory.
+
+  kill | k <alias|id|title|project:title|all>
+      Terminate one session or every listed terminal session.
+
+  sleep <alias|id|title|project:title|all>
+      Sleep one session or every listed terminal session.
+
+  wake <alias|id|title|project:title|all>
+      Wake one session or every listed terminal session.
+
+  focus <alias|id|title|project:title>
+      Focus the selected session in the zmux app.
+
+Selector rules:
+  Numeric aliases come from the last "zmux sessions" list and stay global
+  across grouped and --ungrouped output. Titles match exact first, then
+  case-insensitive substring. Use project:title when a title is ambiguous.
 
 Core commands:
   state | dump-state
