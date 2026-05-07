@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.10 - 2026-05-08
+
+<!-- CDXC:Distribution 2026-05-08-00:46: Release notes for 1.4.10 must include
+all commits after v1.4.9 so README, GitHub, Sparkle, and Homebrew release
+metadata describe the same shipped behavior. -->
+
+- Added human-facing `zmux` CLI session commands for listing, attaching, resuming, killing, sleeping, waking, and focusing running terminal sessions.
+- Added provider-backed attach metadata so tmux, zmx, and zellij sessions keep their stored provider, show sidebar badges, and expose copyable attach commands.
+- Added a Settings control for floating session status indicator size, plus updated indicator drawing, tooltip wrapping, and settings-control polish.
+- Fixed main window chrome restore so zmux reopens at the prior size, position, and display while avoiding offscreen IDE-attachment coordinates.
+- Fixed Find Previous Session routing so the footer button opens the prompt even with an empty modal search field and logs the modal/native bridge path.
+- Improved session title sync by rejecting Ghostty ghost placeholder titles and protecting trusted restored titles from automatic rename overwrite.
+
 ## 1.4.9 - 2026-05-07
 
 <!-- CDXC:Distribution 2026-05-07-08:01: Release notes for 1.4.9 must include

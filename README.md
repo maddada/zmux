@@ -35,6 +35,7 @@ brew install --cask maddada/tap/zmux
 ## Best features:
 
 - Native Sparkle updates for macOS releases.
+- `zmux sessions`, `zmux attach`, `zmux kill`, `zmux sleep`, `zmux wake`, and `zmux focus` manage live terminal sessions from a shell.
 - Native T3 Code panes with managed runtime bootstrap, authenticated thread routing, and remote/browser access links.
 - Optional Browser Panes mode opens browser actions as workspace panes with address navigation, reload, DevTools, React Grab, profiles, and favicon-backed sidebar cards.
 - Embedded code-server editor panes open project-scoped code surfaces with diff stats and native CEF hosting.
@@ -44,11 +45,12 @@ brew install --cask maddada/tap/zmux
 - Project headers can create scoped browser panes and open or close project editor panes directly from the group row.
 - Chromium CEF browser panes keep native browser storage and cookies across app restarts.
 - Shared Ghostty settings keep terminal configuration consistent between the native host and sidebar settings UI.
-- Zellij, tmux, and zmx session persistence providers can keep terminal sessions restart-safe, with stable zellij names and direct zmx attach behavior.
+- Zellij, tmux, and zmx session persistence providers can keep terminal sessions restart-safe, with stable zellij names, direct zmx attach behavior, sidebar provider badges, and copyable attach commands.
 - Sidebar Actions and Open In split controls can run the primary command or show React-rendered dropdown menus for Finder, Visual Studio Code, and Zed.
 - Configure Actions modal supports readable project-action rows plus create, edit, and delete flows.
-- Settings show modified values with reset-to-default tooltips, and sidebar placement can be set to the left or right side.
-- Native floating status indicators show running, attention, and available session counts with click-to-focus routing.
+- Settings show modified values with reset-to-default tooltips, floating indicator sizing, and left/right sidebar placement.
+- Native floating status indicators show running, attention, and available session counts with click-to-focus routing and selectable size.
+- Main window size, position, and display restore across launches, including IDE-attached sessions.
 - Combined sidebar mode shows one project group per project across all projects, with Separated mode still available.
 - Recent Projects keeps closed or empty combined-mode projects available with fuzzy project/path search.
 - Previous Sessions can restore archived terminal sessions with agent identity, first-message metadata, title provenance, favorites, and resume inputs.
