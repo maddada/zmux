@@ -34,7 +34,7 @@ final class SessionStatusIndicatorController {
     panel.backgroundColor = .clear
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
     panel.contentView = indicatorView
-    panel.hasShadow = true
+    panel.hasShadow = false
     panel.hidesOnDeactivate = false
     panel.ignoresMouseEvents = false
     panel.isFloatingPanel = true
@@ -48,6 +48,7 @@ final class SessionStatusIndicatorController {
 
   func apply(_ command: SetSessionStatusIndicators) {
     let items = Self.visibleItems(for: command)
+    indicatorView.sizeSetting = command.size
     indicatorView.items = items
     guard !items.isEmpty else {
       panel.orderOut(nil)
@@ -78,13 +79,13 @@ final class SessionStatusIndicatorController {
           ? SessionStatusIndicatorItem(
             status: .attention,
             count: command.attentionCount,
-            color: NSColor.systemGreen)
+            color: NSColor(calibratedRed: 0.13, green: 0.54, blue: 0.20, alpha: 1))
           : nil,
         command.runningCount > 0
           ? SessionStatusIndicatorItem(
             status: .running,
             count: command.runningCount,
-            color: NSColor.systemOrange)
+            color: NSColor(calibratedRed: 0.70, green: 0.36, blue: 0.10, alpha: 1))
           : nil,
       ].compactMap { $0 }
     }
@@ -96,7 +97,7 @@ final class SessionStatusIndicatorController {
       SessionStatusIndicatorItem(
         status: .available,
         count: command.availableCount,
-        color: NSColor.systemGray)
+        color: NSColor(calibratedWhite: 0.32, alpha: 1))
     ]
   }
 
@@ -149,19 +150,71 @@ private struct SessionStatusIndicatorItem {
 
 @MainActor
 private final class SessionStatusIndicatorView: NSView {
+  private struct IndicatorMetrics {
+    let scale: CGFloat
+
+    var circleDiameter: CGFloat { 52 * scale }
+    var horizontalInset: CGFloat { 11 * scale }
+    var verticalInset: CGFloat { 8 * scale }
+    var itemGap: CGFloat { 6 * scale }
+    var minimumTextPadding: CGFloat { 20 * scale }
+    var countFont: NSFont {
+      NSFont.monospacedDigitSystemFont(ofSize: 23 * scale, weight: .bold)
+    }
+
+    var backdropInset: CGFloat { 3 * scale }
+    var backdropShadowBlur: CGFloat { 14 * scale }
+    var backdropShadowOffset: CGFloat { -3 * scale }
+    var backdropStrokeWidth: CGFloat { max(0.6, 1.4 * scale) }
+    var innerBackdropInset: CGFloat { 2.5 * scale }
+    var topHighlightInset: CGFloat { 5 * scale }
+    var badgeShadowBlur: CGFloat { 8 * scale }
+    var badgeShadowOffset: CGFloat { -2 * scale }
+    var badgeRingInset: CGFloat { 2 * scale }
+    var badgeFillInset: CGFloat { 5.5 * scale }
+    var badgeStrokeWidth: CGFloat { max(0.5, 1.2 * scale) }
+    var textBaselineOffset: CGFloat { 0.5 * scale }
+  }
+
   private struct ShiftDragState {
     let mouseStart: NSPoint
     let windowOriginStart: NSPoint
   }
 
-  private static let circleDiameter: CGFloat = 36
-  private static let contentInset: CGFloat = 2
-  private static let itemGap: CGFloat = 8
-  private static let minimumTextPadding: CGFloat = 16
-  private static let textAttributes: [NSAttributedString.Key: Any] = [
-    .font: NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .bold),
-    .foregroundColor: NSColor.white,
-  ]
+  /**
+   CDXC:SessionStatusIndicators 2026-05-07-16:42
+   Counts should read clearly at default size, and a future user-facing size
+   setting should scale a small set of base metrics instead of rewriting draw
+   logic. Keep the default number visually dominant inside the indicator.
+   CDXC:SessionStatusIndicators 2026-05-07-17:36
+   The indicator should use a polished glass capsule with circular status
+   badges, matching the approved visual direction while preserving the
+   inactive-only-when-no-action-state visibility rule in visibleItems.
+   CDXC:SessionStatusIndicators 2026-05-07-18:02
+   A single visible status must not collapse the backdrop into a square-looking
+   button. Keep a horizontal capsule minimum and draw all shadows inside the
+   view so transparent NSPanel edges never create rectangular chrome.
+   CDXC:SessionStatusIndicators 2026-05-07-18:20
+   The current polished indicator size is X-Large. Medium is the default and
+   scales every drawing metric to 50% of X-Large; Large and Small are named
+   settings values that reuse the same AppKit drawing path.
+   CDXC:SessionStatusIndicators 2026-05-07-18:32
+   The capsule should fit the visible badges tightly, including the single
+   badge case. Badge fill colors stay darker for text contrast, and numbers
+   render as full white rather than tinted text.
+   */
+  private static func metrics(for size: NativeSessionStatusIndicatorSize) -> IndicatorMetrics {
+    switch size {
+    case .small:
+      return IndicatorMetrics(scale: 0.4)
+    case .medium:
+      return IndicatorMetrics(scale: 0.5)
+    case .large:
+      return IndicatorMetrics(scale: 0.75)
+    case .xLarge:
+      return IndicatorMetrics(scale: 1)
+    }
+  }
 
   var items: [SessionStatusIndicatorItem] = [] {
     didSet {
@@ -169,14 +222,26 @@ private final class SessionStatusIndicatorView: NSView {
     }
   }
 
+  var sizeSetting: NativeSessionStatusIndicatorSize = .medium {
+    didSet {
+      needsDisplay = true
+    }
+  }
+
   var preferredSize: NSSize {
+    let metrics = currentMetrics
     let itemWidths = items.map { diameter(for: $0) }
-    let width =
+    let contentWidth =
       itemWidths.reduce(0, +)
-      + CGFloat(max(items.count - 1, 0)) * Self.itemGap
-      + Self.contentInset * 2
-    let height = (itemWidths.max() ?? Self.circleDiameter) + Self.contentInset * 2
+      + CGFloat(max(items.count - 1, 0)) * metrics.itemGap
+      + metrics.horizontalInset * 2
+    let width = contentWidth
+    let height = (itemWidths.max() ?? metrics.circleDiameter) + metrics.verticalInset * 2
     return NSSize(width: width, height: height)
+  }
+
+  private var currentMetrics: IndicatorMetrics {
+    Self.metrics(for: sizeSetting)
   }
 
   private let onClick: (NativeSessionStatusIndicatorStatus) -> Void
@@ -209,19 +274,138 @@ private final class SessionStatusIndicatorView: NSView {
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
+    let metrics = currentMetrics
+    drawBackdrop(metrics: metrics)
     for (item, rect) in itemRects() {
-      item.color.setFill()
-      NSBezierPath(ovalIn: rect).fill()
+      drawBadge(item, in: rect, metrics: metrics)
 
       let label = NSAttributedString(
         string: "\(item.count)",
-        attributes: Self.textAttributes)
+        attributes: textAttributes(metrics: metrics))
       let labelSize = label.size()
       label.draw(
         at: NSPoint(
           x: rect.midX - labelSize.width / 2,
-          y: rect.midY - labelSize.height / 2 + 0.5))
+          y: rect.midY - labelSize.height / 2 + metrics.textBaselineOffset))
     }
+  }
+
+  private func drawBackdrop(metrics: IndicatorMetrics) {
+    let rect = bounds.insetBy(dx: metrics.backdropInset, dy: metrics.backdropInset)
+    let radius = rect.height / 2
+    let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+
+    NSGraphicsContext.saveGraphicsState()
+    let shadow = NSShadow()
+    shadow.shadowBlurRadius = metrics.backdropShadowBlur
+    shadow.shadowColor = NSColor.black.withAlphaComponent(0.58)
+    shadow.shadowOffset = NSSize(width: 0, height: metrics.backdropShadowOffset)
+    shadow.set()
+    NSColor(calibratedWhite: 0.06, alpha: 0.72).setFill()
+    path.fill()
+    NSGraphicsContext.restoreGraphicsState()
+
+    NSGradient(colors: [
+      NSColor(calibratedWhite: 0.31, alpha: 0.90),
+      NSColor(calibratedWhite: 0.16, alpha: 0.84),
+      NSColor(calibratedWhite: 0.07, alpha: 0.88),
+    ])?.draw(in: path, angle: -90)
+
+    NSColor.white.withAlphaComponent(0.28).setStroke()
+    path.lineWidth = metrics.backdropStrokeWidth
+    path.stroke()
+
+    let innerRect = rect.insetBy(dx: metrics.innerBackdropInset, dy: metrics.innerBackdropInset)
+    let innerPath = NSBezierPath(
+      roundedRect: innerRect,
+      xRadius: innerRect.height / 2,
+      yRadius: innerRect.height / 2)
+    NSColor.black.withAlphaComponent(0.52).setStroke()
+    innerPath.lineWidth = 1
+    innerPath.stroke()
+
+    let topHighlightRect = NSRect(
+      x: rect.minX + metrics.topHighlightInset,
+      y: rect.midY,
+      width: rect.width - metrics.topHighlightInset * 2,
+      height: rect.height * 0.42)
+    NSGradient(colors: [
+      NSColor.white.withAlphaComponent(0.18),
+      NSColor.white.withAlphaComponent(0.0),
+    ])?.draw(
+      in: NSBezierPath(
+        roundedRect: topHighlightRect,
+        xRadius: topHighlightRect.height / 2,
+        yRadius: topHighlightRect.height / 2),
+      angle: -90)
+  }
+
+  private func drawBadge(
+    _ item: SessionStatusIndicatorItem,
+    in rect: NSRect,
+    metrics: IndicatorMetrics
+  ) {
+    let outerRingPath = NSBezierPath(ovalIn: rect)
+    NSGraphicsContext.saveGraphicsState()
+    let shadow = NSShadow()
+    shadow.shadowBlurRadius = metrics.badgeShadowBlur
+    shadow.shadowColor = NSColor.black.withAlphaComponent(0.52)
+    shadow.shadowOffset = NSSize(width: 0, height: metrics.badgeShadowOffset)
+    shadow.set()
+    NSColor(calibratedWhite: 0.03, alpha: 0.76).setFill()
+    outerRingPath.fill()
+    NSGraphicsContext.restoreGraphicsState()
+
+    NSGradient(colors: [
+      NSColor.white.withAlphaComponent(0.30),
+      NSColor.black.withAlphaComponent(0.42),
+    ])?.draw(in: outerRingPath, angle: -90)
+
+    let ringPath = NSBezierPath(
+      ovalIn: rect.insetBy(dx: metrics.badgeRingInset, dy: metrics.badgeRingInset))
+    NSGradient(colors: [
+      NSColor(calibratedWhite: 0.72, alpha: 0.34),
+      NSColor(calibratedWhite: 0.08, alpha: 0.70),
+    ])?.draw(in: ringPath, angle: -90)
+
+    let fillRect = rect.insetBy(dx: metrics.badgeFillInset, dy: metrics.badgeFillInset)
+    let fillPath = NSBezierPath(ovalIn: fillRect)
+    NSGradient(colors: [
+      item.color.highlight(withLevel: 0.20) ?? item.color,
+      item.color,
+      item.color.shadow(withLevel: 0.52) ?? item.color,
+    ])?.draw(in: fillPath, angle: -90)
+
+    NSColor.black.withAlphaComponent(0.34).setStroke()
+    fillPath.lineWidth = metrics.badgeStrokeWidth
+    fillPath.stroke()
+
+    item.color.highlight(withLevel: 0.2)?.withAlphaComponent(0.70).setStroke()
+    NSBezierPath(ovalIn: fillRect.insetBy(dx: 1, dy: 1)).stroke()
+
+    let highlightRect = NSRect(
+      x: fillRect.minX + fillRect.width * 0.17,
+      y: fillRect.midY + fillRect.height * 0.10,
+      width: fillRect.width * 0.66,
+      height: fillRect.height * 0.34)
+    NSGradient(colors: [
+      NSColor.white.withAlphaComponent(0.30),
+      NSColor.white.withAlphaComponent(0.0),
+    ])?.draw(
+      in: NSBezierPath(ovalIn: highlightRect),
+      angle: -90)
+  }
+
+  private func textAttributes(metrics: IndicatorMetrics) -> [NSAttributedString.Key: Any] {
+    let shadow = NSShadow()
+    shadow.shadowBlurRadius = 2 * metrics.scale
+    shadow.shadowColor = NSColor.black.withAlphaComponent(0.58)
+    shadow.shadowOffset = NSSize(width: 0, height: -1 * metrics.scale)
+    return [
+      .font: metrics.countFont,
+      .foregroundColor: NSColor.white,
+      .shadow: shadow,
+    ]
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -280,8 +464,13 @@ private final class SessionStatusIndicatorView: NSView {
   }
 
   private func itemRects() -> [(SessionStatusIndicatorItem, NSRect)] {
-    var x = Self.contentInset
+    let metrics = currentMetrics
     let centerY = bounds.midY
+    let itemWidths = items.map { diameter(for: $0) }
+    let groupWidth =
+      itemWidths.reduce(0, +)
+      + CGFloat(max(items.count - 1, 0)) * metrics.itemGap
+    var x = (bounds.width - groupWidth) / 2
     return items.map { item in
       let diameter = diameter(for: item)
       let rect = NSRect(
@@ -289,15 +478,16 @@ private final class SessionStatusIndicatorView: NSView {
         y: centerY - diameter / 2,
         width: diameter,
         height: diameter)
-      x += diameter + Self.itemGap
+      x += diameter + metrics.itemGap
       return (item, rect)
     }
   }
 
   private func diameter(for item: SessionStatusIndicatorItem) -> CGFloat {
+    let metrics = currentMetrics
     let label = NSAttributedString(
       string: "\(item.count)",
-      attributes: Self.textAttributes)
-    return max(Self.circleDiameter, ceil(label.size().width + Self.minimumTextPadding))
+      attributes: [.font: metrics.countFont])
+    return max(metrics.circleDiameter, ceil(label.size().width + metrics.minimumTextPadding))
   }
 }

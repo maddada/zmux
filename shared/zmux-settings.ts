@@ -31,6 +31,7 @@ export type GhosttyScrollbar = "system" | "never";
 export type TerminalCursorStyle = "bar" | "block" | "underline";
 export type BrowserOpenMode = "chrome-canary" | "browser-pane";
 export type SessionPersistenceProvider = "off" | "tmux" | "zmx" | "zellij";
+export type SessionStatusIndicatorSize = "small" | "medium" | "large" | "x-large";
 export type SidebarMode = "combined" | "separated";
 export type SidebarSide = "left" | "right";
 export type ZedOverlayTargetApp = "zed" | "zed-preview" | "vscode" | "vscode-insiders";
@@ -62,6 +63,7 @@ export type zmuxSettings = {
   showSidebarActions: boolean;
   showSidebarAgents: boolean;
   showSidebarGitButton: boolean;
+  sessionStatusIndicatorSize: SessionStatusIndicatorSize;
   sessionPersistenceProvider: SessionPersistenceProvider;
   sidebarMode: SidebarMode;
   sidebarSide: SidebarSide;
@@ -140,6 +142,14 @@ export const DEFAULT_zmux_SETTINGS: zmuxSettings = {
   showSidebarActions: true,
   showSidebarAgents: true,
   showSidebarGitButton: true,
+  /**
+   * CDXC:SessionStatusIndicators 2026-05-07-18:20
+   * The AppKit floating session indicator defaults to Medium, which is half of
+   * the approved X-Large visual size. Persist the named size now so Settings
+   * can later tune the same scalable drawing metrics without changing native
+   * command shape again.
+   */
+  sessionStatusIndicatorSize: "medium",
   /**
    * CDXC:SessionPersistence 2026-05-05-07:28
    * Terminal persistence is opt-in and provider-selected. Off preserves the
@@ -268,6 +278,16 @@ export const SIDEBAR_SIDE_OPTIONS: ReadonlyArray<{
 }> = [
   { label: "Left", value: "left" },
   { label: "Right", value: "right" },
+];
+
+export const SESSION_STATUS_INDICATOR_SIZE_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: SessionStatusIndicatorSize;
+}> = [
+  { label: "X-Large", value: "x-large" },
+  { label: "Large", value: "large" },
+  { label: "Medium", value: "medium" },
+  { label: "Small", value: "small" },
 ];
 
 export const GHOSTTY_COPY_ON_SELECT_OPTIONS: ReadonlyArray<{
@@ -428,6 +448,19 @@ export function normalizezmuxSettings(candidate: unknown): zmuxSettings {
       source,
       "showSidebarGitButton",
       DEFAULT_zmux_SETTINGS.showSidebarGitButton,
+    ),
+    /**
+     * CDXC:SessionStatusIndicators 2026-05-07-18:20
+     * Indicator size is a named UX preference, not raw pixels. Normalize to
+     * supported sizes so the native AppKit renderer can apply deterministic
+     * scale factors while preserving Medium as the first-install default.
+     */
+    sessionStatusIndicatorSize: normalizeSessionStatusIndicatorSize(
+      readString(
+        source,
+        "sessionStatusIndicatorSize",
+        DEFAULT_zmux_SETTINGS.sessionStatusIndicatorSize,
+      ),
     ),
     sessionPersistenceProvider,
     /**
@@ -662,6 +695,12 @@ function normalizeSidebarMode(value: string | undefined): SidebarMode {
 
 function normalizeSidebarSide(value: string | undefined): SidebarSide {
   return value === "right" ? "right" : DEFAULT_zmux_SETTINGS.sidebarSide;
+}
+
+function normalizeSessionStatusIndicatorSize(
+  value: string | undefined,
+): SessionStatusIndicatorSize {
+  return value === "small" || value === "large" || value === "x-large" ? value : "medium";
 }
 
 function normalizeSessionPersistenceProvider(

@@ -25,10 +25,12 @@
   width: 0;
 }
 
-/* CDXC:Settings 2026-04-26-19:08: Keep the legacy sidebar button reset global
-   for handmade sidebar controls, but let shadcn button-based controls inside
-   the settings modal use their generated shadcn styles. */
-.zmux-settings-shadcn button[data-slot] {
+/* CDXC:SettingsControls 2026-05-07-18:03: Only shadcn Button instances need
+   protection from legacy sidebar button globals. Radix controls such as Select
+   and Switch also render buttons with data-slot attributes; resetting all of
+   them strips their shadcn backgrounds and makes dropdowns blend into the
+   settings modal. */
+.zmux-settings-shadcn button[data-slot="button"] {
   background: revert-layer;
   border: revert-layer;
   border-radius: revert-layer;
@@ -38,23 +40,39 @@
   transition: revert-layer;
 }
 
-.zmux-settings-shadcn button[data-slot]:disabled {
+.zmux-settings-shadcn button[data-slot="button"]:disabled {
   cursor: revert-layer;
   opacity: revert-layer;
 }
 
-/* CDXC:Settings 2026-05-06-12:57: Modified settings use an orange star
-   action next to the setting label. The control needs its own scoped color
-   because the modal's shadcn button reset intentionally reverts inherited
-   button colors for generic sidebar compatibility. */
+/* CDXC:SettingsModifiedState 2026-05-07-19:44: Modified settings use a small
+   gray IconAsterisk to the left of the label. Absolute positioning keeps the
+   marker from changing label layout or pushing controls around, and the 3px
+   right shift keeps the heavier glyph visually close to the setting label. */
 .zmux-settings-shadcn .settings-modified-reset-button {
-  color: #f97316;
+  background: transparent !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: color-mix(in srgb, var(--muted-foreground) 82%, var(--foreground) 18%);
+  height: 0.875rem;
+  padding: 0 !important;
+  position: absolute;
+  right: calc(100% + 0.1875rem);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0.875rem;
+}
+
+.zmux-settings-shadcn .settings-modified-reset-button svg {
+  height: 0.625rem;
+  width: 0.625rem;
 }
 
 .zmux-settings-shadcn .settings-modified-reset-button:hover,
 .zmux-settings-shadcn .settings-modified-reset-button:focus-visible {
-  background: color-mix(in srgb, #f97316 16%, transparent);
-  color: #fb923c;
+  background: transparent !important;
+  color: var(--foreground);
 }
 
 /* CDXC:Settings 2026-04-26-22:29: Section title pills in the settings modal

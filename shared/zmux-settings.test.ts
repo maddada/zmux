@@ -5,6 +5,7 @@ import {
   GHOSTTY_THEME_SETTING_OPTIONS,
   normalizezmuxSettings,
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
+  SESSION_STATUS_INDICATOR_SIZE_OPTIONS,
   SIDEBAR_MODE_OPTIONS,
   SIDEBAR_SIDE_OPTIONS,
   ZED_OVERLAY_TARGET_APP_OPTIONS,
@@ -110,6 +111,31 @@ describe("normalizezmuxSettings", () => {
     expect(SIDEBAR_SIDE_OPTIONS).toEqual([
       { label: "Left", value: "left" },
       { label: "Right", value: "right" },
+    ]);
+  });
+
+  test("defaults session status indicators to Medium and keeps four selectable sizes", () => {
+    /**
+     * CDXC:SessionStatusIndicators 2026-05-07-18:20
+     * Medium is the default because it is 50% of the current approved X-Large
+     * indicator size. Settings must expose all named scale points so users can
+     * return to the larger visual or choose smaller indicators later.
+     */
+    expect(DEFAULT_zmux_SETTINGS.sessionStatusIndicatorSize).toBe("medium");
+    expect(normalizezmuxSettings({})).toMatchObject({
+      sessionStatusIndicatorSize: "medium",
+    });
+    expect(normalizezmuxSettings({ sessionStatusIndicatorSize: "x-large" })).toMatchObject({
+      sessionStatusIndicatorSize: "x-large",
+    });
+    expect(normalizezmuxSettings({ sessionStatusIndicatorSize: "giant" })).toMatchObject({
+      sessionStatusIndicatorSize: "medium",
+    });
+    expect(SESSION_STATUS_INDICATOR_SIZE_OPTIONS).toEqual([
+      { label: "X-Large", value: "x-large" },
+      { label: "Large", value: "large" },
+      { label: "Medium", value: "medium" },
+      { label: "Small", value: "small" },
     ]);
   });
 

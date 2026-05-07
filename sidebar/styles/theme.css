@@ -465,7 +465,12 @@ body {
     color 180ms ease;
 }
 
-button {
+/* CDXC:SettingsControls 2026-05-07-18:57: shadcn/Radix controls render
+   button elements with data-slot attributes, and invisible connector buttons
+   own explicit component styles. Keep the legacy sidebar button base low
+   specificity so component classes can remove borders while Select triggers
+   keep their shadcn bg-input/30 fill. */
+button:where(:not([data-slot])) {
   border: 1px solid var(--app-border);
   border-radius: 999px;
   background: transparent;
@@ -484,7 +489,7 @@ select {
   font-family: inherit;
 }
 
-button:disabled {
+button:where(:not([data-slot])):disabled {
   cursor: default;
   opacity: 0.58;
 }

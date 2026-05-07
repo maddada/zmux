@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import Fuse from "fuse.js";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -30,7 +31,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { IconStarFilled } from "@tabler/icons-react";
+import { IconAsterisk } from "@tabler/icons-react";
 import { COMPLETION_SOUND_OPTIONS, type CompletionSoundSetting } from "../shared/completion-sound";
 import { ZMUX_RECOMMENDED_GHOSTTY_CONFIG_LINES } from "../shared/ghostty-config-actions";
 import {
@@ -47,6 +48,7 @@ import {
   GHOSTTY_SCROLLBAR_OPTIONS,
   GHOSTTY_THEME_SETTING_OPTIONS,
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
+  SESSION_STATUS_INDICATOR_SIZE_OPTIONS,
   SIDEBAR_MODE_OPTIONS,
   SIDEBAR_SIDE_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
@@ -57,6 +59,7 @@ import {
   type GhosttyCopyOnSelect,
   type GhosttyScrollbar,
   type SessionPersistenceProvider,
+  type SessionStatusIndicatorSize,
   type SidebarMode,
   type SidebarSide,
   type TerminalCursorStyle,
@@ -116,6 +119,7 @@ export function SettingsModal({
   const pendingSettingsRef = useRef<zmuxSettings | undefined>(undefined);
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const modalTheme = resolveSidebarTheme(draft.sidebarTheme, getSidebarThemeVariant(theme));
+  const isModalDarkTheme = getSidebarThemeVariant(modalTheme) === "dark";
 
   /**
    * CDXC:SettingsSearch 2026-05-04-02:30
@@ -202,6 +206,12 @@ export function SettingsModal({
         options: SIDEBAR_THEME_SETTING_OPTIONS,
         subtitle: "Choose the sidebar color scheme.",
         title: "Theme",
+      },
+      {
+        key: "sessionStatusIndicatorSize",
+        options: SESSION_STATUS_INDICATOR_SIZE_OPTIONS,
+        subtitle: "Scale the floating session status indicator.",
+        title: "Floating Session Indicator Size",
       },
       {
         key: "agentManagerZoomPercent",
@@ -548,7 +558,10 @@ export function SettingsModal({
       open={isOpen}
     >
       <DialogContent
-        className="zmux-settings-shadcn max-h-[min(700px,calc(100vh-2rem))] gap-0 overflow-hidden p-0 font-sans sm:max-w-xl"
+        className={cn(
+          "zmux-settings-shadcn max-h-[min(700px,calc(100vh-2rem))] gap-0 overflow-hidden p-0 font-sans sm:max-w-xl",
+          isModalDarkTheme && "dark",
+        )}
         data-sidebar-theme={modalTheme}
       >
         <TooltipProvider delayDuration={300}>
@@ -617,6 +630,21 @@ export function SettingsModal({
                 onChange={(value) => updateDraft("sidebarTheme", value as SidebarThemeSetting)}
                 options={SIDEBAR_THEME_SETTING_OPTIONS}
                 value={draft.sidebarTheme}
+              />
+              ) : null}
+              {/* CDXC:SessionStatusIndicators 2026-05-07-18:20: The floating
+                  AppKit indicator size is a Sidebar setting because it controls
+                  sidebar-owned session navigation chrome outside the webview. */}
+              {shouldShowSetting(settingsSearch.sidebar, "sessionStatusIndicatorSize") ? (
+              <SelectField
+                description="Scale the floating session status indicator."
+                label="Floating Session Indicator Size"
+                {...getSettingModificationProps("sessionStatusIndicatorSize")}
+                onChange={(value) =>
+                  updateDraft("sessionStatusIndicatorSize", value as SessionStatusIndicatorSize)
+                }
+                options={SESSION_STATUS_INDICATOR_SIZE_OPTIONS}
+                value={draft.sessionStatusIndicatorSize}
               />
               ) : null}
               {shouldShowSetting(settingsSearch.sidebar, "agentManagerZoomPercent") ? (
@@ -1669,9 +1697,11 @@ function ToggleField({
 
 /**
  * CDXC:Settings 2026-05-06-12:57
- * Every changed settings control needs an orange star beside its label. The
- * star opens a shadcn tooltip with reset copy and resets only that setting to
- * DEFAULT_zmux_SETTINGS when clicked.
+ * CDXC:SettingsModifiedState 2026-05-07-18:03
+ * Every changed settings control needs a small, low-emphasis asterisk to the
+ * left of its label. Position it absolutely so modified-state indication does
+ * not reflow setting titles, while the tooltip action still resets only that
+ * setting to DEFAULT_zmux_SETTINGS.
  */
 function SettingRow({
   children,
@@ -1691,13 +1721,13 @@ function SettingRow({
   return (
     <Field className="gap-2.5" orientation="vertical">
       <FieldContent>
-        <FieldTitle className="text-sm">
-          <FieldLabel className="text-sm" htmlFor={htmlFor}>
-            {label}
-          </FieldLabel>
+        <FieldTitle className="relative text-sm">
           {isModified && onResetToDefault ? (
             <ModifiedSettingResetButton label={label} onResetToDefault={onResetToDefault} />
           ) : null}
+          <FieldLabel className="text-sm" htmlFor={htmlFor}>
+            {label}
+          </FieldLabel>
         </FieldTitle>
         {description ? (
           <FieldDescription className="text-sm">{description}</FieldDescription>
@@ -1730,7 +1760,7 @@ function ModifiedSettingResetButton({
           type="button"
           variant="ghost"
         >
-          <IconStarFilled aria-hidden="true" />
+          <IconAsterisk aria-hidden="true" />
         </Button>
       </TooltipTrigger>
       <TooltipContent className="whitespace-pre-line text-center" sideOffset={6}>

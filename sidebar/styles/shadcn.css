@@ -91,31 +91,58 @@
 }
 
 .zmux-settings-shadcn {
-  /* CDXC:Settings 2026-04-26-21:27: Settings modal shadcn tokens should be
-     derived from the active sidebar theme, including the immediate preview
-     theme on the modal itself, so modal surfaces and controls stay in sync
-     with the chosen sidebar color scheme. */
-  color-scheme: inherit;
-  --background: var(--app-background);
-  --foreground: var(--app-foreground);
-  --card: var(--app-card);
-  --card-foreground: var(--app-foreground);
-  --popover: var(--app-card);
-  --popover-foreground: var(--app-foreground);
-  --primary: var(--app-button-background);
-  --primary-foreground: var(--app-button-foreground);
-  --secondary: var(--app-card-active);
-  --secondary-foreground: var(--app-foreground);
-  --muted: var(--app-card-active);
-  --muted-foreground: var(--app-muted);
-  --accent: var(--app-card-active);
-  --accent-foreground: var(--app-foreground);
+  /* CDXC:SettingsControls 2026-05-07-18:03
+     Settings controls should stay visually shadcn-native instead of inheriting
+     sidebar action-button colors. Switch and Slider read --primary for their
+     active state, and Select/Input triggers read --input for their borders and
+     subtle fill, so the modal owns a neutral shadcn palette while sidebar theme
+     variables continue to style the surrounding app chrome. */
+  color-scheme: dark;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: var(--app-border);
-  --input: var(--app-border);
-  --ring: var(--app-button-background);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 28%);
+  --ring: oklch(0.556 0 0);
   --radius: 0.625rem;
   letter-spacing: 0;
+}
+
+.zmux-settings-shadcn[data-sidebar-theme="plain-light"],
+.zmux-settings-shadcn[data-sidebar-theme="light-blue"],
+.zmux-settings-shadcn[data-sidebar-theme="light-green"],
+.zmux-settings-shadcn[data-sidebar-theme="light-pink"],
+.zmux-settings-shadcn[data-sidebar-theme="light-orange"] {
+  color-scheme: light;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.82 0 0);
+  --ring: oklch(0.708 0 0);
 }
 
 @layer base {

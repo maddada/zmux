@@ -289,12 +289,20 @@ struct SetSessionStatusIndicators: Decodable {
   let attentionCount: Int
   let runningCount: Int
   let availableCount: Int
+  let size: NativeSessionStatusIndicatorSize
 }
 
 enum NativeSessionStatusIndicatorStatus: String, Codable {
   case attention
   case running
   case available
+}
+
+enum NativeSessionStatusIndicatorSize: String, Decodable {
+  case small
+  case medium
+  case large
+  case xLarge = "x-large"
 }
 
 struct SetTerminalLayout: Decodable {
