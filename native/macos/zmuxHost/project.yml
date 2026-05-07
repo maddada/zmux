@@ -13,19 +13,19 @@ settings:
     # maintainer's Apple signing identity. Developers can set signing locally
     # in Xcode or with an untracked config.
     CODE_SIGN_STYLE: Automatic
-    # CDXC:AutoUpdate 2026-05-06-19:47: Sparkle compares CFBundleVersion, not
+    # CDXC:AutoUpdate 2026-05-07-08:01: Sparkle compares CFBundleVersion, not
     # only CFBundleShortVersionString. Release builds use semver-derived numeric
     # build values so each public update is greater than earlier installs.
-    CURRENT_PROJECT_VERSION: 10408
+    CURRENT_PROJECT_VERSION: 10409
     GENERATE_INFOPLIST_FILE: YES
     LD_RUNPATH_SEARCH_PATHS:
       - "$(inherited)"
       - "@executable_path/../Frameworks"
     MACOSX_DEPLOYMENT_TARGET: "13.0"
-    # CDXC:Distribution 2026-05-06-19:47: Homebrew and Sparkle release v1.4.8 must
+    # CDXC:Distribution 2026-05-07-08:01: Homebrew and Sparkle release v1.4.9 must
     # publish a notarized Developer ID app whose bundle metadata matches the
     # GitHub release, Sparkle appcast, and brew artifact version.
-    MARKETING_VERSION: "1.4.8"
+    MARKETING_VERSION: "1.4.9"
     SDKROOT: macosx
     SWIFT_VERSION: "5.0"
     # CDXC:ChromiumBrowserPanes 2026-05-04-16:38: Swift needs both Ghostty's
