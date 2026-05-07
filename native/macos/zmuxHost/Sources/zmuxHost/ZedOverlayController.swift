@@ -37,6 +37,7 @@ final class ZedOverlayController: NSObject {
   private static let targetActivationCompletionDelay: TimeInterval = 0.24
 
   private weak var window: NSWindow?
+  private let willHideAttachment: (NSRect) -> Void
   private let didActivateAttachment: () -> Void
   private let didHideAttachment: () -> Void
   private let didShowAttachment: () -> Void
@@ -68,22 +69,25 @@ final class ZedOverlayController: NSObject {
   init(
     window: NSWindow,
     initialWindowSize: CGSize,
+    willHideAttachment: @escaping (NSRect) -> Void,
     didActivateAttachment: @escaping () -> Void,
     didHideAttachment: @escaping () -> Void,
     didShowAttachment: @escaping () -> Void,
     didRequestDetach: @escaping (ZedOverlayTargetApp) -> Void
   ) {
     self.window = window
+    self.willHideAttachment = willHideAttachment
     self.didActivateAttachment = didActivateAttachment
     self.didHideAttachment = didHideAttachment
     self.didShowAttachment = didShowAttachment
     self.didRequestDetach = didRequestDetach
     self.visibleWindowFrame = window.frame
     /**
-     CDXC:NativeWindowChrome 2026-04-28-05:44
-     IDE-attached startup must begin from the same saved main-window size as
-     standalone startup, then let the existing attachment constraints clamp it
-     to the maximum size that still leaves the IDE border visible.
+     CDXC:NativeWindowChrome 2026-05-07-08:17
+     IDE-attached startup still sizes from the restored main-window frame, but
+     hidden attachment moves are not a user window placement. Report the last
+     visible frame before tucking zmux so launch restore keeps the user's
+     screen/position instead of the offscreen helper coordinate.
      */
     self.attachedWindowWidth = initialWindowSize.width
     self.attachedWindowHeight = initialWindowSize.height
@@ -645,6 +649,7 @@ final class ZedOverlayController: NSObject {
     }
 
     let sourceFrame = visibleWindowFrame ?? window.frame
+    willHideAttachment(sourceFrame)
     window.setFrame(offscreenFrame(preserving: sourceFrame), display: false)
     pushHiddenWindowFurtherLeftAfterDelay()
     isWindowVisibleInAttachment = false

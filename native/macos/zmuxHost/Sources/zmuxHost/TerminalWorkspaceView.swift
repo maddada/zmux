@@ -65,6 +65,12 @@ private let nativeGhosttyTerminalColorDisablingEnvironmentKeys = [
   "NODE_DISABLE_COLORS",
 ]
 
+private enum TerminalPaneRoundedBottomCorner {
+  case left
+  case none
+  case right
+}
+
 private func nativeGhosttyTerminalEnvironment(
   _ environment: [String: String]?
 ) -> [String: String] {
@@ -277,6 +283,7 @@ final class TerminalWorkspaceView: NSView {
   private var lastEmittedFocusedSessionId: String?
   private var lastAppliedLayoutFocusRequestId: Int?
   private var paneGap = TerminalWorkspaceView.defaultPaneGap
+  private var sidebarSide: SidebarSide = .left
   private var programmaticFocusDepth = 0
   private var terminalLayout: NativeTerminalLayout?
   private var paneResizeHits: [PaneResizeHit] = []
@@ -1128,7 +1135,7 @@ final class TerminalWorkspaceView: NSView {
         loadProjectEditorPaneWhenReady(
           projectId: command.projectId, url: command.url, reason: "createProjectEditorPaneReroute")
       }
-      configureProjectEditorChromiumDiagnostics(
+      configureProjectEditorChromiumCallbacks(
         existingSession.chromiumView,
         projectId: command.projectId,
         reason: "createProjectEditorPaneExisting")
@@ -1168,6 +1175,7 @@ final class TerminalWorkspaceView: NSView {
       browserView: chromiumView,
       chromiumView: chromiumView,
       showsBrowserToolbar: false,
+      showsInitialLoadingOverlay: true,
       initialAddress: command.url,
       onFocus: { [weak self] in
         self?.focusProjectEditorPane(projectId: command.projectId, reason: "projectEditorHostFocus")
@@ -1181,7 +1189,7 @@ final class TerminalWorkspaceView: NSView {
       title: command.title,
       url: command.url
     )
-    configureProjectEditorChromiumDiagnostics(
+    configureProjectEditorChromiumCallbacks(
       chromiumView,
       projectId: command.projectId,
       reason: "createProjectEditorPaneNew")
@@ -1653,6 +1661,20 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
+  func setSidebarSide(_ side: SidebarSide) {
+    /**
+     CDXC:NativePaneChrome 2026-05-07-15:13
+     The workspace's outer rounded active/done border corner follows sidebar
+     placement: left-sidebar layouts round the bottom-right workspace pane,
+     while right-sidebar layouts round the bottom-left workspace pane.
+     */
+    guard sidebarSide != side else {
+      return
+    }
+    sidebarSide = side
+    updateOuterBottomPaneBorderCorner()
+  }
+
   override func layout() {
     super.layout()
     paneResizeHits.removeAll()
@@ -1676,7 +1698,7 @@ final class TerminalWorkspaceView: NSView {
     } else {
       layoutGrid(visibleSessionIds, in: layoutBounds(forVisibleCount: visibleSessionIds.count))
     }
-    updateBottomRightPaneBorderCorner()
+    updateOuterBottomPaneBorderCorner()
     syncPaneResizeHandleViews()
     window?.invalidateCursorRects(for: self)
   }
@@ -1744,13 +1766,13 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
-  private func updateBottomRightPaneBorderCorner() {
+  private func updateOuterBottomPaneBorderCorner() {
     /**
-     CDXC:NativePaneChrome 2026-05-04-02:36
-     The visible bottom-right pane should always preserve a rounded bottom-right
-     active/done border corner in native AppKit layout. Apply the radius to the
-     border overlay after split/grid frames are assigned so the rule follows
-     pane reorders, split resizing, web panes, and terminal panes uniformly.
+     CDXC:NativePaneChrome 2026-05-07-15:13
+     The pane touching the workspace's visible outside bottom corner should
+     preserve a rounded active/done border corner in native AppKit layout.
+     Apply this after split/grid frames are assigned so the rule follows pane
+     reorders, split resizing, web panes, terminal panes, and sidebar side.
      */
     var visibleBorders: [(sessionId: String, borderView: TerminalPaneBorderView)] = []
     for (sessionId, session) in sessions where activeSessionIds.contains(sessionId) {
@@ -1760,11 +1782,13 @@ final class TerminalWorkspaceView: NSView {
       visibleBorders.append((sessionId: sessionId, borderView: session.borderView))
     }
 
-    let bottomRightSessionId = visibleBorders.max { left, right in
+    let roundedSessionId = visibleBorders.max { left, right in
       let leftFrame = left.borderView.frame
       let rightFrame = right.borderView.frame
-      if abs(leftFrame.maxX - rightFrame.maxX) > 0.5 {
-        return leftFrame.maxX < rightFrame.maxX
+      let leftOuterX = sidebarSide == .left ? leftFrame.maxX : -leftFrame.minX
+      let rightOuterX = sidebarSide == .left ? rightFrame.maxX : -rightFrame.minX
+      if abs(leftOuterX - rightOuterX) > 0.5 {
+        return leftOuterX < rightOuterX
       }
       if abs(leftFrame.minY - rightFrame.minY) > 0.5 {
         return leftFrame.minY > rightFrame.minY
@@ -1772,8 +1796,9 @@ final class TerminalWorkspaceView: NSView {
       return left.sessionId < right.sessionId
     }?.sessionId
 
+    let roundedCorner: TerminalPaneRoundedBottomCorner = sidebarSide == .left ? .right : .left
     for (sessionId, borderView) in visibleBorders {
-      borderView.setBottomRightCornerRounded(sessionId == bottomRightSessionId)
+      borderView.setRoundedBottomCorner(sessionId == roundedSessionId ? roundedCorner : .none)
     }
   }
 
@@ -1833,11 +1858,21 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
-  private func configureProjectEditorChromiumDiagnostics(
+  private func configureProjectEditorChromiumCallbacks(
     _ chromiumView: ZmuxCEFBrowserView,
     projectId: String,
     reason: String
   ) {
+    chromiumView.navigationStateChangedHandler = { [weak self, weak chromiumView] _, _, isLoading in
+      guard let self, let chromiumView else {
+        return
+      }
+      self.updateProjectEditorInitialLoadingOverlay(
+        projectId: projectId,
+        chromiumView: chromiumView,
+        isLoading: isLoading,
+        reason: "chromiumNavigationStateChanged")
+    }
     /**
      CDXC:EditorPanes 2026-05-07-05:18
      VS Code view movement depends on browser drag/drop retargeting for live
@@ -1845,12 +1880,37 @@ final class TerminalWorkspaceView: NSView {
      panes receive native mouse movement but can miss in-page `dragover`
      retargeting, so zmux keeps code-server free of load-time injected drag
      diagnostics and uses a scoped active-drag hover bridge only while dragging.
+
+     CDXC:EditorPanes 2026-05-07-08:29
+     First editor startup should show a native loading spinner immediately while
+     the existing code-server readiness wait continues in parallel. The loader is
+     dismissed from CEF navigation state after the real editor URL finishes, so
+     it never adds startup delay or waits on a separate timer.
      */
-    NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.dnd.diagnosticsConfigured", [
+    NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.chromiumCallbacksConfigured", [
       "projectId": projectId,
       "reason": reason,
       "url": chromiumView.currentURLString ?? NSNull(),
     ])
+  }
+
+  private func updateProjectEditorInitialLoadingOverlay(
+    projectId: String,
+    chromiumView: ZmuxCEFBrowserView,
+    isLoading: Bool,
+    reason: String
+  ) {
+    guard let session = projectEditorPaneSessions[projectId],
+      session.chromiumView === chromiumView,
+      !isLoading
+    else {
+      return
+    }
+    let currentURL = chromiumView.currentURLString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !currentURL.isEmpty, currentURL != "about:blank" else {
+      return
+    }
+    session.hostView.setInitialLoadingOverlayVisible(false, reason: reason)
   }
 
   private func orderedVisibleSessionIds() -> [String] {
@@ -6256,6 +6316,70 @@ private final class TerminalSessionTitleBarView: NSView {
   }
 }
 
+final class ProjectEditorInitialLoadingOverlayView: NSView {
+  private let spinnerContainer = NSView(frame: .zero)
+  private let spinner = NSProgressIndicator(frame: .zero)
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    translatesAutoresizingMaskIntoConstraints = true
+    autoresizesSubviews = true
+    wantsLayer = true
+    layer?.backgroundColor = NSColor(calibratedRed: 0.086, green: 0.086, blue: 0.086, alpha: 1)
+      .cgColor
+
+    spinnerContainer.wantsLayer = true
+    spinnerContainer.layer?.backgroundColor = NSColor(calibratedWhite: 0.17, alpha: 0.92).cgColor
+    spinnerContainer.layer?.cornerRadius = 8
+    spinnerContainer.layer?.borderWidth = 1
+    spinnerContainer.layer?.borderColor = NSColor(calibratedWhite: 0.42, alpha: 0.24).cgColor
+    addSubview(spinnerContainer)
+
+    spinner.style = .spinning
+    spinner.isIndeterminate = true
+    spinner.controlSize = .regular
+    spinner.isDisplayedWhenStopped = false
+    spinner.usesThreadedAnimation = true
+    spinner.appearance = NSAppearance(named: .darkAqua)
+    spinnerContainer.addSubview(spinner)
+    startAnimating()
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
+  override func layout() {
+    super.layout()
+    let containerSize = CGSize(width: 52, height: 52)
+    spinnerContainer.frame = CGRect(
+      x: floor((bounds.width - containerSize.width) / 2),
+      y: floor((bounds.height - containerSize.height) / 2),
+      width: containerSize.width,
+      height: containerSize.height)
+    let spinnerSize: CGFloat = 24
+    spinner.frame = CGRect(
+      x: floor((spinnerContainer.bounds.width - spinnerSize) / 2),
+      y: floor((spinnerContainer.bounds.height - spinnerSize) / 2),
+      width: spinnerSize,
+      height: spinnerSize)
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    nil
+  }
+
+  func startAnimating() {
+    isHidden = false
+    spinner.startAnimation(nil)
+  }
+
+  func stopAnimating() {
+    spinner.stopAnimation(nil)
+    isHidden = true
+  }
+}
+
 final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private enum BrowserPaneThemeMode: String {
     case system
@@ -6295,6 +6419,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private weak var chromiumView: ZmuxCEFBrowserView?
   private weak var webView: WKWebView?
   private let showsBrowserToolbar: Bool
+  private let initialLoadingOverlayView: ProjectEditorInitialLoadingOverlayView?
   private let onFocus: (() -> Void)?
   private let onOpenDevTools: (() -> Void)?
   private let onInjectReactGrab: (() -> Void)?
@@ -6348,6 +6473,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     chromiumView: ZmuxCEFBrowserView? = nil,
     webView: WKWebView? = nil,
     showsBrowserToolbar: Bool = false,
+    showsInitialLoadingOverlay: Bool = false,
     initialAddress: String? = nil,
     onFocus: (() -> Void)? = nil,
     onOpenDevTools: (() -> Void)? = nil,
@@ -6359,6 +6485,8 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     self.chromiumView = chromiumView
     self.webView = webView
     self.showsBrowserToolbar = showsBrowserToolbar
+    self.initialLoadingOverlayView =
+      showsInitialLoadingOverlay ? ProjectEditorInitialLoadingOverlayView(frame: .zero) : nil
     self.onFocus = onFocus
     self.onOpenDevTools = onOpenDevTools
     self.onInjectReactGrab = onInjectReactGrab
@@ -6379,6 +6507,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       addSubview(toolbarView)
     }
     addSubview(browserView)
+    if let initialLoadingOverlayView {
+      addSubview(initialLoadingOverlayView)
+    }
     updateBrowserToolbarState()
   }
 
@@ -6425,6 +6556,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     if browserView.frame != webFrame {
       browserView.frame = webFrame
     }
+    layoutInitialLoadingOverlay(webFrame: webFrame)
   }
 
   func refreshBrowserToolbar(reason: String) {
@@ -6451,6 +6583,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       layoutBrowserToolbar()
     }
     browserView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - toolbarHeight))
+    layoutInitialLoadingOverlay(webFrame: browserView.frame)
     updateBrowserToolbarState()
     needsLayout = true
     needsDisplay = true
@@ -6472,6 +6605,46 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   override func mouseDown(with event: NSEvent) {
     onFocus?()
     super.mouseDown(with: event)
+  }
+
+  func setInitialLoadingOverlayVisible(_ visible: Bool, reason: String) {
+    guard let initialLoadingOverlayView else {
+      return
+    }
+    if visible {
+      initialLoadingOverlayView.startAnimating()
+      layoutInitialLoadingOverlay(webFrame: browserView.frame)
+    } else {
+      initialLoadingOverlayView.stopAnimating()
+    }
+    NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.loadingOverlay.visibilityChanged", [
+      "reason": reason,
+      "visible": visible,
+      "webUrl": currentURLString() ?? NSNull(),
+      "windowNumber": window?.windowNumber ?? NSNull(),
+    ])
+  }
+
+  private func layoutInitialLoadingOverlay(webFrame: CGRect) {
+    guard let initialLoadingOverlayView else {
+      return
+    }
+    /**
+     CDXC:EditorPanes 2026-05-07-08:29
+     The VS Code startup loader is a native overlay above the embedded Chromium
+     view. It is created only for project editor panes, does not participate in
+     browser layout or code-server startup, and ignores hit testing so it cannot
+     add interaction or startup latency.
+     */
+    if initialLoadingOverlayView.superview !== self {
+      addSubview(initialLoadingOverlayView)
+    }
+    if subviews.last !== initialLoadingOverlayView {
+      initialLoadingOverlayView.removeFromSuperview()
+      addSubview(initialLoadingOverlayView)
+    }
+    initialLoadingOverlayView.frame = webFrame
+    initialLoadingOverlayView.needsLayout = true
   }
 
   func controlTextDidBeginEditing(_ obj: Notification) {
@@ -7031,10 +7204,10 @@ final class TerminalPaneBorderView: NSView {
     blue: 0x8A / 255,
     alpha: 1
   ).cgColor
-  private static let bottomRightCornerRadius: CGFloat = 12
+  private static let roundedBottomCornerRadius: CGFloat = 12
   private static let borderWidth: CGFloat = 2
 
-  private var isBottomRightCornerRounded = false
+  private var roundedBottomCorner: TerminalPaneRoundedBottomCorner = .none
   private var state: BorderState = .none
 
   override init(frame frameRect: NSRect) {
@@ -7069,19 +7242,19 @@ final class TerminalPaneBorderView: NSView {
     path.stroke()
   }
 
-  func setBottomRightCornerRounded(_ isRounded: Bool) {
+  fileprivate func setRoundedBottomCorner(_ corner: TerminalPaneRoundedBottomCorner) {
     /**
-     CDXC:NativePaneChrome 2026-05-04-06:26
-     The active/done pane border must have a real rounded visual bottom-right
-     corner. Draw the transparent native overlay's border path directly instead
-     of relying on CALayer's single-corner border masking. In this unflipped
-     AppKit view, the visible bottom-right border corner is max-X/min-Y.
-     Use a larger radius so the corner is visibly rounded at the pane edge.
+     CDXC:NativePaneChrome 2026-05-07-15:13
+     The active/done pane border must have a real rounded visual bottom corner
+     on the workspace side opposite the sidebar. Draw the transparent native
+     overlay's border path directly instead of relying on CALayer's single
+     corner border masking. In this unflipped AppKit view, visible bottom is
+     min-Y, so bottom-left is min-X/min-Y and bottom-right is max-X/min-Y.
      */
-    guard isBottomRightCornerRounded != isRounded else {
+    guard roundedBottomCorner != corner else {
       return
     }
-    isBottomRightCornerRounded = isRounded
+    roundedBottomCorner = corner
     needsDisplay = true
   }
 
@@ -7124,9 +7297,39 @@ final class TerminalPaneBorderView: NSView {
   private func borderPath(in bounds: CGRect) -> NSBezierPath {
     let inset = Self.borderWidth / 2
     let rect = bounds.insetBy(dx: inset, dy: inset)
-    let radius = isBottomRightCornerRounded
-      ? min(Self.bottomRightCornerRadius, rect.width / 2, rect.height / 2)
-      : 0
+    let radius = roundedBottomCorner == .none
+      ? 0
+      : min(Self.roundedBottomCornerRadius, rect.width / 2, rect.height / 2)
+    switch roundedBottomCorner {
+    case .left:
+      return bottomLeftRoundedBorderPath(in: rect, radius: radius)
+    case .none:
+      return NSBezierPath(rect: rect)
+    case .right:
+      return bottomRightRoundedBorderPath(in: rect, radius: radius)
+    }
+  }
+
+  private func bottomLeftRoundedBorderPath(in rect: CGRect, radius: CGFloat) -> NSBezierPath {
+    let path = NSBezierPath()
+    path.move(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+    if radius > 0 {
+      path.curve(
+        to: CGPoint(x: rect.minX + radius, y: rect.minY),
+        controlPoint1: CGPoint(x: rect.minX, y: rect.minY + radius * 0.4477),
+        controlPoint2: CGPoint(x: rect.minX + radius * 0.4477, y: rect.minY)
+      )
+    } else {
+      path.line(to: CGPoint(x: rect.minX, y: rect.minY))
+    }
+    path.line(to: CGPoint(x: rect.maxX, y: rect.minY))
+    path.line(to: CGPoint(x: rect.maxX, y: rect.maxY))
+    path.line(to: CGPoint(x: rect.minX, y: rect.maxY))
+    path.close()
+    return path
+  }
+
+  private func bottomRightRoundedBorderPath(in rect: CGRect, radius: CGFloat) -> NSBezierPath {
     let path = NSBezierPath()
     path.move(to: CGPoint(x: rect.minX, y: rect.minY))
     path.line(to: CGPoint(x: rect.maxX - radius, y: rect.minY))

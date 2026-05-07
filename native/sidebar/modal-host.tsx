@@ -113,6 +113,13 @@ declare global {
 
 const vscode: WebviewApi = {
   postMessage(message) {
+    console.debug("[zmux-app-modal-host] sidebarCommand", message);
+    /**
+     * CDXC:PreviousSessions 2026-05-07-16:02
+     * Previous-session search crosses the full-window modal host before the
+     * native sidebar handles it. Log every modal command at this boundary so a
+     * dead Find Session button can be traced to React, WebKit, or native code.
+     */
     postAppModalHostMessage({ message, type: "sidebarCommand" }, "AppModals:sidebarCommand");
   },
 };
@@ -187,6 +194,9 @@ function AppModalHost() {
         isOpen={activeModal === "findPreviousSession"}
         onCancel={closeModal}
         onConfirm={(query) => {
+          console.debug("[zmux-app-modal-host] findPreviousSession.confirm", {
+            queryLength: query.trim().length,
+          });
           vscode.postMessage({
             query,
             type: "promptFindPreviousSession",

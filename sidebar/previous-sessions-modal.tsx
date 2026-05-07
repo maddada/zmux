@@ -26,7 +26,6 @@ export function PreviousSessionsModal({ isOpen, onClose, vscode }: PreviousSessi
   const showHotkeys = useSidebarStore((state) => state.hud.showHotkeysOnSessionCards);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isFindQueryRequired, setIsFindQueryRequired] = useState(false);
   const [firstMessageSession, setFirstMessageSession] = useState<{
     message: string;
     title?: string;
@@ -102,7 +101,6 @@ export function PreviousSessionsModal({ isOpen, onClose, vscode }: PreviousSessi
     if (!isOpen) {
       setFavoritesOnly(false);
       setFirstMessageSession(undefined);
-      setIsFindQueryRequired(false);
       setSearchQuery("");
       pendingSelectionRef.current = undefined;
     }
@@ -182,12 +180,9 @@ export function PreviousSessionsModal({ isOpen, onClose, vscode }: PreviousSessi
               aria-label="Search previous sessions"
               className="group-title-input previous-sessions-search-input"
               onChange={(event) => {
-                setIsFindQueryRequired(false);
                 setSearchQuery(event.target.value);
               }}
-              placeholder={
-                isFindQueryRequired ? "Describe the session to find..." : "Search sessions..."
-              }
+              placeholder="Search sessions..."
               ref={searchInputRef}
               type="text"
               value={searchQuery}
@@ -274,19 +269,19 @@ export function PreviousSessionsModal({ isOpen, onClose, vscode }: PreviousSessi
               className="previous-sessions-find-button"
               onClick={() => {
                 const normalizedQuery = searchQuery.trim();
-                if (!normalizedQuery) {
-                  /**
-                   * CDXC:PreviousSessions 2026-04-28-05:36
-                   * Prompt to Find Session now uses the modal search field as
-                   * the query prompt, because native WKWebView prompt dialogs
-                   * can fail silently after the command leaves the modal host.
-                   */
-                  setIsFindQueryRequired(true);
-                  searchInputRef.current?.focus();
-                  return;
-                }
+                console.debug("[zmux-previous-sessions] promptFindPreviousSession.click", {
+                  hasQuery: Boolean(normalizedQuery),
+                  queryLength: normalizedQuery.length,
+                });
+                /**
+                 * CDXC:PreviousSessions 2026-05-07-16:02
+                 * The footer button is explicitly a prompt launcher. Always
+                 * send the command: an empty sidebar search opens the dedicated
+                 * Find Previous Session prompt, while non-empty text is used as
+                 * that prompt's initial query.
+                 */
                 vscode.postMessage({
-                  query: normalizedQuery,
+                  query: normalizedQuery || undefined,
                   type: "promptFindPreviousSession",
                 });
                 onClose();

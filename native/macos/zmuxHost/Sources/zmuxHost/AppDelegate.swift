@@ -34,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   private var hasPresentedAccessibilityPermissionDialog = false
   private var pendingZedOverlayConfiguration: ConfigureZedOverlay?
   private var hasUserDetachedZedOverlay = false
+  private var isMainWindowHiddenByIdeAttachment = false
+  private var lastVisibleMainWindowFrameForPersistence: NSRect?
   private var pendingGhosttyConfigReloadTimer: Timer?
   private var t3RuntimeHeartbeatTimer: Timer?
   private var isFlushingCEFBeforeTerminate = false
@@ -95,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    persistMainWindowChrome()
     Self.appendNativeHostLifecycleLog(
       "applicationWillTerminate pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false)"
     )
@@ -447,14 +450,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
   }
 
   func windowWillClose(_ notification: Notification) {
-    persistMainWindowSize()
+    persistMainWindowChrome()
     Self.appendNativeHostLifecycleLog(
       "windowWillClose title=\(window?.title ?? "<missing>") visibleBeforeClose=\(window?.isVisible ?? false)"
     )
   }
 
   func windowDidResize(_ notification: Notification) {
-    persistMainWindowSize()
+    persistMainWindowChrome()
+  }
+
+  func windowDidMove(_ notification: Notification) {
+    persistMainWindowChrome()
   }
 
   func findSurface(forUUID uuid: UUID) -> Ghostty.SurfaceView? {
@@ -707,9 +714,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     workspaceView = root.workspaceView
 
     let initialWindowFrame = restoredInitialWindowFrame()
+    let windowStyleMask: NSWindow.StyleMask = [.closable, .miniaturizable, .resizable, .titled]
+    /**
+     CDXC:NativeWindowChrome 2026-05-07-08:17
+     Persisted placement stores the outer NSWindow frame because that is the
+     size and position users see. NSWindow initializers take a content rect, so
+     convert here instead of treating the saved frame as content dimensions.
+     */
+    let initialContentRect = NSWindow.contentRect(
+      forFrameRect: initialWindowFrame,
+      styleMask: windowStyleMask)
     let window = zmuxFocusReportingWindow(
-      contentRect: initialWindowFrame,
-      styleMask: [.closable, .miniaturizable, .resizable, .titled],
+      contentRect: initialContentRect,
+      styleMask: windowStyleMask,
       backing: .buffered,
       defer: false
     )
@@ -729,6 +746,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
     let zedOverlayController = ZedOverlayController(
       window: window,
       initialWindowSize: initialWindowFrame.size,
+      willHideAttachment: { [weak self] visibleFrame in
+        self?.isMainWindowHiddenByIdeAttachment = true
+        self?.lastVisibleMainWindowFrameForPersistence = visibleFrame
+        self?.persistMainWindowChrome()
+      },
       didActivateAttachment: { [weak self] in
         self?.browserOverlayController?.markBrowserNoLongerShownInAttachment(
           reason: "zmuxActivated"
@@ -742,6 +764,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
           "appDelegate.didHideAttachment.afterMoveBrowser")
       },
       didShowAttachment: { [weak self] in
+        self?.isMainWindowHiddenByIdeAttachment = false
+        self?.persistMainWindowChrome()
         self?.browserOverlayController?.logAttachmentEvent(
           "appDelegate.didShowAttachment.beforeRestoreBrowser")
         self?.browserOverlayController?.restoreBrowserIfNeeded()
@@ -799,26 +823,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Ghos
 
   private func restoredInitialWindowFrame() -> NSRect {
     /**
-     CDXC:NativeWindowChrome 2026-04-28-05:44
-     Startup should use the previous close/resize size as the source of truth.
-     Position remains a stable default, while standalone size is bounded only
-     by native window minimums. IDE-attached startup applies its own existing
-     maximum-size constraint after this saved size is loaded.
+     CDXC:NativeWindowChrome 2026-05-07-08:17
+     Startup must restore the exact main-window size, position, and display
+     from the previous close. Use the saved screen identifier plus the saved
+     screen-relative origin so a re-ordered multi-monitor layout still opens
+     zmux on the same physical display instead of the primary display.
      */
     let stored = nativeSettingsStore.readMainWindowChrome()
+    if let restoredFrame = Self.restoredMainWindowFrame(from: stored) {
+      return restoredFrame
+    }
+
+    let size = CGSize(width: max(stored.width ?? 1440, 320), height: max(stored.height ?? 900, 240))
+    return Self.defaultInitialWindowFrame(size: size)
+  }
+
+  private static func restoredMainWindowFrame(from stored: NativeMainWindowChromeSettings)
+    -> NSRect?
+  {
+    guard let storedFrame = stored.frame else {
+      return nil
+    }
+    let size = CGSize(width: max(storedFrame.width, 320), height: max(storedFrame.height, 240))
+    if let screen = screen(matchingIdentifier: stored.screenID),
+      let storedScreenFrame = stored.screenFrame
+    {
+      return NSRect(
+        x: screen.frame.minX + (storedFrame.minX - storedScreenFrame.minX),
+        y: screen.frame.minY + (storedFrame.minY - storedScreenFrame.minY),
+        width: size.width,
+        height: size.height)
+    }
+    if screen(containingLargestVisibleAreaOf: storedFrame) != nil {
+      return NSRect(origin: storedFrame.origin, size: size)
+    }
+    return nil
+  }
+
+  private static func defaultInitialWindowFrame(size: CGSize) -> NSRect {
     let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-    let width = max(stored.width ?? 1440, 320)
-    let height = max(stored.height ?? 900, 240)
+    let width = size.width
+    let height = size.height
     let x = screenFrame.minX + min(100, max(0, screenFrame.width - width))
     let y = screenFrame.minY + min(80, max(0, screenFrame.height - height))
     return NSRect(x: x, y: y, width: width, height: height)
   }
 
-  private func persistMainWindowSize() {
+  private func persistMainWindowChrome() {
     guard let window else {
       return
     }
-    nativeSettingsStore.persistMainWindowSize(window.frame.size)
+    let frame = window.frame
+    /**
+     CDXC:NativeWindowChrome 2026-05-07-08:17
+     IDE attachment can tuck the real NSWindow offscreen while the user still
+     thinks of the prior visible window frame as zmux's location. Persist that
+     last visible frame during hidden attachment states so launch restore never
+     reopens at an intentional offscreen helper coordinate.
+     */
+    let frameForPersistence =
+      isMainWindowHiddenByIdeAttachment
+      ? lastVisibleMainWindowFrameForPersistence ?? frame
+      : frame
+    guard let screen = Self.screen(containingLargestVisibleAreaOf: frameForPersistence) else {
+      return
+    }
+    lastVisibleMainWindowFrameForPersistence = frameForPersistence
+    nativeSettingsStore.persistMainWindowChrome(frame: frameForPersistence, screen: screen)
+  }
+
+  private static func screen(matchingIdentifier identifier: UInt32?) -> NSScreen? {
+    guard let identifier else {
+      return nil
+    }
+    return NSScreen.screens.first { screenIdentifier($0) == identifier }
+  }
+
+  private static func screen(containingLargestVisibleAreaOf frame: NSRect) -> NSScreen? {
+    let candidates = NSScreen.screens
+      .map { screen -> (screen: NSScreen, area: CGFloat) in
+        let intersection = screen.frame.intersection(frame)
+        return (screen, max(0, intersection.width) * max(0, intersection.height))
+      }
+      .filter { $0.area > 0 }
+      .sorted { lhs, rhs in lhs.area > rhs.area }
+    return candidates.first?.screen
+  }
+
+  fileprivate static func screenIdentifier(_ screen: NSScreen?) -> UInt32? {
+    guard
+      let number = screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+    else {
+      return nil
+    }
+    return number.uint32Value
   }
 
   @MainActor private func installAttachToIdeTitlebarButton(on window: NSWindow) {
@@ -1956,6 +2054,9 @@ private enum NativeSidebarMode: String {
 }
 
 private struct NativeMainWindowChromeSettings {
+  let frame: NSRect?
+  let screenID: UInt32?
+  let screenFrame: NSRect?
   let width: CGFloat?
   let height: CGFloat?
 }
@@ -2105,28 +2206,55 @@ private final class NativeSettingsStore {
   }
 
   /**
-   CDXC:NativeWindowChrome 2026-04-28-05:44
-   The native host must reopen at the same main-window size the user last
-   closed or resized. Store only width and height in the shared native settings
-   file so startup can preserve the user's size without reviving stale screen
-   positions or offscreen IDE attachment coordinates.
+   CDXC:NativeWindowChrome 2026-05-07-08:17
+   The native host must reopen at the exact main-window size, position, and
+   screen from the prior close. Persist the absolute frame and the display's
+   identifier/frame; startup can then restore the same display-relative origin
+   even when macOS has changed the global coordinates for a monitor.
    */
   func readMainWindowChrome() -> NativeMainWindowChromeSettings {
     guard let settings = readSettingsDictionary() else {
-      return NativeMainWindowChromeSettings(width: nil, height: nil)
+      return NativeMainWindowChromeSettings(
+        frame: nil,
+        screenID: nil,
+        screenFrame: nil,
+        width: nil,
+        height: nil)
     }
+    let frame = Self.readRect(
+      x: settings["mainWindowX"],
+      y: settings["mainWindowY"],
+      width: settings["mainWindowWidth"],
+      height: settings["mainWindowHeight"])
+    let screenFrame = Self.readRect(
+      x: settings["mainWindowScreenFrameX"],
+      y: settings["mainWindowScreenFrameY"],
+      width: settings["mainWindowScreenFrameWidth"],
+      height: settings["mainWindowScreenFrameHeight"])
     return NativeMainWindowChromeSettings(
+      frame: frame,
+      screenID: Self.readUInt32(settings["mainWindowScreenID"]),
+      screenFrame: screenFrame,
       width: Self.readCGFloat(settings["mainWindowWidth"]),
       height: Self.readCGFloat(settings["mainWindowHeight"])
     )
   }
 
-  func persistMainWindowSize(_ size: CGSize) {
+  func persistMainWindowChrome(frame: NSRect, screen: NSScreen) {
     do {
       let url = settingsURL()
       var settings = readSettingsDictionary() ?? [:]
-      settings["mainWindowWidth"] = size.width
-      settings["mainWindowHeight"] = size.height
+      settings["mainWindowX"] = frame.minX
+      settings["mainWindowY"] = frame.minY
+      settings["mainWindowWidth"] = frame.width
+      settings["mainWindowHeight"] = frame.height
+      if let screenID = AppDelegate.screenIdentifier(screen) {
+        settings["mainWindowScreenID"] = Int(screenID)
+      }
+      settings["mainWindowScreenFrameX"] = screen.frame.minX
+      settings["mainWindowScreenFrameY"] = screen.frame.minY
+      settings["mainWindowScreenFrameWidth"] = screen.frame.width
+      settings["mainWindowScreenFrameHeight"] = screen.frame.height
       let data = try JSONSerialization.data(
         withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
       try FileManager.default.createDirectory(
@@ -2135,7 +2263,7 @@ private final class NativeSettingsStore {
       )
       try data.write(to: url, options: [.atomic])
     } catch {
-      Self.logger.error("Failed to persist main window size: \(error.localizedDescription)")
+      Self.logger.error("Failed to persist main window chrome: \(error.localizedDescription)")
     }
   }
 
@@ -2212,6 +2340,29 @@ private final class NativeSettingsStore {
       return double
     }
     return nil
+  }
+
+  private static func readUInt32(_ value: Any?) -> UInt32? {
+    if let number = value as? NSNumber {
+      return number.uint32Value
+    }
+    if let string = value as? String, let integer = UInt32(string) {
+      return integer
+    }
+    return nil
+  }
+
+  private static func readRect(x: Any?, y: Any?, width: Any?, height: Any?) -> NSRect? {
+    guard let x = readCGFloat(x),
+      let y = readCGFloat(y),
+      let width = readCGFloat(width),
+      let height = readCGFloat(height),
+      width > 0,
+      height > 0
+    else {
+      return nil
+    }
+    return NSRect(x: x, y: y, width: width, height: height)
   }
 }
 
@@ -2366,6 +2517,7 @@ final class zmuxRootView: NSView {
     self.modalHostView = WKWebView(frame: .zero, configuration: modalHostConfiguration)
     self.divider = PaneResizeHandleView()
     super.init(frame: .zero)
+    workspaceView.setSidebarSide(sidebarSide)
 
     sidebarCommandRouter.onCommand = { [weak self] command in
       self?.handleSidebarCommand(command)
@@ -3002,6 +3154,7 @@ final class zmuxRootView: NSView {
 
   func setSidebarSide(_ side: SidebarSide) {
     sidebarSide = side
+    workspaceView.setSidebarSide(side)
     needsLayout = true
   }
 
@@ -3168,8 +3321,23 @@ final class zmuxRootView: NSView {
       dispatchModalHostMessage(message)
     case "sidebarCommand":
       guard let sidebarMessage = message["message"] else {
+        AppDelegate.appendAppModalErrorLog(
+          area: "AppModals:sidebarCommand",
+          message: "Sidebar command envelope was missing message payload: \(message)",
+          stack: nil
+        )
         return
       }
+      /**
+       CDXC:PreviousSessions 2026-05-07-16:02
+       Previous-session search leaves the modal WKWebView as a sidebarCommand
+       envelope. Log receipt before dispatching to the sidebar WKWebView so
+       click repros can separate modal-host delivery from sidebar handling.
+       */
+      AppDelegate.appendAgentDetectionDebugLog(
+        event: "nativeBridge.appModal.sidebarCommand.received",
+        details: String(describing: sidebarMessage)
+      )
       dispatchSidebarModalCommand(sidebarMessage)
     default:
       AppDelegate.appendAppModalErrorLog(
@@ -3226,6 +3394,10 @@ final class zmuxRootView: NSView {
       )
       return
     }
+    AppDelegate.appendAgentDetectionDebugLog(
+      event: "nativeBridge.appModal.sidebarCommand.dispatch",
+      details: json
+    )
     sidebarView.evaluateJavaScript(
       """
       window.__zmux_NATIVE_MODAL_BRIDGE__?.handleSidebarMessage(\(json));
