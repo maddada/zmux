@@ -21,7 +21,7 @@ brew install --cask maddada/tap/zmux
 
 ## Separated Mode (each workspace is separate tab):
 
-<img width="600" src="https://github.com/user-attachments/assets/61d2cdf4-dcaf-409a-a292-477e0f78baf5" />
+<img width="1000" src="https://github.com/user-attachments/assets/61d2cdf4-dcaf-409a-a292-477e0f78baf5" />
 
 ## Shows a button on the attached IDE to show zmux.
 
@@ -30,7 +30,7 @@ brew install --cask maddada/tap/zmux
 - Hotkey to hide/show.
 - Click on your IDE to hide zmux
 
-<img width="600" src="https://github.com/user-attachments/assets/e68f9cce-897b-4cc4-97fa-7d229fb62899" />
+<img width="1000" src="https://github.com/user-attachments/assets/e68f9cce-897b-4cc4-97fa-7d229fb62899" />
 
 ## Best features:
 
@@ -73,7 +73,7 @@ brew install --cask maddada/tap/zmux
 
 Note: Would be really easy to add a browser like cmux does but it would be Safari which I don't like. Let me know if you really need this. 
 
-<img width="600" src="https://github.com/user-attachments/assets/77f8cd07-e3fc-4c3f-9006-18c1835ff36f" />
+<img width="1000" src="https://github.com/user-attachments/assets/77f8cd07-e3fc-4c3f-9006-18c1835ff36f" />
 
 ### MCP setting to make Chrome Canary always used by your agent:
 
