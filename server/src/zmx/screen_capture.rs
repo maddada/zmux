@@ -14,50 +14,29 @@ use super::*;
 /// Terminal text for one zmx session, read by name.
 pub(crate) struct ZmxHistoryCapture {
     pub text: String,
-    /// The capture lost its TAIL — the live screen — so screen-state readers
-    /// must not draw conclusions from it. The in-process screen capture keeps
-    /// the tail by construction, so only the spawned `/api/readSessionText`
-    /// path can still set this.
+    /// The capture lost its tail (the live screen), so screen-state readers
+    /// must not draw conclusions from it. Unix retains the tail; the Windows
+    /// subprocess path can still lose it at the stdout byte cap.
     pub truncated: bool,
 }
 
 /*
-CDXC:AppShots 2026-08-22:
-Screen-state readers (chat model/effort pills, terminal notices, the compaction
-activity row, the send-delivery watchdog) talk the zmx IPC socket directly
-instead of spawning `zsh -lc … zmx history`. Measured on this machine against
-live daemons, p50 per capture:
-
-    session scrollback   zsh -lc + zmx    direct socket
-    871 B                       5.67 ms          0.10 ms
-    193 KB                     13.74 ms          1.67 ms
-    686 KB                     11.25 ms          6.20 ms
-
-The spawn was the whole cost at small sizes: `command_shell()` runs `zsh -lc`,
-so every capture paid for a LOGIN shell sourcing the user's profile, plus an
-exec of the zmx binary, just to copy bytes off a socket the daemon was already
-listening on. At large sizes the remaining time is the daemon's own
-`serializeTerminal` (5.5 ms of the 6.2 ms above is time-to-first-byte), which
-no client-side change can touch — cutting that needs a tail-scoped IPC tag in
-zmx itself.
-
-Two behavior notes, both improvements over the spawn:
-
-  - `/api/readSessionText` capped stdout at 256 KiB and kept the HEAD, so any
-    session with more than 256 KiB of scrollback reported `truncated` and every
-    screen-state reader correctly refused to conclude anything — those sessions
-    never showed model/effort pills at all. This path keeps the TAIL instead,
-    which is the only part any reader looks at (the widest window is 60
-    non-blank lines), so scrollback size stops deciding whether detection works.
-  - the public `/api/readSessionText` endpoint, the CLI, and automations still
-    go through the spawned path unchanged: they are whole-history consumers,
-    not screen-state readers.
-
-The wire format is frozen (see .dependencies/zmx/src/ipc.zig): 8-byte header of a packed
-`struct { tag: u8, len: u32 }` — one tag byte, four little-endian length bytes,
-three bytes of backing-integer padding — followed by `len` payload bytes.
+CDXC:AgentScreenDetection 2026-09-06 DECISION:
+User: capture the actual active buffer, only the grid for alternate-screen TUIs and the grid plus bounded recent scrollback for scrolling CLIs, without changing polling or full-history APIs or restarting live sessions.
+Capture asks zmx to select rows before formatting and sending them; trimming the History reply here still made the daemon serialize and transfer its entire scrollback.
+An Info request follows Capture on the same connection as an ordering barrier: an Info reply without Capture means an old daemon ignored the optional tag, so only that daemon uses the existing History path.
+SEE-ALSO: .dependencies/zmx/src/ipc.zig (Capture), .dependencies/zmx/src/util.zig (serializeTerminalRange).
 */
 
+/// Recent physical rows in addition to the entire live grid. Codex dialogs
+/// inspect 160 lines, composer detection 120 nonblank lines, notices 60 and
+/// activity/options 15; 512 leaves space for blank rows and wrapped content.
+const ZMX_SCREEN_CAPTURE_SCROLLBACK_ROWS: u32 = 512;
+/// `ipc.Tag.Capture` and the compatibility ordering barrier `ipc.Tag.Info`.
+#[cfg(unix)]
+const ZMX_IPC_TAG_CAPTURE: u8 = 209;
+#[cfg(unix)]
+const ZMX_IPC_TAG_INFO: u8 = 6;
 /// `ipc.Tag.History`.
 #[cfg(unix)]
 const ZMX_IPC_TAG_HISTORY: u8 = 8;
@@ -65,15 +44,20 @@ const ZMX_IPC_TAG_HISTORY: u8 = 8;
 /// rounds up to 8 bytes. The top three bytes are padding on both ends.
 #[cfg(unix)]
 const ZMX_IPC_HEADER_BYTES: usize = 8;
+/// `@sizeOf(ipc.Capture)`: like the header, a packed `struct { format: u8,
+/// rows: u32 }` rounds up to 8 bytes, and the daemon rejects any other
+/// payload length. Bytes 1..5 are the little-endian row count; the last
+/// three bytes are padding the daemon ignores.
+#[cfg(unix)]
+const ZMX_IPC_CAPTURE_BYTES: usize = 8;
 /// `util.HistoryFormat.plain`.
 #[cfg(unix)]
 const ZMX_IPC_HISTORY_FORMAT_PLAIN: u8 = 0;
 /// Matches the 5s poll `zmx history` uses before it gives up on the daemon.
 #[cfg(unix)]
 const ZMX_SCREEN_CAPTURE_TIMEOUT: Duration = Duration::from_millis(5_000);
-/// Scrollback TAIL retained by a screen capture. The widest consumer window is
-/// 60 non-blank lines, so this is orders of magnitude more than any reader
-/// needs; it exists to bound memory against a 10 MB daemon scrollback.
+/// Maximum retained text on both bounded and legacy captures. Old daemons
+/// still send full history; retain its tail without unbounded memory growth.
 #[cfg(unix)]
 const ZMX_SCREEN_CAPTURE_TAIL_BYTES: usize = 256 * 1024;
 
@@ -138,12 +122,12 @@ pub(crate) fn remove_zmx_session_socket(session_name: &str) {
 pub(crate) fn remove_zmx_session_socket(_session_name: &str) {}
 
 /// The session's ACTIVE screen, read straight off the daemon's IPC socket. zmx
-/// answers `History` through Ghostty's `TerminalFormatter`, which serializes
+/// answers `Capture` through Ghostty's `TerminalFormatter`, which serializes
 /// only the screen currently in use: the primary screen together with the tail
 /// of its scrollback, or — while a full-screen TUI such as Claude Code holds
 /// the alternate screen — that grid alone, since Ghostty gives the alternate
 /// screen no scrollback. Primary-screen history is never mixed into an
-/// alternate-screen capture. See `CDXC:AppShots`.
+/// alternate-screen capture. Old daemons use History with a client-side tail cap.
 #[cfg(unix)]
 pub(crate) fn read_zmx_session_screen_capture(zmx_name: &str) -> Result<ZmxHistoryCapture, String> {
     let socket_path = zmx_session_socket_path(zmx_name);
@@ -160,10 +144,14 @@ pub(crate) fn read_zmx_session_screen_capture(zmx_name: &str) -> Result<ZmxHisto
         .and_then(|()| stream.set_write_timeout(Some(ZMX_SCREEN_CAPTURE_TIMEOUT)))
         .map_err(|error| format!("zmx session screen capture could not arm timeouts: {error}"))?;
 
-    let mut request = [0_u8; ZMX_IPC_HEADER_BYTES + 1];
-    request[0] = ZMX_IPC_TAG_HISTORY;
-    request[1..5].copy_from_slice(&1_u32.to_le_bytes());
+    // Send the capture and its ordering barrier in one write.
+    let mut request = [0_u8; ZMX_IPC_HEADER_BYTES * 2 + ZMX_IPC_CAPTURE_BYTES];
+    request[0] = ZMX_IPC_TAG_CAPTURE;
+    request[1..5].copy_from_slice(&(ZMX_IPC_CAPTURE_BYTES as u32).to_le_bytes());
     request[ZMX_IPC_HEADER_BYTES] = ZMX_IPC_HISTORY_FORMAT_PLAIN;
+    request[ZMX_IPC_HEADER_BYTES + 1..ZMX_IPC_HEADER_BYTES + 5]
+        .copy_from_slice(&ZMX_SCREEN_CAPTURE_SCROLLBACK_ROWS.to_le_bytes());
+    request[ZMX_IPC_HEADER_BYTES + ZMX_IPC_CAPTURE_BYTES] = ZMX_IPC_TAG_INFO;
     stream
         .write_all(&request)
         .map_err(|error| format!("zmx session screen capture could not be requested: {error}"))?;
@@ -171,7 +159,7 @@ pub(crate) fn read_zmx_session_screen_capture(zmx_name: &str) -> Result<ZmxHisto
     read_zmx_screen_capture_reply(&mut stream)
 }
 
-/// Drains one `History` reply, retaining only the last
+/// Drains one capture reply, retaining only the last
 /// `ZMX_SCREEN_CAPTURE_TAIL_BYTES` of payload so a huge scrollback costs
 /// bounded memory here regardless of what the daemon serialized.
 #[cfg(unix)]
@@ -180,6 +168,7 @@ fn read_zmx_screen_capture_reply(
 ) -> Result<ZmxHistoryCapture, String> {
     let mut header = [0_u8; ZMX_IPC_HEADER_BYTES];
     let mut chunk = vec![0_u8; 64 * 1024];
+    let mut expected_tag = ZMX_IPC_TAG_CAPTURE;
     loop {
         stream.read_exact(&mut header).map_err(|error| {
             format!("zmx session screen capture reply header was unreadable: {error}")
@@ -189,7 +178,7 @@ fn read_zmx_screen_capture_reply(
 
         let mut remaining = payload_len;
         let mut tail: Vec<u8> = Vec::new();
-        let keep = tag == ZMX_IPC_TAG_HISTORY;
+        let keep = tag == expected_tag;
         while remaining > 0 {
             let want = remaining.min(chunk.len());
             let read = stream.read(&mut chunk[..want]).map_err(|error| {
@@ -215,6 +204,16 @@ fn read_zmx_screen_capture_reply(
                 truncated: false,
             });
         }
+        if tag == ZMX_IPC_TAG_INFO && expected_tag == ZMX_IPC_TAG_CAPTURE {
+            let mut request = [0_u8; ZMX_IPC_HEADER_BYTES + 1];
+            request[0] = ZMX_IPC_TAG_HISTORY;
+            request[1..5].copy_from_slice(&1_u32.to_le_bytes());
+            request[ZMX_IPC_HEADER_BYTES] = ZMX_IPC_HISTORY_FORMAT_PLAIN;
+            stream.write_all(&request).map_err(|error| {
+                format!("zmx legacy screen capture could not be requested: {error}")
+            })?;
+            expected_tag = ZMX_IPC_TAG_HISTORY;
+        }
         // Any other tag on this connection is a message we did not ask for
         // (or one a newer daemon volunteers); skip it and keep reading.
     }
@@ -238,17 +237,19 @@ fn zmx_screen_capture_tail_text(tail: Vec<u8>, payload_len: usize) -> String {
 CDXC:AppShots 2026-08-22:
 On Windows every zmx daemon lives inside WSL, so its session socket sits in the
 WSL filesystem namespace and a Windows process has no AF_UNIX path that reaches
-it. The direct read above is therefore Unix-only, and Windows keeps running
-`zmx history` through the same WSL command wrapper every other zmx interaction
-uses. That path caps stdout and keeps the HEAD, so a session with more
-scrollback than the cap reports `truncated` and screen-state readers correctly
-decline to conclude anything from it — the behaviour Windows already had.
+it.
+Windows runs scoped `zmx history` through the existing WSL command wrapper, reverting to History only for an explicitly unsupported daemon.
+That path keeps the head at the stdout byte cap, so an oversized capture still reports `truncated` and screen-state readers decline to classify it.
 */
 #[cfg(not(unix))]
 pub(crate) fn read_zmx_session_screen_capture(zmx_name: &str) -> Result<ZmxHistoryCapture, String> {
     let zmx = require_bundled_zmx()?;
     let result = run_zmx_interaction_command(
-        build_zmx_history_command(zmx_name, &zmx.executable_path),
+        build_zmx_screen_capture_command(
+            zmx_name,
+            &zmx.executable_path,
+            ZMX_SCREEN_CAPTURE_SCROLLBACK_ROWS,
+        ),
         ZmxCommandOptions {
             allow_stdout_truncation: true,
             stdout_limit_bytes: Some(GXSERVER_ZMX_HISTORY_STDOUT_LIMIT_BYTES),

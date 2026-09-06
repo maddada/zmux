@@ -224,6 +224,37 @@ exec "$zmx_bin" history "$zmx_session"
     .to_string()
 }
 
+/// Bounded history, with the old full-history request only when the daemon
+/// explicitly reports that it predates scoped capture (CLI exit status 3).
+#[cfg(not(unix))]
+pub(crate) fn build_zmx_screen_capture_command(
+    session_name: &str,
+    zmx_executable_path: &str,
+    scrollback_rows: u32,
+) -> String {
+    format!(
+        r#"
+zmx_session={}
+zmx_bin={}
+unset ZMX_SESSION ZMX_SESSION_PREFIX
+if "$zmx_bin" history --scrollback {} "$zmx_session"; then
+  exit 0
+else
+  zmx_status=$?
+fi
+if [ "$zmx_status" -eq 3 ]; then
+  exec "$zmx_bin" history "$zmx_session"
+fi
+exit "$zmx_status"
+"#,
+        shell_quote(session_name),
+        shell_quote(zmx_executable_path),
+        scrollback_rows,
+    )
+    .trim()
+    .to_string()
+}
+
 /// `zmx grid <session>`: the daemon grid plus every attached client and
 /// whether each one is hidden, as JSON.
 pub(crate) fn build_zmx_grid_command(session_name: &str, zmx_executable_path: &str) -> String {
