@@ -12,6 +12,7 @@ import { RecentProjectsModalHost } from '../app/recent-projects-modal-host';
 import { SessionNoteModalHost } from '../app/session-note-modal-host';
 import { RemoteSetupModalHost } from '../app/remote-setup-modal-host';
 import { SettingsModalHost } from '../app/settings-modal-host';
+import { AppToastHost } from '../app/app-toast-host';
 import { SpaceEditorModalHost } from '../app/space-editor-modal-host';
 import { TitlebarActions } from '../app/titlebar-actions';
 import { MachinesControl } from '../machines/MachinesControl';
@@ -199,6 +200,7 @@ function GhostexWebShell() {
         <SessionNoteModalHost runtime={runtime} />
         <RemoteSetupModalHost />
         <SettingsModalHost runtime={runtime} />
+        <AppToastHost />
         <SpaceEditorModalHost runtime={runtime} />
       </div>
     </TooltipProvider>
