@@ -2050,54 +2050,65 @@ function extractChangelogSectionFromText(changelog, version) {
   return notes;
 }
 
+const LEGACY_RELEASE_NOTE_HEADINGS = ['- Major', '- Minor', '- GPUI'];
+const RELEASE_NOTE_HEADINGS = ['- New Features', '- Major Improvements', '- Minor Improvements', '- Stabilization'];
+
 function validateMajorMinorReleaseNotes(notes, version) {
   /*
-   * CDXC:Release 2026-06-14-09:18:
-   * Public changelog sections must keep release notes scannable by using
-   * Major and Minor top-level bullets, with an optional GPUI section after
-   * Minor for cross-platform app work.
+   * CDXC:Release 2026-09-07 DECISION:
+   * User: changelog sections read as New Features, Major Improvements, Minor
+   * Improvements, and Stabilization, in that order, and stay non-technical.
+   * Sections published before this keep the older Major/Minor/GPUI vocabulary,
+   * so both are accepted and a section may not mix the two.
    * Enforce this before publishing so GitHub and Sparkle notes stay consistent.
    */
   const lines = notes.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  const majorIndex = lines.findIndex((line) => line === '- Major');
-  const minorIndex = lines.findIndex((line) => line === '- Minor');
-  const gpuiIndex = lines.findIndex((line) => line === '- GPUI');
-  if (majorIndex !== 0 || minorIndex === -1 || majorIndex > minorIndex) {
-    throw new ReleaseError(`CHANGELOG.md section for ${version} must use Major and Minor top-level bullets.`);
-  }
-  if (gpuiIndex !== -1 && gpuiIndex < minorIndex) {
-    throw new ReleaseError(`CHANGELOG.md section for ${version} must place GPUI after Minor.`);
-  }
-  const topLevelBullets = lines.filter((line) => line.startsWith('- '));
-  if (topLevelBullets.some((line) => line !== '- Major' && line !== '- Minor' && line !== '- GPUI')) {
+  const legacy = lines.some((line) => LEGACY_RELEASE_NOTE_HEADINGS.includes(line));
+  const current = lines.some((line) => RELEASE_NOTE_HEADINGS.includes(line));
+  if (legacy && current) {
     throw new ReleaseError(
-      `CHANGELOG.md section for ${version} must keep Major, Minor, and optional GPUI as the only top-level bullets.`
+      `CHANGELOG.md section for ${version} must not mix Major/Minor headings with the New Features headings.`
     );
   }
-  const sectionHeadings = new Set(['- Major', '- Minor', '- GPUI']);
+  const headings = legacy ? LEGACY_RELEASE_NOTE_HEADINGS : RELEASE_NOTE_HEADINGS;
+  const required = legacy ? ['- Major', '- Minor'] : [];
+  const used = lines.filter((line) => headings.includes(line));
+  const invalidTopLevel = lines.filter((line) => line.startsWith('- ') && !headings.includes(line));
+  if (invalidTopLevel.length > 0 || used.length === 0) {
+    throw new ReleaseError(
+      `CHANGELOG.md section for ${version} must keep ${headings.join(', ')} as the only top-level bullets.`
+    );
+  }
+  if (new Set(used).size !== used.length) {
+    throw new ReleaseError(`CHANGELOG.md section for ${version} must not repeat release-note headings.`);
+  }
+  const missing = required.filter((heading) => !used.includes(heading));
+  if (missing.length > 0 || !headings.includes(lines[0])) {
+    throw new ReleaseError(`CHANGELOG.md section for ${version} must use ${headings.join(', ')} top-level bullets.`);
+  }
+  const order = used.map((heading) => headings.indexOf(heading));
+  if (order.some((index, position) => position > 0 && index < order[position - 1])) {
+    throw new ReleaseError(
+      `CHANGELOG.md section for ${version} must keep its headings in ${headings.join(', ')} order.`
+    );
+  }
   const invalidItemLines = lines.filter(
-    (line) => !sectionHeadings.has(line) && (!line.startsWith('  - ') || line.slice(4).trim().length === 0)
+    (line) => !headings.includes(line) && (!line.startsWith('  - ') || line.slice(4).trim().length === 0)
   );
   if (invalidItemLines.length > 0) {
     throw new ReleaseError(
       `CHANGELOG.md section for ${version} must keep every change item on one physical \`  - \` line.`
     );
   }
-  if (
-    lines.filter((line) => line === '- Major').length !== 1 ||
-    lines.filter((line) => line === '- Minor').length !== 1 ||
-    lines.filter((line) => line === '- GPUI').length > 1
-  ) {
-    throw new ReleaseError(`CHANGELOG.md section for ${version} must not repeat release-note headings.`);
-  }
-  const majorSubBullets = lines.slice(majorIndex + 1, minorIndex).filter((line) => line.startsWith('  - '));
-  const minorEndIndex = gpuiIndex === -1 ? lines.length : gpuiIndex;
-  const minorSubBullets = lines.slice(minorIndex + 1, minorEndIndex).filter((line) => line.startsWith('  - '));
-  if (majorSubBullets.length === 0 || minorSubBullets.length === 0) {
-    throw new ReleaseError(`CHANGELOG.md section for ${version} must include sub-bullets under both Major and Minor.`);
-  }
-  if (gpuiIndex !== -1 && !lines.slice(gpuiIndex + 1).some((line) => line.startsWith('  - '))) {
-    throw new ReleaseError(`CHANGELOG.md section for ${version} must include sub-bullets under GPUI when present.`);
+  const headingPositions = lines.flatMap((line, index) => (headings.includes(line) ? [index] : []));
+  const emptySections = headingPositions.filter((index, position) => {
+    const nextIndex = headingPositions[position + 1] ?? lines.length;
+    return !lines.slice(index + 1, nextIndex).some((line) => line.startsWith('  - '));
+  });
+  if (emptySections.length > 0) {
+    throw new ReleaseError(
+      `CHANGELOG.md section for ${version} must include sub-bullets under ${lines[emptySections[0]].slice(2)}.`
+    );
   }
 }
 
