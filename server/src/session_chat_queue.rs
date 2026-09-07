@@ -70,6 +70,9 @@ pub struct SessionChatDraft {
     pub content: String,
     pub updated_at: String,
     pub origin_client_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<crate::session_chat_draft_versions::DraftVersion>,
+    pub consumed_drafts: Vec<crate::session_chat_draft_versions::DraftVersion>,
 }
 
 /*
@@ -133,6 +136,8 @@ impl SessionChatQueueSnapshot {
             revision.push_str(&draft.updated_at);
             revision.push(':');
             revision.push_str(&draft.origin_client_id);
+            revision.push_str(&serde_json::to_string(&draft.version).unwrap_or_default());
+            revision.push_str(&serde_json::to_string(&draft.consumed_drafts).unwrap_or_default());
         }
         revision
     }
@@ -235,19 +240,40 @@ pub fn handle_session_chat_queue_endpoint(
             (snapshot_value(&snapshot), false)
         }
         "/api/queueSessionChatPrompt" => {
+            let transaction = db.unchecked_transaction().map_err(sql_error)?;
             let text = required_text(params, "text")?;
-            let draft_before_queue = read_snapshot(&db, &project_id, &session_id)?.draft;
-            let prompt = append_prompt(&db, &project_id, &session_id, &text)?;
-            clear_session_chat_draft_after_send(
-                &db,
-                &project_id,
-                &session_id,
-                &text,
-                draft_before_queue.as_ref(),
-            )?;
-            let snapshot = read_snapshot(&db, &project_id, &session_id)?;
+            let version = crate::session_chat_draft_versions::parse(params)?;
+            if let Some(version) = version.as_ref() {
+                crate::session_chat_draft_versions::require_saved(
+                    &transaction,
+                    &project_id,
+                    &session_id,
+                    &text,
+                    version,
+                )?;
+            }
+            let draft_before_queue = read_snapshot(&transaction, &project_id, &session_id)?.draft;
+            let prompt = append_prompt(&transaction, &project_id, &session_id, &text)?;
+            if let Some(version) = version.as_ref() {
+                crate::session_chat_draft_versions::consume_in(
+                    &transaction,
+                    &project_id,
+                    &session_id,
+                    version,
+                )?;
+            } else {
+                clear_session_chat_draft_after_send(
+                    &transaction,
+                    &project_id,
+                    &session_id,
+                    &text,
+                    draft_before_queue.as_ref(),
+                )?;
+            }
+            let snapshot = read_snapshot(&transaction, &project_id, &session_id)?;
             let mut value = snapshot_value(&snapshot);
             insert_prompt(&mut value, &prompt);
+            transaction.commit().map_err(sql_error)?;
             (value, true)
         }
         "/api/updateSessionChatQueuedPrompt" => {
@@ -314,7 +340,18 @@ pub fn handle_session_chat_queue_endpoint(
                     "previous": before.as_ref().map(&describe),
                 }),
             );
-            let result = set_draft(&db, &project_id, &session_id, &content, &client_id);
+            let version = crate::session_chat_draft_versions::parse(params)?;
+            let result = match version.as_ref() {
+                Some(version) => crate::session_chat_draft_versions::save(
+                    &db,
+                    &project_id,
+                    &session_id,
+                    &client_id,
+                    &content,
+                    version,
+                ),
+                None => set_draft(&db, &project_id, &session_id, &content, &client_id),
+            };
             crate::session_chat_draft_diagnostics::log(
                 &logger,
                 "serverSaveSettled",
@@ -546,24 +583,7 @@ fn read_snapshot(
         .map_err(sql_error)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sql_error)?;
-    let draft = db
-        .query_row(
-            r#"
-            SELECT content, originClientId, updatedAt
-            FROM session_chat_drafts
-            WHERE projectId = ?1 AND sessionId = ?2
-            "#,
-            params![project_id, session_id],
-            |row| {
-                Ok(SessionChatDraft {
-                    content: row.get(0)?,
-                    origin_client_id: row.get(1)?,
-                    updated_at: row.get(2)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(sql_error)?;
+    let draft = crate::session_chat_draft_versions::read(db, project_id, session_id)?;
     Ok(SessionChatQueueSnapshot {
         queue,
         draft,
@@ -765,6 +785,8 @@ fn set_draft(
         content: content.to_string(),
         origin_client_id: client_id.to_string(),
         updated_at: now_iso(),
+        version: None,
+        consumed_drafts: Vec::new(),
     };
     // A new write must have a distinct version even in the same millisecond:
     // a send acknowledgement may be comparing against the previous stamp.
@@ -776,6 +798,8 @@ fn set_draft(
         ON CONFLICT(projectId, sessionId) DO UPDATE SET
           content = excluded.content,
           originClientId = excluded.originClientId,
+          draftId = NULL,
+          revision = NULL,
           updatedAt = CASE
             WHEN excluded.updatedAt > session_chat_drafts.updatedAt THEN excluded.updatedAt
             ELSE strftime('%Y-%m-%dT%H:%M:%fZ', session_chat_drafts.updatedAt, '+0.001 seconds')
@@ -794,7 +818,6 @@ fn set_draft(
         .map_err(sql_error)?;
     Ok(draft)
 }
-
 
 /*
 CDXC:Drafts 2026-08-28:
@@ -861,27 +884,25 @@ the client can refuse anything older than what it still holds.
 */
 pub fn list_session_chat_drafts_value(db: &Connection) -> Result<Value, DomainStateError> {
     let mut statement = db
-        .prepare(
-            r#"
-            SELECT projectId, sessionId, content, updatedAt
-            FROM session_chat_drafts
-            WHERE TRIM(content) <> ''
-            ORDER BY updatedAt DESC
-            "#,
-        )
+        .prepare("SELECT projectId, sessionId FROM session_chat_drafts ORDER BY updatedAt DESC")
         .map_err(sql_error)?;
-    let drafts = statement
+    let keys = statement
         .query_map([], |row| {
-            Ok(json!({
-                "projectId": row.get::<_, String>(0)?,
-                "sessionId": row.get::<_, String>(1)?,
-                "content": row.get::<_, String>(2)?,
-                "updatedAt": row.get::<_, String>(3)?,
-            }))
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(sql_error)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sql_error)?;
+    let mut drafts = Vec::new();
+    for (project, session) in keys {
+        if let Some(draft) = crate::session_chat_draft_versions::read(db, &project, &session)? {
+            let mut value = serde_json::to_value(draft)
+                .map_err(|error| DomainStateError::bad_request(error.to_string()))?;
+            value["projectId"] = json!(project);
+            value["sessionId"] = json!(session);
+            drafts.push(value);
+        }
+    }
     Ok(json!({ "drafts": drafts }))
 }
 
@@ -890,15 +911,14 @@ pub fn list_session_chat_drafts_value(db: &Connection) -> Result<Value, DomainSt
 /// hand the terminal composer's text off into this draft, so an Enter fired
 /// into the pty would land on an empty input line and silently drop the
 /// message the user staged.
-pub fn armed_delayed_send_draft_text(
+pub fn armed_delayed_send_draft(
     db: &Connection,
     project_id: &str,
     session_id: &str,
-) -> Result<Option<String>, DomainStateError> {
+) -> Result<Option<SessionChatDraft>, DomainStateError> {
     Ok(read_snapshot(db, project_id, session_id)?
         .draft
-        .map(|draft| draft.content)
-        .filter(|content| !content.trim().is_empty()))
+        .filter(|draft| !draft.content.trim().is_empty()))
 }
 
 /// Clears the synced composer draft after a Delayed Send delivered it. The
@@ -908,14 +928,25 @@ pub fn clear_session_chat_draft_after_delivery(
     db: &Connection,
     project_id: &str,
     session_id: &str,
+    submitted: &SessionChatDraft,
 ) -> Result<(), DomainStateError> {
-    set_draft(db, project_id, session_id, "", "gxserver-delayed-send").map(|_| ())
+    if let Some(version) = submitted.version.as_ref() {
+        crate::session_chat_draft_versions::consume(db, project_id, session_id, version)
+    } else {
+        clear_session_chat_draft_after_send(
+            db,
+            project_id,
+            session_id,
+            &submitted.content,
+            Some(submitted),
+        )
+        .map(|_| ())
+    }
 }
 
 /// CDXC:Drafts 2026-09-05 WHY:
-/// Debounced saves can hold only a prefix of the submitted message; exact-text cleanup left those fragments available for restart recovery.
-/// Compare against the draft captured before delivery, then retire that exact version atomically so edits made during the send survive, even when their text is identical.
-/// Queue insertion owns retirement for queued prompts; their later delivery must not retire a new composer draft.
+/// Legacy clients lack draft identities. Only clear the unchanged exact snapshot;
+/// versioned clients retire their identity through session_chat_draft_versions.
 pub fn clear_session_chat_draft_after_send(
     db: &Connection,
     project_id: &str,
@@ -926,7 +957,10 @@ pub fn clear_session_chat_draft_after_send(
     let Some(draft) = draft_before_send else {
         return Ok(false);
     };
-    if draft.content.trim().is_empty() || !sent_text.trim().starts_with(draft.content.trim()) {
+    if draft.version.is_some()
+        || draft.content.trim().is_empty()
+        || sent_text.trim() != draft.content.trim()
+    {
         return Ok(false);
     }
     let changed = db.execute(
@@ -938,7 +972,6 @@ pub fn clear_session_chat_draft_after_send(
     ).map_err(sql_error)?;
     Ok(changed > 0)
 }
-
 
 /// Guarded claim: only a `queued` or `failed` row can move to `sending`, so two
 /// scheduler ticks (or a tick racing a "Send now") cannot both deliver it.

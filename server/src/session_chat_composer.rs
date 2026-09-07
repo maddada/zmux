@@ -417,6 +417,34 @@ pub fn claude_composer_input_text(screen_text: &str) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// The text inside Grok Build's boxed `❯` composer, including wrapped rows.
+pub fn grok_composer_input_text(screen_text: &str) -> Option<String> {
+    let lines = composer_lines(screen_text);
+    let start = lines
+        .iter()
+        .rposition(|line| is_boxed_marker_line(line, '\u{276f}'))?;
+    let mut parts = Vec::new();
+    for (index, line) in lines[start..].iter().enumerate() {
+        let Some(inner) = line
+            .trim()
+            .strip_prefix('\u{2502}')
+            .and_then(|inner| inner.strip_suffix('\u{2502}'))
+        else {
+            break;
+        };
+        let inner = inner.trim();
+        let text = if index == 0 {
+            inner.strip_prefix('\u{276f}')?.trim()
+        } else {
+            inner
+        };
+        if !text.is_empty() {
+            parts.push(text);
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
 /// Display rows for terminal-preview clients, OLDEST FIRST.
 ///
 /// Readiness matching needs whitespace-folded non-blank lines, but a visual

@@ -21,9 +21,7 @@ use crate::server::{
 use crate::session_chat::{SessionChatQuestion, SessionChatQuestionSelection};
 use crate::session_chat_follower::session_chat_agent_for_session;
 use crate::session_chat_options::schedule_session_chat_option_redetect;
-use crate::session_chat_queue_runtime::{
-    send_session_chat_message_internal, SessionChatMessageSource,
-};
+use crate::session_chat_queue_runtime::SessionChatMessageSource;
 use crate::storage::open_gxserver_database;
 use axum::http::StatusCode;
 use serde_json::{json, Map, Value};
@@ -762,6 +760,10 @@ pub fn has_ask_answer(selections: &[SessionChatQuestionSelection]) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionChatSendStep {
+    /// Stop this interrupt job if Escape would open Codex's message-editing pager.
+    GuardCodexInterrupt,
+    /// Recheck the transcript pager and cross-client visibility at the front of the queue.
+    CloseUnwatchedCodexTranscriptPager,
     BeginCodexCommandOutput {
         command: String,
     },
@@ -827,7 +829,7 @@ pub enum SessionChatSendStep {
     },
     /*
     CDXC:SessionChat 2026-09-02:
-    Hand the input line to the Claude rewind driver for the whole `/rewind`
+    Hand the input line to the agent rewind driver for its whole terminal
     dialog. The driver is adaptive (it reads the screen and decides the next
     keystroke from what it sees), so it cannot be expressed as a fixed step
     list, but it MUST still own the pty the way a fixed list does: a queued
@@ -836,12 +838,12 @@ pub enum SessionChatSendStep {
     session_chat_rewind.rs rather than through this enum, which stays plain
     data.
     */
-    DriveClaudeRewind {
+    DriveSessionChatRewind {
         job_id: u64,
     },
     /// Hand the input line to the Codex model picker driver
     /// (session_chat_codex_picker.rs) for the whole `/model` flow, for the same
-    /// reasons DriveClaudeRewind lists: adaptive, and it must own the pty.
+    /// reasons DriveSessionChatRewind lists: adaptive, and it must own the pty.
     DriveCodexModelPicker {
         job_id: u64,
     },
@@ -1346,6 +1348,20 @@ async fn run_session_chat_send_worker(
                 break; // cancelled mid-sequence
             }
             match step {
+                SessionChatSendStep::GuardCodexInterrupt => {
+                    let Some(screen) = capture_session_terminal_text(&zmx_name).await else {
+                        outcome = Err(SessionChatSendError::not_attempted(
+                            "The Codex terminal could not be read, so Escape was not sent."
+                                .to_string(),
+                        ));
+                        break;
+                    };
+                    if crate::session_chat_codex_pager::codex_escape_would_open_transcript_pager(
+                        &screen,
+                    ) {
+                        break;
+                    }
+                }
                 SessionChatSendStep::BeginCodexCommandOutput { command } => {
                     if let Some(screen) = capture_session_terminal_text(&zmx_name).await {
                         crate::session_chat_app_command::begin_codex_command_output(
@@ -1379,6 +1395,22 @@ async fn run_session_chat_send_worker(
                     if current.is_none_or(|dialog| dialog.id != id) {
                         outcome = Err(SessionChatSendError::not_attempted(
                             "The dialog changed before the answer could be sent.".to_string(),
+                        ));
+                        break;
+                    }
+                }
+                SessionChatSendStep::CloseUnwatchedCodexTranscriptPager => {
+                    if let Err(error) = crate::session_chat_codex_pager::close_unwatched_pager(
+                        &project_id,
+                        &session_id,
+                        &zmx_name,
+                        &|| job_generation != generation.load(Ordering::SeqCst),
+                    )
+                    .await
+                    {
+                        outcome = Err(SessionChatSendError::new(
+                            SessionChatSendFailure::Write,
+                            error,
                         ));
                         break;
                     }
@@ -1647,7 +1679,7 @@ async fn run_session_chat_send_worker(
                         }
                     }
                 }
-                SessionChatSendStep::DriveClaudeRewind { job_id } => {
+                SessionChatSendStep::DriveSessionChatRewind { job_id } => {
                     /*
                     The driver owns its own failure taxonomy (which dialog step
                     disagreed with the screen) and publishes it to the waiting
@@ -1655,7 +1687,7 @@ async fn run_session_chat_send_worker(
                     onto the send failures here. It is the only step of its job,
                     so there is no later write for an error to have to abort.
                     */
-                    crate::session_chat_rewind::run_claude_rewind_job(
+                    crate::session_chat_rewind::run_session_chat_rewind_job(
                         &project_id,
                         &session_id,
                         &zmx_name,
@@ -2637,13 +2669,18 @@ pub(crate) async fn handle_send_session_chat_message_http(
             },
         );
     }
-    match send_session_chat_message_internal(
+    let draft_version = match crate::session_chat_draft_versions::parse(&params) {
+        Ok(version) => version,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    match crate::session_chat_queue_runtime::send_session_chat_message_with_draft(
         state,
         &target.project_id,
         &target.session_id,
         &text,
         &image_paths,
         SessionChatMessageSource::Composer,
+        draft_version.as_ref(),
     )
     .await
     {
@@ -2919,21 +2956,28 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
                     },
                 );
             };
-            let picker = crate::session_chat_send::capture_session_terminal_text(&target.zmx_name)
+            let agent = session_chat_agent_for_session(&target.session);
+            let answer_key = crate::session_chat_send::capture_session_terminal_text(&target.zmx_name)
                 .await
                 .as_deref()
-                .and_then(crate::session_chat_resume_prompt::detect_session_chat_terminal_picker);
-            let Some(picker) = picker else {
-                return domain_error_response(
-                    endpoint_path,
-                    request_id,
-                    DomainStateError {
-                        code: "invalidState",
-                        message: "That picker is no longer on the session's screen.".to_string(),
-                    },
-                );
-            };
-            let Some(answer_key) = picker.answer_key(choice_index) else {
+                .and_then(|text| {
+                    if crate::session_chat_options::session_chat_option_agent(agent.as_deref())
+                        == Some(crate::session_chat_options::SessionChatOptionAgent::Pi)
+                    {
+                        crate::session_chat_pi_blocking::pi_trust_answer_key(text, choice_index)
+                    } else {
+                        crate::session_chat_workspace_trust::workspace_trust_answer_key(
+                            agent.as_deref(),
+                            text,
+                            choice_index,
+                        )
+                        .or_else(|| {
+                            crate::session_chat_resume_prompt::detect_session_chat_terminal_picker(text)
+                                .and_then(|picker| picker.answer_key(choice_index))
+                        })
+                    }
+                });
+            let Some(answer_key) = answer_key else {
                 return domain_error_response(
                     endpoint_path,
                     request_id,
@@ -2977,7 +3021,7 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
     at +2s and +6s and republishes, which is exactly the window the picker
     needs to tear down.
     */
-    if matches!(kind, "terminalChoice" | "question") {
+    if matches!(kind, "terminalChoice" | "question" | "approval") {
         let agent = session_chat_agent_for_session(&target.session);
         schedule_session_chat_option_redetect(
             state,
@@ -3216,14 +3260,19 @@ pub(crate) fn handle_interrupt_session_chat_http(
     // Cancel first so queued sends (and an in-flight sequence's remaining
     // steps) drop, then deliver ESC through the queue's new generation.
     crate::session_chat_send::cancel_session_chat_sends(&target.project_id, &target.session_id);
+    let mut steps = Vec::new();
+    if session_chat_agent_for_session(&target.session).as_deref() == Some("codex") {
+        steps.push(SessionChatSendStep::GuardCodexInterrupt);
+    }
+    steps.push(SessionChatSendStep::Write(
+        SESSION_CHAT_INTERRUPT.to_string(),
+    ));
     crate::session_chat_send::enqueue_session_chat_send(
         &target.project_id,
         &target.session_id,
         &target.zmx_name,
         "session-chat-interrupt",
-        vec![crate::session_chat_send::SessionChatSendStep::Write(
-            crate::session_chat_send::SESSION_CHAT_INTERRUPT.to_string(),
-        )],
+        steps,
     );
     // The interrupt is an Escape as far as the activity state machine is
     // concerned: it ends the hook-backed working claim the way the

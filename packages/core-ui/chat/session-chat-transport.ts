@@ -1,3 +1,5 @@
+import type { SessionChatDraft } from '@/packages/shared/session-chat-queue';
+import type { SessionChatDraftVersion } from '@/packages/shared/session-chat-queue';
 import type { AccountsTransport } from '@/packages/shared/agent-accounts';
 // Session Chat transport contract.
 // Hosts (ghostex-web, gpui CEF, mobile web views) inject an implementation so
@@ -78,7 +80,7 @@ export interface SessionChatTransport {
      */
     currentLimit?: () => number;
   }): () => void;
-  send(text: string, imagePaths?: string[]): Promise<void>;
+  send(text: string, imagePaths?: string[], draftVersion?: SessionChatDraftVersion): Promise<void>;
   /**
    * Injects a raw keystroke sequence (no text, no Enter) for controls owned by
    * the agent TUI. Hosts without a path for it omit this, which hides those
@@ -173,7 +175,10 @@ export interface SessionChatTransport {
    * long-press on Send). Hosts without it lose queueing altogether: Tab falls
    * back to its normal behaviour and long-press just sends.
    */
-  queuePrompt?(params: { text: string }): Promise<GxserverQueueSessionChatPromptResult>;
+  queuePrompt?(params: {
+    text: string;
+    draftVersion?: SessionChatDraftVersion;
+  }): Promise<GxserverQueueSessionChatPromptResult>;
   /**
    * Edits a row's text and/or retries it. `retry: true` moves a `failed` row
    * back to `queued` and clears its error so draining can resume. Hosts
@@ -209,7 +214,11 @@ export interface SessionChatTransport {
    * can ignore its own broadcast. Hosts without it keep their local draft
    * cache and simply never sync — nothing in the UI is hidden.
    */
-  setDraft?(params: { content: string; clientId: string }): Promise<void>;
+  setDraft?(params: {
+    content: string;
+    clientId: string;
+    draftVersion?: SessionChatDraftVersion;
+  }): Promise<{ draft: SessionChatDraft } | void>;
   /*
   CDXC:SessionNotes 2026-08-24:
   The session's "what to do next here" note. gxserver files it under the

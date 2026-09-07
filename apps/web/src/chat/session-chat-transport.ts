@@ -1,3 +1,4 @@
+import type { GxserverSetSessionChatDraftResult } from '@/packages/shared/session-chat-queue';
 // ghostex-web SessionChatTransport implementation.
 // Scoped to one (machineId, projectId, sessionId): RPC mutations go through the
 // machine's gxserver connection, live frames ride the shared /api/events
@@ -60,11 +61,12 @@ export function createSessionChatTransport(
         sessionId,
       });
     },
-    async send(text, imagePaths) {
+    async send(text, imagePaths, draftVersion) {
       await rpcForMachine(machineId, '/api/sendSessionChatMessage', {
         projectId,
         sessionId,
         text,
+        draftVersion,
         ...(imagePaths && imagePaths.length > 0 ? { imagePaths } : {}),
       });
     },
@@ -178,6 +180,7 @@ export function createSessionChatTransport(
         projectId,
         sessionId,
         text: params.text,
+        draftVersion: params.draftVersion,
       });
     },
     updateQueuedPrompt(params) {
@@ -250,10 +253,11 @@ export function createSessionChatTransport(
     // fresh id per call would make this client's own draft echo look like
     // another device and pop the conflict bar for no reason.
     async setDraft(params) {
-      await rpcForMachine(machineId, '/api/setSessionChatDraft', {
+      return rpcForMachine<GxserverSetSessionChatDraftResult>(machineId, '/api/setSessionChatDraft', {
         projectId,
         sessionId,
         content: params.content,
+        draftVersion: params.draftVersion,
         clientId: params.clientId,
       });
     },

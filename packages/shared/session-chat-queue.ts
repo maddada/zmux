@@ -60,9 +60,18 @@ Conflict rule: never clobber. A client that receives a draft with a newer
 one-line "Newer draft from another device: Use / Dismiss" bar above the
 composer instead of overwriting a non-empty local composer.
 */
+/** An identity stays stable across edits; revisions include deletions. */
+export interface SessionChatDraftVersion {
+  draftId: string;
+  revision: number;
+}
+
 export interface SessionChatDraft {
+  version?: SessionChatDraftVersion;
+  /** Durable receipts, retained even after a subsequent draft is saved. */
+  consumedDrafts?: SessionChatDraftVersion[];
   content: string;
-  /** ISO-8601 millis. The only ordering signal; do not trust local clocks. */
+  /** ISO-8601 millis for display and legacy caches; version orders edits within an identity. */
   updatedAt: string;
   /**
    * Opaque per-client id of the writer, so a client can ignore its own echo
@@ -127,6 +136,7 @@ export interface GxserverSessionChatQueueResult {
 }
 
 export interface GxserverQueueSessionChatPromptParams {
+  draftVersion?: SessionChatDraftVersion;
   projectId: string;
   sessionId: string;
   /** Appended at the END of the queue. Callers trim before sending. */
@@ -200,6 +210,7 @@ export interface GxserverSendSessionChatQueuedPromptResult extends GxserverSessi
 // ---------------------------------------------------------------------------
 
 export interface GxserverSetSessionChatDraftParams {
+  draftVersion?: SessionChatDraftVersion;
   projectId: string;
   sessionId: string;
   /** Verbatim composer text. An empty string is how a draft is CLEARED. */

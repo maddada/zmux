@@ -407,18 +407,18 @@ impl DelayedSendRuntime {
         session gets the historical bare Enter into whatever is on its input
         line.
         */
-        let draft_text = crate::session_chat_queue::armed_delayed_send_draft_text(
+        let draft = crate::session_chat_queue::armed_delayed_send_draft(
             db,
             &record.project_id,
             &record.session_id,
         )?;
-        if let Some(text) = draft_text {
+        if let Some(draft) = draft {
             let sender = chat_sender_factory(&record.project_id, &record.session_id);
             let publisher = chat_publisher_factory(&record.project_id, &record.session_id);
             let runtime = self.clone();
             let record = record.clone();
             tokio::spawn(async move {
-                let outcome = sender(text).await;
+                let outcome = sender(draft.content.clone()).await;
                 let Ok(db) = open_gxserver_database(&runtime.paths) else {
                     return;
                 };
@@ -428,6 +428,7 @@ impl DelayedSendRuntime {
                             &db,
                             &record.project_id,
                             &record.session_id,
+                            &draft,
                         );
                         publisher();
                         runtime.finish_record(&db, &record, "completed", None)

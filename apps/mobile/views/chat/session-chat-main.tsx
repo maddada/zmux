@@ -1,3 +1,4 @@
+import type { GxserverSetSessionChatDraftResult } from '@/packages/shared/session-chat-queue';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import './session-chat.css';
@@ -826,9 +827,10 @@ function createMobileSessionChatTransport(): SessionChatTransport {
         path: params.path,
       });
     },
-    async send(text, imagePaths) {
+    async send(text, imagePaths, draftVersion) {
       await bridgeCall('send', {
         text,
+        draftVersion,
         ...(imagePaths && imagePaths.length > 0 ? { imagePaths } : {}),
       });
     },
@@ -847,6 +849,7 @@ function createMobileSessionChatTransport(): SessionChatTransport {
     queuePrompt(params) {
       return bridgeCall<GxserverQueueSessionChatPromptResult>('queuePrompt', {
         text: params.text,
+        draftVersion: params.draftVersion,
       }).then(withQueueReport);
     },
     updateQueuedPrompt(params) {
@@ -888,9 +891,10 @@ function createMobileSessionChatTransport(): SessionChatTransport {
     // untouched is what keeps this device's own echo from reading as another
     // device and popping the conflict bar against itself.
     async setDraft(params) {
-      await bridgeCall('setDraft', {
+      return bridgeCall<GxserverSetSessionChatDraftResult>('setDraft', {
         clientId: params.clientId,
         content: params.content,
+        draftVersion: params.draftVersion,
       });
     },
     subscribe({ currentLimit, onEvent }) {

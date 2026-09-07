@@ -604,6 +604,7 @@ pub(crate) enum SessionChatMessageSource {
     Composer,
     AutomaticQueue,
     AutomaticRecovery,
+    AccountSwitch(uuid::Uuid),
     ManualQueue,
 }
 
@@ -626,6 +627,27 @@ pub(crate) async fn send_session_chat_message_internal(
     image_paths: &[String],
     source: SessionChatMessageSource,
 ) -> std::result::Result<usize, DomainStateError> {
+    send_session_chat_message_with_draft(
+        state, project_id, session_id, text, image_paths, source, None,
+    ).await
+}
+
+pub(crate) async fn send_session_chat_message_with_draft(
+    state: &AppState,
+    project_id: &str,
+    session_id: &str,
+    text: &str,
+    image_paths: &[String],
+    source: SessionChatMessageSource,
+    draft_version: Option<&crate::session_chat_draft_versions::DraftVersion>,
+) -> std::result::Result<usize, DomainStateError> {
+    if let Some(version) = draft_version {
+        let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+            code: "internalError",
+            message: error.to_string(),
+        })?;
+        crate::session_chat_draft_versions::require_saved(&db, project_id, session_id, text, version)?;
+    }
     let mut params = Map::new();
     params.insert("projectId".to_string(), json!(project_id));
     params.insert("sessionId".to_string(), json!(session_id));
@@ -700,9 +722,13 @@ pub(crate) async fn send_session_chat_message_internal(
     // Recheck automatic delivery against the fresh capture: the scheduler's
     // cached notice may predate a quota, authentication, or agent error.
     // Explicit Send now is a retry.
-    if source == SessionChatMessageSource::AutomaticRecovery {
+    if matches!(source, SessionChatMessageSource::AutomaticRecovery | SessionChatMessageSource::AccountSwitch(_)) {
         let current = resolve_session_chat_send_target(state, &params, "automaticRecovery")?;
-        let armed = current.session.pointer("/runtimeSettings/accountRecovery/status").and_then(Value::as_str) == Some("retrying");
+        let armed = current.session.pointer("/runtimeSettings/accountRecovery/status").and_then(Value::as_str) == Some("retrying")
+            && match source {
+                SessionChatMessageSource::AccountSwitch(claim) => current.session.pointer("/runtimeSettings/accountRecovery/claim").and_then(Value::as_str) == Some(claim.to_string().as_str()),
+                _ => true,
+            };
         let blocked = detection.notice.as_ref().is_some_and(|n| n.blocks_queued_delivery() && !matches!(n.kind.as_str(), "streamError" | "usageLimit" | "agentError"));
         if !armed || !detection.captured || detection.composer.state != crate::session_chat_composer::SessionChatComposerState::Ready || detection.prompt.is_some() || crate::session_chat_send::transcript_pending_question_prompt(&current.session).is_some() || detection.activity.is_some() || blocked {
             return Err(DomainStateError { code: "accountRecoveryNotReady", message: "Automatic recovery is waiting for the session to be ready.".into() });
@@ -895,7 +921,7 @@ pub(crate) async fn send_session_chat_message_internal(
         &target.session,
         match source {
             SessionChatMessageSource::Composer => "chat",
-            SessionChatMessageSource::AutomaticQueue | SessionChatMessageSource::AutomaticRecovery | SessionChatMessageSource::ManualQueue => {
+            SessionChatMessageSource::AutomaticQueue | SessionChatMessageSource::AutomaticRecovery | SessionChatMessageSource::AccountSwitch(_) | SessionChatMessageSource::ManualQueue => {
                 "queue"
             }
         },
@@ -939,7 +965,20 @@ pub(crate) async fn send_session_chat_message_internal(
     } else {
         promote_draft_session_after_send(state, &target.project_id, &target.session_id);
     }
-    if source == SessionChatMessageSource::Composer {
+    if let Some(version) = draft_version {
+        let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+            code: "internalError",
+            message: error.to_string(),
+        })?;
+        crate::session_chat_draft_versions::consume(
+            &db, &target.project_id, &target.session_id, version,
+        )?;
+        crate::session_chat_draft_diagnostics::log(
+            &state.logger, "consumed", &target.project_id, &target.session_id,
+            json!({ "version": version }),
+        );
+        broadcast_session_chat_queue_state(state, &target.project_id, &target.session_id);
+    } else if source == SessionChatMessageSource::Composer {
         retire_sent_session_chat_draft(
             state,
             &target.project_id,

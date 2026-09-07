@@ -1,3 +1,4 @@
+import type { SessionChatDraftVersion } from '@/packages/shared/session-chat-queue';
 import type { SessionChatPendingModelSelection } from '@/packages/shared/session-chat';
 // useSessionChat — host-agnostic session-chat state machine.
 // Consumes an injected SessionChatTransport; implements the seed read, frame
@@ -86,6 +87,7 @@ import { classifySessionChatSend, SESSION_CHAT_DEFAULT_COMMAND_CATALOG } from '.
 import { deriveSessionChatStreamingText, sessionChatStreamingMessage } from './session-chat-streaming';
 import { surfaceSkillInvocationUserTurns } from './session-chat-command-envelope';
 import {
+  mergeSessionChatDraftState,
   moveSessionChatQueueRow,
   sessionChatDraftClientId,
   sessionChatQueueCapabilities,
@@ -217,7 +219,7 @@ export interface SessionChatQueueController {
   /** Authoritative queue, head first. Empty while supported but nothing waits. */
   prompts: readonly SessionChatQueuedPrompt[];
   /** Appends text at the end of the queue (Tab / long-press on Send). */
-  queuePrompt: (text: string) => Promise<void>;
+  queuePrompt: (text: string, draftVersion?: SessionChatDraftVersion) => Promise<void>;
   /** Moves a failed row back to queued and clears its error. */
   retryPrompt: (promptId: string) => Promise<void>;
   /** Deletes a row and resolves with it, so Edit can reuse the text. */
@@ -239,7 +241,7 @@ export interface SessionChatDraftController {
    * Pushes the unsent composer text. Called on blur / session switch /
    * unmount / backgrounding — never per keystroke. An empty string clears.
    */
-  push: (content: string) => Promise<void>;
+  push: (content: string, draftVersion?: SessionChatDraftVersion) => Promise<void>;
 }
 
 export interface UseSessionChatResult {
@@ -342,7 +344,7 @@ export interface UseSessionChatResult {
   hasMore: boolean;
   loadingEarlier: boolean;
   loadEarlier: () => void;
-  send: (text: string, imagePaths?: string[]) => Promise<void>;
+  send: (text: string, imagePaths?: string[], draftVersion?: SessionChatDraftVersion) => Promise<void>;
   /**
    * Raw keystroke injection for agent-owned TUI controls. Undefined when the
    * host transport cannot deliver keys, so callers hide the control instead
@@ -521,7 +523,9 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   control. An empty array means supported-and-empty. Once present it is
   authoritative and replaces the list wholesale.
   */
-  const [pendingModelSelection, setPendingModelSelection] = useState<SessionChatPendingModelSelection | null | undefined>(undefined);
+  const [pendingModelSelection, setPendingModelSelection] = useState<
+    SessionChatPendingModelSelection | null | undefined
+  >(undefined);
   const [queuePrompts, setQueuePrompts] = useState<readonly SessionChatQueuedPrompt[] | null>(null);
   /*
   Latest synced composer draft. An OMITTED draft means unchanged, NOT cleared
@@ -641,13 +645,17 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
    * clearing a draft is an explicit empty `content` from the server.
    */
   const applyQueueCarriage = useCallback(
-    (carrier: { queue?: SessionChatQueuedPrompt[]; draft?: SessionChatDraft; pendingModelSelection?: SessionChatPendingModelSelection | null }): void => {
+    (carrier: {
+      queue?: SessionChatQueuedPrompt[];
+      draft?: SessionChatDraft;
+      pendingModelSelection?: SessionChatPendingModelSelection | null;
+    }): void => {
       if (carrier.pendingModelSelection !== undefined) setPendingModelSelection(carrier.pendingModelSelection);
       if (carrier.queue !== undefined) {
         setQueuePrompts(carrier.queue);
       }
       if (carrier.draft !== undefined) {
-        setSyncedDraft(carrier.draft);
+        setSyncedDraft((current) => mergeSessionChatDraftState(current, carrier.draft!));
       }
     },
     []
@@ -657,6 +665,8 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     (
       result: {
         messages: SessionChatMessage[];
+        epoch?: number;
+        seq?: number;
         lifecycle?: SessionChatTurnLifecycle;
         hasMore: boolean;
         hasMoreExact?: boolean;
@@ -693,6 +703,10 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       source: string
     ): void => {
       diagnosticLogRef.current?.('sessionChat.authoritative', {
+        epoch: result.epoch,
+        seq: result.seq,
+        previousMessageCount: mergerRef.current.list.length,
+        hasDraftMetadata: 'availableAgents' in result,
         hasAgentSessionId: result.agentSessionId !== undefined,
         hasMore: result.hasMore,
         messageCount: result.messages.length,
@@ -1001,6 +1015,14 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         return;
       }
       if (verdict === 'resync') {
+        diagnosticLogRef.current?.('sessionChat.sequenceGap', {
+          generation,
+          eventType: event.type,
+          epoch: event.epoch,
+          seq: event.seq,
+          previousEpoch: frameState.epoch,
+          previousSeq: frameState.seq,
+        });
         requestResync();
         return;
       }
@@ -1075,8 +1097,8 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       onEvent,
     });
 
-    // Seed read: independent of the subscription; permanently outranked by
-    // the first snapshot/replacement frame.
+    // The seed transcript is outranked by the first snapshot/replacement frame.
+    // Its read-only agent metadata still needs to be applied.
     const startedAt = Date.now();
     let attempt = 0;
     const scheduleRetry = (run: () => void): void => {
@@ -1084,9 +1106,38 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       attempt += 1;
     };
     const seedRead = (): void => {
+      const readStartedAt = Date.now();
+      diagnosticLogRef.current?.('sessionChat.seedReadStarted', { generation, attempt });
       void withReadTimeout(transport.read({ limit: limitRef.current }))
         .then((result: GxserverReadSessionChatResult) => {
-          if (closedRef.current || generationRef.current !== generation || frameState.frameArrived) {
+          diagnosticLogRef.current?.('sessionChat.seedReadCompleted', {
+            generation,
+            attempt,
+            durationMs: Date.now() - readStartedAt,
+            epoch: result.epoch,
+            seq: result.seq,
+            status: result.status,
+            messageCount: result.messages.length,
+            frameArrived: frameState.frameArrived,
+            obsolete: closedRef.current || generationRef.current !== generation,
+          });
+          if (closedRef.current || generationRef.current !== generation) {
+            return;
+          }
+          /*
+          CDXC:AgentProviders 2026-09-06 WHY:
+          Older live snapshots omit the agent family and account-menu metadata. Dropping the entire seed read when a snapshot wins the race made Switch Account disappear from otherwise identical Claude sessions.
+          Keep the newer transcript while accepting the read's identity; a read from an older stream generation must resync instead of restoring an obsolete agent.
+          */
+          if (frameState.frameArrived) {
+            if (frameState.epoch !== null && result.epoch < frameState.epoch) {
+              requestResync();
+              return;
+            }
+            if (result.agent !== undefined) {
+              setAgent(result.agent);
+            }
+            applyDraftAgentCarriage(result);
             return;
           }
           lastFrameAtRef.current = Date.now();
@@ -1159,6 +1210,11 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
 
     return () => {
       closedRef.current = true;
+      diagnosticLogRef.current?.('sessionChat.subscribeStopped', {
+        generation,
+        epoch: frameState.epoch,
+        seq: frameState.seq,
+      });
       clearInterval(stallTimer);
       if (retryTimerRef.current !== null) {
         clearTimeout(retryTimerRef.current);
@@ -1393,7 +1449,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   }, [hasMore, loadingEarlier, transport]);
 
   const send = useCallback(
-    async (text: string, imagePaths?: string[]): Promise<void> => {
+    async (text: string, imagePaths?: string[], draftVersion?: SessionChatDraftVersion): Promise<void> => {
       const classification = classifySessionChatSend(text, commandCatalog);
       let pendingId: string | null = null;
       let commandMarkerSentAt: number | null = null;
@@ -1436,7 +1492,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         );
       }
       try {
-        await transport.send(text, imagePaths);
+        await transport.send(text, imagePaths, draftVersion);
       } catch (sendError) {
         if (pendingId !== null) {
           const dropId = pendingId;
@@ -1507,12 +1563,12 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     []
   );
   const queuePrompt = useCallback(
-    async (text: string): Promise<void> => {
+    async (text: string, draftVersion?: SessionChatDraftVersion): Promise<void> => {
       const call = transport.queuePrompt?.bind(transport);
       if (!queueCapabilities.canQueue || !call) {
         return;
       }
-      await queueMutation(() => call({ text }));
+      await queueMutation(() => call({ text, draftVersion }));
     },
     [queueCapabilities.canQueue, queueMutation, transport]
   );
@@ -1580,14 +1636,19 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   // Otherwise a slow typing save can arrive after the successful-send clear.
   const draftWrites = useMemo(() => ({ tail: Promise.resolve() }), [transport]);
   const pushDraft = useCallback(
-    async (content: string): Promise<void> => {
+    async (content: string, draftVersion?: SessionChatDraftVersion): Promise<void> => {
       const call = transport.setDraft?.bind(transport);
       if (!call) {
         return;
       }
-      const write = draftWrites.tail.then(() => call({ clientId, content }));
-      draftWrites.tail = write.catch(() => {});
-      await write;
+      const write = draftWrites.tail.then(() => call({ clientId, content, draftVersion }));
+      draftWrites.tail = write.then(
+        () => {},
+        () => {}
+      );
+      const result = await write;
+      if (result?.draft && !closedRef.current && seededTransportRef.current === transport)
+        setSyncedDraft((current) => mergeSessionChatDraftState(current, result.draft));
     },
     [clientId, draftWrites, transport]
   );
