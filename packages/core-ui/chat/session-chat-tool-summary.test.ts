@@ -7,7 +7,7 @@ describe('command tool previews', () => {
       summarizeSessionChatCommandInput({
         command: 'git status\ngit diff\nbun run typecheck\nfourth line',
       })
-    ).toBe('git status git diff bun run typecheck');
+    ).toBe('git status git diff bun run typecheck…');
   });
 
   test('accepts Codex freeform exec input', () => {
@@ -15,6 +15,6 @@ describe('command tool previews', () => {
       summarizeSessionChatCommandInput(
         'const result = await tools.exec_command({"cmd":"rg foo\\nbun test\\ngit diff\\nfourth"});'
       )
-    ).toBe('rg foo bun test git diff');
+    ).toBe('rg foo bun test git diff…');
   });
 });

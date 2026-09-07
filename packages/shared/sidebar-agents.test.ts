@@ -105,6 +105,13 @@ describe('createSidebarAgentButtons', () => {
           isDefault: true,
           name: 'Hermes Agent',
         },
+        {
+          agentId: 'mastra',
+          command: 'mastracode',
+          icon: 'mastra',
+          isDefault: true,
+          name: 'Mastra Code',
+        },
       ])
     );
   });
@@ -195,6 +202,13 @@ describe('createSidebarAgentButtons', () => {
           icon: 'hermes-agent',
           isDefault: true,
           name: 'Hermes Agent',
+        },
+        {
+          agentId: 'mastra',
+          command: 'mastracode',
+          icon: 'mastra',
+          isDefault: true,
+          name: 'Mastra Code',
         },
       ])
     );
@@ -311,6 +325,13 @@ describe('createSidebarAgentButtons', () => {
           name: 'Hermes Agent',
         },
         {
+          agentId: 'mastra',
+          command: 'mastracode',
+          icon: 'mastra',
+          isDefault: true,
+          name: 'Mastra Code',
+        },
+        {
           agentId: 'aider',
           command: 'aider',
           icon: undefined,
@@ -411,6 +432,13 @@ describe('createSidebarAgentButtons', () => {
           icon: 'hermes-agent',
           isDefault: true,
           name: 'Hermes Agent',
+        },
+        {
+          agentId: 'mastra',
+          command: 'mastracode',
+          icon: 'mastra',
+          isDefault: true,
+          name: 'Mastra Code',
         },
       ])
     );
@@ -531,6 +559,13 @@ describe('createSidebarAgentButtons', () => {
           name: 'Hermes Agent',
         },
         {
+          agentId: 'mastra',
+          command: 'mastracode',
+          icon: 'mastra',
+          isDefault: true,
+          name: 'Mastra Code',
+        },
+        {
           agentId: 'custom-codex-fast',
           command: 'codex --profile fast',
           icon: 'codex',
@@ -647,6 +682,13 @@ describe('createSidebarAgentButtons', () => {
           icon: 'hermes-agent',
           isDefault: true,
           name: 'Hermes Agent',
+        },
+        {
+          agentId: 'mastra',
+          command: 'mastracode',
+          icon: 'mastra',
+          isDefault: true,
+          name: 'Mastra Code',
         },
       ])
     );
