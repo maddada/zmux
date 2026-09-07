@@ -274,10 +274,9 @@ impl GhostexGpuiApp {
         #[cfg(target_os = "macos")]
         let button = button
             .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .w(px(29.0))
+            .w(px(TITLEBAR_LEADING_BUTTON_WIDTH))
             .ml(px(-9.0))
             .flex_shrink_0()
-            .rounded(px(5.0))
             .child(
                 div()
                     .flex()
@@ -345,22 +344,27 @@ impl GhostexGpuiApp {
                 .unwrap_or_else(|| id.as_str().to_string()),
             mode => mode.display_label().to_string(),
         };
+        /*
+        CDXC:Titlebar 2026-09-06 DECISION:
+        User: the compact view dropdown is a full-height square titlebar
+        segment that looks like a mode tab - no corner rounding, no boxed
+        outline, just the left/right hairlines the mode tabs use.
+        */
         h_flex()
             .id("ghostex-gpui-titlebar-compact-mode-dropdown")
-            .h(px(25.0))
+            .h(px(TITLEBAR_CONTROL_HEIGHT))
             .min_w(px(108.0))
             .ml(px(7.0))
-            .mt(px(2.0))
             .items_center()
             .justify_center()
             .gap(px(7.0))
-            .rounded(px(5.0))
-            .border_1()
+            .border_l_1()
+            .border_r_1()
             .border_color(titlebar_button_border_color())
             .px(px(9.0))
             .text_size(px(12.5))
             .font_weight(FontWeight::NORMAL)
-            .line_height(px(25.0))
+            .line_height(px(TITLEBAR_CONTROL_HEIGHT))
             .text_color(titlebar_active_text_color())
             .cursor_default()
             .hover(|this| this.bg(titlebar_button_hover_color()))

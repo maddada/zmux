@@ -62,7 +62,7 @@ pub(crate) fn titlebar_tooltip(
 
 pub(crate) fn titlebar_popup_menu_width(kind: GpuiTitlebarPopupKind) -> f32 {
     match kind {
-        GpuiTitlebarPopupKind::RemoteSites => 640.0,
+        GpuiTitlebarPopupKind::RemoteSites => TITLEBAR_POPUP_RESOURCES_WIDTH,
         GpuiTitlebarPopupKind::Actions | GpuiTitlebarPopupKind::OpenTargets => {
             TITLEBAR_POPUP_COMPACT_WIDTH
         }

@@ -218,14 +218,19 @@ impl GhostexGpuiApp {
                     ))
                 },
             )
-            .child(self.render_titlebar_native_popup_button(
-                GpuiTitlebarPopupKind::RemoteSites,
-                BROWSER_ICON_WORLD,
-                "Remote dev servers",
-                false,
-                window,
-                cx,
-            ))
+            .when(
+                !button_hidden(DEV_SERVERS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY),
+                |this| {
+                    this.child(self.render_titlebar_native_popup_button(
+                        GpuiTitlebarPopupKind::RemoteSites,
+                        BROWSER_ICON_WORLD,
+                        "Dev servers",
+                        false,
+                        window,
+                        cx,
+                    ))
+                },
+            )
             .when(
                 !button_hidden(RESOURCES_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY),
                 |this| {

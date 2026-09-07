@@ -324,7 +324,6 @@ impl GhostexGpuiApp {
 
     pub(crate) fn titlebar_popup_content_height(&self, kind: GpuiTitlebarPopupKind) -> f32 {
         match kind {
-            GpuiTitlebarPopupKind::RemoteSites => 650.0,
             GpuiTitlebarPopupKind::Actions => self.titlebar_actions_popup_content_height(),
             GpuiTitlebarPopupKind::Extensions => {
                 let extension_count = self
@@ -344,9 +343,9 @@ impl GhostexGpuiApp {
             }
             GpuiTitlebarPopupKind::Git => self.titlebar_git_popup_content_height(),
             GpuiTitlebarPopupKind::OpenTargets => self.titlebar_open_targets_popup_content_height(),
-            GpuiTitlebarPopupKind::Resources | GpuiTitlebarPopupKind::Tips => {
-                TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT
-            }
+            GpuiTitlebarPopupKind::Resources
+            | GpuiTitlebarPopupKind::Tips
+            | GpuiTitlebarPopupKind::RemoteSites => TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT,
         }
     }
 }

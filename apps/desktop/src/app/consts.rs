@@ -194,6 +194,18 @@ pub(crate) const TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD: f32 = 1330.0;
 
 pub(crate) const TITLEBAR_BUTTON_WIDTH: f32 = 42.0;
 
+/*
+CDXC:Titlebar 2026-09-06 DECISION:
+User: the leading titlebar buttons - sidebar collapse, update, Back and
+Forward - are one square button family of the same width, so they read as a
+row instead of three differently sized affordances. Back/Forward and update
+additionally stand 1px taller than TITLEBAR_CONTROL_HEIGHT at the top and the
+bottom.
+*/
+pub(crate) const TITLEBAR_LEADING_BUTTON_WIDTH: f32 = 29.0;
+
+pub(crate) const TITLEBAR_LEADING_TALL_BUTTON_HEIGHT: f32 = TITLEBAR_CONTROL_HEIGHT + 2.0;
+
 pub(crate) const TITLEBAR_TOOLTIP_HEIGHT: f32 = 20.0;
 
 pub(crate) const TITLEBAR_TOOLTIP_TEXT_SIZE: f32 = 12.0;
@@ -1646,6 +1658,9 @@ pub(crate) const TIPS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY: &str =
 
 pub(crate) const RESOURCES_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY: &str =
     "resourcesTitlebarButtonHidden";
+
+pub(crate) const DEV_SERVERS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY: &str =
+    "devServersTitlebarButtonHidden";
 
 pub(crate) const EXTENSIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY: &str =
     "extensionsTitlebarButtonHidden";

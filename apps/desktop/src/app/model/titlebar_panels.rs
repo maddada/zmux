@@ -43,6 +43,7 @@ pub(crate) struct GpuiNativeResourceRow {
     pub(crate) label: String,
     pub(crate) memory_mb: f64,
     pub(crate) pids: Vec<u32>,
+    pub(crate) termination_targets: Vec<GpuiNativeResourceProcess>,
     pub(crate) session_id: Option<String>,
     /// True when Sleep Inactive would put this row to sleep: an awake session
     /// whose agent is idle (not working, not waiting for attention).
@@ -74,9 +75,11 @@ pub(crate) struct GpuiNativeResourcesSnapshot {
     pub(crate) code_rows: Vec<GpuiNativeResourceRow>,
     pub(crate) inactive_terminal_sleep_count: usize,
     pub(crate) orphan_rows: Vec<GpuiNativeResourceRow>,
+    pub(crate) other_session_rows: Vec<GpuiNativeResourceRow>,
     pub(crate) project_label: String,
     pub(crate) server_rows: Vec<GpuiNativeResourceRow>,
     pub(crate) session_rows: Vec<GpuiNativeResourceRow>,
+    pub(crate) session_inventory_error: Option<String>,
     pub(crate) sleep_all_session_count: usize,
     pub(crate) total_cpu: f64,
     pub(crate) total_memory_mb: f64,

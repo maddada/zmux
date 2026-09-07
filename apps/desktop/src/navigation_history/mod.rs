@@ -30,8 +30,9 @@ use gpui::{
 use gpui_component::h_flex;
 
 use crate::{
-    GhostexGpuiApp, TITLEBAR_CONTROL_HEIGHT, titlebar_button_hover_color,
-    titlebar_disabled_text_color, titlebar_icon_color, titlebar_svg_icon,
+    GhostexGpuiApp, TITLEBAR_CONTROL_HEIGHT, TITLEBAR_LEADING_BUTTON_WIDTH,
+    TITLEBAR_LEADING_TALL_BUTTON_HEIGHT, titlebar_button_hover_color, titlebar_disabled_text_color,
+    titlebar_icon_color, titlebar_svg_icon,
 };
 
 /// Page-side event the sidebar runtime listens for. Must stay identical to
@@ -41,7 +42,6 @@ const NAVIGATION_HISTORY_COMMAND_EVENT_NAME: &str =
 /// Bridge message the sidebar runtime posts whenever the buttons should change.
 pub(crate) const NAVIGATION_HISTORY_STATE_MESSAGE_TYPE: &str = "navigationHistoryState";
 
-const NAVIGATION_BUTTON_WIDTH: f32 = 24.0;
 const NAVIGATION_ICON_SIZE: f32 = 15.0;
 const NAVIGATION_ICON_BACK: &str = "titlebar/chevron-left.svg";
 const NAVIGATION_ICON_FORWARD: &str = "titlebar/chevron-right.svg";
@@ -160,12 +160,19 @@ impl GhostexGpuiApp {
                 "ghostex-gpui-titlebar-navigate-forward"
             })
             .flex()
-            .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .w(px(NAVIGATION_BUTTON_WIDTH))
+            /*
+            CDXC:Navigation 2026-09-06 DECISION:
+            User: Back/Forward are square (no corner rounding), as wide as the
+            sidebar collapse and update buttons, and their hit and hover area
+            reaches 1px past the titlebar control height at the top and the
+            bottom, so the arrows sit in a taller strip than the sidebar
+            toggle next to them.
+            */
+            .h(px(TITLEBAR_LEADING_TALL_BUTTON_HEIGHT))
+            .w(px(TITLEBAR_LEADING_BUTTON_WIDTH))
             .flex_shrink_0()
             .items_center()
             .justify_center()
-            .rounded(px(5.0))
             .cursor_default()
             .when(enabled, |this| {
                 this.hover(|this| this.bg(titlebar_button_hover_color()))
