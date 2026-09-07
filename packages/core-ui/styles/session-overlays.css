@@ -142,6 +142,23 @@
   min-width: 0;
 }
 
+.session-saved-account-submenu {
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+.session-saved-account-submenu .session-tag-menu-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-saved-account-message {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+
 .session-tag-menu-item-check {
   margin-left: auto;
   opacity: 0;

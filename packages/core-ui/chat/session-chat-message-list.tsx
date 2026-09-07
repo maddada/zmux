@@ -68,7 +68,10 @@ import {
   SessionChatDisclosure,
   SessionChatExpansion,
 } from './session-chat-expansion';
+import { SessionChatSavePromptButton } from './session-chat-save-prompt-button';
+import { SessionChatUserMessageLayout } from './session-chat-user-message-layout';
 import { SessionChatMarkdown } from './session-chat-markdown';
+import { SessionChatMinimap } from './session-chat-minimap';
 import { SessionChatScrollCap } from './session-chat-scroll-cap';
 import {
   SessionChatSaveMarkdownDialog,
@@ -80,7 +83,9 @@ import {
   type RewindSessionChatToMessage,
   type SessionChatRewindRequest,
 } from './session-chat-rewind-dialog';
-import { isSessionChatPendingMessageId } from './session-chat-pending';
+import { SESSION_CHAT_CODEX_GOAL_ID_PREFIX, isSessionChatPendingMessageId } from './session-chat-pending';
+import { SessionChatGoalCard } from './session-chat-goal-card';
+import { SessionChatAgentMessageCard, parseSessionChatAgentMessage } from './session-chat-agent-message-card';
 import {
   dropSessionChatHiddenMessages,
   sessionChatSuppressedTurnLabel,
@@ -128,6 +133,7 @@ export interface SessionChatMessageListProps {
   hasMore: boolean;
   loadingEarlier: boolean;
   onLoadEarlier: () => void;
+  onSavePrompt?: (prompt: string) => Promise<void>;
   /** Saves a settled assistant response inside this session project's Docs tree. */
   saveMessageMarkdown?: SaveSessionMessageMarkdown;
   /** Reads existing project Markdown paths before generating the next file name. */
@@ -136,10 +142,11 @@ export interface SessionChatMessageListProps {
   CDXC:SessionChat 2026-09-02:
   Rewinds the live conversation back to the point before a user prompt was
   sent. Set only when the host can reach `/api/rewindSessionChat` AND the
-  session runs an agent whose rewind Ghostex drives (Claude), so the
+  session runs an agent whose rewind Ghostex drives (Claude or Codex), so the
   transcript never offers a rewind that would be refused.
   */
   rewindToMessage?: RewindSessionChatToMessage;
+  rewindAgent?: 'claude' | 'codex';
   /**
    * The live gate: the same condition that lets the composer send, because the
    * daemon types the rewind into that same pane. Only the "Rewind to here"
@@ -255,15 +262,19 @@ function UserImageThumbnails({ blocks }: { blocks: readonly { alt?: string; path
 
 function CopyFooter({
   anchoredToAssistantMarker = false,
+  className,
   markdown,
   onRewind,
   onSaveMarkdown,
+  onSavePrompt,
 }: {
   anchoredToAssistantMarker?: boolean;
+  className?: string;
   markdown: string;
   /** Opens the rewind confirmation for this prompt (user rows only). */
   onRewind?: () => void;
   onSaveMarkdown?: (markdown: string) => void;
+  onSavePrompt?: (prompt: string) => Promise<void>;
 }) {
   const canSaveMarkdown = markdown.split(/\r?\n/u).filter((line) => line.trim().length > 0).length > 1;
   return (
@@ -272,7 +283,8 @@ function CopyFooter({
         'px-0',
         anchoredToAssistantMarker
           ? 'ghostex-chat-final-actions'
-          : 'opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100'
+          : 'opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100',
+        className
       )}
     >
       <Button
@@ -287,6 +299,7 @@ function CopyFooter({
       >
         <IconCopy aria-hidden='true' data-icon='inline-start' stroke={1.9} />
       </Button>
+      {onSavePrompt ? <SessionChatSavePromptButton prompt={markdown} onSave={onSavePrompt} /> : null}
       {onRewind ? (
         <Button aria-label='Rewind to here' onClick={onRewind} size='icon-xs' title='Rewind to here' variant='ghost'>
           <IconArrowBackUp aria-hidden='true' data-icon='inline-start' stroke={1.9} />
@@ -738,6 +751,7 @@ function MessageRow({
   message,
   onRewind,
   onSaveMarkdown,
+  onSavePrompt,
   questionPairsAsRows = false,
   showAssistantCopy,
   verboseMode,
@@ -752,6 +766,7 @@ function MessageRow({
   /** Set only when this transcript may be rewound; see the list's prop. */
   onRewind?: (request: SessionChatRewindRequest) => void;
   onSaveMarkdown?: (markdown: string) => void;
+  onSavePrompt?: (prompt: string) => Promise<void>;
   /** Set inside the expanded completed-work log, where the hoisted question
    * card already shows any answered question this message carries. */
   questionPairsAsRows?: boolean;
@@ -823,7 +838,7 @@ function MessageRow({
       : '';
   if (isSystem && autoNamedTitle) {
     return (
-      <Marker className='pb-3'>
+      <Marker className='ghostex-chat-status-card'>
         <div className='inline-flex max-w-full items-start gap-2.5 rounded-2xl border border-border/70 bg-muted/40 px-3.5 py-2.5 shadow-sm'>
           <IconSparkles aria-hidden='true' className='mt-0.5 size-4 shrink-0 text-muted-foreground' stroke={1.8} />
           <span className='flex min-w-0 flex-col gap-0.5'>
@@ -858,15 +873,29 @@ function MessageRow({
     );
   }
 
+  if (isSystem && message.id.startsWith(SESSION_CHAT_CODEX_GOAL_ID_PREFIX)) {
+    const [status, objective, usage] = message.blocks.map((block) => (block.type === 'text' ? block.text : ''));
+    return <SessionChatGoalCard objective={objective ?? ''} status={status ?? ''} usage={usage || undefined} />;
+  }
+
   if (isSystem && message.id.startsWith('app-command-output:')) {
     const command = message.blocks[0]?.type === 'text' ? message.blocks[0].text : '';
     const output = message.blocks[1]?.type === 'text' ? message.blocks[1].text : '';
     return (
-      <details open className='mb-3 min-w-0 rounded-lg border bg-muted/20'>
+      <details open className='ghostex-chat-status-card min-w-0 rounded-lg border bg-muted/20'>
         <summary className='cursor-pointer px-3 py-2 text-xs font-medium'>{command}</summary>
-        <pre className='max-h-96 overflow-auto whitespace-pre-wrap break-words border-t px-3 py-2 text-xs leading-relaxed'>{output}</pre>
+        <pre className='max-h-96 overflow-auto whitespace-pre-wrap break-words border-t px-3 py-2 text-xs leading-relaxed'>
+          {output}
+        </pre>
       </details>
     );
+  }
+
+  if (isSystem) {
+    const agentMessage = parseSessionChatAgentMessage(markdown);
+    if (agentMessage) {
+      return <SessionChatAgentMessageCard body={agentMessage.body} sender={agentMessage.sender} />;
+    }
   }
 
   if (isSystem) {
@@ -908,25 +937,30 @@ function MessageRow({
      */
     return (
       <Message align='end' className='pb-4' data-role='user'>
-        <MessageContent>
+        <MessageContent className='ghostex-chat-user-message-container'>
           {message.queued === true ? <QueuedLabel /> : null}
-          {/* justify-end keeps wrapped rows against the user's side. */}
-          <UserImageThumbnails blocks={images} />
-          {userMarkdown.length > 0 ? (
-            <Bubble align='end' className='ghostex-chat-user-bubble' variant='default'>
-              <BubbleContent>
-                <SessionChatMarkdown chatText markdown={userMarkdown} />
-              </BubbleContent>
-            </Bubble>
-          ) : null}
-          {showCopy ? (
-            <CopyFooter
-              markdown={userCopyMarkdown}
-              {...(showRewind && onRewind
-                ? { onRewind: () => onRewind({ messageId: message.id, prompt: userCopyMarkdown }) }
-                : {})}
-            />
-          ) : null}
+          <SessionChatUserMessageLayout>
+            {showCopy ? (
+              <CopyFooter
+                className='ghostex-chat-user-actions'
+                markdown={userCopyMarkdown}
+                onSavePrompt={onSavePrompt}
+                {...(showRewind && onRewind
+                  ? { onRewind: () => onRewind({ messageId: message.id, prompt: userCopyMarkdown }) }
+                  : {})}
+              />
+            ) : null}
+            <div className='ghostex-chat-user-content'>
+              <UserImageThumbnails blocks={images} />
+              {userMarkdown.length > 0 ? (
+                <Bubble align='end' className='ghostex-chat-user-bubble' variant='default'>
+                  <BubbleContent>
+                    <SessionChatMarkdown chatText markdown={userMarkdown} />
+                  </BubbleContent>
+                </Bubble>
+              ) : null}
+            </div>
+          </SessionChatUserMessageLayout>
         </MessageContent>
       </Message>
     );
@@ -1337,10 +1371,12 @@ export function SessionChatMessageList({
   loadingEarlier,
   messages,
   onLoadEarlier,
+  onSavePrompt,
   canRewind = true,
   listMessageMarkdownPaths,
   onRewound,
   rewindToMessage,
+  rewindAgent = 'claude',
   saveMessageMarkdown,
   sessionTitle = '',
   summaryMode = false,
@@ -1365,6 +1401,10 @@ export function SessionChatMessageList({
     // Clear bottom-follow before its resize can pin the viewport to the end.
     shouldFollowBottomRef.current = false;
     anchorSessionChatExpansionTop(target);
+  }, []);
+  const navigateHistory = useCallback((): void => {
+    shouldFollowBottomRef.current = false;
+    viewportRef.current?.setAttribute(FOLLOW_BOTTOM_ATTRIBUTE, 'false');
   }, []);
 
   useEffect(
@@ -1475,7 +1515,8 @@ export function SessionChatMessageList({
       scrollEdgeThreshold={AUTO_SCROLL_EDGE_THRESHOLD_PX}
     >
       <ScrollToLatestSend pendingMessageId={pendingMessageId} />
-      <MessageScroller className='flex-1'>
+      <MessageScroller className={cn('flex-1', summaryTurns.length >= 2 && 'ghostex-chat-has-minimap')}>
+        <SessionChatMinimap onNavigate={navigateHistory} turns={summaryTurns} />
         {/* RTL viewport + LTR content puts the scrollbar on the left edge. */}
         {/* outline-none: Chromium makes scrollers keyboard-focusable and paints
             its default focus ring on them; a transcript is not a control. */}
@@ -1494,6 +1535,7 @@ export function SessionChatMessageList({
                   <MessageScrollerItem key={`summary:${turn.user.id}`} messageId={turn.user.id}>
                     <MessageRow
                       message={turn.user}
+                      onSavePrompt={onSavePrompt}
                       {...(rewindToMessage && canRewind ? { onRewind: setRewindRequest } : {})}
                       showAssistantCopy={false}
                       verboseMode={verboseMode}
@@ -1554,6 +1596,7 @@ export function SessionChatMessageList({
                          */
                         isStreaming={isWorking && index === renderItems.length - 1}
                         message={item.message}
+                        onSavePrompt={onSavePrompt}
                         {...(rewindToMessage && canRewind ? { onRewind: setRewindRequest } : {})}
                         {...(saveMessageMarkdown && listMessageMarkdownPaths
                           ? { onSaveMarkdown: setMarkdownToSave }
@@ -1595,6 +1638,7 @@ export function SessionChatMessageList({
       ) : null}
       {rewindToMessage ? (
         <SessionChatRewindDialog
+          agent={rewindAgent}
           onOpenChange={(open) => {
             if (!open) {
               setRewindRequest(null);

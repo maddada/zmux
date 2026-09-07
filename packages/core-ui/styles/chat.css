@@ -13,6 +13,7 @@
  * looking heavier than it should next to the body copy.
  */
 @import '@fontsource-variable/dm-sans/index.css';
+@import '../chat/session-chat-card-styles.css';
 
 /*
  * CDXC:SessionChat 2026-07-31:
@@ -92,6 +93,15 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
   position: relative;
   transform: translateX(-50%);
   width: min(calc(100vw - 2rem), 46rem);
+}
+
+/* CDXC:SessionChat 2026-09-06 DECISION: User: the transcript status cards (goal,
+   received agent message, pending tool) sit as far from the row below as from
+   the row above. The row above is a thinking row, whose bottom padding is
+   0.375rem + 7px; the card's own 0.25rem top margin comes on top of that, so
+   the bottom margin repeats both. */
+.ghostex-chat-status-card {
+  margin-block: 0.25rem calc(0.625rem + 7px);
 }
 
 ::highlight(ghostex-chat-search-match) {
@@ -489,6 +499,58 @@ body[data-session-chat-bullets='off'] .ghostex-session-chat-popup {
 }
 
 /* --- Conversation blocks ------------------------------------------------- */
+
+/* CDXC:SessionChat 2026-09-07 DECISION:
+   User: keep Copy, Save prompt and Rewind outside the bubble on the left; show them horizontally for one- or two-line messages and vertically for longer messages, superseding the always-vertical arrangement. */
+.ghostex-chat-user-message-container {
+  container-type: inline-size;
+}
+
+.ghostex-chat-user-message {
+  --chat-user-action-width: 1.5rem;
+  align-items: flex-start;
+  align-self: flex-end;
+  display: flex;
+  gap: 0.375rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.ghostex-chat-user-message:has(.ghostex-chat-user-actions > button:nth-child(2)) {
+  --chat-user-action-width: 3rem;
+}
+
+.ghostex-chat-user-message:has(.ghostex-chat-user-actions > button:nth-child(3)) {
+  --chat-user-action-width: 4.5rem;
+}
+
+.ghostex-chat-user-message[data-compact='true'] {
+  align-items: center;
+}
+
+.ghostex-chat-user-message[data-compact='true'] > .ghostex-chat-user-actions {
+  flex-direction: row;
+  padding-block-start: 0;
+}
+
+.ghostex-chat-user-message > .ghostex-chat-user-actions {
+  flex: none;
+  flex-direction: column;
+  padding-block-start: 0.75rem;
+}
+
+.ghostex-chat-user-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  /* Keep wrapping independent of button orientation so a two-line bubble cannot oscillate between layouts. */
+  max-width: min(80cqi, calc(100cqi - var(--chat-user-action-width) - 0.375rem));
+  min-width: 0;
+}
+
+.ghostex-chat-user-content > .ghostex-chat-user-bubble {
+  max-width: 100%;
+}
 
 .ghostex-chat-user-bubble > [data-slot='bubble-content'] {
   background: var(--accent);
@@ -3629,23 +3691,6 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   padding-left: 1.375rem;
 }
 
-.ghostex-chat-agent-tasks-fold-button {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: var(--muted-foreground);
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.6875rem;
-  line-height: 1.25rem;
-  padding: 0;
-}
-
-.ghostex-chat-agent-tasks-fold-button:hover {
-  color: var(--foreground);
-  text-decoration: underline;
-}
-
 /* CDXC:AgentScreenDetection 2026-08-23:
    Sub-agents Claude is running, read off its terminal screen. This sits
    ABOVE the composer container while the queue strip sits INSIDE it, and that
@@ -3654,6 +3699,7 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
    Same quiet weight as the draft-conflict bar above it, so neither reads as a
    second composer. */
 .ghostex-chat-agent-fleet {
+  /* CDXC:SessionChat 2026-09-07 DECISION: User: increase the space below the Subagents title by 5px and the padding on every side by 8px. */
   /* Its own container, because the composer's is on a SIBLING box and cannot be
      queried from here. Same technique the composer footer uses to drop the
      agent name under a narrow pane. */
@@ -3663,10 +3709,10 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   border-radius: 0.75rem;
   display: flex;
   flex-direction: column;
-  gap: 0.125rem;
+  gap: calc(0.125rem + 5px);
   margin-bottom: 0.375rem;
   min-width: 0;
-  padding: 0.375rem 0.5rem;
+  padding: calc(0.375rem + 8px) calc(0.5rem + 8px);
 }
 
 .ghostex-chat-agent-fleet-header {
@@ -3681,7 +3727,7 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   font-size: 0.6875rem;
   letter-spacing: 0.04em;
   line-height: 1.2;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 /* The count carries the roster size on its own, so the title never has to be
@@ -3712,7 +3758,7 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  row-gap: 0.0625rem;
+  row-gap: calc(0.0625rem + 3px);
 }
 
 /* The row is a grouping for semantics only; its cells belong to the grid above
@@ -3802,7 +3848,7 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 
 .ghostex-chat-agent-fleet-separator {
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
+  font-size: calc(0.6875rem - 1px);
   line-height: 1.125rem;
   opacity: 0.5;
 }

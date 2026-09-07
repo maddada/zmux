@@ -1,0 +1,122 @@
+.ghostex-chat-minimap {
+  display: none;
+}
+
+@media (pointer: fine) {
+  /* The rail owns a real gutter beside the viewport, so its grab area cannot cover transcript controls. */
+  .ghostex-chat-has-minimap {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    container-type: inline-size;
+  }
+
+  .ghostex-chat-minimap {
+    display: flex;
+    min-height: 0;
+    align-items: center;
+    padding-block: 24px;
+    padding-left: 12px;
+    z-index: 1;
+  }
+}
+
+.ghostex-chat-minimap-rail {
+  position: relative;
+  width: 28px;
+  max-height: 100%;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+/* CDXC:SessionChat 2026-09-07 DECISION:
+   User: hide the minimap until the user hovers that area of the chat viewport. */
+.ghostex-chat-minimap:hover .ghostex-chat-minimap-rail,
+.ghostex-chat-minimap-rail:focus-visible {
+  opacity: 1;
+}
+
+.ghostex-chat-minimap-rail:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1px var(--ring),
+    0 0 0 4px color-mix(in srgb, var(--ring) 20%, transparent);
+}
+
+.ghostex-chat-minimap-line {
+  position: absolute;
+  inset-block: 0;
+  left: 12px;
+  width: 1px;
+  background: color-mix(in srgb, var(--border) 15%, transparent);
+  pointer-events: none;
+}
+
+.ghostex-chat-minimap-dash {
+  position: absolute;
+  left: 0;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted-foreground) 35%, transparent);
+  transition:
+    background-color 150ms,
+    width 150ms;
+  pointer-events: none;
+}
+
+.ghostex-chat-minimap-dash[data-active='true'] {
+  background: color-mix(in srgb, var(--muted-foreground) 75%, transparent);
+}
+
+.ghostex-chat-minimap-dash[data-in-view='true'] {
+  background: color-mix(in srgb, var(--foreground) 90%, transparent);
+}
+
+.ghostex-chat-minimap-preview {
+  position: absolute;
+  left: 32px;
+  width: min(320px, calc(100cqw - 56px));
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--popover) 94%, transparent);
+  backdrop-filter: blur(16px);
+  color: var(--popover-foreground);
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 25%);
+  font-size: 14px;
+  line-height: 20px;
+  pointer-events: none;
+}
+
+.ghostex-chat-minimap-prompt {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.ghostex-chat-minimap-reply {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  margin-top: 4px;
+  max-height: 60px;
+  color: var(--muted-foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghostex-chat-minimap-rail,
+  .ghostex-chat-minimap-dash {
+    transition: none;
+  }
+}

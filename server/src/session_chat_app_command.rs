@@ -56,6 +56,8 @@ pub struct SessionChatAppCommand {
     /// agent publishes the generated title in its own metadata.
     pub title: Option<String>,
     pub output: Option<String>,
+    /// The parsed goal cell behind a Codex `/goal` command's output.
+    pub goal: Option<crate::session_chat_codex_goal::SessionChatCodexGoal>,
     screen_baseline: Option<String>,
     /// RFC3339 millis, for display ordering only.
     pub sent_at: String,
@@ -71,6 +73,9 @@ impl SessionChatAppCommand {
         map.insert("command".to_string(), json!(self.command));
         if let Some(output) = self.output.as_deref() {
             map.insert("output".to_string(), json!(output));
+        }
+        if let Some(goal) = self.goal.as_ref() {
+            map.insert("goal".to_string(), goal.to_value());
         }
         if let Some(title) = self.title.as_deref() {
             map.insert("title".to_string(), json!(title));
@@ -144,6 +149,7 @@ fn record_session_chat_app_command_inner(
         command: command.to_string(),
         title: app_command_title(command),
         output: None,
+        goal: None,
         screen_baseline: None,
         sent_at,
         title_metadata_baseline,
@@ -166,20 +172,39 @@ fn app_command_title(command: &str) -> Option<String> {
 /// CDXC:SessionChat 2026-09-05 WHY:
 /// Codex's local commands do not enter its transcript, and asynchronous commands such as /mcp repaint after their initial loading line.
 /// Retain one command's screen baseline until the next send so the shared screen probe can update the same result row.
-pub(crate) fn begin_codex_command_output(project_id: &str, session_id: &str, command: &str, screen: String) {
-    let Ok(mut guard) = store().lock() else { return; };
-    let rows = guard.entry((project_id.to_string(), session_id.to_string())).or_default();
+pub(crate) fn begin_codex_command_output(
+    project_id: &str,
+    session_id: &str,
+    command: &str,
+    screen: String,
+) {
+    let Ok(mut guard) = store().lock() else {
+        return;
+    };
+    let rows = guard
+        .entry((project_id.to_string(), session_id.to_string()))
+        .or_default();
     if crate::session_chat_codex_dialog::detect_codex_dialog(&screen).is_some()
-        && rows.iter().any(|row| row.screen_baseline.is_some()) {
+        && rows.iter().any(|row| row.screen_baseline.is_some())
+    {
         return;
     }
-    for row in rows.iter_mut() { row.screen_baseline = None; }
+    for row in rows.iter_mut() {
+        row.screen_baseline = None;
+    }
     let now = Instant::now();
     let sent_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     rows.push(SessionChatAppCommand {
-        id: format!("{sent_at}-{}", rows.len()), command: command.to_string(), title: None,
-        output: Some(String::new()), screen_baseline: Some(screen), sent_at,
-        title_metadata_baseline: None, title_metadata_baseline_captured: false, recorded: now,
+        id: format!("{sent_at}-{}", rows.len()),
+        command: command.to_string(),
+        title: None,
+        output: Some(String::new()),
+        goal: None,
+        screen_baseline: Some(screen),
+        sent_at,
+        title_metadata_baseline: None,
+        title_metadata_baseline_captured: false,
+        recorded: now,
     });
     prune(rows, now);
 }
@@ -187,19 +212,39 @@ pub(crate) fn begin_codex_command_output(project_id: &str, session_id: &str, com
 pub(crate) fn stop_codex_command_output(project_id: &str, session_id: &str) {
     if let Ok(mut guard) = store().lock() {
         if let Some(rows) = guard.get_mut(&(project_id.to_string(), session_id.to_string())) {
-            for row in rows { row.screen_baseline = None; }
+            for row in rows {
+                row.screen_baseline = None;
+            }
         }
     }
 }
 
 pub(crate) fn refresh_codex_command_output(project_id: &str, session_id: &str, screen: &str) {
-    let Ok(mut guard) = store().lock() else { return; };
-    let Some(rows) = guard.get_mut(&(project_id.to_string(), session_id.to_string())) else { return; };
+    let Ok(mut guard) = store().lock() else {
+        return;
+    };
+    let Some(rows) = guard.get_mut(&(project_id.to_string(), session_id.to_string())) else {
+        return;
+    };
     prune(rows, Instant::now());
     for row in rows.iter_mut().filter(|row| row.screen_baseline.is_some()) {
-        if let Some(output) = crate::session_chat_codex_dialog::codex_command_output(row.screen_baseline.as_deref().unwrap_or_default(), screen) {
-            row.output = Some(output);
+        let Some(output) = crate::session_chat_codex_dialog::codex_command_output(
+            row.screen_baseline.as_deref().unwrap_or_default(),
+            screen,
+        ) else {
+            continue;
+        };
+        if crate::session_chat_codex_goal::command_is_codex_goal(&row.command) {
+            if let Some(cell) = crate::session_chat_codex_goal::parse_codex_goal_cell(&output) {
+                row.output = Some(cell.text);
+                row.goal = Some(cell.goal);
+                if cell.settled {
+                    row.screen_baseline = None;
+                }
+                continue;
+            }
         }
+        row.output = Some(output);
     }
 }
 
@@ -294,10 +339,14 @@ pub fn session_chat_app_commands_identity(project_id: &str, session_id: &str) ->
         .into_iter()
         .map(|row| {
             format!(
-                "{}\u{1e}{}\u{1e}{}",
+                "{}\u{1e}{}\u{1e}{}\u{1e}{}",
                 row.id,
                 row.title.as_deref().unwrap_or_default(),
-                row.output.as_deref().unwrap_or_default()
+                row.output.as_deref().unwrap_or_default(),
+                row.goal
+                    .as_ref()
+                    .map(|goal| goal.identity())
+                    .unwrap_or_default()
             )
         })
         .collect::<Vec<_>>()

@@ -533,6 +533,9 @@ Retired against the agent's OWN record of the same command: Claude Code writes a
 `<command-name>` envelope for everything it intercepts, so rendering both would
 double the row. Codex writes nothing, which is the whole reason these exist.
 */
+/** System row carrying a Codex goal: blocks are status, objective, usage. */
+export const SESSION_CHAT_CODEX_GOAL_ID_PREFIX = 'app-command-goal:';
+
 export function sessionChatAppCommandsAsMessages(
   commands: readonly SessionChatAppCommand[],
   transcript: readonly SessionChatMessage[]
@@ -549,15 +552,35 @@ export function sessionChatAppCommandsAsMessages(
     })
   );
   return commands.flatMap((entry) => {
+    if (entry.goal) {
+      return [
+        {
+          blocks: [
+            { text: entry.goal.status, type: 'text' as const },
+            { text: entry.goal.objective, type: 'text' as const },
+            { text: entry.goal.usage ?? '', type: 'text' as const },
+          ],
+          id: `${SESSION_CHAT_CODEX_GOAL_ID_PREFIX}${entry.id}`,
+          role: 'system' as const,
+          source: 'client' as const,
+          timestamp: Date.parse(entry.sentAt) || null,
+        },
+      ];
+    }
     if (entry.output !== undefined) {
       if (!entry.output) return [];
-      return [{
-        blocks: [{ text: entry.command, type: 'text' as const }, { text: entry.output, type: 'text' as const }],
-        id: `app-command-output:${entry.id}`,
-        role: 'system' as const,
-        source: 'client' as const,
-        timestamp: Date.parse(entry.sentAt) || null,
-      }];
+      return [
+        {
+          blocks: [
+            { text: entry.command, type: 'text' as const },
+            { text: entry.output, type: 'text' as const },
+          ],
+          id: `app-command-output:${entry.id}`,
+          role: 'system' as const,
+          source: 'client' as const,
+          timestamp: Date.parse(entry.sentAt) || null,
+        },
+      ];
     }
     if (recorded.has(normalizeSessionChatPendingText(entry.command))) {
       return [];
