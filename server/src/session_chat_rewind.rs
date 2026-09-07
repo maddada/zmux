@@ -18,7 +18,7 @@ the TUI itself is showing on the highlighted row, so a list that is one row off
 the terminal) is refused rather than silently rewinding to the wrong turn.
 
 The whole sequence runs as ONE job on the per-session send worker
-(`SessionChatSendStep::DriveClaudeRewind`), for the reason
+(`SessionChatSendStep::DriveSessionChatRewind`), for the reason
 CDXC:SessionChat states: a queued prompt landing between the
 Up presses would type into the rewind dialog. It also means an interrupt that
 bumps the session's send generation aborts the drive at its next step.
@@ -27,6 +27,9 @@ On success the target's `parentUuid` is recorded as the session's pending
 rewind (session_chat_rewind_state.rs) so the chat readers hide the rewound rows
 immediately, before the transcript can confirm anything.
 */
+
+#[path = "session_chat_rewind_codex.rs"]
+mod codex;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -156,7 +159,7 @@ fn log_session_chat_rewind(level: LogLevel, event: &str, details: Value, error: 
 fn unsupported_agent() -> DomainStateError {
     DomainStateError {
         code: "unsupportedAgent",
-        message: "Rewind is only available for Claude Code sessions.".to_string(),
+        message: "Rewind is only available for Claude Code and Codex sessions.".to_string(),
     }
 }
 
@@ -192,7 +195,7 @@ fn rewind_timeout(step: &str) -> DomainStateError {
     DomainStateError {
         code: "timeout",
         message: format!(
-            "Claude Code did not answer the rewind {step} step in time. Nothing was rewound."
+            "The agent did not answer the rewind {step} step in time. Nothing was rewound."
         ),
     }
 }
@@ -532,32 +535,33 @@ fn resolve_rewind_target(
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
-struct ClaudeRewindPlan {
+struct RewindPlan {
+    codex: Option<codex::CodexRewindPlan>,
     /// First line of the target prompt, space-collapsed.
     target_first_line: String,
-    /// Up presses from `(current)` to the target: one per prompt after it, plus
-    /// one to leave `(current)`.
+    /// Claude: Up presses from `(current)`, including one to leave it.
+    /// Codex: Left presses from the already-selected latest prompt.
     presses: usize,
 }
 
-struct ClaudeRewindJob {
-    plan: ClaudeRewindPlan,
+struct RewindJob {
+    plan: RewindPlan,
     outcome: Option<std::result::Result<(), DomainStateError>>,
 }
 
-static REWIND_JOBS: OnceLock<Mutex<HashMap<u64, ClaudeRewindJob>>> = OnceLock::new();
+static REWIND_JOBS: OnceLock<Mutex<HashMap<u64, RewindJob>>> = OnceLock::new();
 static REWIND_JOB_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-fn rewind_jobs() -> &'static Mutex<HashMap<u64, ClaudeRewindJob>> {
+fn rewind_jobs() -> &'static Mutex<HashMap<u64, RewindJob>> {
     REWIND_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn register_rewind_job(plan: ClaudeRewindPlan) -> u64 {
+fn register_rewind_job(plan: RewindPlan) -> u64 {
     let job_id = REWIND_JOB_SEQUENCE.fetch_add(1, Ordering::SeqCst);
     if let Ok(mut jobs) = rewind_jobs().lock() {
         jobs.insert(
             job_id,
-            ClaudeRewindJob {
+            RewindJob {
                 plan,
                 outcome: None,
             },
@@ -772,7 +776,10 @@ impl RewindDriver<'_> {
         }
     }
 
-    async fn run(&self, plan: &ClaudeRewindPlan) -> std::result::Result<(), DomainStateError> {
+    async fn run(&self, plan: &RewindPlan) -> std::result::Result<(), DomainStateError> {
+        if let Some(codex) = &plan.codex {
+            return codex::drive(self, plan, codex).await;
+        }
         match self.drive(plan).await {
             Ok(()) => Ok(()),
             Err(error) => {
@@ -782,7 +789,7 @@ impl RewindDriver<'_> {
         }
     }
 
-    async fn drive(&self, plan: &ClaudeRewindPlan) -> std::result::Result<(), DomainStateError> {
+    async fn drive(&self, plan: &RewindPlan) -> std::result::Result<(), DomainStateError> {
         /*
         The composer check is repeated HERE, not just in the handler, because
         the handler ran before this job reached the front of the session's send
@@ -875,10 +882,7 @@ impl RewindDriver<'_> {
     /// is spent first, then the highlighted row must show the target prompt;
     /// a few extra presses are allowed for a list Claude counts differently,
     /// and anything past that is a refusal.
-    async fn select_prompt(
-        &self,
-        plan: &ClaudeRewindPlan,
-    ) -> std::result::Result<(), DomainStateError> {
+    async fn select_prompt(&self, plan: &RewindPlan) -> std::result::Result<(), DomainStateError> {
         let mut last_row = self
             .wait_for("list", |screen| {
                 rewind_stage_region(&screen_lines(screen), CLAUDE_REWIND_LIST_SUBTITLE)
@@ -919,7 +923,7 @@ impl RewindDriver<'_> {
 
     /// Verify the confirmation dialog is quoting the target prompt, then move
     /// the menu cursor onto the option labelled exactly `Restore conversation`.
-    async fn confirm(&self, plan: &ClaudeRewindPlan) -> std::result::Result<(), DomainStateError> {
+    async fn confirm(&self, plan: &RewindPlan) -> std::result::Result<(), DomainStateError> {
         let quoted = self
             .wait_for("confirmation", |screen| {
                 let lines = screen_lines(screen);
@@ -1007,9 +1011,9 @@ impl RewindDriver<'_> {
     }
 }
 
-/// The `SessionChatSendStep::DriveClaudeRewind` body. Runs on the session's own
+/// The `SessionChatSendStep::DriveSessionChatRewind` body. Runs on the session's own
 /// send worker, so nothing else can write to that pty while the dialog is open.
-pub(crate) async fn run_claude_rewind_job(
+pub(crate) async fn run_session_chat_rewind_job(
     project_id: &str,
     session_id: &str,
     zmx_name: &str,
@@ -1095,6 +1099,9 @@ async fn rewind_session_chat(
     }
     let target = resolve_session_chat_send_target(state, params, "rewindSessionChat")?;
     let agent = crate::session_chat_follower::session_chat_agent_for_session(&target.session);
+    if agent.as_deref() == Some("codex") {
+        return codex::rewind(state, target, &message_id).await;
+    }
     if !matches!(agent.as_deref(), Some("claude" | "openclaude")) {
         return Err(unsupported_agent());
     }
@@ -1118,7 +1125,8 @@ async fn rewind_session_chat(
             "A rewind is already running for this session.".to_string(),
         ));
     };
-    let job_id = register_rewind_job(ClaudeRewindPlan {
+    let job_id = register_rewind_job(RewindPlan {
+        codex: None,
         target_first_line: rewind_target.first_line.clone(),
         presses: rewind_target.prompts_after.saturating_add(1),
     });
@@ -1127,7 +1135,7 @@ async fn rewind_session_chat(
         &target.session_id,
         &target.zmx_name,
         "session-chat-rewind",
-        vec![SessionChatSendStep::DriveClaudeRewind { job_id }],
+        vec![SessionChatSendStep::DriveSessionChatRewind { job_id }],
     )
     .await;
     let outcome = take_rewind_job_outcome(job_id);

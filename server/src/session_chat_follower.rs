@@ -643,6 +643,11 @@ fn emit_snapshot_frame(
             };
             frame.insert("status".to_string(), json!(status.as_str()));
             frame.insert("working".to_string(), json!(working));
+            // CDXC:AgentProviders 2026-09-07 WHY:
+            // The account submenu needs the provider even when the live snapshot arrives before the initial read, or that read fails. An authoritative snapshot must carry its own agent family.
+            if let Some(agent) = config.agent.as_deref() {
+                frame.insert("agent".to_string(), json!(agent));
+            }
             insert_optional_prompt(&mut frame, prompt.or(screen.prompt));
             insert_optional_selected_options(&mut frame, selected_options);
             insert_screen_state(&mut frame, screen);
@@ -1037,6 +1042,36 @@ pub async fn run_session_chat_follower(
 
     loop {
         heartbeat.stamp();
+        if want_snapshot {
+            let live = read_live_state();
+            if live.agent_session_id.is_some() && live.agent_session_id != identity.agent_session_id {
+                // CDXC:SessionChat 2026-09-07 WHY:
+                // Codex rewind adopts a new conversation before requesting this snapshot. Re-resolve now instead of re-sending the abandoned file until the idle successor scan.
+                identity.adopt(live);
+                resolved = None;
+                file_state = FollowerFileState::new();
+                transcript_prompt = SessionChatTranscriptPromptState::default();
+                fork_ancestor_path = None;
+                has_fork_ancestor = false;
+                emitted_starting = false;
+                published_state_valid = false;
+                if identity.agent_session_path.is_none() {
+                    emit_snapshot_frame(
+                        &emit,
+                        &config,
+                        &stream,
+                        epoch,
+                        "sessionChatSnapshot",
+                        &SessionChatTailFileResult::default(),
+                        false,
+                        None,
+                        false,
+                        published_options.as_ref(),
+                        SessionChatScreenState::default(),
+                    );
+                }
+            }
+        }
         if resolved.is_none() {
             let agent_session_id = identity.agent_session_id.clone();
             let agent_session_path = identity.agent_session_path.clone();
@@ -1541,13 +1576,20 @@ pub async fn run_session_chat_follower(
         subscribed, so the faster tiers are bounded by what is actually on
         screen in front of someone.
         */
-        let probe_interval_ticks = if published_activity.is_some() || published_fleet.is_some() {
-            crate::session_chat_options::SESSION_CHAT_ACTIVITY_RECONCILE_INTERVAL_TICKS
-        } else if published_working {
-            crate::session_chat_options::SESSION_CHAT_WORKING_RECONCILE_INTERVAL_TICKS
-        } else {
-            crate::session_chat_options::SESSION_CHAT_OPTION_RECONCILE_INTERVAL_TICKS
-        };
+        let transcript_pager_open = published_notice
+            .as_ref()
+            .and_then(|notice| notice.dialog.as_ref())
+            .is_some_and(|dialog| {
+                dialog.id == crate::session_chat_codex_pager::CODEX_TRANSCRIPT_PAGER_ID
+            });
+        let probe_interval_ticks =
+            if published_activity.is_some() || published_fleet.is_some() || transcript_pager_open {
+                crate::session_chat_options::SESSION_CHAT_ACTIVITY_RECONCILE_INTERVAL_TICKS
+            } else if published_working {
+                crate::session_chat_options::SESSION_CHAT_WORKING_RECONCILE_INTERVAL_TICKS
+            } else {
+                crate::session_chat_options::SESSION_CHAT_OPTION_RECONCILE_INTERVAL_TICKS
+            };
         let activity_command_probe_due = activity_command_probe_ticks > 0;
         activity_command_probe_ticks = activity_command_probe_ticks.saturating_sub(1);
         /*
@@ -1590,6 +1632,11 @@ pub async fn run_session_chat_follower(
             )
             .await;
             if let Ok(Ok(mut detection)) = probe {
+                // Detection can project a fleet/compaction transition into the shared status.
+                // Read it before emitting this fleet so the same frame carries its working truth.
+                let detected_working = read_live_state().working;
+                let working_changed = detected_working != published_working;
+                published_working = detected_working;
                 if !published_working
                     && !detection
                         .activity
@@ -1623,10 +1670,9 @@ pub async fn run_session_chat_follower(
                 detection HAD run and would hold its loading skeleton for the
                 life of the session.
                 */
-                // Same capture rule again: only a whole screen proves the fleet
-                // is gone, and only the roster counts as a change — the per-row
-                // clocks tick locally off `detectedAt`.
-                let fleet_changed = detection.captured
+                // Only a successful fleet observation can retire it. Codex reads
+                // child rollouts; Claude reads its live screen. Clocks tick locally.
+                let fleet_changed = detection.fleet_observed
                     && !crate::session_chat_agent_fleet::same_session_chat_agent_fleet(
                         detection.fleet.as_ref(),
                         published_fleet.as_ref(),
@@ -1643,6 +1689,7 @@ pub async fn run_session_chat_follower(
                 let prompt_changed = detection.captured && detected_prompt != published_prompt;
                 let probed_changed = detection.attempted && !published_screen_probed;
                 if options_changed
+                    || working_changed
                     || notice_changed
                     || activity_changed
                     || fleet_changed
@@ -1806,10 +1853,12 @@ pub(crate) struct SessionChatFollowerIdentity {
 
 impl SessionChatFollowerIdentity {
     fn adopt(&mut self, live: SessionChatLiveState) {
+        let session_changed = live.agent_session_id.is_some()
+            && live.agent_session_id != self.agent_session_id;
         if live.agent_session_id.is_some() {
             self.agent_session_id = live.agent_session_id;
         }
-        if live.agent_session_path.is_some() {
+        if session_changed || live.agent_session_path.is_some() {
             self.agent_session_path = live.agent_session_path;
         }
     }

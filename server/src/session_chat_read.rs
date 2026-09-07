@@ -391,7 +391,7 @@ pub(crate) async fn handle_read_session_chat_http(
         agent_session_id,
         agent_session_path: _,
         lifecycle_running,
-        working,
+        mut working,
         stored_prompt,
         transcript_path,
         queue,
@@ -491,6 +491,17 @@ pub(crate) async fn handle_read_session_chat_http(
         )
         .await
         .unwrap_or_default();
+        let current_working = open_gxserver_database(&state.paths).ok().and_then(|db| {
+            DomainRepository::new(&db, state.metadata.server_id.as_str())
+                .get_session(&project_id, &session_id)
+                .ok()
+                .flatten()
+                .map(|session| session_chat_hook_working(&session))
+        });
+        if let Some(current_working) = current_working {
+            working = current_working;
+            result.insert("working".to_string(), json!(working));
+        }
         screen_prompt = detection.prompt.clone();
         if let Some(detected) = detection.options {
             result.insert("selectedOptions".to_string(), detected.to_value());

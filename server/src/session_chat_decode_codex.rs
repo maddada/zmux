@@ -106,17 +106,35 @@ fn codex_response_item(
             }],
         )),
         /*
-        Multi-agent traffic: one agent's message to another. The payload is
-        mostly `encrypted_content`, but the readable `input_text` header names
-        the sender/recipient, which is the only in-chat signal that a teammate
-        replied. Rendered as a system row.
+        CDXC:SessionChat 2026-09-06 DECISION:
+        User: the bare "Message Type: MESSAGE Task name: /root Sender: /root/core Payload:" rows must not appear in the Codex chat.
+        Multi-agent traffic is one agent's message to another; its body is `encrypted_content`, so the readable `input_text` header carries no payload and says nothing the fleet strip does not already show.
+        The row survives only when the payload itself is readable, and then names its sender.
         */
         Some("agent_message") => {
             let blocks = claude_content_blocks(payload.get("content"));
             if blocks.is_empty() {
                 return None;
             }
-            Some(transcript_message(SessionChatRole::System, blocks))
+            let text = blocks
+                .iter()
+                .filter_map(|block| match block {
+                    SessionChatBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let Some((sender, body)) = codex_agent_message_envelope(&text) else {
+                return Some(transcript_message(SessionChatRole::System, blocks));
+            };
+            if body.is_empty() {
+                return None;
+            }
+            let sender = extract_string(payload.get("author")).unwrap_or(sender);
+            Some(transcript_message(
+                SessionChatRole::System,
+                vec![text_block(format!("Message from {sender}\n\n{body}"))],
+            ))
         }
         _ => None,
     }
@@ -325,7 +343,80 @@ fn codex_call_input(payload: &Map<String, Value>) -> Value {
             .cloned()
             .unwrap_or(Value::Null)
     };
-    bounded_tool_call_input(raw)
+    let mut input = bounded_tool_call_input(raw);
+    scrub_encrypted_strings(&mut input);
+    input
+}
+
+/// `Message Type: … Task name: … Sender: … Payload:` header of an inter-agent
+/// message: the sender and whatever readable text follows the header.
+fn codex_agent_message_envelope(text: &str) -> Option<(String, String)> {
+    let text = text.trim_start();
+    if !text.starts_with("Message Type:") {
+        return None;
+    }
+    let mut sender = String::new();
+    let mut lines = text.lines();
+    let mut body: Option<String> = None;
+    for line in lines.by_ref() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("Sender:") {
+            sender = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("Payload:") {
+            body = Some(rest.trim().to_string());
+            break;
+        }
+    }
+    let mut body = body?;
+    let rest = lines.collect::<Vec<_>>().join("\n");
+    if !rest.trim().is_empty() {
+        if !body.is_empty() {
+            body.push('\n');
+        }
+        body.push_str(rest.trim());
+    }
+    Some((sender, body))
+}
+
+/// CDXC:SessionChat 2026-09-06 WHY:
+/// Codex encrypts the bodies of its collaboration tool calls (`send_message`, `followup_task`), so their arguments carry an opaque Fernet token that filled the tool row with base64.
+/// The token is replaced with a marker wherever it appears in a tool input; everything readable around it stays.
+fn scrub_encrypted_strings(value: &mut Value) {
+    match value {
+        Value::String(text) => {
+            if text.contains(ENCRYPTED_TOKEN_PREFIX) {
+                *text = replace_encrypted_tokens(text);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(scrub_encrypted_strings),
+        Value::Object(map) => map.values_mut().for_each(scrub_encrypted_strings),
+        _ => {}
+    }
+}
+
+const ENCRYPTED_TOKEN_PREFIX: &str = "gAAAAA";
+const ENCRYPTED_TOKEN_MIN_LEN: usize = 60;
+
+fn replace_encrypted_tokens(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(ENCRYPTED_TOKEN_PREFIX) {
+        out.push_str(&rest[..start]);
+        let candidate = &rest[start..];
+        let len = candidate
+            .char_indices()
+            .find(|(_, ch)| !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '=')))
+            .map(|(index, _)| index)
+            .unwrap_or(candidate.len());
+        if len >= ENCRYPTED_TOKEN_MIN_LEN {
+            out.push_str("[encrypted]");
+        } else {
+            out.push_str(&candidate[..len]);
+        }
+        rest = &candidate[len..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn codex_tool_result(output: Option<&Value>) -> SessionChatBlock {

@@ -50,12 +50,14 @@ function previewLines(preview: string): { lines: string[]; truncated: boolean } 
 }
 
 export function SessionChatRewindDialog({
+  agent = 'claude',
   onOpenChange,
   onRewound,
   request,
   rewind,
   theme,
 }: {
+  agent?: 'claude' | 'codex';
   onOpenChange: (open: boolean) => void;
   /**
    * The rewind landed: the prompt it rewound to, verbatim, so the surface can
@@ -138,8 +140,9 @@ export function SessionChatRewindDialog({
               </blockquote>
             ) : null}
             <p className='text-xs leading-relaxed text-muted-foreground'>
-              We only rewind using "Restore conversation" in the Chat View currently. Switch to Terminal View and use
-              /rewind to resume using another option.
+              {agent === 'codex'
+                ? 'Codex continues in a new conversation from this point and puts this message back in the composer for editing.'
+                : 'We only rewind using "Restore conversation" in the Chat View currently. Switch to Terminal View and use /rewind to resume using another option.'}
             </p>
             {error !== null ? (
               <p className='text-xs leading-relaxed text-destructive' role='alert'>
