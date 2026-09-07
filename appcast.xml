@@ -8,6 +8,63 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>8.10.0</title>
+            <pubDate>Mon, 07 Sep 2026 10:05:39 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v8.10.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>81000</sparkle:version>
+            <sparkle:shortVersionString>8.10.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 8.10.0
+
+## 8.10.0 - 2026-09-07
+
+- New Features
+  - Sign in to several Claude or Codex accounts, switch a session between them, and let Ghostex move to the next account when one hits its limit. A setup guide walks you through each provider, and you can blur account emails when sharing your screen.
+  - Diagrams written in chat messages or Docs now draw as pictures you can open full screen.
+  - Dev Servers lists the local web servers your projects are running, with a titlebar button you can hide if you do not use it.
+  - A minimap beside long conversations lets you jump back to any earlier turn.
+  - Save a prompt you wrote straight from the chat into your Saved Prompts library.
+  - Pick the model and the reasoning effort for Claude and Codex from the chat bar.
+  - Browse the web servers running on a remote computer over SSH, inside Ghostex's browser.
+  - Split the session you are on into a second pane on the right.
+  - Mastra Code joins the agents you can launch.
+  - Restart Ghostex from the app menu.
+- Major Improvements
+  - The terminal engine moves to zmx 0.8.1. Installing this version restarts your running sessions once. Agents come back automatically, but anything they had in flight at that moment is lost, so update at a quiet time.
+  - Questions that used to appear only in the terminal now show up as cards in chat with buttons you can click: trust this folder, Codex dialogs, and the Grok, Hermes, and Pi permission prompts.
+  - Long Codex transcripts open in a pager you can restore back to the chat view, and rewinding a conversation now works for Codex as well as Claude.
+  - Chats you are not looking at release their memory against a budget, so keeping many sessions open costs noticeably less RAM.
+  - Codex shows its local command output and its sub-agent activity in chat as they happen.
+- Minor Improvements
+  - Edit in the chat box with the keyboard: move the caret by word or line, reach the last queued message with Alt+Up, and use the usual text shortcuts.
+  - Scroll continuously through models and effort levels in the picker instead of one step per gesture.
+  - The chat box gets out of the way while you scroll the conversation and returns when you stop.
+  - Context usage is shown as a percentage.
+  - Notices, questions, tool runs, and activity rows share one card look across the chat.
+  - A transcript you hand to another agent arrives as a named link instead of a bare file path.
+  - The Resources panel lists sessions from every project, not only the one you are in.
+  - The sidebar collapse, update, Back, and Forward buttons are one square family in the titlebar.
+  - Terminal, browser, and editor panes follow the window's rounded corners.
+  - Docs can reveal the file you have open, peek at the files list when you hover the expand button, and floats that list over a narrow pane instead of squeezing the page.
+  - Docs uses the same palette as the Kanban board.
+  - Settings previews the pairing QR code, and its search finds more of what is there.
+  - The web app shows the same toasts as the desktop app and is served by its own `ghostex web` command.
+  - Projects remember the session you were last on, and Quick Access reopens it.
+  - The session list keeps the sections you collapsed.
+- Stabilization
+  - Restored terminals keep their soft wraps, so resizing the window reflows the text instead of leaving broken lines.
+  - Sessions parked in the background stay attached and resize correctly when you come back to them.
+  - Composer text is versioned, so the newest edit wins when the desktop, web, and phone apps are typing into the same session.
+  - Arrow keys reach the agent list prompts that expect them.
+  - A forked session no longer inherits an unbounded Codex history.
+  - Codex sub-agent transcripts no longer set off agent hooks.
+  - Command terminals for a remote project are created on that machine, and reconnecting recovers them.
+  - Reading an agent's screen now takes a bounded slice of the terminal instead of the whole scrollback.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v8.10.0/ghostex-8.10.0-arm64.dmg" length="124027665" type="application/octet-stream" sparkle:edSignature="GZKst+Dhd7ZM7JhZiu4Bb3cqnAEr443sLkPtftP9v4i5xBZgFOTJ4YKAEpnoMVGGUfBF+s4fBqwlLwoODaBkDg=="/>
+        </item>
+        <item>
             <title>8.9.0</title>
             <pubDate>Sat, 05 Sep 2026 00:48:41 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v8.9.0</sparkle:fullReleaseNotesLink>
@@ -206,34 +263,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v8.5.0/ghostex-8.5.0-arm64.dmg" length="117489990" type="application/octet-stream" sparkle:edSignature="4MprJ0VOiOjQ9K33LkiPSOj8p2b5aZYoADPFEPOByUymtXNmlWqD3zaZIV7f4/XvOjk5GXNRvxJivBIIH42hDg=="/>
         </item>
         <item>
-            <title>8.4.0</title>
-            <pubDate>Mon, 31 Aug 2026 05:35:08 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v8.4.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>80400</sparkle:version>
-            <sparkle:shortVersionString>8.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 8.4.0
-
-## 8.4.0 - 2026-08-31
-
-- Major
-  - Session Chat now shows what the agent's terminal is doing right now: compaction and other live activity appear as a card pinned above the composer, stay visible wherever the transcript is scrolled, and clear on their own when the agent goes idle.
-  - Codex sessions that open a chooser — model, effort, permissions, approvals, or any other numbered picker — now say so in chat with the choice on screen, instead of refusing your message with a generic "input box is not on screen" error.
-- Minor
-  - The `ghostex` and `gx` commands keep working after an app update; a packaged launch refreshes command wrappers that were still pointing at the previous install's binaries.
-  - Close After Done sits beside Delayed Send in the session menus on desktop, web, and the terminal action bar, and both countdowns tick live instead of only moving when the session refreshes.
-  - First launch asks whether the terminal view should use the full pane or match the chat width, and new installs now default to full width.
-  - The agents tab context menu opens with Rename and Sleep for the session you clicked, above the scoped Sleep Right, Sleep Left, and Sleep Others actions.
-  - File references in the transcript read as ordinary links, and composer reference pills show their full path in a tooltip rather than a native title popup.
-  - Installed extensions show their author, and version labels are written the same way across the Store, your installed list, and Settings.
-  - Hermes sessions running under a named profile are recognized again, so chat no longer refuses every send while the composer is plainly on screen, thanks to @banozz.
-  - Agent commands that hop to another user or host, such as through `ssh`, no longer leave the agent CLI wedged in an editor at launch, thanks to @banozz.
-  - Project Board `start-work` dispatches the worker into the project you name instead of whichever project was touched most recently, thanks to @banozz.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v8.4.0/ghostex-8.4.0-arm64.dmg" length="118074063" type="application/octet-stream" sparkle:edSignature="tdDcW8KciRoSjLzKb++jUX8bQJrWSbgTfVV1kta+r0r5+71DsKiTjnhcvuF8T+TBb8SBv34SP4fVRsuoVyB1AQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -245,6 +274,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: rUkzj6+egJqlGVNqllyV8TvitXBu5b/gwqrYMYLTwpCk21INOMfVMo6QxHHowOVBNfVLGDz9ASWCs7NX92s+Bw==
-length: 33233
+edSignature: /gpmcW4h6ff3tsUIiq5MrdJGzMMhCpSibEyfQ/KMqLmhm+yRZnL19qIcqE28yyOqku4uLJCLBkekiArELAq2BA==
+length: 35257
 -->
