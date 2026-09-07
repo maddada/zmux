@@ -59,6 +59,7 @@ export const SPARKLE_FEED_URL = 'https://raw.githubusercontent.com/maddada/Ghost
  */
 export const IGNORED_FOR_RELEASE = Object.freeze([
   { path: '.beads', why: 'Project board database; never compiled into an artifact.' },
+  { path: '.cargo', why: 'Local dev profile settings; release builds use their own profiles.' },
   { path: '.editorconfig', why: 'Editor configuration only.' },
   { path: '.gitattributes', why: 'Git checkout behavior only; release jobs use fresh clones.' },
   { path: '.gitignore', why: 'Ignore rules only; tracked inputs are enumerated explicitly.' },
