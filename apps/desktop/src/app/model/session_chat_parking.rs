@@ -19,6 +19,11 @@ None of this is serialized; it returns only to the exact project that parked it.
 */
 #[derive(Default)]
 pub(crate) struct ParkedAgentsChatRuntime {
+    /// CDXC:SessionChat 2026-09-06 DECISION:
+    /// User: a session switched to Terminal must remain there when visiting another project and returning, until switched back manually.
+    /// Keep default-view observations with their project so restoring a session does not apply the Chat default again.
+    pub(crate) auto_switch_observed_sessions:
+        HashMap<TerminalSessionId, GpuiPreferredAgentInterface>,
     pub(crate) page_states: HashMap<TerminalSessionId, SessionChatPageState>,
     /// Pending sends and handoffs remain protected until the owning project restores their runtime state.
     pub(crate) protected_sessions: HashSet<TerminalSessionId>,
@@ -64,4 +69,13 @@ impl SessionChatPageState {
             pending_probe: None,
         }
     }
+}
+
+/// Presentation of a pending account change, shared by the sidebar and chat menu.
+pub(crate) struct SessionAccountSwitchProgress {
+    pub(crate) title: String,
+    pub(crate) email: String,
+    pub(crate) provider: &'static str,
+    pub(crate) color: u32,
+    pub(crate) page_generation: Option<u64>,
 }

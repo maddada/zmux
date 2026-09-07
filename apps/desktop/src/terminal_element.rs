@@ -734,10 +734,16 @@ impl TerminalView {
         &mut self.model
     }
 
+    /// Enable ordered size claims for this live zmx attachment, including
+    /// attachments first shown in chat or parked before their first prepaint.
+    pub fn enable_zmx_visibility_claims(&mut self) {
+        self.zmx_visibility_claims_enabled = true;
+    }
+
     /// Ask the next prepaint to announce `ZMX_VISIBLE` with the grid it
     /// settles on. Called when the terminal becomes a displayed slot.
     pub fn request_zmx_visible_announce(&mut self) {
-        self.zmx_visibility_claims_enabled = true;
+        self.enable_zmx_visibility_claims();
         self.pending_zmx_visible_announce = true;
     }
 

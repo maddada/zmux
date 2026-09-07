@@ -20,6 +20,7 @@ pub(crate) enum GpuiEngineTerminalZmxVisibility {
 /// engine terminal, plus the grid that claim carried. Runtime-only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GpuiEngineTerminalAnnouncedVisibility {
+    pub(crate) view_id: gpui::EntityId,
     pub(crate) visibility: GpuiEngineTerminalZmxVisibility,
     pub(crate) rows: u16,
     pub(crate) cols: u16,
@@ -78,13 +79,35 @@ impl GhostexGpuiApp {
         {
             let records = &self.agents_gpui_engine_terminals;
             self.agents_gpui_engine_terminal_zmx_visibility
-                .retain(|session_id, _| records.contains_key(session_id));
+                .retain(|session_id, announced| {
+                    records
+                        .get(session_id)
+                        .is_some_and(|record| record.view.entity_id() == announced.view_id)
+                });
         }
         if self.agents_gpui_engine_terminal_visibility_drag_in_progress() {
             return;
         }
 
         let displayed = self.displayed_agents_gpui_engine_terminal_sessions();
+        self.sync_agents_gpui_engine_terminal_zmx_visibility_for_displayed(&displayed, cx);
+    }
+
+    /// CDXC:Terminal 2026-09-06 WHY:
+    /// A project switch keeps attach clients alive outside the active workspace; release their claims before moving them, then discard the active project's cache so incoming terminals announce their current layout.
+    pub(crate) fn park_agents_gpui_engine_terminal_zmx_clients(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.sync_agents_gpui_engine_terminal_zmx_visibility_for_displayed(&HashSet::new(), cx);
+        self.agents_gpui_engine_terminal_zmx_visibility.clear();
+    }
+
+    fn sync_agents_gpui_engine_terminal_zmx_visibility_for_displayed(
+        &mut self,
+        displayed: &HashSet<TerminalSessionId>,
+        cx: &mut gpui::Context<Self>,
+    ) {
         let session_ids = self
             .agents_gpui_engine_terminals
             .keys()
@@ -106,10 +129,15 @@ impl GhostexGpuiApp {
             else {
                 continue;
             };
+            let view_id = view.entity_id();
             let previous = self
                 .agents_gpui_engine_terminal_zmx_visibility
                 .get(&session_id)
+                .filter(|announced| announced.view_id == view_id)
                 .map(|announced| announced.visibility);
+            if previous.is_none() {
+                view.update(cx, |view, _cx| view.enable_zmx_visibility_claims());
+            }
             let visibility = if !displayed.contains(&session_id) {
                 GpuiEngineTerminalZmxVisibility::Parked
             } else if self.agents_chat_mode_sessions.contains(&session_id) {
@@ -126,6 +154,7 @@ impl GhostexGpuiApp {
                 self.agents_gpui_engine_terminal_zmx_visibility.insert(
                     session_id,
                     GpuiEngineTerminalAnnouncedVisibility {
+                        view_id,
                         visibility: GpuiEngineTerminalZmxVisibility::Visible,
                         rows,
                         cols,
@@ -146,6 +175,7 @@ impl GhostexGpuiApp {
                 self.agents_gpui_engine_terminal_zmx_visibility.insert(
                     session_id,
                     GpuiEngineTerminalAnnouncedVisibility {
+                        view_id,
                         visibility,
                         rows,
                         cols,
@@ -180,7 +210,10 @@ impl GhostexGpuiApp {
     /// client: a local daemon session carries its zmx name on the workspace
     /// session, a remote one is tracked by the SSH attach map (its attach
     /// command runs `zmx attach` on the remote machine).
-    fn agents_gpui_engine_terminal_is_zmx_client(&self, session_id: TerminalSessionId) -> bool {
+    pub(crate) fn agents_gpui_engine_terminal_is_zmx_client(
+        &self,
+        session_id: TerminalSessionId,
+    ) -> bool {
         self.agents_workspace
             .session(session_id)
             .is_some_and(|session| session.zmx_session_name.is_some())

@@ -45,7 +45,13 @@ impl GhostexGpuiApp {
         &self,
         session_id: TerminalSessionId,
     ) -> AnyElement {
-        let surface = self.agents_chat_surfaces.get(&session_id).cloned();
+        let switching = self.session_account_switch_progress(session_id);
+        self.record_session_chat_render(session_id);
+        let surface = self
+            .agents_chat_surfaces
+            .get(&session_id)
+            .filter(|_| switching.is_none())
+            .cloned();
         if let Some(surface) = surface {
             div()
                 .id(format!("ghostex-gpui-session-chat-cef-{}", session_id.0))
@@ -58,7 +64,9 @@ impl GhostexGpuiApp {
                 .into_any_element()
         } else {
             let bootstrap_missing = self.sidebar_gxserver_bootstrap.is_none();
-            let (title, message) = if bootstrap_missing {
+            let (title, message) = if let Some(progress) = switching {
+                (progress.title.as_str(), progress.email.as_str())
+            } else if bootstrap_missing {
                 (
                     "Chat unavailable",
                     "Session Chat needs the local Ghostex server. Start it from the sidebar, then toggle Chat View again.",
@@ -66,6 +74,18 @@ impl GhostexGpuiApp {
             } else {
                 ("Loading Chat...", "")
             };
+            let hide_emails = shared_settings::shared_sidebar_settings_snapshot().object()
+                .get("hideAccountEmails").and_then(serde_json::Value::as_bool) == Some(true);
+            let message = if switching.is_some() && hide_emails {
+                match message.split_once('@') {
+                    Some((address, _)) => {
+                        let chars: Vec<_> = address.chars().collect();
+                        format!("{}•••{}@••••••.•••", chars.first().copied().unwrap_or('•'),
+                            if chars.len() > 1 { chars.last().unwrap().to_string() } else { String::new() })
+                    }
+                    None => message.to_string(),
+                }
+            } else { message.to_string() };
             v_flex()
                 .id(format!(
                     "ghostex-gpui-session-chat-placeholder-{}",
@@ -86,8 +106,24 @@ impl GhostexGpuiApp {
                                 .text_size(px(13.0))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(workspace_terminal_placeholder_title_color())
-                                .child(title),
+                                .child(title.to_string()),
                         )
+                        .when(!message.is_empty(), |this| {
+                            this.child(
+                                div()
+                                    .mt(px(5.0))
+                                    .max_w(px(390.0))
+                                    .text_size(px(12.5))
+                                    .line_height(px(18.0))
+                                    .text_color(workspace_terminal_placeholder_message_color())
+                                    .flex().items_center().gap(px(8.0))
+                                    .when_some(switching, |this, progress| {
+                                        this.child(gpui::svg().path(workspace_tab_agent_icon_path(progress.provider).unwrap())
+                                            .size(px(18.0)).flex_shrink_0().text_color(gpui::rgb(progress.color)))
+                                    })
+                                    .child(message.clone()),
+                            )
+                        })
                         .when(!bootstrap_missing, |this| {
                             this.child(
                                 canvas(
@@ -99,17 +135,6 @@ impl GhostexGpuiApp {
                                 )
                                 .size(px(18.0))
                                 .mt(px(10.0)),
-                            )
-                        })
-                        .when(bootstrap_missing, |this| {
-                            this.child(
-                                div()
-                                    .mt(px(5.0))
-                                    .max_w(px(390.0))
-                                    .text_size(px(12.5))
-                                    .line_height(px(18.0))
-                                    .text_color(workspace_terminal_placeholder_message_color())
-                                    .child(message),
                             )
                         }),
                 )

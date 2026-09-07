@@ -130,6 +130,16 @@ pub(crate) fn remove_zmx_session_socket(_session_name: &str) {}
 /// alternate-screen capture. Old daemons use History with a client-side tail cap.
 #[cfg(unix)]
 pub(crate) fn read_zmx_session_screen_capture(zmx_name: &str) -> Result<ZmxHistoryCapture, String> {
+    read_zmx_session_screen_capture_format(zmx_name, ZMX_IPC_HISTORY_FORMAT_PLAIN)
+}
+
+#[cfg(unix)]
+pub(crate) fn read_zmx_session_screen_capture_vt(zmx_name: &str) -> Result<ZmxHistoryCapture, String> {
+    read_zmx_session_screen_capture_format(zmx_name, 1)
+}
+
+#[cfg(unix)]
+fn read_zmx_session_screen_capture_format(zmx_name: &str, format: u8) -> Result<ZmxHistoryCapture, String> {
     let socket_path = zmx_session_socket_path(zmx_name);
     let mut stream = std::os::unix::net::UnixStream::connect(&socket_path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::ConnectionRefused {
@@ -148,7 +158,7 @@ pub(crate) fn read_zmx_session_screen_capture(zmx_name: &str) -> Result<ZmxHisto
     let mut request = [0_u8; ZMX_IPC_HEADER_BYTES * 2 + ZMX_IPC_CAPTURE_BYTES];
     request[0] = ZMX_IPC_TAG_CAPTURE;
     request[1..5].copy_from_slice(&(ZMX_IPC_CAPTURE_BYTES as u32).to_le_bytes());
-    request[ZMX_IPC_HEADER_BYTES] = ZMX_IPC_HISTORY_FORMAT_PLAIN;
+    request[ZMX_IPC_HEADER_BYTES] = format;
     request[ZMX_IPC_HEADER_BYTES + 1..ZMX_IPC_HEADER_BYTES + 5]
         .copy_from_slice(&ZMX_SCREEN_CAPTURE_SCROLLBACK_ROWS.to_le_bytes());
     request[ZMX_IPC_HEADER_BYTES + ZMX_IPC_CAPTURE_BYTES] = ZMX_IPC_TAG_INFO;
@@ -156,7 +166,7 @@ pub(crate) fn read_zmx_session_screen_capture(zmx_name: &str) -> Result<ZmxHisto
         .write_all(&request)
         .map_err(|error| format!("zmx session screen capture could not be requested: {error}"))?;
 
-    read_zmx_screen_capture_reply(&mut stream)
+    read_zmx_screen_capture_reply(&mut stream, format)
 }
 
 /// Drains one capture reply, retaining only the last
@@ -165,6 +175,7 @@ pub(crate) fn read_zmx_session_screen_capture(zmx_name: &str) -> Result<ZmxHisto
 #[cfg(unix)]
 fn read_zmx_screen_capture_reply(
     stream: &mut std::os::unix::net::UnixStream,
+    format: u8,
 ) -> Result<ZmxHistoryCapture, String> {
     let mut header = [0_u8; ZMX_IPC_HEADER_BYTES];
     let mut chunk = vec![0_u8; 64 * 1024];
@@ -208,7 +219,7 @@ fn read_zmx_screen_capture_reply(
             let mut request = [0_u8; ZMX_IPC_HEADER_BYTES + 1];
             request[0] = ZMX_IPC_TAG_HISTORY;
             request[1..5].copy_from_slice(&1_u32.to_le_bytes());
-            request[ZMX_IPC_HEADER_BYTES] = ZMX_IPC_HISTORY_FORMAT_PLAIN;
+            request[ZMX_IPC_HEADER_BYTES] = format;
             stream.write_all(&request).map_err(|error| {
                 format!("zmx legacy screen capture could not be requested: {error}")
             })?;
@@ -243,12 +254,23 @@ That path keeps the head at the stdout byte cap, so an oversized capture still r
 */
 #[cfg(not(unix))]
 pub(crate) fn read_zmx_session_screen_capture(zmx_name: &str) -> Result<ZmxHistoryCapture, String> {
+    read_zmx_session_screen_capture_format(zmx_name, false)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn read_zmx_session_screen_capture_vt(zmx_name: &str) -> Result<ZmxHistoryCapture, String> {
+    read_zmx_session_screen_capture_format(zmx_name, true)
+}
+
+#[cfg(not(unix))]
+fn read_zmx_session_screen_capture_format(zmx_name: &str, vt: bool) -> Result<ZmxHistoryCapture, String> {
     let zmx = require_bundled_zmx()?;
     let result = run_zmx_interaction_command(
         build_zmx_screen_capture_command(
             zmx_name,
             &zmx.executable_path,
             ZMX_SCREEN_CAPTURE_SCROLLBACK_ROWS,
+            vt,
         ),
         ZmxCommandOptions {
             allow_stdout_truncation: true,
@@ -270,12 +292,21 @@ pub(crate) fn read_zmx_session_screen_capture(zmx_name: &str) -> Result<ZmxHisto
 CDXC:SessionChatTerminalActivity 2026-09-04 WHY:
 Whether anyone is looking at this session's terminal right now. Every viewer
 (the desktop terminal pane, the web and mobile terminals) is a zmx client that
-announces itself hidden or visible through the ZMX_HIDDEN / ZMX_VISIBLE
-sequences, and `zmx grid` reports that flag per client, so "no visible client"
+announces its visible, chat, or parked state through ZMX_VISIBLE / ZMX_CHAT /
+ZMX_HIDDEN sequences, and `zmx grid` reports that state per client, so "no visible client"
 is the daemon's own answer, not a guess from the chat view's state. `None`
 when the daemon could not be asked.
 */
 pub(crate) fn zmx_session_has_visible_client(zmx_name: &str) -> Option<bool> {
+    zmx_grid_has_visible_client(&read_zmx_grid(zmx_name)?)
+}
+
+pub(crate) fn zmx_session_has_only_chat_viewers(zmx_name: &str) -> Option<bool> {
+    let (visible, chat) = zmx_grid_visibility(&read_zmx_grid(zmx_name)?)?;
+    Some(chat && !visible)
+}
+
+fn read_zmx_grid(zmx_name: &str) -> Option<String> {
     let zmx = crate::toolchain::require_bundled_zmx().ok()?;
     let result = crate::zmx::run_zmx_interaction_command(
         crate::zmx::build_zmx_grid_command(zmx_name, &zmx.executable_path),
@@ -285,17 +316,29 @@ pub(crate) fn zmx_session_has_visible_client(zmx_name: &str) -> Option<bool> {
     if result.exit_code != 0 {
         return None;
     }
-    zmx_grid_has_visible_client(&result.stdout)
+    Some(result.stdout)
 }
 
-/// Reads `zmx grid` JSON: any client that is not hidden is a visible one.
+/// Reads zmx's current per-client visibility contract.
 pub(crate) fn zmx_grid_has_visible_client(grid_json: &str) -> Option<bool> {
+    zmx_grid_visibility(grid_json).map(|(visible, _)| visible)
+}
+
+/// CDXC:Zmx 2026-09-06 WHY:
+/// GridInfo reports `state`, not the retired `hidden` boolean. Treating a missing `hidden` as invisible allowed chat to dismiss terminal UI that another client was using. Unknown client states must prevent automatic dismissal.
+/// SEE-ALSO: .dependencies/zmx/src/loop.zig handleGridInfo.
+fn zmx_grid_visibility(grid_json: &str) -> Option<(bool, bool)> {
     let grid: serde_json::Value = serde_json::from_str(grid_json.trim()).ok()?;
     let clients = grid.get("clients")?.as_array()?;
-    Some(clients.iter().any(|client| {
-        client
-            .get("hidden")
-            .and_then(serde_json::Value::as_bool)
-            .is_some_and(|hidden| !hidden)
-    }))
+    let mut visible = false;
+    let mut chat = false;
+    for client in clients {
+        match client.get("state")?.as_str()? {
+            "visible" => visible = true,
+            "chat" => chat = true,
+            "parked" => {}
+            _ => return None,
+        }
+    }
+    Some((visible, chat))
 }

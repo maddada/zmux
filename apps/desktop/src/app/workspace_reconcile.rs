@@ -913,6 +913,19 @@ impl GhostexGpuiApp {
             &self.agents_send_when_stopped_watchers,
             SystemTime::now(),
         );
+        self.park_agents_gpui_engine_terminal_zmx_clients(cx);
+        let zmx_session_names = self
+            .agents_workspace
+            .terminal_sessions
+            .iter()
+            .filter(|session| self.agents_gpui_engine_terminals.contains_key(&session.id))
+            .filter_map(|session| {
+                session
+                    .zmx_session_name
+                    .clone()
+                    .map(|name| (session.id, name))
+            })
+            .collect();
         /*
         CDXC:SessionChat 2026-08-26:
         Chat pages park with the terminal owners rather than being destroyed and
@@ -929,6 +942,7 @@ impl GhostexGpuiApp {
                 self.parked_agents_terminal_runtimes_by_project.insert(
                     old_project_id.clone(),
                     ParkedAgentsTerminalRuntime {
+                        zmx_session_names,
                         runtime_sessions: std::mem::take(
                             &mut self.agents_terminal_runtime_sessions,
                         ),
@@ -989,6 +1003,12 @@ impl GhostexGpuiApp {
                     .remove(project_id)
             })
             .unwrap_or_default();
+        for session in &mut self.agents_workspace.terminal_sessions {
+            session.zmx_session_name = restored_terminal_runtime
+                .zmx_session_names
+                .get(&session.id)
+                .cloned();
+        }
         self.agents_terminal_runtime_sessions = restored_terminal_runtime.runtime_sessions;
         self.agents_gpui_engine_terminals = restored_terminal_runtime.gpui_engine_terminals;
         self.agents_terminal_runtime_osc_states = restored_terminal_runtime.runtime_osc_states;
@@ -2100,7 +2120,12 @@ impl GhostexGpuiApp {
         let Some(popup_tab_id) = popup_tab_id else {
             return;
         };
-        if let Some(tab) = self.browser_tabs.tabs.iter_mut().find(|tab| tab.id == popup_tab_id) {
+        if let Some(tab) = self
+            .browser_tabs
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.id == popup_tab_id)
+        {
             tab.remote_machine_id = remote_machine_id;
         }
         self.request_sidebar_browser_tab_reveal(popup_tab_id);

@@ -231,25 +231,27 @@ pub(crate) fn build_zmx_screen_capture_command(
     session_name: &str,
     zmx_executable_path: &str,
     scrollback_rows: u32,
+    vt: bool,
 ) -> String {
     format!(
         r#"
 zmx_session={}
 zmx_bin={}
 unset ZMX_SESSION ZMX_SESSION_PREFIX
-if "$zmx_bin" history --scrollback {} "$zmx_session"; then
+if "$zmx_bin" history {format_flag} --scrollback {} "$zmx_session"; then
   exit 0
 else
   zmx_status=$?
 fi
 if [ "$zmx_status" -eq 3 ]; then
-  exec "$zmx_bin" history "$zmx_session"
+  exec "$zmx_bin" history {format_flag} "$zmx_session"
 fi
 exit "$zmx_status"
 "#,
         shell_quote(session_name),
         shell_quote(zmx_executable_path),
         scrollback_rows,
+        format_flag = if vt { "--vt" } else { "" },
     )
     .trim()
     .to_string()

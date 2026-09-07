@@ -574,9 +574,17 @@ impl GhostexGpuiApp {
         let view_settings = engine_config.view.clone();
         let confirm_close_behavior =
             terminal_gpui_engine::gpui_engine_confirm_close_behavior(&engine_config);
+        let uses_zmx_visibility_claims = matches!(
+            target,
+            GpuiEngineTerminalEventTarget::Agents(session_id)
+                if self.agents_gpui_engine_terminal_is_zmx_client(session_id)
+        );
         let view = cx.new(|cx| {
             let mut view = terminal_element::TerminalView::from_model(model, event_rx, font, cx);
             view.apply_settings(view_settings);
+            if uses_zmx_visibility_claims {
+                view.enable_zmx_visibility_claims();
+            }
             if let Some(initial_input) = &initial_input {
                 let _ = view.model().write_input(initial_input.as_bytes());
             }

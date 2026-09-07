@@ -86,6 +86,53 @@ fn session_chat_image_downloads_path(directory: &Path, file_name: &str) -> PathB
 }
 
 impl GhostexGpuiApp {
+    pub(crate) fn session_account_switch_progress(
+        &self,
+        session_id: TerminalSessionId,
+    ) -> Option<&SessionAccountSwitchProgress> {
+        self.account_switch_progress
+            .get(&self.workspace_terminal_key_for_shell_session(session_id)?)
+    }
+
+    /// CDXC:AgentProviders 2026-09-07 DECISION:
+    /// During account switching, the chat body says "Switching Claude account to" (or Codex) with the selected email below it. Keep its existing page alive so switching does not reload the conversation.
+    pub(crate) fn set_session_account_switch_progress(
+        &mut self,
+        key: GpuiWorkspaceTerminalSessionKey,
+        progress: &serde_json::Value,
+        page_generation: Option<u64>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if progress.is_null() {
+            if self
+                .account_switch_progress
+                .get(&key)
+                .is_some_and(|progress| progress.page_generation == page_generation)
+            {
+                self.account_switch_progress.remove(&key);
+            }
+        } else {
+            let provider = match progress["provider"].as_str() {
+                Some("claude") => "Claude",
+                Some("codex") => "Codex",
+                _ => return,
+            };
+            let Some(email) = progress["email"].as_str() else {
+                return;
+            };
+            self.account_switch_progress.insert(key, SessionAccountSwitchProgress {
+                title: format!("Switching {provider} account to"),
+                email: email.to_string(),
+                provider: if provider == "Claude" { "claude" } else { "codex" },
+                color: progress["color"].as_str().and_then(|color| color.strip_prefix('#'))
+                    .and_then(|color| u32::from_str_radix(color, 16).ok()).unwrap_or(0xdddddd),
+                page_generation,
+            });
+        }
+        self.reconcile_agents_chat_surfaces(cx);
+        cx.notify();
+    }
+
     pub(crate) fn sidebar_bridge_event_handler(
         &self,
         cx: &mut gpui::Context<Self>,
@@ -188,6 +235,7 @@ impl GhostexGpuiApp {
         generation: u64,
         cx: &mut gpui::Context<Self>,
     ) -> cef::AppModalHostBridgeEventHandler {
+        let account_key = self.workspace_terminal_key_for_shell_session(session_id);
         let app = cx.entity().downgrade();
         let async_cx = cx.to_async();
         let foreground = cx.foreground_executor().clone();
@@ -197,10 +245,29 @@ impl GhostexGpuiApp {
                 return;
             };
             let app = app.clone();
+            let account_key = account_key.clone();
             let mut async_cx = async_cx.clone();
             foreground
                 .spawn(async move {
                     let _ = app.update_in(&mut async_cx, |this, window, cx| {
+                        // CDXC:AgentProviders 2026-09-07 WHY:
+                        // A switch can finish after its project is parked. Its progress belongs to the captured server session, not whichever project now owns the numeric shell ID.
+                        if let (Some(key), Ok(message)) = (
+                            account_key,
+                            serde_json::from_str::<serde_json::Value>(&payload),
+                        ) {
+                            if message["type"] == "sessionChatHostAction"
+                                && message["action"] == "accountSwitchProgress"
+                            {
+                                this.set_session_account_switch_progress(
+                                    key,
+                                    &message["progress"],
+                                    Some(generation),
+                                    cx,
+                                );
+                                return;
+                            }
+                        }
                         this.receive_owned_session_chat_host_action(
                             session_id, generation, &payload, window, cx,
                         );
@@ -236,6 +303,22 @@ impl GhostexGpuiApp {
         */
         if message.get("type").and_then(serde_json::Value::as_str) == Some("toast") {
             self.receive_gpui_app_toast_bridge_message(&message, cx);
+            return;
+        }
+        // CDXC:Settings 2026-09-06 WHY: The chat bridge previously dropped Settings opens as unknown chat actions, so the account settings shortcut did nothing. Route this modal through the existing native modal owner.
+        // CDXC:SessionChat 2026-09-06 WHY:
+        // Transcript diagrams use the shared modal launcher; their expand requests must reach the native diagram window instead of being discarded as unknown chat actions.
+        if message.get("type").and_then(serde_json::Value::as_str) == Some("open")
+            && matches!(
+                message.get("modal").and_then(serde_json::Value::as_str),
+                Some("settings" | "mermaidDiagram")
+            )
+        {
+            self.receive_app_modal_host_bridge_event(
+                cef::AppModalHostBridgeEvent::Message(payload.to_string()),
+                window,
+                cx,
+            );
             return;
         }
         if message.get("type").and_then(serde_json::Value::as_str) != Some("sessionChatHostAction")
@@ -294,6 +377,12 @@ impl GhostexGpuiApp {
                 event,
                 serde_json::json!({
                     "sessionId": format!("{session_id:?}"),
+                    "projectId": self.agents_workspace_project_id,
+                    "mappedSessionId": self.workspace_terminal_key_for_shell_session(session_id).map(|key| match key {
+                        GpuiWorkspaceTerminalSessionKey::Local(key) => key.session_id,
+                        GpuiWorkspaceTerminalSessionKey::Remote(key) => key.session_id,
+                    }),
+                    "pageGeneration": self.agents_chat_page_states.get(&session_id).map(|state| state.generation),
                     "details": details,
                 }),
             );
@@ -307,6 +396,7 @@ impl GhostexGpuiApp {
                 self.flush_pending_chat_bar_extension_toggles(session_id, cx);
             }
             self.complete_session_chat_composer_focus_handoff(session_id, window, cx);
+            self.sync_session_chat_pane_focus(window, cx, true);
             /*
             CDXC:Drafts 2026-08-18:
             A transferred draft also has to reach a chat surface the user is

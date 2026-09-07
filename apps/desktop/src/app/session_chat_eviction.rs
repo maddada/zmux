@@ -76,7 +76,11 @@ impl GhostexGpuiApp {
         candidate: &ChatEvictionCandidate,
         require_empty: bool,
     ) -> bool {
-        if self.chat_eviction_drag_active()
+        if self
+            .account_switch_progress
+            .values()
+            .any(|progress| progress.page_generation == Some(candidate.generation))
+            || self.chat_eviction_drag_active()
             || (candidate.hidden_since.elapsed() < GPUI_AGENTS_CHAT_SURFACE_HIDDEN_EVICT_AFTER
                 && self.hidden_chat_page_count() <= GPUI_AGENTS_CHAT_SURFACE_HIDDEN_MAX)
         {
@@ -177,6 +181,24 @@ impl GhostexGpuiApp {
         state.pending_probe = None;
         if !eligible {
             return;
+        }
+        support_logs::append(
+            support_logs::GpuiSupportLog::SessionChat,
+            "sessionChat.nativePageEvicted",
+            serde_json::json!({
+                "projectId": candidate.project_id,
+                "sessionId": candidate.session_id.0,
+                "pageGeneration": candidate.generation,
+                "hiddenMs": candidate.hidden_since.elapsed().as_millis() as u64,
+                "activeProject": active,
+            }),
+        );
+        if active {
+            self.record_session_chat_lifecycle(
+                candidate.session_id,
+                "sessionChat.nativePageEvicted",
+                "hiddenPageEviction",
+            );
         }
         let surface = if active {
             self.agents_chat_page_states.remove(&candidate.session_id);

@@ -304,7 +304,7 @@ pub(crate) fn read_codex_process_session_identity(
 }
 
 #[cfg(target_os = "linux")]
-fn process_open_file_paths(process_id: i64) -> Vec<PathBuf> {
+pub(crate) fn process_open_file_paths(process_id: i64) -> Vec<PathBuf> {
     let fd_dir = PathBuf::from(format!("/proc/{process_id}/fd"));
     fs::read_dir(fd_dir)
         .into_iter()
@@ -315,7 +315,7 @@ fn process_open_file_paths(process_id: i64) -> Vec<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn process_open_file_paths(process_id: i64) -> Vec<PathBuf> {
+pub(crate) fn process_open_file_paths(process_id: i64) -> Vec<PathBuf> {
     let output = std::process::Command::new("/usr/sbin/lsof")
         .args(["-Fn", "-p", &process_id.to_string()])
         .output();
@@ -334,7 +334,7 @@ fn process_open_file_paths(process_id: i64) -> Vec<PathBuf> {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn process_open_file_paths(_process_id: i64) -> Vec<PathBuf> {
+pub(crate) fn process_open_file_paths(_process_id: i64) -> Vec<PathBuf> {
     Vec::new()
 }
 

@@ -4,7 +4,6 @@
 //
 // Cluster: clipboard/paste, IME preedit, text-input handoff, close-confirm dialogs
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::Ordering;
@@ -717,7 +716,10 @@ impl GhostexGpuiApp {
         */
         let shared_settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let settings_object = shared_settings_snapshot.object();
-        let mut observed_sessions = HashMap::with_capacity(eligible_session_ids.len());
+        // CDXC:SessionChat 2026-09-06 WHY:
+        // Project restore can briefly lack eligible terminal runtimes or sidebar metadata; that gap must not make an existing session new to the Chat default again.
+        self.agents_chat_auto_switch_observed_sessions
+            .retain(|session_id, _| self.agents_workspace.has_session(*session_id));
         let mut newly_eligible = Vec::new();
         for session_id in eligible_session_ids.iter().copied() {
             let effective_interface = gpui_effective_preferred_agent_interface_for_agent_icon(
@@ -735,9 +737,9 @@ impl GhostexGpuiApp {
             {
                 newly_eligible.push(session_id);
             }
-            observed_sessions.insert(session_id, effective_interface);
+            self.agents_chat_auto_switch_observed_sessions
+                .insert(session_id, effective_interface);
         }
-        self.agents_chat_auto_switch_observed_sessions = observed_sessions;
 
         let mut changed = false;
         for session_id in newly_eligible {
