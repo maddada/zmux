@@ -46,12 +46,85 @@ fn row(line: &str) -> Option<TerminalDialogRow> {
     })
 }
 
+const DIRECTORY_TRUST_ID_PREFIX: &str = "codex-directory-trust:";
+
+/// CDXC:AgentScreenDetection 2026-09-06 WHY:
+/// Codex redraws the directory heading into scrollback during onboarding, so only the final heading belongs to the live trust dialog.
+/// Its trust shortcut selects Yes but requires Enter to commit; treating it like the ordinary numbered menus leaves the dialog open.
+fn directory_trust_dialog(content: &[&str]) -> Option<TerminalDialog> {
+    let heading = content.iter().position(|line| !clean(line).is_empty())?;
+    let path_start = clean(content[heading]).strip_prefix("> You are in ")?;
+    let path_end = (heading + 1..content.len()).find(|&i| clean(content[i]).is_empty())?;
+    let folder = std::iter::once(path_start)
+        .chain(
+            content[heading + 1..path_end]
+                .iter()
+                .map(|line| clean(line)),
+        )
+        .collect::<String>();
+    let first_row = content.iter().position(|line| row(line).is_some())?;
+    let mut rows: Vec<_> = content.iter().filter_map(|line| row(line)).collect();
+    if rows.len() != 2
+        || rows[0].number != 1
+        || rows[0].label != "Yes, continue"
+        || rows[1].number != 2
+        || rows[1].label != "No, quit"
+        || rows.iter().filter(|row| row.selected).count() != 1
+        || path_end >= first_row
+    {
+        return None;
+    }
+    let context = content[path_end..first_row]
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !context.contains("Do you trust the contents of this directory?") {
+        return None;
+    }
+    let context = context.replace(
+        "Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt injection. Trusting the directory allows project-local config, hooks, and exec policies to load.",
+        "Only continue if you trust this folder's contents. Codex will load its local configuration, hooks, and execution policies. Untrusted content can contain instructions that manipulate the agent.",
+    );
+    let last_row = content.iter().rposition(|line| row(line).is_some())?;
+    let error = content[last_row + 1..]
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let identity = serde_json::to_string(&(&folder, &context, &rows, &error)).ok()?;
+    rows[0].label = "Trust and continue".to_string();
+    rows[1].label = "Quit Codex".to_string();
+    let name = folder
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()?;
+    Some(TerminalDialog {
+        id: format!(
+            "{DIRECTORY_TRUST_ID_PREFIX}{:x}",
+            Sha256::digest(identity.as_bytes())
+        ),
+        title: format!("Trust folder \"{name}\"?"),
+        body: format!("{folder}\n\n{context}\n\n{error}")
+            .trim()
+            .to_string(),
+        footer: "Choose an option to continue.".to_string(),
+        rows,
+        input: None,
+        input_value: String::new(),
+        actions: Vec::new(),
+    })
+}
+
 /// CDXC:AgentScreenDetection 2026-09-05 DECISION:
 /// User: expose the "Implement this plan?" picker in chat so switching to the terminal is unnecessary.
 /// User: audit every Codex command and make its messages and interactions usable in chat, using the existing UX and improving it where needed.
 /// Numbered selectors, searchable menus, checkbox settings, and text forms have different key semantics, so only numbered rows use digit shortcuts; the other views retain their own navigation, toggle, save, and cancel actions.
 /// SEE-ALSO: packages/core-ui/chat/session-chat-terminal-dialog.tsx and Codex tui/src/bottom_pane/list_selection_view.rs.
 pub fn detect_codex_dialog(text: &str) -> Option<TerminalDialog> {
+    if let Some(pager) = crate::session_chat_codex_pager::detect_codex_transcript_pager(text) {
+        return Some(pager);
+    }
     let lines: Vec<String> = text
         .lines()
         .rev()
@@ -76,7 +149,7 @@ pub fn detect_codex_dialog(text: &str) -> Option<TerminalDialog> {
                 || line.contains("exit")
                 || line.contains("back")))
             || line == "q to quit"
-            || line == "press enter to continue"
+            || line.starts_with("press enter to continue")
             || line.starts_with("press space to select or enter to save")
     })?;
     if lines[footer_index + 1..]
@@ -114,6 +187,24 @@ pub fn detect_codex_dialog(text: &str) -> Option<TerminalDialog> {
             )
     }) {
         start = named;
+    }
+    if clean(&lines[footer_index])
+        .to_ascii_lowercase()
+        .starts_with("press enter to continue")
+    {
+        if let Some(trust_heading) = lines[..footer_index]
+            .iter()
+            .rposition(|line| clean(line).starts_with("> You are in "))
+        {
+            if let Some(dialog) = directory_trust_dialog(
+                &lines[trust_heading..footer_index]
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            ) {
+                return Some(dialog);
+            }
+        }
     }
     if clean(&lines[footer_index]) == "q to quit" {
         start = 0;
@@ -304,6 +395,10 @@ pub fn detect_codex_dialog(text: &str) -> Option<TerminalDialog> {
 }
 
 impl TerminalDialog {
+    pub(crate) fn is_codex_directory_trust(&self) -> bool {
+        self.id.starts_with(DIRECTORY_TRUST_ID_PREFIX)
+    }
+
     fn payload(&self, params: &Map<String, Value>) -> Result<String, DomainStateError> {
         let invalid = || DomainStateError {
             code: "invalidParams",
@@ -311,6 +406,14 @@ impl TerminalDialog {
         };
         if let Some(index) = params.get("choiceIndex").and_then(Value::as_u64) {
             let row = self.rows.get(index as usize).ok_or_else(invalid)?;
+            if self.is_codex_directory_trust() {
+                return Ok(match row.number {
+                    1 => "\x1b[A\r",
+                    2 => "2",
+                    _ => return Err(invalid()),
+                }
+                .to_string());
+            }
             if row.number <= 9 {
                 return Ok(row.number.to_string());
             }
@@ -435,7 +538,12 @@ impl TerminalDialog {
             "pageDown" => "\x1b[6~",
             "home" => "\x1b[H",
             "end" => "\x1b[F",
-            "cancel" if self.footer.contains("q to quit") => "q",
+            "cancel"
+                if self.id == crate::session_chat_codex_pager::CODEX_TRANSCRIPT_PAGER_ID
+                    || self.footer.contains("q to quit") =>
+            {
+                "q"
+            }
             "cancel" => SESSION_CHAT_INTERRUPT,
             _ => return Err(invalid()),
         }

@@ -5,7 +5,11 @@ prompt back to its own composer, the chat view must reflect that instead of
 showing the message as sent: the user bubble goes away, the text comes back
 into the chat composer (above anything typed since), the session stops
 pretending to work, and an "Interrupted the agent" row says what happened.
-Claude Code only; Codex really sends, and every other agent is measured later.
+Codex really sends and does not participate in this flow.
+
+CDXC:SessionChat 2026-09-06 DECISION:
+User: Grok Build must match Claude Code exactly when an interrupted send returns to the input box: restore the message in the chat composer and remove its sent bubble.
+This extends the original Claude-only scope through the same returned-prompt flow, using Grok's boxed composer and its own transcript decoder.
 
 CDXC:SessionChat 2026-09-04 WHY:
 Measured live on Claude Code 2.1.260 through a zmx pty. An Escape ~85ms after
@@ -47,10 +51,12 @@ use crate::{
     server::AppState,
     session_chat::{
         resolve_session_chat_transcript_agent, SessionChatBlock, SessionChatMessage,
-        SessionChatRole, SessionChatSource, SessionChatTailPage, SessionChatTranscriptAgent,
-        SessionChatTurnLifecycle, SessionChatTurnLifecycleState,
+        SessionChatRole, SessionChatSource, SessionChatTailPage, SessionChatTurnLifecycle,
+        SessionChatTurnLifecycleState,
     },
-    session_chat_composer::{claude_composer_input_text, session_chat_composer_agent_id},
+    session_chat_composer::{
+        claude_composer_input_text, grok_composer_input_text, session_chat_composer_agent_id,
+    },
     session_chat_follower::session_chat_agent_for_session,
     session_chat_send::{
         build_agent_tui_clear_input_steps, capture_session_terminal_text,
@@ -188,7 +194,7 @@ pub fn screen_shows_returned_session_chat_send(
     let Some(agent) = normalize_agent_id(agent) else {
         return false;
     };
-    if !matches!(agent.as_str(), "claude" | "openclaude") {
+    if !matches!(agent.as_str(), "claude" | "openclaude" | "grok") {
         return false;
     }
     let Some(send) = last_sends()
@@ -201,7 +207,7 @@ pub fn screen_shows_returned_session_chat_send(
     if !send.submitted || send.claimed {
         return false;
     }
-    claude_composer_input_text(screen_text)
+    returned_prompt_composer_text(&agent, screen_text)
         .is_some_and(|composer_text| composer_holds_sent_text(&composer_text, &send.text))
 }
 
@@ -354,6 +360,14 @@ fn record_returned_prompt(
 // Detection
 // ---------------------------------------------------------------------------
 
+fn returned_prompt_composer_text(agent: &str, screen_text: &str) -> Option<String> {
+    match agent {
+        "claude" | "openclaude" => claude_composer_input_text(screen_text),
+        "grok" => grok_composer_input_text(screen_text),
+        _ => None,
+    }
+}
+
 /// Screen text as the paste verifier compares it: no whitespace, no box or
 /// rule drawing, no control characters.
 fn normalize_screen_text(text: &str) -> String {
@@ -462,7 +476,7 @@ fn log(state: &AppState, level: LogLevel, event: &str, details: Value) {
 /// Runs after an Escape reached the session: the chat interrupt endpoint, the
 /// `escape` activity event a terminal pane reports, or the delivery watchdog's
 /// deadline tier. Returns without doing anything unless the session runs
-/// Claude Code and the Escape answers a send this daemon made from Chat.
+/// Claude Code or Grok Build and the Escape answers a send this daemon made from Chat.
 pub(crate) fn schedule_session_chat_returned_prompt_detection(
     state: &AppState,
     target: &SessionChatSendTarget,
@@ -473,14 +487,12 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
     let Some(agent) = normalize_agent_id(terminal_agent.as_deref()) else {
         return;
     };
-    if !matches!(agent.as_str(), "claude" | "openclaude") {
+    if !matches!(agent.as_str(), "claude" | "openclaude" | "grok") {
         return;
     }
-    if resolve_session_chat_transcript_agent(Some(agent.as_str()))
-        != Some(SessionChatTranscriptAgent::Claude)
-    {
+    let Some(transcript_agent) = resolve_session_chat_transcript_agent(Some(agent.as_str())) else {
         return;
-    }
+    };
     let Some(send) = claim_last_chat_send(&target.project_id, &target.session_id) else {
         return;
     };
@@ -498,7 +510,7 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
         if !send.submitted {
             /*
             Escape landed while the send worker was still typing: the cancelled
-            job never wrote Enter, so the message never reached Claude and the
+            job never wrote Enter, so the message never reached the agent and the
             client keeps its own copy (`sendCancelled`). Only the half-pasted
             text sitting in the terminal composer is ours to remove.
             */
@@ -525,7 +537,7 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
             if let Some(capture) = capture_session_terminal_text(&zmx_name).await {
                 // Not the readiness signature: that one admits a single input
                 // row only, and a wrapped or multi-line prompt fills several.
-                if let Some(composer_text) = claude_composer_input_text(&capture) {
+                if let Some(composer_text) = returned_prompt_composer_text(&agent, &capture) {
                     if composer_holds_sent_text(&composer_text, &send.text) {
                         returned = true;
                         break;
@@ -546,7 +558,7 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
             let agent_session_path = runtime_text(&session, "agentSessionPath");
             tokio::task::spawn_blocking(move || {
                 crate::session_chat_paths::resolve_session_chat_transcript_path(
-                    SessionChatTranscriptAgent::Claude,
+                    transcript_agent,
                     agent_session_id.as_deref(),
                     agent_session_path.as_deref(),
                 )
@@ -560,7 +572,7 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
             Some(path) => {
                 let page = tokio::task::spawn_blocking(move || {
                     crate::session_chat_tail::read_session_chat_tail_page(
-                        SessionChatTranscriptAgent::Claude,
+                        transcript_agent,
                         &path,
                         RETURNED_PROMPT_TAIL_LIMIT,
                         None,

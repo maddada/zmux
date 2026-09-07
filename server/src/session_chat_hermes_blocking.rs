@@ -270,6 +270,47 @@ fn live_named_screen(
     (!composer_after(lines, index)).then_some(HermesBlockingScreen { title, detail })
 }
 
+/// CDXC:AgentScreenDetection 2026-09-07 DECISION:
+/// User: check all chat-supported agents for missing trust notices and make them answerable in chat.
+/// Hermes asks for each shell hook's consent before its composer starts; show the command and event with the approval.
+pub fn detect_hermes_hook_trust(
+    text: &str,
+) -> Option<crate::session_chat_notice::SessionChatTerminalNotice> {
+    use crate::session_chat_notice::{
+        SessionChatTerminalNotice, SessionChatTerminalNoticeAction,
+        SessionChatTerminalNoticeSeverity, SessionChatTerminalNoticeSource,
+        SESSION_CHAT_NOTICE_PERMISSIONS_WARNING,
+    };
+    let lines = scan_lines(text);
+    if lines.last()?.trim() != "Allow this hook to run? [y/N]:" {
+        return None;
+    }
+    let heading = lines
+        .iter()
+        .rposition(|line| line.contains("Hermes is about to register a shell hook"))?;
+    let context = &lines[heading..lines.len() - 1];
+    if !context.iter().any(|line| line.starts_with("Event:"))
+        || !context.iter().any(|line| line.starts_with("Command:"))
+    {
+        return None;
+    }
+    Some(
+        SessionChatTerminalNotice::new(
+            SESSION_CHAT_NOTICE_PERMISSIONS_WARNING,
+            SessionChatTerminalNoticeSeverity::Warning,
+            SessionChatTerminalNoticeSource::Screen,
+            "Hermes is waiting for hook approval",
+        )
+        .with_detail(context.join("\n"))
+        .with_screen_tail(crate::session_chat_notice::session_chat_terminal_screen_tail(text))
+        .with_actions(vec![
+            SessionChatTerminalNoticeAction::send_keys("allowHook", "Allow this hook", "y\r"),
+            SessionChatTerminalNoticeAction::send_keys("skipHook", "Skip this hook", "n\r"),
+            SessionChatTerminalNoticeAction::switch_to_terminal("Open terminal"),
+        ]),
+    )
+}
+
 /// Classify a live Hermes screen that owns terminal input in place of the
 /// ordinary prompt. `None` means either normal input is available, the only
 /// evidence is stale scrollback, or no source-stable terminal text identifies

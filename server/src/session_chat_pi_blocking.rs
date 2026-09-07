@@ -90,6 +90,97 @@ fn has_all_words(text: &str, words: &[&str]) -> bool {
     words.iter().all(|word| text.contains(word))
 }
 
+/// CDXC:AgentScreenDetection 2026-09-07 DECISION:
+/// User: Pi's project trust prompt must be answerable from chat, like Cursor's.
+/// Preserve Pi's folder, parent-folder, and session-only choices rather than choosing a trust scope for the user.
+pub fn detect_pi_trust_prompt(
+    text: &str,
+) -> Option<crate::session_chat_notice::SessionChatTerminalNotice> {
+    use crate::session_chat_notice::{
+        SessionChatTerminalNotice, SessionChatTerminalNoticeAction,
+        SessionChatTerminalNoticeChoice, SessionChatTerminalNoticeSeverity,
+        SessionChatTerminalNoticeSource, SESSION_CHAT_NOTICE_TRUST_PROMPT,
+    };
+    let lines = scan_lines(text);
+    let frame = active_frame(&lines)?;
+    let heading = frame
+        .iter()
+        .position(|line| matches!(line.trim(), "Trust project folder?" | "Project trust"))?;
+    let footer = frame.iter().rposition(|line| {
+        let line = line.to_ascii_lowercase();
+        has_all_words(&line, &["navigate", "cancel"])
+            && (line.contains("select") || line.contains("save"))
+    })?;
+    let row_text = |line: &str| {
+        line.trim()
+            .trim_start_matches(['\u{2192}', '\u{203a}'])
+            .trim_start()
+            .trim_start_matches('\u{2713}')
+            .trim_start()
+            .to_string()
+    };
+    let first = (heading + 1..footer).find(|index| row_text(&frame[*index]) == "Trust")?;
+    let mut choices: Vec<SessionChatTerminalNoticeChoice> = Vec::new();
+    for line in &frame[first..footer] {
+        if let Some(previous) = choices.last_mut() {
+            if previous.label.starts_with("Trust parent folder (") && !previous.label.ends_with(')')
+            {
+                previous.label.push_str(line.trim());
+                continue;
+            }
+        }
+        let label = row_text(line);
+        if !matches!(
+            label.as_str(),
+            "Trust"
+                | "Trust (this session only)"
+                | "Do not trust"
+                | "Do not trust (this session only)"
+        ) && !label.starts_with("Trust parent folder (")
+        {
+            return None;
+        }
+        choices.push(SessionChatTerminalNoticeChoice {
+            index: choices.len(),
+            label,
+            selected: line.trim_start().starts_with(['\u{2192}', '\u{203a}']),
+        });
+    }
+    if !choices.iter().any(|row| row.label == "Do not trust")
+        || choices.iter().filter(|row| row.selected).count() != 1
+    {
+        return None;
+    }
+    Some(
+        SessionChatTerminalNotice::new(
+            SESSION_CHAT_NOTICE_TRUST_PROMPT,
+            SessionChatTerminalNoticeSeverity::Warning,
+            SessionChatTerminalNoticeSource::Screen,
+            "Pi is waiting for project trust",
+        )
+        .with_detail(frame[heading + 1..first].join("\n"))
+        .with_screen_tail(crate::session_chat_notice::session_chat_terminal_screen_tail(text))
+        .with_choices(choices)
+        .with_actions(vec![SessionChatTerminalNoticeAction::switch_to_terminal(
+            "Open terminal",
+        )]),
+    )
+}
+
+/// Compute navigation from the freshly captured highlight, since the terminal
+/// selection may have moved since the chat card was displayed.
+pub fn pi_trust_answer_key(text: &str, target: usize) -> Option<String> {
+    let notice = detect_pi_trust_prompt(text)?;
+    notice.choices.get(target)?;
+    let selected = notice.choices.iter().position(|row| row.selected)?;
+    let arrow = if target >= selected {
+        "\x1b[1;1B"
+    } else {
+        "\x1b[1;1A"
+    };
+    Some(format!("{}\r", arrow.repeat(target.abs_diff(selected))))
+}
+
 /// Classify a live Pi screen whose focused component has replaced the ordinary
 /// prompt editor. `None` means the newest complete frame is the editor itself
 /// or the screen has no source-stable evidence of a blocking Pi component.

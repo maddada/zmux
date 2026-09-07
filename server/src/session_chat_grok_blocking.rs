@@ -241,6 +241,43 @@ fn has_special_composer(lines: &[String], prefix: char, label: &str) -> Option<u
     None
 }
 
+/// CDXC:AgentScreenDetection 2026-09-07 DECISION:
+/// User: Grok Build's folder trust prompt must be answerable from chat, like Cursor's.
+/// Grok Build 1.0.21 displays explicit y/n shortcuts when project-local hooks require trust.
+pub fn detect_grok_trust_prompt(
+    text: &str,
+) -> Option<crate::session_chat_notice::SessionChatTerminalNotice> {
+    use crate::session_chat_notice::{
+        SessionChatTerminalNotice, SessionChatTerminalNoticeAction,
+        SessionChatTerminalNoticeSeverity, SessionChatTerminalNoticeSource,
+        SESSION_CHAT_NOTICE_TRUST_PROMPT,
+    };
+    let lines = scan_lines(text);
+    let heading = lines
+        .iter()
+        .rposition(|line| line.contains("Do you trust the contents of this directory?"))?;
+    let choices = heading
+        + 1
+        + latest_keyed_menu_pair(&lines[heading + 1..], "yes, proceed", "y", "no, quit", "n")?;
+    if composer_after(&lines, choices) {
+        return None;
+    }
+    Some(
+        SessionChatTerminalNotice::new(
+            SESSION_CHAT_NOTICE_TRUST_PROMPT,
+            SessionChatTerminalNoticeSeverity::Warning,
+            SessionChatTerminalNoticeSource::Screen,
+            "Grok Build is waiting for folder trust",
+        )
+        .with_detail(lines[heading + 1..choices - 1].join("\n"))
+        .with_screen_tail(crate::session_chat_notice::session_chat_terminal_screen_tail(text))
+        .with_actions(vec![
+            SessionChatTerminalNoticeAction::send_keys("trustDirectory", "Trust this folder", "y"),
+            SessionChatTerminalNoticeAction::switch_to_terminal("Open terminal"),
+        ]),
+    )
+}
+
 /// Classify a live Grok Build surface that owns terminal input instead of the
 /// ordinary prompt. `None` means normal input has returned, only stale
 /// scrollback matched, or no source-stable blocking chrome is visible.
