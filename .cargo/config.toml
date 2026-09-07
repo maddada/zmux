@@ -1,0 +1,5 @@
+# CDXC:Build 2026-09-07 DECISION:
+# User requested reduced Rust debug information to keep the checkout small.
+# Line tables retain file/line backtraces; dev-derived test profiles inherit this setting.
+[profile.dev]
+debug = "line-tables-only"

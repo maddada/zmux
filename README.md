@@ -277,6 +277,19 @@ size = 21474836480 # 20 GiB; the default is 10 GiB
 Then `sccache --stop-server` so the next build starts a server with the new settings, and check with
 `sccache --show-stats` (it prints the cache location and max size; run it after a build to see hits).
 
+The root `.cargo/config.toml` uses `line-tables-only` debug information for development builds
+and their derived test profiles. This keeps file/line backtraces while reducing compiler output;
+local-variable debug information is omitted. Incremental compilation keeps its existing settings.
+
+On macOS, `python3 tooling/clean-build-caches.py` previews cleanup of a fixed list of generated
+Rust, Zig, Xcode, and Android caches. Add `--apply` to clean, or `--install` to register a user
+LaunchAgent that checks daily at 04:30 local time and at login. It removes trees unchanged for
+14 days, or the oldest eligible trees above a combined 30 GiB cache budget, after at least six
+hours without changes. Build locks, detected compiler activity, open files, and Git tracking
+checks protect active work. This is a cache budget, not a hard limit on the entire checkout.
+The latest scheduled result replaces `~/Library/Application Support/Ghostex/build-cache-cleanup/last-run.json`.
+Time Machine snapshots and backup settings are not part of this maintenance job.
+
 ## Credits
 
 Ghostex builds on open source work from these projects and communities:
