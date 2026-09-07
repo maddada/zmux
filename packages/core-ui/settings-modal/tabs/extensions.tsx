@@ -90,6 +90,7 @@ const OFFICIAL_EXTENSION_ICONS: Record<GhostexOfficialExtensionId, TablerIcon> =
   automate: IconBolt,
   browser: IconWorld,
   code: IconCodeDots,
+  devServers: IconWorld,
   docs: IconFileText,
   extensionsButton: IconPuzzle,
   gitActions: IconGitCommit,

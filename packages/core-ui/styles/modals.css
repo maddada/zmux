@@ -4275,6 +4275,46 @@ html:has(body.app-modal-host-native-window-body) {
   gap: 12px;
 }
 
+.settings-remote-qr-preview-trigger {
+  display: grid;
+  gap: 8px;
+  justify-items: stretch;
+  width: 144px;
+}
+
+.ghostex-settings-shadcn.settings-remote-qr-preview-dialog[data-slot='dialog-content'] {
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
+  gap: 16px;
+  max-width: calc(100% - 2rem);
+  padding: 20px;
+  width: 340px;
+}
+
+.settings-remote-qr-preview-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.settings-remote-qr-preview-code {
+  justify-self: center;
+}
+
+.settings-remote-qr-preview-caption {
+  color: var(--app-foreground);
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.settings-remote-qr-preview-caption span {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
 .settings-remote-computer-connect {
   background: color-mix(in srgb, var(--app-card-active) 18%, transparent);
   border: 1px solid color-mix(in srgb, var(--app-border) 70%, transparent);

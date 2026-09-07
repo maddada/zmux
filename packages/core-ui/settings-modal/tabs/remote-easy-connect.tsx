@@ -1,12 +1,14 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { Button } from '@/packages/components/ui/button';
-import { QrCode } from '@/packages/components/ui/qr-code';
+import { SegmentedControl, SegmentedControlItem } from '@/packages/components/ui/segmented-control';
 import { Switch } from '@/packages/components/ui/switch';
 import {
   IconAlertTriangle,
   IconChevronDown,
   IconChevronRight,
   IconDownload,
+  IconDeviceDesktop,
+  IconDeviceMobile,
   IconLoader2,
   IconPower,
   IconQrcode,
@@ -14,6 +16,7 @@ import {
 import { RemoteCopyButton } from './remote-copy-button';
 import { getEasyConnectStatusBadge } from './remote-easy-connect-model';
 import { PairedDevicesList } from './remote-paired-devices';
+import { RemotePairingQrPreview } from './remote-pairing-qr-preview';
 import { SshAccessRow } from './remote-ssh-access-row';
 import type { RemoteAccessState } from './use-remote-access';
 
@@ -37,6 +40,9 @@ const SSH_REQUIRED_OFF =
  *
  * CDXC:RemotePairing 2026-09-05 DECISION:
  * User: explain why the Tailcat CLI is needed and install it with one click; separate Connect a Phone (compact QR) from Connect a Remote machine (copy button only), and explain the SSH login on the other device.
+ *
+ * CDXC:RemotePairing 2026-09-06 DECISION:
+ * User: show phone and computer connection choices as two tabs at the top, with only the selected instructions visible instead of both numbered sections.
  */
 export function EasyConnectCard({
   expanded,
@@ -51,6 +57,8 @@ export function EasyConnectCard({
 }) {
   const titleId = useId();
   const bodyId = useId();
+  const connectionPanelId = useId();
+  const [connectionDevice, setConnectionDevice] = useState('phone');
   const status = remote.easyConnect;
   const badge = getEasyConnectStatusBadge(status);
   const binaryFound = status?.binaryFound === true;
@@ -157,74 +165,93 @@ export function EasyConnectCard({
 
           {isOn ? (
             <div className='settings-remote-connect-sections'>
-              <section
-                aria-label='Connect a Phone'
-                className='settings-remote-qr-block settings-remote-easy-connect-qr-block'
+              <SegmentedControl
+                aria-label='Device to connect'
+                onValueChange={setConnectionDevice}
+                stretch
+                value={connectionDevice}
               >
-                {easyConnectCode ? (
-                  <QrCode
-                    alt='Easy Connect pairing code'
-                    className='settings-remote-qr'
-                    size={144}
-                    value={easyConnectCode.payload}
-                  />
-                ) : (
-                  <span className='settings-remote-qr settings-remote-qr-pending' data-slot='qr-code'>
-                    <span className='settings-management-detail'>Waiting for the address…</span>
-                  </span>
-                )}
-                <div className='settings-remote-qr-meta'>
-                  <strong>1. Connect a Phone</strong>
-                  <span>
-                    On your phone, open Ghostex → <em>Connect your computer</em> → <em>Scan code</em> and scan this QR.
-                  </span>
+                <SegmentedControlItem aria-controls={connectionPanelId} value='phone'>
+                  <IconDeviceMobile aria-hidden='true' />
+                  Connect a phone
+                </SegmentedControlItem>
+                <SegmentedControlItem aria-controls={connectionPanelId} value='computer'>
+                  <IconDeviceDesktop aria-hidden='true' />
+                  Connect a computer
+                </SegmentedControlItem>
+              </SegmentedControl>
+              {connectionDevice === 'phone' ? (
+                <section
+                  aria-label='Connect a phone'
+                  className='settings-remote-qr-block settings-remote-easy-connect-qr-block'
+                  id={connectionPanelId}
+                >
                   {easyConnectCode ? (
-                    <span>
-                      Pairs as <strong>{easyConnectCode.code.user}</strong> on{' '}
-                      <strong>{easyConnectCode.code.name}</strong>. Nothing to type on the phone.
+                    <RemotePairingQrPreview computerName={easyConnectCode.code.name} value={easyConnectCode.payload} />
+                  ) : (
+                    <span className='settings-remote-qr settings-remote-qr-pending' data-slot='qr-code'>
+                      <span className='settings-management-detail'>Waiting for the address…</span>
                     </span>
-                  ) : null}
-                  <span>The QR refreshes after pairing. Remove a paired phone below to disconnect it.</span>
-                </div>
-              </section>
-              <section aria-label='Connect a Remote machine' className='settings-remote-computer-connect'>
-                <div className='settings-remote-qr-meta'>
-                  <strong>2. Connect a Remote machine</strong>
-                  <span>To add this computer on another computer, copy its Easy Connect code below.</span>
-                  <ol className='settings-remote-connect-instructions'>
-                    <li>On the other computer, open Ghostex → Settings → Remote → Add a machine.</li>
-                    <li>
-                      Choose <strong>Easy Connect code</strong> and paste the copied code.
-                    </li>
-                    <li>
-                      Confirm this computer’s SSH username
-                      {easyConnectCode ? (
-                        <>
-                          {' '}
-                          (<strong>{easyConnectCode.code.user}</strong>)
-                        </>
-                      ) : null}{' '}
-                      and enter its SSH password. If you use an SSH key, choose it under Advanced instead.
-                    </li>
-                    <li>
-                      Click <strong>Add machine</strong>, then open it from the sidebar.
-                    </li>
-                  </ol>
-                  {easyConnectCode ? (
-                    <div className='settings-remote-qr-actions'>
-                      <RemoteCopyButton
-                        className='settings-remote-copy-code-button'
-                        copyLabel='Copy Easy Connect code for another computer'
-                        size='sm'
-                        value={easyConnectCode.payload}
-                        variant='default'
-                      >
-                        Copy Easy Connect code
-                      </RemoteCopyButton>
-                    </div>
-                  ) : null}
-                </div>
-              </section>
+                  )}
+                  <div className='settings-remote-qr-meta'>
+                    <strong>Scan with your phone</strong>
+                    <span>
+                      On your phone, open Ghostex → <em>Connect your computer</em> → <em>Scan code</em> and scan this
+                      QR.
+                    </span>
+                    {easyConnectCode ? (
+                      <span>
+                        Pairs as <strong>{easyConnectCode.code.user}</strong> on{' '}
+                        <strong>{easyConnectCode.code.name}</strong>. Nothing to type on the phone.
+                      </span>
+                    ) : null}
+                    <span>The QR refreshes after pairing. Remove a paired phone below to disconnect it.</span>
+                  </div>
+                </section>
+              ) : (
+                <section
+                  aria-label='Connect a computer'
+                  className='settings-remote-computer-connect'
+                  id={connectionPanelId}
+                >
+                  <div className='settings-remote-qr-meta'>
+                    <strong>Use a code on your other computer</strong>
+                    <span>To add this computer on another computer, copy its Easy Connect code below.</span>
+                    <ol className='settings-remote-connect-instructions'>
+                      <li>On the other computer, open Ghostex → Settings → Remote → Add a machine.</li>
+                      <li>
+                        Choose <strong>Easy Connect code</strong> and paste the copied code.
+                      </li>
+                      <li>
+                        Confirm this computer’s SSH username
+                        {easyConnectCode ? (
+                          <>
+                            {' '}
+                            (<strong>{easyConnectCode.code.user}</strong>)
+                          </>
+                        ) : null}{' '}
+                        and enter its SSH password. If you use an SSH key, choose it under Advanced instead.
+                      </li>
+                      <li>
+                        Click <strong>Add machine</strong>, then open it from the sidebar.
+                      </li>
+                    </ol>
+                    {easyConnectCode ? (
+                      <div className='settings-remote-qr-actions'>
+                        <RemoteCopyButton
+                          className='settings-remote-copy-code-button'
+                          copyLabel='Copy Easy Connect code for another computer'
+                          size='sm'
+                          value={easyConnectCode.payload}
+                          variant='default'
+                        >
+                          Copy Easy Connect code
+                        </RemoteCopyButton>
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+              )}
             </div>
           ) : (
             <div className='settings-remote-off-block'>

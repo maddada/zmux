@@ -598,6 +598,10 @@ export function SettingsModal({
   }, [initialTab, isOpen]);
 
   useEffect(() => {
+    if (isOpen && initialAgentsSection) setSettingsSearchQuery('');
+  }, [isOpen, initialAgentsSection]);
+
+  useEffect(() => {
     if (activeTab !== 'osIntegration' || showOSIntegrationSettingsTab) {
       return;
     }
@@ -688,7 +692,8 @@ export function SettingsModal({
      */
     const animationFrame = requestAnimationFrame(() => {
       const viewport = getActiveSettingsModalScrollViewport(dialogContentRef.current);
-      if (viewport) {
+      // An explicit Agents section owns the scroll target for this open.
+      if (viewport && !(activeTab === 'agents' && initialAgentsSection)) {
         viewport.scrollTop = getRememberedSettingsModalScrollTop(
           activeTab,
           (pendingSettingsRef.current ?? draft).settingsModalNavigation
@@ -697,7 +702,7 @@ export function SettingsModal({
       focusSearchInput();
     });
     return () => cancelAnimationFrame(animationFrame);
-  }, [activeTab, isFirstLaunchSetup, isOpen]);
+  }, [activeTab, initialAgentsSection, isFirstLaunchSetup, isOpen]);
 
   useEffect(() => {
     if (!isOpen || activeTab !== 'agents' || agentHookStatus || agentHookStatusLoading) {
@@ -1525,12 +1530,23 @@ export function SettingsModal({
                                 value={draft.accentColor}
                               />
                             ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'workspaceActivePaneBorderColor') ? (
-                              <TextField
-                                description='CSS color for the focused pane border.'
+                            {mainSettingVisible(settingsSearch.theming, 'showActivePaneOutline') ? (
+                              <ToggleField
+                                checked={draft.showActivePaneOutline}
+                                description='Show an outline around the currently focused pane.'
+                                label='Show Active Pane Outline'
+                                {...getSettingModificationProps('showActivePaneOutline')}
+                                onChange={(checked) => updateDraft('showActivePaneOutline', checked)}
+                              />
+                            ) : null}
+                            {draft.showActivePaneOutline &&
+                            mainSettingVisible(settingsSearch.theming, 'workspaceActivePaneBorderColor') ? (
+                              <WebColorPickerField
+                                description='Color of the outline around the currently focused pane.'
                                 label='Active Pane Border'
                                 {...getSettingModificationProps('workspaceActivePaneBorderColor')}
-                                onChange={(value) => updateDraft('workspaceActivePaneBorderColor', value)}
+                                onChange={(value) => updateDraftDebounced('workspaceActivePaneBorderColor', value)}
+                                onCommit={(value) => updateDraft('workspaceActivePaneBorderColor', value)}
                                 value={draft.workspaceActivePaneBorderColor}
                               />
                             ) : null}
@@ -2841,6 +2857,8 @@ export function SettingsModal({
                 {!isFirstLaunchSetup ? (
                   <TabsContent className='mt-0 min-h-0 flex-1 overflow-hidden' value='agents'>
                     <AgentsSettingsTab
+                      hideAccountEmails={draft.hideAccountEmails}
+                      onHideAccountEmailsChange={(checked) => updateDraft('hideAccountEmails', checked)}
                       initialAgentsSection={initialAgentsSection}
                       isActive={isOpen && activeTab === 'agents'}
                       agentHookStatus={agentHookStatus}

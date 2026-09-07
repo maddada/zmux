@@ -435,8 +435,13 @@ export function getSettingsSearchSections(settingsSearchQuery: string, draft: gh
         title: 'Accent Color',
       },
       {
+        key: 'showActivePaneOutline',
+        subtitle: 'Show an outline around the currently focused pane.',
+        title: 'Show Active Pane Outline',
+      },
+      {
         key: 'workspaceActivePaneBorderColor',
-        subtitle: 'CSS color for the focused pane border.',
+        subtitle: 'Color of the outline around the currently focused pane.',
         title: 'Active Pane Border',
       },
     ]),

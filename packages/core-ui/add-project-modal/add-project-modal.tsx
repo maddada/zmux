@@ -1217,7 +1217,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
                   <span className='min-w-0'>
                     <span className='block text-sm font-medium text-foreground'>Clone branch only</span>
                     <span className='mt-0.5 block text-sm leading-relaxed text-muted-foreground'>
-                      Fetch only the selected or default branch.
+                      Fetch only the selected branch.
                     </span>
                   </span>
                 </label>
