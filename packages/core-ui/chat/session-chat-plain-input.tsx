@@ -120,18 +120,15 @@ function boundaryForCanonicalOffset(editor: HTMLElement, canonicalOffset: number
   return { node: editor, offset: editor.childNodes.length };
 }
 
-function setEditorSelection(editor: HTMLElement, start: number, end = start): void {
+function setEditorSelection(editor: HTMLElement, start: number, end = start, focus = end): void {
   const selection = window.getSelection();
   if (!selection) {
     return;
   }
   const startBoundary = boundaryForCanonicalOffset(editor, start);
   const endBoundary = boundaryForCanonicalOffset(editor, end);
-  const range = document.createRange();
-  range.setStart(startBoundary.node, startBoundary.offset);
-  range.setEnd(endBoundary.node, endBoundary.offset);
-  selection.removeAllRanges();
-  selection.addRange(range);
+  const [anchor, head] = focus === start ? [endBoundary, startBoundary] : [startBoundary, endBoundary];
+  selection.setBaseAndExtent(anchor.node, anchor.offset, head.node, head.offset);
 }
 
 function referencePillCount(editor: HTMLElement): number {
@@ -159,11 +156,29 @@ export function SessionChatPlainInput({
 }) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const valueRef = useRef(initialValue);
+  const selectionRef = useRef({ end: initialValue.length, focus: initialValue.length, start: initialValue.length });
   const composingRef = useRef(false);
   const registerApiRef = useRef(registerApi);
   registerApiRef.current = registerApi;
   const callbacksRef = useRef({ onCaretChange, onChange, onPasteData });
   callbacksRef.current = { onCaretChange, onChange, onPasteData };
+
+  const readSelection = (): typeof selectionRef.current => {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    if (editor && selection?.focusNode && editor.contains(selection.focusNode)) {
+      selectionRef.current = editorSelection(editor);
+    }
+    return selectionRef.current;
+  };
+
+  const focus = (): void => {
+    const editor = editorRef.current;
+    if (!editor || document.activeElement === editor) return;
+    const selection = readSelection();
+    editor.focus();
+    setEditorSelection(editor, selection.start, selection.end, selection.focus);
+  };
 
   const applyValue = (next: string, caret: number): void => {
     const editor = editorRef.current;
@@ -177,7 +192,9 @@ export function SessionChatPlainInput({
     ) {
       renderCanonicalValue(editor, next);
     }
-    setEditorSelection(editor, Math.min(caret, next.length));
+    const position = Math.min(caret, next.length);
+    selectionRef.current = { end: position, focus: position, start: position };
+    setEditorSelection(editor, position);
   };
 
   const insertText = (text: string): boolean => {
@@ -185,12 +202,14 @@ export function SessionChatPlainInput({
     if (!editor) {
       return false;
     }
-    const selection = editorSelection(editor);
+    const selection = readSelection();
     const current = canonicalEditorText(editor);
     const next = `${current.slice(0, selection.start)}${text}${current.slice(selection.end)}`;
     const caret = selection.start + text.length;
+    editor.focus();
     renderCanonicalValue(editor, next);
     setEditorSelection(editor, caret);
+    selectionRef.current = { end: caret, focus: caret, start: caret };
     valueRef.current = next;
     callbacksRef.current.onChange(next, caret);
     return true;
@@ -210,28 +229,64 @@ export function SessionChatPlainInput({
     if (!editor || canonicalEditorText(editor) === initialValue) {
       return;
     }
-    const caret = Math.min(editorSelection(editor).focus, initialValue.length);
+    const caret = Math.min(readSelection().focus, initialValue.length);
     renderCanonicalValue(editor, initialValue);
     setEditorSelection(editor, caret);
+    selectionRef.current = { end: caret, focus: caret, start: caret };
     valueRef.current = initialValue;
   }, [initialValue]);
 
   useEffect(() => {
     const api: SessionChatComposerInputApi = {
       applyValue,
-      focus: () => editorRef.current?.focus(),
+      focus,
       getSelection: () => {
         const editor = editorRef.current;
         if (!editor) {
           const end = valueRef.current.length;
           return { end, start: end };
         }
-        const selection = editorSelection(editor);
+        const selection = readSelection();
         return { end: selection.end, start: selection.start };
       },
       getValue: () => (editorRef.current ? canonicalEditorText(editorRef.current) : valueRef.current),
       insertSavedPrompt: insertText,
       insertText,
+      editText: (command) => {
+        if (command === 'undo' || command === 'redo') {
+          document.execCommand(command);
+          return;
+        }
+        const selection = window.getSelection();
+        if (!selection) return;
+        const backward = command.endsWith('Left');
+        if (selection.isCollapsed) {
+          selection.modify(
+            'extend',
+            backward ? 'backward' : 'forward',
+            command.startsWith('deleteWord') ? 'word' : 'lineboundary'
+          );
+        }
+        document.execCommand(backward ? 'delete' : 'forwardDelete');
+      },
+      navigateCaret: ({ direction, select, unit }) => {
+        const selection = window.getSelection();
+        if (!selection) return;
+        const granularity = {
+          character: 'character',
+          word: 'word',
+          line: 'line',
+          lineBoundary: 'lineboundary',
+          paragraph: 'paragraphboundary',
+          document: 'documentboundary',
+        }[unit];
+        selection.modify(
+          select ? 'extend' : 'move',
+          direction === 'up' ? 'backward' : direction === 'down' ? 'forward' : direction,
+          granularity
+        );
+        callbacksRef.current.onCaretChange(readSelection().focus);
+      },
       selectAll: () => {
         const editor = editorRef.current;
         if (!editor) {
@@ -239,6 +294,7 @@ export function SessionChatPlainInput({
         }
         editor.focus();
         setEditorSelection(editor, 0, canonicalEditorText(editor).length);
+        selectionRef.current = editorSelection(editor);
         callbacksRef.current.onCaretChange(canonicalEditorText(editor).length);
       },
     };
@@ -257,9 +313,7 @@ export function SessionChatPlainInput({
       ) {
         return;
       }
-      callbacksRef.current.onCaretChange(
-        canonicalOffsetForBoundary(editor, selection.focusNode, selection.focusOffset)
-      );
+      callbacksRef.current.onCaretChange(readSelection().focus);
     };
     document.addEventListener('selectionchange', handleSelectionChange);
     return () => document.removeEventListener('selectionchange', handleSelectionChange);
@@ -276,6 +330,7 @@ export function SessionChatPlainInput({
     }
     caret = Math.min(caret, canonical.length);
     valueRef.current = canonical;
+    selectionRef.current = editorSelection(editor);
     callbacksRef.current.onChange(canonical, caret);
   };
 
@@ -350,6 +405,7 @@ export function SessionChatPlainInput({
         composingRef.current = false;
         synchronizeInput(event);
       }}
+      onBlur={readSelection}
       onCompositionStart={() => {
         composingRef.current = true;
       }}

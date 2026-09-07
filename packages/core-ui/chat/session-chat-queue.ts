@@ -73,6 +73,25 @@ export function isSessionChatQueueRowBusy(prompt: SessionChatQueuedPrompt): bool
 }
 
 /**
+ * The row the Alt+ArrowUp composer gesture edits: the one nearest the input,
+ * which is the TAIL of the head-first list the strip renders top to bottom.
+ * `sending` rows are skipped for the same reason their Edit button is disabled
+ * — editing one would race the send already in flight — so the gesture reaches
+ * the last row a user could actually have clicked Edit on.
+ */
+export function lastEditableSessionChatQueueRow(
+  queue: readonly SessionChatQueuedPrompt[]
+): SessionChatQueuedPrompt | null {
+  for (let index = queue.length - 1; index >= 0; index -= 1) {
+    const prompt = queue[index];
+    if (prompt && !isSessionChatQueueRowBusy(prompt)) {
+      return prompt;
+    }
+  }
+  return null;
+}
+
+/**
  * Both capability gates in one place (see the transport's queue section):
  * the daemon must have reported a `queue` array AND this host's transport must
  * implement the method. Anything false hides that control outright instead of
@@ -197,82 +216,27 @@ export function shouldOfferSessionChatDraft(params: {
   return isNewerSessionChatDraftStamp(incoming.updatedAt, lastHandledUpdatedAt);
 }
 
-/**
- * The crash-recovery rule: whether this client's OWN synced draft should be
- * put straight back into the composer. The offer bar above deliberately never
- * fires for own-client drafts (they are echoes), which meant a draft that
- * survived only in gxserver — because the app was killed before Chromium
- * committed the per-keystroke localStorage batch — was unreachable. This
- * predicate closes that hole, and stays conservative:
- *
- * - only own-client drafts: another device's text keeps the explicit Use bar;
- * - only a virgin composer: any edit, load, send, or clear since mount means
- *   the user is working here, and nothing may replace their text silently;
- * - only when the synced copy is demonstrably fresher than the stored one —
- *   the stored draft is missing/blank, or carries an older stamp. A legacy
- *   stored value without a stamp is "age unknown" and is never overridden.
- */
-/*
-CDXC:Drafts 2026-09-05 WHY:
-Age alone cannot prove a draft was sent: another client or the terminal can send a different prompt while this composer holds unsent text.
-A debounced save can contain only the beginning of the submitted message, so compare prefixes as well as complete text.
-Only an untouched restored copy saved no later than that matching message may be retired from transcript evidence; newer drafts remain unsent.
-*/
-export function isSessionChatDraftStale(
-  draftUpdatedAt: number | string | null | undefined,
-  lastSentPromptAt: number | null | undefined,
-  draftText: string,
-  lastSentPromptText: string | null | undefined
-): boolean {
-  if (!draftText.trim() || !lastSentPromptText?.trim().startsWith(draftText.trim())) {
-    return false;
+/** Receipts are monotonic even when an older save response follows a newer frame. */
+export function mergeSessionChatDraftState(
+  current: SessionChatDraft | null,
+  incoming: SessionChatDraft
+): SessionChatDraft {
+  const consumed = new Map<string, number>();
+  for (const receipt of [...(current?.consumedDrafts ?? []), ...(incoming.consumedDrafts ?? [])]) {
+    consumed.set(receipt.draftId, Math.max(consumed.get(receipt.draftId) ?? 0, receipt.revision));
   }
-  if (lastSentPromptAt === null || lastSentPromptAt === undefined) {
-    return false;
-  }
-  const at = typeof draftUpdatedAt === 'string' ? Date.parse(draftUpdatedAt) : draftUpdatedAt;
-  if (at === null || at === undefined || Number.isNaN(at)) {
-    return false;
-  }
-  return at <= lastSentPromptAt;
-}
-
-export function shouldRestoreOwnSessionChatDraft(params: {
-  incoming: SessionChatDraft | null;
-  clientId: string;
-  /** True once anything mutated the composer since mount. */
-  composerTouched: boolean;
-  /** Live composer text, so an identical draft never reloads. */
-  composerText: string;
-  /** This client's stored draft entry, null when absent. */
-  stored: { text: string; updatedAt: number | undefined } | null;
-  /** Epoch ms of the transcript's newest user prompt; null while unknown. */
-  lastSentPromptAt?: number | null;
-  lastSentPromptText?: string | null;
-}): boolean {
-  const { clientId, composerText, composerTouched, incoming, lastSentPromptAt, lastSentPromptText, stored } = params;
-  if (!incoming || incoming.originClientId !== clientId || composerTouched) {
-    return false;
-  }
-  if (incoming.content.trim() === '' || incoming.content === composerText) {
-    return false;
-  }
-  if (isSessionChatDraftStale(incoming.updatedAt, lastSentPromptAt, incoming.content, lastSentPromptText)) {
-    return false;
-  }
-  if (stored === null) {
-    return true;
-  }
-  if (stored.updatedAt === undefined) {
-    // Legacy plain-string value: age unknown, so only a BLANK one may lose.
-    return stored.text.trim() === '';
-  }
-  // One rule, shared with the reconcile in session-chat-draft-storage: the
-  // synced copy wins only with a strictly newer stamp. A stamped blank entry
-  // is a deliberate tombstone (the Recovered list's delete) and refuses older
-  // server text exactly like real text would.
-  const incomingAt = Date.parse(incoming.updatedAt);
-  return !Number.isNaN(incomingAt) && incomingAt > stored.updatedAt;
+  const body =
+    current?.version &&
+    current.version.draftId === incoming.version?.draftId &&
+    current.version.revision > incoming.version.revision
+      ? current
+      : incoming;
+  const retired = body.version && (consumed.get(body.version.draftId) ?? 0) >= body.version.revision;
+  return {
+    ...body,
+    content: retired ? '' : body.content,
+    consumedDrafts: [...consumed].map(([draftId, revision]) => ({ draftId, revision })),
+  };
 }
 
 // ---------------------------------------------------------------------------

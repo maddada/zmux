@@ -31,9 +31,9 @@ back through answerSessionChatPrompt's `terminalChoice` lane — which re-reads
 the live screen, so the row the user sees marked as the CLI's default here is
 never what drives the keystrokes.
 
-A picker is not dismissable: hiding it would leave the composer disabled with
-nothing on screen explaining why, since the CLI accepts no input until it is
-answered. "Open terminal" stays as the escape hatch.
+A picker is not dismissable: hiding it would leave sending blocked with
+nothing on screen explaining why, since the CLI cannot accept the draft until
+it is answered. The composer stays editable. "Open terminal" stays as the escape hatch.
 
 CDXC:AgentScreenDetection 2026-09-03:
 User decision: expanding terminal output starts at the newest text, and its Terminal action stays on the opposite side of the same control row so both ways of inspecting the terminal remain together.
@@ -55,6 +55,8 @@ import { IconChevronRight, IconTerminal2, IconX } from '@tabler/icons-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { GxserverAnswerSessionChatPromptParams, SessionChatTerminalNotice } from '../../shared/session-chat';
 import { cn } from '@/packages/components/utils';
+import { detectghostexHotkeyPlatform } from '@/packages/shared/ghostex-hotkeys';
+import { sessionChatKeyboardPopupOpen } from './session-chat-caret-navigation';
 import { Button } from '../../components/ui/button';
 import { SessionChatChoiceRows } from './session-chat-choice-rows';
 import { SessionChatNoticeCard } from './session-chat-notice-card';
@@ -62,14 +64,15 @@ import { SessionChatTerminalDialogCard } from './session-chat-terminal-dialog';
 
 const SEND_FAILED_NOTICE = "Couldn't deliver those keys. Switch to Terminal View to act there.";
 const READ_ONLY_HINT = 'Input is held by another device.';
-const CHOICE_FAILED_NOTICE = "Couldn't answer that picker. It may have been answered in the terminal already.";
+const CHOICE_FAILED_NOTICE = "Couldn't send your choice. Please try again.";
 /** Options a collapsed picker shows before the user expands it. */
 const COLLAPSED_CHOICE_COUNT = 2;
 /** Label suffixes dropped in the collapsed state so both options fit on one line. */
 const COLLAPSED_LABEL_SUFFIXES = [' (recommended)'];
 
 function collapsedChoiceLabel(label: string): string {
-  const trimmed = label.trim();
+  // CDXC:SessionChat 2026-09-07 WHY: Rate-limit continuation labels wrapped in the compact two-button layout. Shorten their shared prefix while preserving the timing, whether an explicit reset time or "shortly"; expanding still shows the terminal's full wording.
+  const trimmed = label.trim().replace(/^Wait here, then continue automatically\b/i, 'Continue automatically');
   for (const suffix of COLLAPSED_LABEL_SUFFIXES) {
     if (trimmed.toLowerCase().endsWith(suffix)) {
       return trimmed.slice(0, -suffix.length).trimEnd();
@@ -235,7 +238,7 @@ export function SessionChatTerminalNoticeCard({
   const [tailOpen, setTailOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
-  const [choiceFailed, setChoiceFailed] = useState(false);
+  const [choiceError, setChoiceError] = useState<string | null>(null);
   const [pickedChoice, setPickedChoice] = useState<number | null>(null);
   // Optimistic answer: the notice key whose picker was answered from here and
   // is hidden while the daemon confirms. Cleared only by a failed answer or a
@@ -244,6 +247,9 @@ export function SessionChatTerminalNoticeCard({
   const [expanded, setExpanded] = useState(false);
   const sendingRef = useRef(false);
   const screenTailRef = useRef<HTMLPreElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const isMac = detectghostexHotkeyPlatform() === 'mac';
+  const primaryShortcutLabel = isMac ? '⌘ Enter' : 'Ctrl Enter';
 
   const noticeKey = sessionChatTerminalNoticeDismissKey(notice);
   const dismiss = (): void => {
@@ -267,7 +273,7 @@ export function SessionChatTerminalNoticeCard({
     sendingRef.current = false;
     setSending(false);
     setSendFailed(false);
-    setChoiceFailed(false);
+    setChoiceError(null);
     setPickedChoice(null);
     setAnsweredKey(null);
     setExpanded(false);
@@ -293,6 +299,10 @@ export function SessionChatTerminalNoticeCard({
   // the blind confirm this feature exists to stop.
   const choices = (notice?.choices ?? []).filter((choice) => choice.label.trim().length > 0);
   const answerable = choices.length > 0 && onAnswerChoice !== undefined;
+  /** CDXC:SessionChat 2026-09-07 DECISION: User: the rate-limit picker already has clickable options, so omit its redundant Previous/Next/Confirm/Cancel controls and terminal footer. */
+  const rateLimitPicker = answerable && choices.some((choice) =>
+    /^Wait here, then continue automatically\b/i.test(choice.label.trim())
+  );
 
   const answerChoice = (choiceIndex: number): void => {
     if (sendingRef.current || !canSend || !onAnswerChoice) {
@@ -300,16 +310,15 @@ export function SessionChatTerminalNoticeCard({
     }
     sendingRef.current = true;
     setSending(true);
-    setChoiceFailed(false);
+    setChoiceError(null);
     setPickedChoice(choiceIndex);
     // Optimistic: the card leaves the screen now; the keystrokes land in the background.
     setAnsweredKey(noticeKey);
     void onAnswerChoice(choiceIndex)
-      .catch(() => {
-        // The picker was gone (answered in the terminal, or already dismissed
-        // by the CLI): bring the card back and say so rather than leaving the
-        // user with a silently unanswered picker.
-        setChoiceFailed(true);
+      .catch((error: unknown) => {
+        // Keep the server's reason: an open dialog and a stale dialog need
+        // different guidance even though both reject the answer.
+        setChoiceError(error instanceof Error ? error.message : CHOICE_FAILED_NOTICE);
         setPickedChoice(null);
         setAnsweredKey(null);
       })
@@ -319,38 +328,11 @@ export function SessionChatTerminalNoticeCard({
       });
   };
 
-  // Number keys 1-9 pick the matching row while focus sits outside an editable
-  // field — the same key map the AskUserQuestion card teaches, and the composer
-  // is read-only while a picker waits, so the digits are free.
   const answerChoiceRef = useRef(answerChoice);
   answerChoiceRef.current = answerChoice;
   const keyboardAnswerable = visible && answerable && canSend && !sending && pickedChoice === null;
-  const choiceCount = choices.length;
-  useEffect(() => {
-    if (!keyboardAnswerable) {
-      return;
-    }
-    const handler = (event: KeyboardEvent): void => {
-      if (event.metaKey || event.ctrlKey || event.altKey) {
-        return;
-      }
-      const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-        return;
-      }
-      if (target instanceof HTMLElement && target.closest('[contenteditable]:not([contenteditable="false"])')) {
-        return;
-      }
-      const digit = Number.parseInt(event.key, 10);
-      if (Number.isNaN(digit) || digit < 1 || digit > 9 || digit > choiceCount) {
-        return;
-      }
-      event.preventDefault();
-      answerChoiceRef.current(digit - 1);
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [choiceCount, keyboardAnswerable]);
+  const primaryChoiceIndex = choices[0]?.index;
+  const secondaryChoiceIndex = choices[1]?.index;
 
   const firstSendKeys =
     !answerable && notice
@@ -376,40 +358,56 @@ export function SessionChatTerminalNoticeCard({
       });
   };
 
-  // Digit 1 is the Trust (or other primary sendKeys) action on notices that
-  // are a single confirm, not a numbered picker. The composer is held shut
-  // until that confirm lands, so the key is taken even while the editor has
-  // focus — otherwise 1 would type into a box that cannot reach the agent.
   const runSendKeysRef = useRef(runSendKeys);
   runSendKeysRef.current = runSendKeys;
-  const keyboardSendKeys = visible && firstSendKeys !== undefined && canSend && !sending;
+  const keyboardSendKeys = visible && firstSendKeys !== undefined && canSend && !sending &&
+    !(notice?.dialog && notice.dialog.rows.length === 0 && onAnswerDialog);
+
+  /**
+   * CDXC:SessionChat 2026-09-07 DECISION:
+   * User: Command+Enter picks the left action and Escape picks the second action while the chat draft stays editable. Numeric keys remain available for typing.
+   * Windows and Linux use Control+Enter for the primary action. Capture within the focused chat before the composer can submit or interrupt; open popups keep their keyboard ownership.
+   */
   useEffect(() => {
-    if (!keyboardSendKeys || firstSendKeys === undefined) {
-      return;
-    }
-    const send = firstSendKeys;
+    if (!keyboardAnswerable && !keyboardSendKeys) return;
+    const root = cardRef.current?.closest<HTMLElement>('.ghostex-session-chat-scope');
+    if (!root) return;
     const handler = (event: KeyboardEvent): void => {
-      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) {
-        return;
+      if (event.defaultPrevented || event.repeat || event.isComposing || event.altKey || event.shiftKey) return;
+      const primary = event.key === 'Enter' && (isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey);
+      const secondary = event.key === 'Escape' && !event.metaKey && !event.ctrlKey;
+      if (!primary && !secondary) return;
+      if (!(event.target instanceof Element) || event.target.closest('.ghostex-session-chat-scope') !== root) return;
+      if (sessionChatKeyboardPopupOpen(root) || root.querySelector('.ghostex-chat-composer-picker')) return;
+      const choiceIndex = primary ? primaryChoiceIndex : secondaryChoiceIndex;
+      if (keyboardAnswerable && choiceIndex !== undefined) {
+        event.preventDefault();
+        event.stopPropagation();
+        answerChoiceRef.current(choiceIndex);
+      } else if (primary && keyboardSendKeys && firstSendKeys !== undefined) {
+        event.preventDefault();
+        event.stopPropagation();
+        runSendKeysRef.current(firstSendKeys);
       }
-      if (event.key !== '1') {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      runSendKeysRef.current(send);
     };
-    document.addEventListener('keydown', handler, true);
-    return () => document.removeEventListener('keydown', handler, true);
-  }, [firstSendKeys, keyboardSendKeys]);
+    root.ownerDocument.addEventListener('keydown', handler, true);
+    return () => root.ownerDocument.removeEventListener('keydown', handler, true);
+  }, [firstSendKeys, isMac, keyboardAnswerable, keyboardSendKeys, primaryChoiceIndex, secondaryChoiceIndex, noticeKey]);
 
   if (!visible || !notice) {
     return null;
   }
   if (notice.dialog && notice.dialog.rows.length === 0 && onAnswerDialog) {
-    return <SessionChatNoticeCard kind={notice.kind} severity={notice.severity}>
-      <SessionChatTerminalDialogCard key={notice.dialog.title} dialog={notice.dialog} canSend={canSend} onAnswer={onAnswerDialog} />
-    </SessionChatNoticeCard>;
+    return (
+      <SessionChatNoticeCard ref={cardRef} kind={notice.kind} severity={notice.severity}>
+        <SessionChatTerminalDialogCard
+          key={notice.dialog.title}
+          dialog={notice.dialog}
+          canSend={canSend}
+          onAnswer={onAnswerDialog}
+        />
+      </SessionChatNoticeCard>
+    );
   }
 
   // Actions are normalized here so the render below never has to re-prove that
@@ -452,51 +450,75 @@ export function SessionChatTerminalNoticeCard({
   }));
   const toggleExpanded = (): void => setExpanded((value) => !value);
   return (
-    <SessionChatNoticeCard kind={notice.kind} severity={notice.severity}>
-      <div className={cn('relative flex items-start gap-2 px-3', collapsed ? 'py-2' : 'py-2.5')}>
-        <div className='min-w-0 flex-1'>
+    <SessionChatNoticeCard ref={cardRef} kind={notice.kind} severity={notice.severity}>
+      <div
+        className={cn(
+          'relative flex items-start gap-2',
+          answerable ? (collapsed ? 'px-[22px] py-[18px]' : 'px-[22px] py-[20px]') : 'p-[20px]'
+        )}
+      >
+        {/* CDXC:SessionChat 2026-09-07 DECISION: User: notices like the folder-trust card have 20px padding on all sides and 10px more space between their rows. Picker cards get 10px additional padding on all sides. */}
+        <div className={cn('min-w-0 flex-1', !answerable && 'flex flex-col gap-[10px]')}>
           {answerable ? (
+            /* CDXC:SessionChat 2026-09-07 DECISION: User: picker titles align with the content and action edges below. Offset the title button's own inset into the card padding so its hover background still has breathing room. */
             <button
               aria-expanded={expanded}
-              className='group/title flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md pr-6 text-left outline-none'
+              className='group/title -ml-2 flex w-[calc(100%+0.5rem)] min-w-0 cursor-pointer items-center gap-1.5 rounded-md py-1 pl-2 pr-6 text-left outline-none'
               data-slot='session-chat-notice-title-toggle'
               onClick={toggleExpanded}
               type='button'
             >
-              <span className='min-w-0 flex-1 text-sm leading-snug font-medium text-foreground'>{notice.title}</span>
+              <span className='ghostex-chat-card-title min-w-0 flex-1 text-sm leading-snug font-medium text-foreground'>{notice.title}</span>
             </button>
           ) : (
-            <p className='text-sm leading-snug font-medium text-foreground'>{notice.title}</p>
+            // CDXC:AgentScreenDetection 2026-09-06 DECISION: User: the top-right dismiss button must not reserve a right-hand gap beside the content below it.
+            <div className='flex min-w-0 items-start gap-2'>
+              <p className='ghostex-chat-card-title min-w-0 flex-1 text-sm leading-snug font-medium text-foreground'>{notice.title}</p>
+              <Button className='ghostex-chat-card-dismiss' aria-label='Dismiss' onClick={dismiss} size='icon-xs' variant='outline'>
+                <IconX aria-hidden='true' stroke={2} />
+              </Button>
+            </div>
           )}
           {notice.detail && !collapsed ? (
-            <p className='mt-1 text-xs leading-snug text-muted-foreground'>{notice.detail}</p>
+            <p className='mt-1 whitespace-pre-line break-words text-xs leading-snug text-muted-foreground'>
+              {notice.detail}
+            </p>
           ) : null}
           {answerable ? (
             <div className={collapsed ? 'mt-2' : 'mt-3'}>
               <SessionChatChoiceRows
                 dense={collapsed}
-                onSelect={answerChoice}
+                onSelect={(index) => answerChoice(choices[index].index)}
                 options={collapsed ? choiceOptions.slice(0, COLLAPSED_CHOICE_COUNT) : choiceOptions}
                 // The rows lock while an answer is in flight; the card itself
                 // is hidden optimistically, so this only matters for the
                 // instant before the hide and for a failed answer.
                 readOnly={!canSend || sending || pickedChoice !== null}
-                selected={pickedChoice === null ? [] : [pickedChoice]}
+                selected={pickedChoice === null ? [] : [choices.findIndex((choice) => choice.index === pickedChoice)]}
                 showShortcuts={showShortcutLabels}
+                shortcutLabels={[primaryShortcutLabel, 'Esc']}
               />
               {!canSend ? (
-                <p className='mt-2 text-[11px] leading-snug text-muted-foreground'>{READ_ONLY_HINT}</p>
+                /* CDXC:SessionChat 2026-09-07 DECISION: User: the input-ownership sentence is a smaller secondary hint beneath the picker actions. */
+                <p className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] mt-2 font-normal leading-snug text-[#b4b8bf]'>{READ_ONLY_HINT}</p>
               ) : null}
             </div>
           ) : null}
-          {notice.dialog && onAnswerDialog && !collapsed ? (
-            <SessionChatTerminalDialogCard dialog={notice.dialog} canSend={canSend && !sending && pickedChoice === null} onAnswer={onAnswerDialog} controlsOnly />
+          {notice.dialog && onAnswerDialog && !collapsed && !rateLimitPicker ? (
+            <SessionChatTerminalDialogCard
+              dialog={notice.dialog}
+              canSend={canSend && !sending && pickedChoice === null}
+              onAnswer={onAnswerDialog}
+              controlsOnly
+            />
           ) : null}
           {notice.screenTail && !collapsed ? (
             <div className='mt-2'>
               <div className='flex min-w-0 items-center justify-between gap-2'>
-                <button
-                  className='group/tail inline-flex items-center gap-1 rounded-md text-[11px] font-medium text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground'
+                <Button
+                  className='ghostex-chat-card-action group/tail'
+                  size='sm'
+                  variant='outline'
                   // The sidebar's legacy bare-button base paints a 1px app border
                   // on every unnamed button; naming the slot opts this row out.
                   data-slot='session-chat-notice-tail-toggle'
@@ -509,15 +531,15 @@ export function SessionChatTerminalNoticeCard({
                     aria-hidden='true'
                     className={cn('ghostex-chat-disclosure-chevron', tailOpen && 'is-open')}
                   />
-                </button>
+                </Button>
                 {switchToTerminalActions.length > 0 ? (
                   <div className='ml-auto flex shrink-0 items-center gap-2'>
                     {switchToTerminalActions.map((action) => (
-                      <Button key={action.id} onClick={onSwitchToTerminal} size='xs' variant='outline'>
+                      <Button key={action.id} onClick={onSwitchToTerminal} size='sm' variant='outline'>
                         <IconTerminal2 aria-hidden='true' stroke={2} />
                         {action.label}
                         {showShortcutLabels && switchToTerminalShortcut ? (
-                          <kbd className='ml-0.5 flex h-4 shrink-0 items-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground'>
+                          <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ml-0.5 flex h-4 shrink-0 items-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground'>
                             {switchToTerminalShortcut}
                           </kbd>
                         ) : null}
@@ -541,8 +563,10 @@ export function SessionChatTerminalNoticeCard({
           {sendFailed ? (
             <p className='mt-2 text-[11px] leading-snug text-destructive/80'>{SEND_FAILED_NOTICE}</p>
           ) : null}
-          {choiceFailed ? (
-            <p className='mt-2 text-[11px] leading-snug text-destructive/80'>{CHOICE_FAILED_NOTICE}</p>
+          {choiceError ? (
+            <p role='alert' className='mt-2 text-[11px] leading-snug text-destructive/80'>
+              {choiceError}
+            </p>
           ) : null}
           {!collapsed && (sendKeysActions.length > 0 || (!notice.screenTail && switchToTerminalActions.length > 0)) ? (
             <div className='mt-3 flex flex-wrap items-center gap-2'>
@@ -551,14 +575,14 @@ export function SessionChatTerminalNoticeCard({
                   disabled={!canSend || sending}
                   key={action.id}
                   onClick={() => runSendKeys(action.send)}
-                  size='xs'
+                  size='sm'
                   variant='outline'
                   {...(canSend ? {} : { title: READ_ONLY_HINT })}
                 >
                   {action.label}
                   {showShortcutLabels && sendKeysIndex === 0 && keyboardSendKeys ? (
-                    <kbd className='ml-0.5 flex h-4 min-w-4 shrink-0 items-center justify-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground tabular-nums'>
-                      1
+                    <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ml-0.5 flex h-4 min-w-4 shrink-0 items-center justify-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground tabular-nums'>
+                      {primaryShortcutLabel}
                     </kbd>
                   ) : null}
                 </Button>
@@ -567,11 +591,11 @@ export function SessionChatTerminalNoticeCard({
                 // Without captured output, the escape hatch keeps its existing bottom-right position.
                 <div className='ml-auto flex items-center gap-2'>
                   {switchToTerminalActions.map((action) => (
-                    <Button key={action.id} onClick={onSwitchToTerminal} size='xs' variant='outline'>
+                    <Button key={action.id} onClick={onSwitchToTerminal} size='sm' variant='outline'>
                       <IconTerminal2 aria-hidden='true' stroke={2} />
                       {action.label}
                       {showShortcutLabels && switchToTerminalShortcut ? (
-                        <kbd className='ml-0.5 flex h-4 shrink-0 items-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground'>
+                        <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ml-0.5 flex h-4 shrink-0 items-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground'>
                           {switchToTerminalShortcut}
                         </kbd>
                       ) : null}
@@ -588,7 +612,10 @@ export function SessionChatTerminalNoticeCard({
           <button
             aria-expanded={expanded}
             aria-label={expanded ? 'Show less' : 'Show all options'}
-            className='absolute top-2 right-2 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground'
+            className={cn(
+              'absolute right-[22px] inline-flex size-5 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground',
+              collapsed ? 'top-[22px]' : 'top-[24px]'
+            )}
             data-slot='session-chat-notice-expand-toggle'
             onClick={toggleExpanded}
             title={expanded ? 'Show less' : 'Show all options'}
@@ -599,11 +626,7 @@ export function SessionChatTerminalNoticeCard({
               className={cn('ghostex-chat-disclosure-chevron', expanded && 'is-open')}
             />
           </button>
-        ) : (
-          <Button aria-label='Dismiss' onClick={dismiss} size='icon-xs' variant='ghost'>
-            <IconX aria-hidden='true' stroke={2} />
-          </Button>
-        )}
+        ) : null}
       </div>
     </SessionChatNoticeCard>
   );

@@ -86,6 +86,7 @@ interface MonacoEditorInstanceLike {
   setSelection(selection: unknown): void;
   setPosition(position: MonacoPositionLike): void;
   setValue(value: string): void;
+  trigger(source: string, handlerId: string, payload: unknown): void;
   updateOptions(options: Record<string, unknown>): void;
 }
 
@@ -616,6 +617,7 @@ export function SessionChatMonacoInput({
           }),
           editor.onDidContentSizeChange(applyHeight),
           editor.onKeyDown((event) => {
+            if (quickInputOpenRef.current) return;
             const key = composerKeyForMonacoEvent(event);
             callbacksRef.current.onKeyDown({
               altKey: event.browserEvent.altKey,
@@ -707,6 +709,34 @@ export function SessionChatMonacoInput({
           getValue: canonicalValue,
           insertSavedPrompt: (text) => insertCanonicalText(text, 'ghostex-saved-prompt'),
           insertText: (text) => insertCanonicalText(text, 'ghostex-insert-text'),
+          editText: (command) => {
+            if (!quickInputOpenRef.current) editor.trigger('ghostex-pane-edit', command, null);
+          },
+          navigateCaret: ({ direction, select, unit }) => {
+            if (quickInputOpenRef.current) return;
+            if (unit === 'paragraph') {
+              editor.trigger('ghostex-pane-navigation', 'cursorMove', {
+                to: direction === 'up' ? 'prevBlankLine' : 'nextBlankLine',
+                select,
+              });
+              return;
+            }
+            const command =
+              unit === 'document'
+                ? direction === 'up'
+                  ? 'cursorTop'
+                  : 'cursorBottom'
+                : unit === 'lineBoundary'
+                  ? direction === 'left'
+                    ? 'cursorHome'
+                    : 'cursorEnd'
+                  : unit === 'word'
+                    ? direction === 'left'
+                      ? 'cursorWordLeft'
+                      : 'cursorWordRight'
+                    : { left: 'cursorLeft', right: 'cursorRight', up: 'cursorUp', down: 'cursorDown' }[direction];
+            editor.trigger('ghostex-pane-navigation', `${command}${select ? 'Select' : ''}`, null);
+          },
           selectAll: () => {
             const model = editor.getModel();
             if (!model) {

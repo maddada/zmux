@@ -1,7 +1,12 @@
+import type { SessionChatDraftVersion } from '@/packages/shared/session-chat-queue';
 import { sessionChatDraftFingerprint } from './session-chat-draft-diagnostics';
+import { sessionChatCaretMovement, type SessionChatCaretMovement } from './session-chat-caret-navigation';
+import type { SessionChatTextEditCommand } from './session-chat-edit-shortcuts';
+import './session-chat-composer-focus.css';
 // Session chat composer (upstream chat spec §1.1/§11.6 port). Enter sends by
 // default, hosts can reserve it for newlines, Escape interrupts, the IME guard swallows
-// composition Enter, and ArrowUp/Down recall draft history. Typing a
+// composition Enter, ArrowUp/Down recall draft history, and Alt+ArrowUp in an
+// empty composer pulls the nearest queued prompt back in to edit. Typing a
 // line-leading "/" opens the slash-command picker (per-agent catalog):
 // ArrowUp/Down highlight, Tab/Enter complete, Enter on an exact match sends,
 // Escape dismisses the picker without interrupting. A "$" token opens the same
@@ -74,6 +79,8 @@ import {
 } from './session-chat-composer-state';
 import {
   clearStoredSessionChatDraftIfUnchanged,
+  nextSessionChatDraftVersion,
+  recoverSessionChatDraft,
   readStoredSessionChatDraft,
   readStoredSessionChatDraftEntry,
   writeStoredSessionChatDraft,
@@ -110,10 +117,9 @@ import {
 import type { SessionChatHostActions } from './session-chat-host-actions';
 import {
   isNewerSessionChatDraftStamp,
-  isSessionChatDraftStale,
+  lastEditableSessionChatQueueRow,
   SESSION_CHAT_QUEUE_LONG_PRESS_MS,
   shouldOfferSessionChatDraft,
-  shouldRestoreOwnSessionChatDraft,
 } from './session-chat-queue';
 import type { SessionChatDraftController, SessionChatQueueController } from './use-session-chat';
 import type {
@@ -135,7 +141,7 @@ export interface SessionChatComposerHandle {
   /*
   CDXC:Drafts 2026-08-28:
   Persist what is in the field RIGHT NOW: the localStorage copy synchronously,
-  and gxserver's durable copy through the same debounced sync the composer uses
+  and gxserver's durable copy through the same ordered revision saves it uses
   everywhere else (the push is a no-op when the server already has this text).
   Callers use it before an action that restarts the agent CLI under the pane.
   */
@@ -151,6 +157,9 @@ export interface SessionChatComposerHandle {
   restoreReturnedPrompt: (text: string) => void;
   /** Insert text at the caret; returns false when the composer cannot take it. */
   insertTypedText: (text: string) => boolean;
+  navigateCaret: (event: SessionChatComposerKeyEvent) => boolean;
+  editText: (command: SessionChatTextEditCommand | 'selectAll') => boolean;
+  copyClipboard: (data: DataTransfer, cut: boolean) => boolean;
   /** Attach files/folders dropped anywhere on the chat view. */
   attachDroppedFiles: (data: DataTransfer) => boolean;
   /**
@@ -188,10 +197,13 @@ export interface SessionChatComposerInputApi {
   getValue: () => string;
   insertSavedPrompt: (text: string) => boolean;
   insertText: (text: string) => boolean;
+  navigateCaret: (movement: SessionChatCaretMovement) => void;
+  editText: (command: SessionChatTextEditCommand) => void;
   selectAll: () => void;
 }
 
 export interface SessionChatComposerProps {
+  paneFocused?: boolean;
   /**
    * Host-provided diagnostic breadcrumb sink (desktop support logs). Called on
    * composer mount/unmount and on focus entering/leaving the composer so a
@@ -258,7 +270,7 @@ export interface SessionChatComposerProps {
   onRequestFiles?: () => void;
   /** True while the host is listing files for the "@" picker. */
   filesLoading?: boolean;
-  onSend: (text: string) => void | Promise<void>;
+  onSend: (text: string, draftVersion?: SessionChatDraftVersion) => void | Promise<void>;
   /**
    * Reads the session's terminal screen for the `composerNotReady` refusal
    * notice (see session-chat-composer-not-ready.tsx) and, polled, for the
@@ -276,6 +288,7 @@ export interface SessionChatComposerProps {
    * these (e.g. the mobile app's native header) simply omit the prop.
    */
   hostActions?: SessionChatHostActions;
+  renderAccountMenu?: (close: () => void) => ReactNode;
   /** Open the host's delayed actions for this session. */
   onDelayedActions?: () => void;
   /** Save the current draft for later and clear it after the save succeeds. */
@@ -303,12 +316,6 @@ export interface SessionChatComposerProps {
   sessionNoteHasText?: boolean;
   /** Whether the composer renders shortcut chords in its controls and menu. */
   showShortcutLabels?: boolean;
-  /**
-   * Epoch ms of the transcript's newest user prompt, null while the transcript
-   * is unknown. Used with its text to recognize a sent message restored from cache.
-   */
-  lastSentPromptAt?: number | null;
-  lastSentPromptText?: string | null;
   /** Per-session Verbose mode value shown with the right-hand composer actions. */
   verboseMode?: boolean;
   /** Toggle the per-session Verbose mode override. Omitted hides the action. */
@@ -415,7 +422,7 @@ interface PastedImagePreview {
 /** Rich Prompt Editor numbering: max existing [Image #N]( in the draft, +1. */
 function nextImageReferenceIndex(text: string): number {
   let highest = 0;
-  for (const match of text.matchAll(/\[Image #(\d+)\]\(/g)) {
+  for (const match of text.matchAll(/\[Image #(\d+)·?\]\(/g)) {
     const index = Number.parseInt(match[1] ?? '', 10);
     if (Number.isFinite(index)) {
       highest = Math.max(highest, index);
@@ -424,10 +431,10 @@ function nextImageReferenceIndex(text: string): number {
   return highest + 1;
 }
 
-/** Same numbering scheme for non-image attachments: "[File #N](path)". */
+/** Numbered file references include both attachment labels and descriptive picker labels. */
 function nextFileReferenceIndex(text: string): number {
   let highest = 0;
-  for (const match of text.matchAll(/\[File #(\d+)\]\(/g)) {
+  for (const match of text.matchAll(/\[(?:\\.|[^\]\\\r\n])* #(\d+)\]\(/g)) {
     const index = Number.parseInt(match[1] ?? '', 10);
     if (Number.isFinite(index)) {
       highest = Math.max(highest, index);
@@ -442,22 +449,13 @@ const DESKTOP_SESSION_CHAT_PLACEHOLDER =
 const MOBILE_SESSION_CHAT_PLACEHOLDER = 'Tap ↑ to send or hold it to queue; use @ for files and $ for skills.';
 
 const IMAGE_PATH_PATTERN = /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i;
-const LINKED_IMAGE_REFERENCE_PATTERN = /\[Image #\d+\]\(([^)\r\n]+)\)/g;
+/**
+ * CDXC:SessionChat 2026-09-06 DECISION:
+ * User: expanded image references with the trailing · must still show image previews in input boxes across all apps.
+ */
+const LINKED_IMAGE_REFERENCE_PATTERN = /\[Image #\d+·?\]\(([^)\r\n]+)\)/g;
 const SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS = 2_000;
 
-/*
- * CDXC:Drafts 2026-08-28:
- * The per-keystroke localStorage cache is NOT durable: Chromium batches its
- * LevelDB commits and an app quit that skips a clean CEF shutdown (a dev
- * restart, a crash, a force quit) drops everything uncommitted. gxserver's
- * synced draft is the durable copy — its SQLite store outlives the app because
- * the daemon deliberately survives restarts — so typing must reach it while it
- * happens, not only on blur/unmount. A trailing debounce keeps the chatter
- * down, and the max interval bounds staleness while the user types without a
- * pause.
- */
-const SESSION_CHAT_DRAFT_SYNC_DEBOUNCE_MS = 2_000;
-const SESSION_CHAT_DRAFT_SYNC_MAX_INTERVAL_MS = 10_000;
 /**
  * A push that failed is retried on this delay, this many times. Without a
  * retry the empty push after a send was the only thing clearing gxserver's
@@ -569,9 +567,8 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       files,
       filesLoading = false,
       hostActions,
+      renderAccountMenu,
       isWorking,
-      lastSentPromptAt = null,
-      lastSentPromptText = null,
       monacoVsBaseUrl,
       nativeContextMenu = false,
       onAttachFile,
@@ -591,6 +588,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       onToggleSummary,
       onToggleVerbose,
       optionPills,
+      paneFocused = false,
       placeholder,
       queue,
       scrollCollapseEnabled = false,
@@ -614,18 +612,16 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     ref
   ) {
     const [draft, setDraft] = useState(() => readStoredSessionChatDraft(sessionKey));
-    /**
-     * The text this composer holds without the user having typed it — the
-     * mount-time localStorage restore, or gxserver's crash-restore copy — with
-     * its stamp, so it can be measured against the transcript once that has
-     * loaded. Cleared once the check retires it or the user replaces it.
-     */
-    const silentlyRestoredDraftRef = useRef<{ text: string; updatedAt: number | undefined } | null>(
-      (() => {
-        const stored = readStoredSessionChatDraftEntry(sessionKey);
-        return stored !== null && stored.text !== '' ? stored : null;
-      })()
+    const draftVersionRef = useRef<SessionChatDraftVersion | undefined>(
+      readStoredSessionChatDraftEntry(sessionKey)?.submitted
+        ? undefined
+        : readStoredSessionChatDraftEntry(sessionKey)?.version
     );
+    const persistComposerDraft = (text: string, submitted = false) => {
+      const version = nextSessionChatDraftVersion(draftVersionRef.current);
+      draftVersionRef.current = version;
+      return writeStoredSessionChatDraft(sessionKey, text, undefined, version, submitted);
+    };
     const [history, setHistory] = useState(EMPTY_SESSION_CHAT_COMPOSER_HISTORY);
     const [slashDismissed, setSlashDismissed] = useState(false);
     const [slashIndex, setSlashIndex] = useState(0);
@@ -701,6 +697,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         sessionKey,
         clientId: draftSync?.clientId,
         editRevision: draftEditRevision.current,
+        draftVersion: draftVersionRef.current,
         editor: sessionChatDraftFingerprint(getInputApi()?.getValue() ?? draftRef.current),
         stored: stored ? { ...sessionChatDraftFingerprint(stored.text), updatedAt: stored.updatedAt } : null,
         touched: composerTouchedRef.current,
@@ -728,6 +725,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     draftEmptyRef.current = draftEmpty;
     useEffect(() => {
       onDraftEmptyChangeRef.current?.(draftEmpty);
+      diagnosticLogRef.current?.('sessionChat.composerEmptyChanged', { empty: draftEmpty });
     }, [draftEmpty]);
     useEffect(
       () => () => {
@@ -827,10 +825,9 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       draftEditRevision.current += 1;
       expandComposer();
       composerTouchedRef.current = true;
-      silentlyRestoredDraftRef.current = null;
       draftRef.current = next;
       const caretOffset = nextCaret ?? next.length;
-      writeStoredSessionChatDraft(sessionKey, next);
+      persistComposerDraft(next);
       setDraft(next);
       setCaret(caretOffset);
       setSendError(null);
@@ -928,8 +925,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           return false;
         }
         composerTouchedRef.current = true;
-        silentlyRestoredDraftRef.current = null;
-        writeStoredSessionChatDraft(sessionKey, '');
+        persistComposerDraft('');
         draftRef.current = '';
         setDraft('');
         setCaret(0);
@@ -956,7 +952,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         if (current !== draftRef.current) {
           updateDraft(current);
         } else if (composerTouchedRef.current && pendingDraftTransfersRef.current === 0) {
-          writeStoredSessionChatDraft(sessionKey, current);
+          persistComposerDraft(current);
         }
         pushDraftRef.current();
       },
@@ -992,6 +988,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         return input.insertSavedPrompt(text);
       },
       insertTypedText: (text: string): boolean => {
+        expandComposer();
         const input = getInputApi();
         if (!input) {
           pendingInsertTextRef.current += text;
@@ -999,8 +996,49 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         }
         return input.insertText(text);
       },
+      navigateCaret: (event): boolean => {
+        const movement = sessionChatCaretMovement(event);
+        const input = getInputApi();
+        if (!movement || !input) return false;
+        expandComposer();
+        input.focus();
+        let handled = false;
+        handleKeyDown({
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+          isComposing: event.isComposing,
+          key: event.key,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          preventDefault: () => {
+            handled = true;
+          },
+        });
+        if (!handled) input.navigateCaret(movement);
+        return true;
+      },
       pasteClipboard: (data: DataTransfer): boolean => {
         return pasteClipboardData(data);
+      },
+      editText: (command): boolean => {
+        const input = getInputApi();
+        if (!input) return false;
+        expandComposer();
+        input.focus();
+        if (command === 'selectAll') input.selectAll();
+        else input.editText(command);
+        return true;
+      },
+      copyClipboard: (data, cut): boolean => {
+        const input = getInputApi();
+        if (!input) return false;
+        const selection = input.getSelection();
+        if (selection.start === selection.end) return false;
+        data.setData('text/plain', input.getValue().slice(selection.start, selection.end));
+        expandComposer();
+        input.focus();
+        if (cut) input.insertText('');
+        return true;
       },
     }));
 
@@ -1018,9 +1056,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
      */
     const vacateComposer = (options?: { retainStoredDraft?: boolean }): void => {
       composerTouchedRef.current = true;
-      silentlyRestoredDraftRef.current = null;
       if (options?.retainStoredDraft !== true) {
-        writeStoredSessionChatDraft(sessionKey, '');
+        persistComposerDraft('');
+      } else {
+        // Subsequent typing belongs to a new draft, even before this send resolves.
+        draftVersionRef.current = undefined;
       }
       draftRef.current = '';
       setDraft('');
@@ -1042,12 +1082,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         unmounted: draftSyncUnmountedRef.current,
       });
       composerTouchedRef.current = true;
-      silentlyRestoredDraftRef.current = null;
       const current = draftSyncUnmountedRef.current
         ? readStoredSessionChatDraft(sessionKey)
         : (getInputApi()?.getValue() ?? draftRef.current);
       const restored = current === '' || current === text ? text : `${text}\n${current}`;
-      writeStoredSessionChatDraft(sessionKey, restored);
+      persistComposerDraft(restored);
       if (draftSyncUnmountedRef.current) {
         return;
       }
@@ -1059,7 +1098,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       getInputApi()?.focus();
     };
 
-    const send = (text: string = draft): void => {
+    const send = (text: string = getInputApi()?.getValue() ?? draftRef.current): void => {
       if (text.trim() === '' || sendInFlightRef.current) {
         return;
       }
@@ -1082,8 +1121,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       });
       sendInFlightRef.current = true;
       pendingDraftTransfersRef.current += 1;
-      writeStoredSessionChatDraft(sessionKey, text);
-      const submittedDraft = readStoredSessionChatDraftEntry(sessionKey);
+      const submittedDraft = persistComposerDraft(text, true);
       // Sending closes the maximize overlay: the user's next look is at the
       // transcript, not an empty full-height editor.
       setMaximized(false);
@@ -1099,18 +1137,17 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
 
       const sendRequest = (async () => {
         /*
-        CDXC:Drafts 2026-09-05 DECISION:
-        User: preserve unsent messages, but never restore text already sent into the chat box.
-        Await the final draft save before delivery so gxserver retires the complete message, not an older debounced fragment.
-        Draft writes are ordered in use-session-chat.ts; a newer draft typed during delivery remains protected by the server's conditional clear.
+        CDXC:Drafts 2026-09-06 DECISION:
+        User: preserve unsent messages and retire sent drafts by identity and revision, including older copies containing deleted text.
+        Await the exact submitted revision before delivery; subsequent edits use a new identity and survive the receipt for this send.
         */
         if (draftSync?.canSync) {
           traceDraft('sendSaveBegin', { sent: sessionChatDraftFingerprint(text) });
-          await draftSync.push(text);
+          await draftSync.push(text, submittedDraft.version);
           traceDraft('sendSaveAcknowledged', { sent: sessionChatDraftFingerprint(text) });
         }
         traceDraft('deliveryBegin', { sent: sessionChatDraftFingerprint(text) });
-        await onSend(text);
+        await onSend(text, submittedDraft.version);
       })();
       void sendRequest
         .then(() => {
@@ -1174,9 +1211,12 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const loadComposerText = (text: string, restoredAt?: number): void => {
       if (restoredAt === undefined) {
         composerTouchedRef.current = true;
-        silentlyRestoredDraftRef.current = null;
       }
-      writeStoredSessionChatDraft(sessionKey, text, restoredAt);
+      if (restoredAt === undefined) {
+        persistComposerDraft(text);
+      } else {
+        writeStoredSessionChatDraft(sessionKey, text, restoredAt, draftVersionRef.current);
+      }
       draftRef.current = text;
       setDraft(text);
       setCaret(text.length);
@@ -1204,17 +1244,16 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       // as a send does, so the gesture reads as "this left the composer". The
       // stored copy is kept until the row exists, for the same reason a send
       // keeps it: this composer may be gone by the time the queueing fails.
-      writeStoredSessionChatDraft(sessionKey, stored);
-      const submittedDraft = readStoredSessionChatDraftEntry(sessionKey);
+      const submittedDraft = persistComposerDraft(stored, true);
       vacateComposer({ retainStoredDraft: true });
       pendingComposerOperationsRef.current += 1;
       pendingDraftTransfersRef.current += 1;
       void (async () => {
         try {
           if (draftSync?.canSync) {
-            await draftSync.push(stored);
+            await draftSync.push(stored, submittedDraft.version);
           }
-          await controller.queuePrompt(text);
+          await controller.queuePrompt(text, submittedDraft.version);
           clearStoredSessionChatDraftIfUnchanged(sessionKey, submittedDraft);
         } catch {
           restoreComposerText(text);
@@ -1323,13 +1362,13 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     // --- Cross-client draft sync -------------------------------------------------
     // Pushed on a short typing debounce plus blur / session switch / unmount /
     // backgrounding. The per-client localStorage cache above is untouched:
-    // gxserver is the durable copy (see SESSION_CHAT_DRAFT_SYNC_DEBOUNCE_MS),
+    // gxserver holds acknowledged revisions; localStorage is only the cache.
     // localStorage the instant one.
     /** True once anything mutated the composer — typing, load, send, clear. */
     const composerTouchedRef = useRef(false);
     const pendingDraftTransfersRef = useRef(0);
     const draftSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const lastDraftSyncAtRef = useRef(0);
+    const lastPushedVersionRef = useRef<string | null>(null);
     const draftSyncRetriesRef = useRef(0);
     /** Set by the unmount cleanup so a late failure cannot arm a timer into a dead composer. */
     const draftSyncUnmountedRef = useRef(false);
@@ -1339,23 +1378,33 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       if (!controller?.canSync || !composerTouchedRef.current) {
         return;
       }
-      lastDraftSyncAtRef.current = Date.now();
       const content = getInputApi()?.getValue() ?? draftRef.current;
       // The blank field is optimistic until delivery succeeds. A blur or
       // unmount must not erase the durable unsent message while it is in flight.
       if (content === '' && pendingDraftTransfersRef.current > 0) {
         return;
       }
-      if (content === lastPushedDraftRef.current) {
+      const stored = readStoredSessionChatDraftEntry(sessionKey);
+      if (
+        !draftVersionRef.current ||
+        stored?.text !== content ||
+        stored.version?.draftId !== draftVersionRef.current.draftId
+      ) {
+        persistComposerDraft(content);
+      }
+      const version = draftVersionRef.current;
+      const versionKey = version ? `${version.draftId}:${version.revision}` : null;
+      if (content === lastPushedDraftRef.current && versionKey === lastPushedVersionRef.current) {
         return;
       }
       lastPushedDraftRef.current = content;
+      lastPushedVersionRef.current = versionKey;
       const pushed = sessionChatDraftFingerprint(content);
-      traceDraft('syncBegin', { pushed });
+      traceDraft('syncBegin', { pushed, version });
       void controller
-        .push(content)
+        .push(content, version)
         .then(() => {
-          traceDraftRef.current('syncAcknowledged', { pushed });
+          traceDraftRef.current('syncAcknowledged', { pushed, version });
           draftSyncRetriesRef.current = 0;
         })
         .catch(() => {
@@ -1405,16 +1454,9 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         clearTimeout(draftSyncTimerRef.current);
         draftSyncTimerRef.current = null;
       }
-      // Steady typing keeps resetting the debounce, so the max interval is
-      // what bounds how much a kill mid-sentence can lose.
-      if (Date.now() - lastDraftSyncAtRef.current >= SESSION_CHAT_DRAFT_SYNC_MAX_INTERVAL_MS) {
-        pushDraftRef.current();
-        return;
-      }
-      draftSyncTimerRef.current = setTimeout(() => {
-        draftSyncTimerRef.current = null;
-        pushDraftRef.current();
-      }, SESSION_CHAT_DRAFT_SYNC_DEBOUNCE_MS);
+      // Save every rendered edit, including deletion. The transport serializes
+      // revisions; successful sending still awaits its final exact save.
+      pushDraftRef.current();
     }, [draft]);
     useEffect(() => {
       draftSyncUnmountedRef.current = false;
@@ -1428,48 +1470,6 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       };
     }, []);
 
-    /*
-    CDXC:Drafts 2026-09-04 WHY:
-    The transcript-side half of "a sent message never comes back as a draft".
-    Text this composer holds only because a cache restored it (mount-time
-    localStorage, or the crash-restore above when it ran before the transcript
-    loaded) is retired the moment the transcript proves that same prompt went
-    out: the field, the localStorage copy, and — through the ordinary sync —
-    gxserver's row. Text the user has touched is never measured; the live
-    value must still equal the restored text, so a single keystroke opts out.
-    */
-    useEffect(() => {
-      const restored = silentlyRestoredDraftRef.current;
-      if (restored === null) {
-        return;
-      }
-      const composerText = getInputApi()?.getValue() ?? draftRef.current;
-      if (composerText !== restored.text) {
-        silentlyRestoredDraftRef.current = null;
-        return;
-      }
-      traceDraft('transcriptRestoreCheck', {
-        restored: sessionChatDraftFingerprint(restored.text),
-        restoredAt: restored.updatedAt,
-        lastSentPromptAt,
-        lastSent: lastSentPromptText ? sessionChatDraftFingerprint(lastSentPromptText) : null,
-      });
-      if (!isSessionChatDraftStale(restored.updatedAt, lastSentPromptAt, restored.text, lastSentPromptText)) {
-        return;
-      }
-      silentlyRestoredDraftRef.current = null;
-      vacateComposer();
-      // getInputApi is resolved lazily and draftRef is a ref; the draft this
-      // reads is deliberately the live one, not a render-scoped copy.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [draft, lastSentPromptAt, lastSentPromptText]);
-
-    /*
-  "Newer draft from another device": offered, never applied. The three
-  conditions live in shouldOfferSessionChatDraft; the important half is here —
-  a draft that is NOT offered still marks its stamp handled, so a later
-  keystroke cannot make an old draft look new again and pop the bar.
-  */
     const syncedDraft = draftSync?.synced ?? null;
     const draftClientId = draftSync?.clientId ?? '';
     useEffect(() => {
@@ -1477,40 +1477,48 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         return;
       }
       const composerText = getInputApi()?.getValue() ?? draftRef.current;
-      /*
-      CDXC:Drafts 2026-08-28:
-      This client's own synced draft is normally a mute echo — but when it is
-      fresher than the stored copy, the stored copy LOST data (the app died
-      before Chromium committed the localStorage batch) and gxserver holds the
-      only surviving text. Load it back silently, exactly as a localStorage
-      restore would have; the predicate refuses the moment anything has touched
-      the composer, so it can never replace text the user is working on.
-      */
-      if (
-        shouldRestoreOwnSessionChatDraft({
-          clientId: draftClientId,
-          composerText,
-          composerTouched: composerTouchedRef.current,
-          incoming: syncedDraft,
-          lastSentPromptAt,
-          lastSentPromptText,
-          stored: readStoredSessionChatDraftEntry(sessionKey),
-        })
-      ) {
+      if (pendingDraftTransfersRef.current > 0) return;
+      const stored = readStoredSessionChatDraftEntry(sessionKey);
+      const retired =
+        stored?.version &&
+        syncedDraft.consumedDrafts?.some(
+          (receipt) => receipt.draftId === stored.version?.draftId && receipt.revision >= stored.version.revision
+        );
+      const staleBase =
+        stored?.version &&
+        syncedDraft.version?.draftId === stored.version.draftId &&
+        (syncedDraft.version.revision > stored.version.revision ||
+          (syncedDraft.version.revision === stored.version.revision && syncedDraft.content !== composerText));
+      if ((retired || staleBase) && composerTouchedRef.current) {
+        // An edit made before recovery finished must survive under a new
+        // identity when its old base has already advanced or been consumed.
+        draftVersionRef.current = undefined;
+        persistComposerDraft(composerText);
+        pushDraftRef.current();
+        return;
+      }
+      const recovered =
+        !composerTouchedRef.current && (retired || syncedDraft.originClientId === draftClientId)
+          ? recoverSessionChatDraft(stored, syncedDraft)
+          : null;
+      if (recovered) {
+        traceDraft('versionRecovery', { localVersion: stored?.version, incomingVersion: syncedDraft.version, retired });
         lastHandledDraftAtRef.current = syncedDraft.updatedAt;
-        // The restore IS the synced content; pushing it back would be an echo.
-        lastPushedDraftRef.current = syncedDraft.content;
-        const restoredAt = Date.parse(syncedDraft.updatedAt);
-        silentlyRestoredDraftRef.current = {
-          text: syncedDraft.content,
-          updatedAt: Number.isNaN(restoredAt) ? undefined : restoredAt,
-        };
-        traceDraft('serverRestoreApplied', {
-          incoming: sessionChatDraftFingerprint(syncedDraft.content),
-          incomingAt: syncedDraft.updatedAt,
-          originClientId: syncedDraft.originClientId,
-        });
-        loadComposerText(syncedDraft.content, restoredAt);
+        lastPushedDraftRef.current = recovered.text;
+        draftVersionRef.current = recovered.submitted ? undefined : recovered.version;
+        // Keep the receipt identity in the cache, but allocate a new identity
+        // on the next real edit of a retired draft.
+        writeStoredSessionChatDraft(
+          sessionKey,
+          recovered.text,
+          recovered.updatedAt,
+          recovered.version,
+          recovered.submitted
+        );
+        draftRef.current = recovered.text;
+        setDraft(recovered.text);
+        setCaret(recovered.text.length);
+        getInputApi()?.applyValue(recovered.text, recovered.text.length);
         return;
       }
       if (
@@ -1534,7 +1542,6 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           incoming: sessionChatDraftFingerprint(syncedDraft.content),
           incomingAt: syncedDraft.updatedAt,
           originClientId: syncedDraft.originClientId,
-          lastSentPromptAt,
         });
         lastHandledDraftAtRef.current = syncedDraft.updatedAt;
       }
@@ -1729,7 +1736,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       const api = getInputApi();
       const current = api?.getValue() ?? draft;
       const escapedPath = image.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const pattern = new RegExp(`\\s?\\[Image #\\d+\\]\\(${escapedPath}\\) ?`);
+      const pattern = new RegExp(`\\s?\\[Image #\\d+·?\\]\\(${escapedPath}\\) ?`);
       const matchIndex = current.search(pattern);
       if (matchIndex < 0) {
         // The reference text is already gone; just drop the thumbnail.
@@ -1969,7 +1976,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     };
 
     const completeFileMention = (path: string): void => {
-      completeMention(`${sessionChatFileMention(path)} `);
+      completeMention(`${sessionChatFileMention(path, nextFileReferenceIndex(draft))} `);
     };
 
     const handleSkillKeyDown = (event: SessionChatComposerKeyEvent): boolean => {
@@ -2085,14 +2092,33 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         send();
         return;
       }
+      /*
+    CDXC:SessionChat 2026-09-06 DECISION:
+    User: Option/Alt+ArrowUp in an empty chat input is the keyboard form of clicking Edit on the queued prompt directly above the box.
+    A box holding only spaces and newlines counts as empty, because that is what a
+    stray Enter leaves behind and the user still reads the box as empty.
+    It falls through to draft-history recall when there is no editable row, so an
+    unqueued session keeps the plain ArrowUp behaviour under the modifier.
+    */
+      if (event.key === 'ArrowUp' && event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+        const currentText = getInputApi()?.getValue() ?? draftRef.current;
+        const editableRow =
+          currentText.trim() === '' && queue && queueCapabilities?.canEdit
+            ? lastEditableSessionChatQueueRow(queue.prompts)
+            : null;
+        if (editableRow) {
+          event.preventDefault();
+          editQueuedPrompt(editableRow);
+          return;
+        }
+      }
       if (event.key === 'ArrowUp' && (draft === '' || history.index !== null)) {
         const recalled = recallPreviousSessionChatDraft(history);
         if (recalled) {
           event.preventDefault();
           setHistory(recalled.history);
           composerTouchedRef.current = true;
-          silentlyRestoredDraftRef.current = null;
-          writeStoredSessionChatDraft(sessionKey, recalled.draft);
+          persistComposerDraft(recalled.draft);
           draftRef.current = recalled.draft;
           setDraft(recalled.draft);
           setCaret(recalled.draft.length);
@@ -2106,8 +2132,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           event.preventDefault();
           setHistory(recalled.history);
           composerTouchedRef.current = true;
-          silentlyRestoredDraftRef.current = null;
-          writeStoredSessionChatDraft(sessionKey, recalled.draft);
+          persistComposerDraft(recalled.draft);
           draftRef.current = recalled.draft;
           setDraft(recalled.draft);
           setCaret(recalled.draft.length);
@@ -2381,9 +2406,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           ) : null}
           <div
             className={cn(
-              'ghostex-chat-composer min-w-0 rounded-3xl border border-input bg-card px-4 py-2.5 transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20'
+              'ghostex-chat-composer min-w-0 rounded-3xl border border-input bg-card px-4 py-2.5 transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20',
+              paneFocused && 'border-ring ring-[3px] ring-ring/20'
             )}
             data-scroll-collapsed={collapsed ? 'true' : undefined}
+            data-pane-focused={paneFocused ? 'true' : undefined}
             ref={composerContainerRef}
             onPointerDownCapture={expandComposer}
             onKeyDownCapture={expandComposer}
@@ -2594,6 +2621,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                   summaryMode={summaryMode}
                   verboseMode={verboseMode}
                   {...(hostActions ? { hostActions } : {})}
+                  {...(renderAccountMenu ? { renderAccountMenu } : {})}
                   {...(onDelayedActions ? { onDelayedActions } : {})}
                   {...(onReadTerminalTail ? { onReadTerminalTail } : {})}
                   {...(onSessionNote ? { onSessionNote } : {})}

@@ -1,3 +1,4 @@
+import type { SessionChatDraftVersion } from '@/packages/shared/session-chat-queue';
 import { useAccounts } from '@/packages/core-ui/accounts/use-accounts';
 import { SessionAccountsPanel } from '@/packages/core-ui/accounts/session-panel';
 // SessionChatView — root layout (upstream chat spec §11.1 port): message list
@@ -23,6 +24,9 @@ import { ghostexHotkeyTextFromKeyboardEvent } from '../../shared/ghostex-hotkeys
 import { AppTooltip, TooltipProvider } from '../app-tooltip';
 import { displayAgentName, NewSessionWelcome } from './session-chat-new-session-welcome';
 import { SessionChatComposer, type SessionChatComposerHandle } from './session-chat-composer';
+import { sessionChatKeyboardPopupOpen } from './session-chat-caret-navigation';
+import { sessionChatEditingShortcut, sessionChatHasTranscriptSelection } from './session-chat-edit-shortcuts';
+import { useSessionChatPaneFocus } from './use-session-chat-pane-focus';
 import { SessionChatWorkingStrip } from './session-chat-working-strip';
 import { sessionChatDataTransferHasFiles } from './session-chat-drop-attachments';
 import { sessionChatEmptyStateCopy } from './session-chat-empty-state';
@@ -147,6 +151,7 @@ export interface SessionChatComposerHandoff {
 }
 
 export interface SessionChatHostComposerActions {
+  setPaneFocused: (focused: boolean) => void;
   canRelease: () => boolean;
   /** Clears only when the composer still holds this exact acknowledged send. */
   clearDraft: (expectedContent: string) => boolean;
@@ -157,6 +162,8 @@ export interface SessionChatHostComposerActions {
 }
 
 export interface SessionChatHostComposerBridge {
+  /** Native hosts report pane ownership independently of DOM/editor focus. */
+  providesPaneFocus?: boolean;
   register: (actions: SessionChatHostComposerActions) => () => void;
   /**
    * Tells the host whether the composer currently holds anything unsent (draft
@@ -532,15 +539,20 @@ export function SessionChatView({
   otherwise the transcript family gxserver resolved.
   */
   const readStateAgent = draftAgentRow?.baseAgentId ?? chat.agent ?? null;
-  const accountsEnabled = readStateAgent === 'claude' || readStateAgent === 'codex';
+  const accountProvider = (readStateAgent ?? agentLabel)?.toLowerCase();
+  const accountsEnabled = accountProvider === 'claude' || accountProvider === 'codex';
   const accountState = useAccounts(transport.accounts, true, accountsEnabled);
-  const [accountsOpen, setAccountsOpen] = useState(false);
-  const activeAccount = accountState.data?.accounts.find(a => a.id === accountState.data?.session?.accountId);
+  const activeAccount = accountState.data?.accounts.find((a) => a.id === accountState.data?.session?.accountId);
   const chatRefresh = chat.refresh;
   useEffect(() => {
     setReadAgentEntry({ agent: readStateAgent, transport });
   }, [readStateAgent, transport]);
   const composerRef = useRef<SessionChatComposerHandle | null>(null);
+  const chatRootRef = useRef<HTMLDivElement | null>(null);
+  const [paneFocused, setPaneFocused] = useSessionChatPaneFocus(
+    chatRootRef,
+    hostComposerBridge?.providesPaneFocus === true
+  );
   const [composerCollapsed, setComposerCollapsed] = useState(false);
   /*
   CDXC:SessionChat 2026-09-04: a prompt Claude handed back to its composer
@@ -808,6 +820,16 @@ export function SessionChatView({
       window.removeEventListener('focus', handleFocus);
     };
   }, [countSessionStashedPrompts, refreshStashedPromptCount]);
+  const saveTranscriptPrompt = useCallback(
+    async (prompt: string): Promise<void> => {
+      const stashPrompt = hostComposerBridge?.stashPrompt;
+      if (!stashPrompt) return;
+      await stashPrompt(prompt);
+      setStashedPromptCount((count) => count + 1);
+      refreshStashedPromptCount();
+    },
+    [hostComposerBridge, refreshStashedPromptCount]
+  );
   const stashComposerDraft = useCallback((): void => {
     const composer = composerRef.current;
     const draft = composer?.getDraft() ?? '';
@@ -870,6 +892,7 @@ export function SessionChatView({
       return;
     }
     return hostComposerBridge.register({
+      setPaneFocused,
       canRelease: () => !noteOpenRef.current && composerRef.current?.canRelease() === true,
       clearDraft: (expectedContent) => composerRef.current?.clearDraft(expectedContent) ?? false,
       focus: () => composerRef.current?.focus(),
@@ -877,7 +900,7 @@ export function SessionChatView({
       insertPrompt: (content) => composerRef.current?.insertSavedPrompt(content) ?? false,
       requestStash: stashComposerDraft,
     });
-  }, [handoffComposerDraft, hostComposerBridge, initialTranscriptLoading, stashComposerDraft]);
+  }, [handoffComposerDraft, hostComposerBridge, initialTranscriptLoading, setPaneFocused, stashComposerDraft]);
   const reportDraftState = hostComposerBridge?.reportDraftState;
   const reportComposerDraftState = useCallback(
     (empty: boolean) => {
@@ -1034,22 +1057,36 @@ export function SessionChatView({
     diagnosticLogRef.current?.('sessionChat.questionActiveChanged', { active: questionActive });
   }, [questionActive]);
   const viewKind = chat.view.kind;
+  const previousViewRef = useRef<{ sessionKey: string | undefined; kind: string; atMs: number } | null>(null);
   // The inputs selectSessionChatViewState decided from, snapshotted every
   // render so the kind-change breadcrumb reports the values that produced it.
   const viewKindInputsRef = useRef<Record<string, unknown>>({});
   viewKindInputsRef.current = {
     hasAgentSessionId: chat.agentSessionId !== null,
     hasError: chat.error !== null,
+    isDraft: chat.availableAgents !== null,
     messageCount: chat.messages.length,
     status: chat.status,
     working: chat.working,
   };
   useEffect(() => {
-    diagnosticLogRef.current?.('sessionChat.viewKindChanged', {
+    const previous = previousViewRef.current;
+    const atMs = Date.now();
+    const regressed =
+      previous !== null &&
+      previous.sessionKey === sessionKey &&
+      ['ready', 'empty', 'starting'].includes(previous.kind) &&
+      viewKind === 'loading';
+    const details = {
       kind: viewKind,
+      previousKind: previous?.kind ?? null,
+      previousStateDurationMs: previous ? atMs - previous.atMs : null,
       ...viewKindInputsRef.current,
-    });
-  }, [viewKind]);
+    };
+    diagnosticLogRef.current?.('sessionChat.viewKindChanged', details);
+    if (regressed) diagnosticLogRef.current?.('sessionChat.loadingRegressionWarning', details);
+    previousViewRef.current = { sessionKey, kind: viewKind, atMs };
+  }, [sessionKey, viewKind]);
   useEffect(() => {
     diagnosticLogRef.current?.('sessionChat.loadingStageChanged', { stage: loadingStage });
   }, [loadingStage]);
@@ -1062,7 +1099,6 @@ export function SessionChatView({
   // vertical space.
   const [noticeCardVisible, setNoticeCardVisible] = useState(false);
   const [interactiveCardVisible, setInteractiveCardVisible] = useState(false);
-  const chatRootRef = useRef<HTMLDivElement | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const [transcriptSelection, setTranscriptSelection] = useState('');
   const [transcriptFilePath, setTranscriptFilePath] = useState<string | null>(null);
@@ -1100,9 +1136,11 @@ export function SessionChatView({
   const answerNoticeChoice = useCallback(
     async (choiceIndex: number): Promise<void> => {
       try {
-        await chatAnswerPrompt(chat.terminalNotice?.dialog
-          ? { choiceIndex, kind: 'terminalDialog', dialogId: chat.terminalNotice.dialog.id }
-          : { choiceIndex, kind: 'terminalChoice' });
+        await chatAnswerPrompt(
+          chat.terminalNotice?.dialog
+            ? { choiceIndex, kind: 'terminalDialog', dialogId: chat.terminalNotice.dialog.id }
+            : { choiceIndex, kind: 'terminalChoice' }
+        );
         if (chat.terminalNotice?.kind === 'permissionPrompt' && chat.prompt?.kind === 'approval') {
           setAnsweredApprovalKey(sessionChatCardDismissKey(chat.prompt));
         }
@@ -1123,7 +1161,9 @@ export function SessionChatView({
     },
     [chat.prompt, chat.terminalNotice, chatAnswerPrompt, noticeKey]
   );
-  const terminalChoicePending = ((chat.terminalNotice?.choices?.length ?? 0) > 0 || !!chat.terminalNotice?.dialog) && noticeKey !== retiredNoticeKey;
+  const terminalChoicePending =
+    ((chat.terminalNotice?.choices?.length ?? 0) > 0 || !!chat.terminalNotice?.dialog) &&
+    noticeKey !== retiredNoticeKey;
   /*
   CDXC:AgentScreenDetection 2026-09-04 WHY:
   Claude's tool permission dialog can reach chat twice: as the hook-derived
@@ -1167,25 +1207,6 @@ export function SessionChatView({
     [claudeStatus, contextDetailsNow, contextDetailsPreferences, contextDetailsSession]
   );
   const composerEnabled = canSend && !terminalChoicePending && !sessionOptionSwitching;
-  // The newest user prompt the transcript knows about, for the composer's
-  // stale-draft check. Pending optimistic echoes count: they are prompts that
-  // left this composer.
-  const lastSentPrompt = useMemo(() => {
-    let latest: { timestamp: number; text: string } | null = null;
-    for (const message of chat.messages) {
-      if (
-        message.role === 'user' &&
-        message.timestamp !== null &&
-        (latest === null || message.timestamp > latest.timestamp)
-      ) {
-        latest = {
-          timestamp: message.timestamp,
-          text: message.blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n'),
-        };
-      }
-    }
-    return latest;
-  }, [chat.messages]);
   /*
   CDXC:SessionChat 2026-09-03:
   `composerEnabled` gates only the actions that reach the agent (send, queue,
@@ -1208,9 +1229,8 @@ export function SessionChatView({
   hold before a prompt row offers it:
     1. the host can reach `/api/rewindSessionChat` (bound like every other
        optional transport call here);
-    2. the session's chat-supported family is Claude, because the rewind is
-       driven through the agent's own terminal dialog and Claude's is the only
-       one Ghostex knows how to drive today;
+    2. the session's chat-supported family is Claude or Codex, whose terminal
+       rewind pickers Ghostex knows how to drive;
     3. the composer could send right now, because the daemon has to type into
        the same live pane a message would go to.
   A rewind is never offered when any of them is missing, rather than offered
@@ -1222,7 +1242,9 @@ export function SessionChatView({
     const rewind = transport.rewindSessionChat?.bind(transport);
     return rewind ? (params: { messageId: string }) => rewind(params) : undefined;
   }, [transport]);
-  const rewindToMessage = readStateAgent === 'claude' ? rewindSessionChat : undefined;
+  const rewindToMessage = readStateAgent === 'claude' || readStateAgent === 'codex' ? rewindSessionChat : undefined;
+  const canRewind = composerEnabled && (readStateAgent !== 'codex' || !chat.sessionWorking);
+  const rewindAgent: 'claude' | 'codex' = readStateAgent === 'codex' ? 'codex' : 'claude';
   // CDXC:AgentScreenDetection 2026-09-03 WHY: same two gates as the
   // rewind — a host route to `/api/selectSessionChatModel`, and a Codex
   // session, the only agent whose picker the daemon knows how to drive.
@@ -1236,10 +1258,13 @@ export function SessionChatView({
   }, [readStateAgent, transport]);
   const queueModel = useMemo(() => {
     const select = transport.selectSessionChatModel?.bind(transport);
-    return select && chat.pendingModelSelection !== undefined && (readStateAgent === 'codex' || readStateAgent === 'claude')
+    return select &&
+      chat.pendingModelSelection !== undefined &&
+      (readStateAgent === 'codex' || readStateAgent === 'claude')
       ? async (params: { model: string; effort: string }) => {
           const result = await select({ ...params, defer: true });
-          if (!result.queued || !result.pendingModelSelection) throw new Error('The server has not accepted this selection into its queue.');
+          if (!result.queued || !result.pendingModelSelection)
+            throw new Error('The server has not accepted this selection into its queue.');
           return result.pendingModelSelection;
         }
       : undefined;
@@ -1273,9 +1298,9 @@ export function SessionChatView({
   const reconcileTypedCommand = sessionOptions.reconcileTypedCommand;
   const isDraft = draftAgents !== null;
   const send = useCallback(
-    async (text: string): Promise<void> => {
+    async (text: string, draftVersion?: SessionChatDraftVersion): Promise<void> => {
       reconcileTypedCommand(text);
-      await chatSend(text);
+      await chatSend(text, undefined, draftVersion);
       /*
       CDXC:Drafts 2026-08-28:
       A delivered prompt PROMOTES a draft server-side (option commands like
@@ -1333,16 +1358,41 @@ export function SessionChatView({
     return changed ? { ...hostActions, actions: kept } : hostActions;
   }, [chat.switchableAgents, hostActions, isDraft]);
 
-  // Typing anywhere in the pane lands in the composer (§11.1): a single
-  // printable character without Ctrl/Meta is redirected; unmodified
-  // Backspace/Delete focuses the composer without inserting anything.
+  // Background typing and caret navigation resume the composer at its saved
+  // selection. Interactive controls and open pickers retain their keys.
   const handleKeyDownCapture = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-      if (event.defaultPrevented || questionActive) {
+      if (event.defaultPrevented || questionActive || event.nativeEvent.isComposing) {
         return;
       }
       const target = event.target as HTMLElement | null;
       if (target?.closest?.(INTERACTIVE_TARGET_SELECTOR)) {
+        return;
+      }
+      if (sessionChatKeyboardPopupOpen(event.currentTarget)) return;
+      const editingShortcut = sessionChatEditingShortcut(event.nativeEvent);
+      if (editingShortcut === 'copy' || editingShortcut === 'cut' || editingShortcut === 'paste') {
+        if (editingShortcut === 'paste' || !sessionChatHasTranscriptSelection(event.currentTarget)) {
+          composerRef.current?.focus();
+        }
+        // Keep the trusted browser clipboard event, including image payloads.
+        return;
+      }
+      if (editingShortcut && composerRef.current?.editText(editingShortcut)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (event.key === 'Enter' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        if (composerRef.current?.insertTypedText('\n')) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+      if (event.key.startsWith('Arrow') && composerRef.current?.navigateCaret(event.nativeEvent)) {
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
       if ((event.key === 'Backspace' || event.key === 'Delete') && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -1371,7 +1421,25 @@ export function SessionChatView({
       if (target?.closest?.(INTERACTIVE_TARGET_SELECTOR)) {
         return;
       }
+      if (sessionChatKeyboardPopupOpen(event.currentTarget)) return;
       if (composerRef.current?.pasteClipboard(event.clipboardData)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    [questionActive]
+  );
+
+  const handleCopyCutCapture = useCallback(
+    (event: ClipboardEvent<HTMLDivElement>): void => {
+      if (event.defaultPrevented || questionActive) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.(INTERACTIVE_TARGET_SELECTOR)) return;
+      if (
+        sessionChatKeyboardPopupOpen(event.currentTarget) ||
+        sessionChatHasTranscriptSelection(event.currentTarget)
+      ) return;
+      if (composerRef.current?.copyClipboard(event.clipboardData, event.type === 'cut')) {
         event.preventDefault();
         event.stopPropagation();
       }
@@ -1444,13 +1512,13 @@ export function SessionChatView({
   }, [transcriptSelection]);
 
   /*
-  CDXC:SessionChat 2026-09-04 DECISION:
-  User: Add to Chat puts the transcript selection in the composer as a quote, leaves a new line beneath it, and focuses the caret on that line so typing can continue immediately.
+  CDXC:SessionChat 2026-09-07 DECISION:
+  User: Add to Chat puts the transcript selection in the composer as a quote, followed by exactly one newline with the caret there; remove the extra return previously added beneath it.
   The desktop menu restores focus to its trigger when it finishes closing, so that path reclaims composer focus afterward.
   */
   const addTranscriptTextToChat = useCallback((text: string): boolean => {
     const composer = composerRef.current;
-    return text !== '' && composer !== null && composer.appendText(`${asMarkdownQuote(text)}\n\n`);
+    return text !== '' && composer !== null && composer.appendText(`${asMarkdownQuote(text)}\n`);
   }, []);
 
   const addTranscriptSelectionToChat = useCallback((): void => {
@@ -1524,6 +1592,8 @@ export function SessionChatView({
           : { onContextMenu: (event: MouseEvent<HTMLDivElement>) => event.preventDefault() })}
         onKeyDownCapture={handleKeyDownCapture}
         onPasteCapture={handlePasteCapture}
+        onCopyCapture={handleCopyCutCapture}
+        onCutCapture={handleCopyCutCapture}
         onDragOverCapture={handleDragOverCapture}
         onDropCapture={handleDropCapture}
         ref={chatRootRef}
@@ -1569,9 +1639,10 @@ export function SessionChatView({
                           loadingEarlier={chat.loadingEarlier}
                           messages={chat.messages}
                           onLoadEarlier={chat.loadEarlier}
+                          {...(hostComposerBridge?.stashPrompt ? { onSavePrompt: saveTranscriptPrompt } : {})}
                           {...(listMessageMarkdownPaths ? { listMessageMarkdownPaths } : {})}
                           {...(rewindToMessage
-                            ? { canRewind: composerEnabled, onRewound: holdRewoundPromptInComposer, rewindToMessage }
+                            ? { canRewind, onRewound: holdRewoundPromptInComposer, rewindToMessage, rewindAgent }
                             : {})}
                           {...(saveMessageMarkdown ? { saveMessageMarkdown } : {})}
                           sessionTitle={sessionTitle}
@@ -1606,9 +1677,10 @@ export function SessionChatView({
                             loadingEarlier={chat.loadingEarlier}
                             messages={chat.messages}
                             onLoadEarlier={chat.loadEarlier}
+                            {...(hostComposerBridge?.stashPrompt ? { onSavePrompt: saveTranscriptPrompt } : {})}
                             {...(listMessageMarkdownPaths ? { listMessageMarkdownPaths } : {})}
                             {...(rewindToMessage
-                              ? { canRewind: composerEnabled, onRewound: holdRewoundPromptInComposer, rewindToMessage }
+                              ? { canRewind, onRewound: holdRewoundPromptInComposer, rewindToMessage, rewindAgent }
                               : {})}
                             {...(saveMessageMarkdown ? { saveMessageMarkdown } : {})}
                             sessionTitle={sessionTitle}
@@ -1753,8 +1825,8 @@ export function SessionChatView({
                         theme={theme}
                       />
                     ) : null}
-                    {accountsOpen && <SessionAccountsPanel {...accountState} contextUsage={detectedOptions?.contextUsage} close={() => setAccountsOpen(false)} />}
                     <SessionChatComposer
+                      paneFocused={paneFocused}
                       agentFleet={chat.agentFleet}
                       agentTasks={chat.agentTasks}
                       {...(diagnosticLog ? { diagnosticLog } : {})}
@@ -1762,8 +1834,6 @@ export function SessionChatView({
                       draftSync={chat.draft}
                       isWorking={chat.working}
                       key={sessionKey}
-                      lastSentPromptAt={lastSentPrompt?.timestamp ?? null}
-                      lastSentPromptText={lastSentPrompt?.text ?? null}
                       monacoVsBaseUrl={monacoVsBaseUrl}
                       nativeContextMenu={nativeSelectionMenus}
                       queue={chat.queue}
@@ -1782,6 +1852,17 @@ export function SessionChatView({
                       onSend={send}
                       sendOnEnter={sendOnEnter}
                       {...(draftAwareHostActions ? { hostActions: draftAwareHostActions } : {})}
+                      {...(accountsEnabled && transport.accounts
+                        ? {
+                            renderAccountMenu: (close: () => void) => (
+                              <SessionAccountsPanel
+                                {...accountState}
+                                contextUsage={detectedOptions?.contextUsage}
+                                close={close}
+                              />
+                            ),
+                          }
+                        : {})}
                       {...(onDelayedActions ? { onDelayedActions } : {})}
                       {...(sessionNoteAvailable ? { onSessionNote: toggleSessionNote } : {})}
                       sessionNoteActive={noteOpen}
@@ -1799,37 +1880,36 @@ export function SessionChatView({
                       {...(reportDraftState ? { onDraftEmptyChange: reportComposerDraftState } : {})}
                       optionPills={
                         <>
-                        {accountsEnabled && transport.accounts && <button type='button' className='gx-account-toolbar-button' aria-expanded={accountsOpen} onClick={() => setAccountsOpen(!accountsOpen)}>{activeAccount?.name ?? 'Accounts'}{accountState.data?.session?.recovery?.status === 'waiting' ? ' · Waiting' : ''} ⌄</button>}
-                        <SessionChatSessionOptionPills
-                          canSend={canSend}
-                          canSendKey={chat.sendKey !== undefined}
-                          controller={sessionOptions}
-                          accountColor={activeAccount?.color}
-                          detectedOptions={detectedOptions}
-                          {...(draftAgents ? { draftAgents } : {})}
-                          {...(chat.sessionAgentId !== null ? { draftAgentId: chat.sessionAgentId } : {})}
-                          {...(switchDraftAgent ? { onSwitchDraftAgent: switchDraftAgent } : {})}
-                          isWorking={chat.working}
-                          screenProbed={chat.screenProbed}
-                          onQueueModel={queueModel}
-                          pendingModelSelection={chat.pendingModelSelection}
-                          onDispatchCommand={send}
-                          onDispatchKey={async (key, marker) => {
-                            await chat.sendKey?.(key, marker);
-                          }}
-                          {...(pickModel ? { onPickModel: pickModel } : {})}
-                          contextDetailsSession={contextDetailsSession}
-                          onEditContextDetails={() => setContextDetailsOpen(true)}
-                          onSwitchingChange={setSessionOptionSwitching}
-                          {...(onSwitchToTerminalForAgentPicker || hostActions?.onSwitchToTerminal
-                            ? {
-                                onSwitchToTerminal:
-                                  onSwitchToTerminalForAgentPicker ??
-                                  hostActions?.onSwitchToTerminalForAgentPicker ??
-                                  hostActions?.onSwitchToTerminal,
-                              }
-                            : {})}
-                        />
+                          <SessionChatSessionOptionPills
+                            canSend={canSend}
+                            canSendKey={chat.sendKey !== undefined}
+                            controller={sessionOptions}
+                            accountColor={activeAccount?.color}
+                            detectedOptions={detectedOptions}
+                            {...(draftAgents ? { draftAgents } : {})}
+                            {...(chat.sessionAgentId !== null ? { draftAgentId: chat.sessionAgentId } : {})}
+                            {...(switchDraftAgent ? { onSwitchDraftAgent: switchDraftAgent } : {})}
+                            isWorking={chat.working}
+                            screenProbed={chat.screenProbed}
+                            onQueueModel={queueModel}
+                            pendingModelSelection={chat.pendingModelSelection}
+                            onDispatchCommand={send}
+                            onDispatchKey={async (key, marker) => {
+                              await chat.sendKey?.(key, marker);
+                            }}
+                            {...(pickModel ? { onPickModel: pickModel } : {})}
+                            contextDetailsSession={contextDetailsSession}
+                            onEditContextDetails={() => setContextDetailsOpen(true)}
+                            onSwitchingChange={setSessionOptionSwitching}
+                            {...(onSwitchToTerminalForAgentPicker || hostActions?.onSwitchToTerminal
+                              ? {
+                                  onSwitchToTerminal:
+                                    onSwitchToTerminalForAgentPicker ??
+                                    hostActions?.onSwitchToTerminalForAgentPicker ??
+                                    hostActions?.onSwitchToTerminal,
+                                }
+                              : {})}
+                          />
                         </>
                       }
                       placeholder={
@@ -1839,8 +1919,8 @@ export function SessionChatView({
                             ? chat.terminalNotice?.dialog?.rows.length === 0
                               ? 'Use the controls above to continue.'
                               : noticeCardVisible
-                              ? 'Answer the question above to continue.'
-                              : 'Applying your answer…'
+                                ? 'Answer the question above to continue.'
+                                : 'Applying your answer…'
                             : sessionOptionSwitching
                               ? 'Switching Claude mode…'
                               : undefined
