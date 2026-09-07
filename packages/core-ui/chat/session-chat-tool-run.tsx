@@ -19,6 +19,7 @@ import {
   formatSessionChatToolInput,
   summarizeSessionChatCommandInput,
   summarizeSessionChatToolInput,
+  truncateSessionChatToolPreview,
 } from './session-chat-tool-summary';
 
 export const SESSION_CHAT_MAX_TOOL_RESULT_CHARS = 4000;
@@ -117,7 +118,7 @@ function ToolLine({
   const commandTool = isCommandTool(name);
   const inputPreview = call ? summarizeSessionChatToolInput(call.input) : '';
   const commandPreview = call ? summarizeSessionChatCommandInput(call.input) : '';
-  const resultPreview = result?.output.split('\n')[0]?.trim().slice(0, 120) ?? '';
+  const resultPreview = truncateSessionChatToolPreview(result?.output.split('\n')[0]?.trim() ?? '', 120);
   const preview = commandTool ? commandPreview : inputPreview || resultPreview;
   const callDiff = call ? diffFromSessionChatToolCall(call.name, call.input) : null;
   const resultDiff = result ? diffFromSessionChatText(result.output) : null;

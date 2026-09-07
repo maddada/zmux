@@ -9,6 +9,11 @@ export const SESSION_CHAT_MAX_PREVIEW_DEPTH = 2;
 export const SESSION_CHAT_MAX_TOOL_RUN_SUMMARY_PARTS = 3;
 export const SESSION_CHAT_MAX_COMMAND_PREVIEW_LINES = 3;
 
+/** CDXC:SessionChat 2026-09-06 DECISION: User: show an ellipsis at the end of tool-call text when it is truncated. */
+export function truncateSessionChatToolPreview(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
+}
+
 function boundedPreviewValue(value: unknown, depth: number, seen: WeakSet<object>): unknown {
   if (typeof value === 'string') {
     return value.length > SESSION_CHAT_MAX_PREVIEW_STRING_INPUT
@@ -65,9 +70,7 @@ function toRawPreview(input: unknown): string {
 
 export function summarizeSessionChatToolInput(input: unknown): string {
   const collapsed = toRawPreview(input).replace(/\s+/g, ' ').trim();
-  return collapsed.length <= SESSION_CHAT_MAX_PREVIEW_LENGTH
-    ? collapsed
-    : `${collapsed.slice(0, SESSION_CHAT_MAX_PREVIEW_LENGTH - 1)}…`;
+  return truncateSessionChatToolPreview(collapsed, SESSION_CHAT_MAX_PREVIEW_LENGTH);
 }
 
 function sessionChatCommandText(input: unknown): string {
@@ -105,12 +108,12 @@ function sessionChatCommandText(input: unknown): string {
 
 /** First three non-empty command lines, flattened into the compact tool row. */
 export function summarizeSessionChatCommandInput(input: unknown): string {
-  return sessionChatCommandText(input)
+  const lines = sessionChatCommandText(input)
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, SESSION_CHAT_MAX_COMMAND_PREVIEW_LINES)
-    .join(' ');
+    .filter(Boolean);
+  const preview = lines.slice(0, SESSION_CHAT_MAX_COMMAND_PREVIEW_LINES).join(' ');
+  return lines.length > SESSION_CHAT_MAX_COMMAND_PREVIEW_LINES ? `${preview}…` : preview;
 }
 
 /** Full detail for the expanded view. */
@@ -158,10 +161,10 @@ export function briefSessionChatToolArg(input: unknown): string {
     }
     const command = record.command ?? record.cmd ?? record.query ?? record.pattern;
     if (typeof command === 'string') {
-      return summarizeSessionChatToolInput(command).slice(0, 28);
+      return truncateSessionChatToolPreview(summarizeSessionChatToolInput(command), 28);
     }
   }
-  return summarizeSessionChatToolInput(input).slice(0, 28);
+  return truncateSessionChatToolPreview(summarizeSessionChatToolInput(input), 28);
 }
 
 export function summarizeSessionChatToolRun(blocks: readonly SessionChatBlock[]): string {
