@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/packages/components/ui/select';
 import { Switch } from '@/packages/components/ui/switch';
 import { SegmentedControl, SegmentedControlItem } from '@/packages/components/ui/segmented-control';
 import {
@@ -90,13 +91,14 @@ export function AccountColorSelect({
   return (
     <label className='gx-account-field' htmlFor={id}>
       Account icon color
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value as AccountIconColor)}>
-        {ACCOUNT_ICON_COLORS.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.label}
-          </option>
-        ))}
-      </select>
+      <Select value={value} onValueChange={(next) => { if (next) onChange(next as AccountIconColor); }}>
+        <SelectTrigger id={id} aria-label='Account icon color' className='w-full'><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {ACCOUNT_ICON_COLORS.map((c) => (
+            <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <small>Identifies this login in the chat bar and sidebar.</small>
     </label>
   );
@@ -144,16 +146,20 @@ export function PolicyControls({
         {policy.atLimit === 'switch' && (
           <label className='gx-account-field'>
             Account preference
-            <select
-              aria-label={`${scope} account preference`}
+            <Select
               value={policy.priority}
-              onChange={(e) => onChange({ ...policy, priority: e.target.value as AccountPolicy['priority'] })}
+              onValueChange={(value) => { if (value) onChange({ ...policy, priority: value as AccountPolicy['priority'] }); }}
             >
-              <option value='leastUsed'>Lowest usage first</option>
-              <option value='mostUsed'>Highest usage first</option>
-              <option value='soonestReset'>Earliest reset first</option>
-              <option value='latestReset'>Latest reset first</option>
-            </select>
+              <SelectTrigger aria-label={`${scope} account preference`} className='w-full'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='leastUsed'>Lowest usage first</SelectItem>
+                <SelectItem value='mostUsed'>Highest usage first</SelectItem>
+                <SelectItem value='soonestReset'>Earliest reset first</SelectItem>
+                <SelectItem value='latestReset'>Latest reset first</SelectItem>
+              </SelectContent>
+            </Select>
           </label>
         )}
         <div className='gx-account-field-row'>

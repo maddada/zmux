@@ -282,6 +282,7 @@ export type ghostexSettings = {
    */
   tipsAndTricksTitlebarButtonHidden: boolean;
   resourcesTitlebarButtonHidden: boolean;
+  devServersTitlebarButtonHidden: boolean;
   extensionsTitlebarButtonHidden: boolean;
   gitActionsTitlebarButtonHidden: boolean;
   quickActionsTitlebarButtonHidden: boolean;
@@ -382,6 +383,7 @@ export type ghostexSettings = {
   hideBrowserFaviconUntilHover: boolean;
   showCloseButtonOnSessionCards: boolean;
   hideLastActiveTimeOnSessionCards: boolean;
+  hideAccountEmails: boolean;
   /**
    * CDXC:ContextMenus 2026-06-10-13:58:
    * The destructive single-session Close context-menu item is advanced chrome.
@@ -625,6 +627,12 @@ export type ghostexSettings = {
   portlessProtocol: PortlessProtocol;
   promptEditorBackend: PromptEditorBackend;
   hotkeys: ghostexHotkeySettings;
+  /**
+   * CDXC:Settings 2026-09-06 DECISION:
+   * User: the active pane outline is optional advanced chrome, since most users do not need it.
+   * Its advanced color picker belongs directly below the outline toggle and appears only while the outline is enabled.
+   */
+  showActivePaneOutline: boolean;
   workspaceActivePaneBorderColor: string;
   workspaceBackgroundColor: string;
   /**

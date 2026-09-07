@@ -157,13 +157,25 @@
   color: var(--muted-foreground);
 }
 .gx-account-editor,
-.gx-account-setup,
-.gx-account-local-policy {
+.gx-account-setup {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--card);
   padding: 16px;
   margin: 14px 0;
+}
+.gx-account-session-policy-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gx-account-session-policy-heading > button {
+  color: var(--muted-foreground);
+}
+.gx-account-policy-reset {
+  margin-top: 8px;
 }
 .gx-account-error,
 .gx-account-recovery {
@@ -188,15 +200,16 @@
   gap: 8px;
   margin: 8px 0;
 }
-.gx-account-switch {
+.gx-accounts .gx-account-switch {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 12px;
   text-align: left;
-  padding: 12px 0;
+  padding: 12px 10px;
+  margin: 4px 0;
   border: 0;
-  border-bottom: 1px solid var(--border);
+  border-radius: 6px;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -238,46 +251,193 @@
   font-size: 10px;
   color: var(--muted-foreground);
 }
-.gx-account-toolbar-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.gx-account-submenu {
+  width: min(420px, calc(100vw - 24px));
+  max-width: var(--available-width);
+  padding: 0;
+}
+.gx-account-submenu .gx-account-panel {
+  margin: 0;
+  border: 0;
+  border-radius: inherit;
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 3px 8px;
-  color: var(--muted-foreground);
-  font-size: 11px;
+  max-height: min(70vh, var(--available-height));
+  padding: 14px;
 }
-.gx-account-toolbar-button[aria-expanded='true'] {
-  background: color-mix(in srgb, var(--foreground) 14%, transparent);
-  color: var(--foreground);
+.gx-account-submenu .gx-account-heading {
+  flex-wrap: wrap;
 }
-.gx-account-setup code {
-  display: block;
-  padding: 10px;
-  overflow-wrap: anywhere;
+.gx-account-submenu .gx-account-panel-columns {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+.gx-account-submenu .gx-account-panel-columns > section + section {
+  border-left: 0;
+  border-top: 1px solid var(--border);
+  padding: 18px 0 0;
+}
+.gx-account-command-block {
+  margin: 12px 0;
+}
+.gx-account-command {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
   background: var(--background);
   border: 1px solid var(--border);
   border-radius: 7px;
+}
+.gx-account-command code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: 11px;
-  margin: 10px 0;
+}
+.gx-account-command-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.gx-account-policy-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+}
+.gx-account-policy-summary::-webkit-details-marker {
+  display: none;
+}
+.gx-account-policy-summary > svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+details[open] > .gx-account-policy-summary > svg {
+  transform: rotate(90deg);
 }
 .gx-account-consent {
   display: flex;
   gap: 8px;
-  align-items: flex-start;
+  align-items: center;
   font-size: 11px;
   margin: 14px 0;
 }
-.gx-account-consent input {
-  accent-color: #bcbcbc;
+.gx-account-provider {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.gx-account-manager {
+  display: grid;
+  gap: 28px;
+}
+.gx-account-settings {
+  font-size: 13px;
+}
+.gx-account-settings p,
+.gx-account-settings small {
+  font-size: 12px;
+}
+.gx-account-settings .gx-account-heading {
+  margin-bottom: 0;
+}
+.gx-account-manager-toolbar {
+  align-items: flex-start;
+}
+.gx-account-manager-toolbar p {
+  margin: 0;
+  max-width: 52ch;
+}
+.gx-account-provider-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gx-account-provider-title > .gx-account-logo {
+  width: 18px;
+  height: 18px;
+}
+.gx-account-list {
+  display: grid;
+  gap: 8px;
+}
+.gx-account-saved,
+.gx-account-empty,
+.gx-account-defaults {
+  border: 1px solid var(--border);
+  border-radius: var(--settings-radius-control, 8px);
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  min-width: 0;
+}
+.gx-account-settings .gx-account-row {
+  padding: 14px 12px;
+  border: 0;
+  gap: 14px;
+}
+.gx-account-settings .gx-account-status {
+  border: 0;
+  padding: 0;
+  font-size: 11px;
+}
+.gx-account-saved[data-editing='true'] .gx-account-edit-chevron {
+  transform: rotate(90deg);
+}
+.gx-account-settings .gx-account-editor {
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0 16px 16px;
+}
+.gx-account-empty {
+  padding: 18px 16px;
+}
+.gx-account-empty p {
+  margin-bottom: 0;
+}
+.gx-account-defaults > .gx-account-policy-summary {
+  padding: 14px 12px;
+  gap: 10px;
+  cursor: pointer;
+  border-radius: inherit;
+}
+.gx-account-defaults > .gx-account-policy-summary:hover {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+.gx-account-defaults > .gx-account-policy-summary:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-color: color-mix(in srgb, var(--ring) 20%, transparent);
+  outline-offset: -3px;
+}
+.gx-account-defaults .gx-account-row-copy strong {
+  font-weight: 500;
+}
+.gx-account-defaults .gx-account-row-copy small {
   margin-top: 3px;
 }
-.gx-account-provider {
-  padding-top: 16px;
-  margin-top: 16px;
-  border-top: 1px solid var(--border);
+.gx-account-defaults-body {
+  padding: 0 16px 16px;
+}
+.gx-account-settings .gx-account-field {
+  margin: 20px 0;
+  gap: 8px;
+}
+.gx-account-settings .gx-account-field-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 22px 0 12px;
+}
+.gx-account-settings .gx-account-policy legend {
+  font-size: 13px;
+  color: var(--foreground);
+}
+.gx-account-settings .gx-account-setup {
+  margin: 0;
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  border-radius: var(--settings-radius-control, 8px);
 }
 @container (max-width:600px) {
   .gx-account-panel-columns {
@@ -302,3 +462,40 @@
     flex-wrap: wrap;
   }
 }
+
+.gx-account-guide { max-width: min(680px, calc(100vw - 48px)); overflow-y: auto; gap: 20px; }
+.gx-account-guide section { display: grid; gap: 10px; }
+.gx-account-guide h3 { font-size: 13px; font-weight: 600; margin: 0; }
+.gx-accounts.gx-account-guide p { margin: 0; font-size: 12px; line-height: 1.6; }
+.gx-account-guide-providers { display: grid; gap: 10px; padding: 0; margin: 4px 0; list-style: none; }
+.gx-account-guide-providers li { display: grid; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+.gx-account-guide-providers li[data-selected=true] { background: color-mix(in srgb, var(--foreground) 5%, transparent); }
+.gx-account-guide h4 { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; }
+.gx-account-launcher-hint { padding: 8px 10px; margin: 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
+.group-agent-menu .gx-account-logo { flex-shrink: 0; width: 16px; height: 16px; }
+.gx-account-launcher-default { flex-shrink: 0; color: var(--muted-foreground); font-size: 11px; }
+
+.gx-account-settings .gx-account-refresh {
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--foreground) 18%, var(--background));
+  color: var(--foreground);
+  border: 1px solid color-mix(in srgb, var(--foreground) 24%, transparent);
+}
+.gx-account-settings .gx-account-refresh:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 26%, var(--background));
+}
+
+.gx-account-login-action { flex-shrink: 0; }
+
+/* CDXC:AgentProviders 2026-09-07 DECISION: Hidden addresses retain their end characters; the entire domain is blurred. Render substitute glyphs so selecting or hovering cannot reveal the original domain. */
+.gx-account-hidden-domain { display: inline-block; user-select: none; }
+.gx-account-hidden-domain > span { filter: blur(4px); }
+.gx-account-privacy-description { display: block; margin-top: 4px; color: var(--muted-foreground); font-size: 12px; }
+.gx-account-saved .gx-account-logo, .session-saved-account-submenu .gx-account-logo { flex-shrink: 0; }
+
+.gx-account-settings .gx-account-privacy-setting { flex-direction: row; align-items: center; margin: 4px 0 18px; }
+.gx-account-default-summary { display: flex; align-items: center; gap: 6px; }
+.gx-account-default-summary .gx-account-logo { width: 14px; height: 14px; flex-shrink: 0; }
+.session-context-menu.session-saved-account-submenu { width: 260px; max-width: calc(100vw - 24px); }
+.session-saved-account-submenu .session-tag-menu-item-label { flex: 1; white-space: nowrap; }
+.session-saved-account-submenu .session-context-menu-trailing-icon { flex-shrink: 0; }

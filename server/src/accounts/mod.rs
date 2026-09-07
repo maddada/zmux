@@ -5,3 +5,4 @@ pub(crate) mod model;
 pub(crate) mod recovery;
 pub(crate) mod runtime;
 pub(crate) mod store;
+pub(crate) mod continuation;

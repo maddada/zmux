@@ -565,10 +565,10 @@ pub struct GhostexGpuiApp {
         Option<TerminalAgentBarCompanionFocusReturn>,
     /// Sessions whose current compatibility state has already been considered
     /// for the saved automatic Chat preference, together with the effective
-    /// Default Agent View each one was considered under. Runtime-only so a
-    /// later agent detection in the same shell slot is still a fresh
-    /// eligibility edge, and keyed by effective value so a session is swept
-    /// again when that value changes — whether the user flipped the global
+    /// Default Agent View each one was considered under. These observations
+    /// survive temporary eligibility gaps and park with their project until
+    /// the shell session is removed. A session is swept again when its
+    /// effective value changes, whether the user flipped the global
     /// preference or only this agent's per-agent override.
     pub(crate) agents_chat_auto_switch_observed_sessions:
         HashMap<TerminalSessionId, GpuiPreferredAgentInterface>,
@@ -576,9 +576,11 @@ pub struct GhostexGpuiApp {
     /// mapped session enters Chat mode before any terminal focus handoff.
     pub(crate) pending_agents_chat_launch_intents: HashSet<GpuiWorkspaceTerminalSessionKey>,
     pub(crate) agents_chat_page_states: HashMap<TerminalSessionId, SessionChatPageState>,
+    pub(crate) session_chat_diagnostics: super::session_chat_diagnostics::SessionChatDiagnostics,
     pub(crate) agents_chat_eviction_running: bool,
     pub(crate) agents_chat_eviction_requested: bool,
     pub(crate) agents_chat_surfaces: HashMap<TerminalSessionId, Entity<CefSurface>>,
+    pub(crate) account_switch_progress: HashMap<GpuiWorkspaceTerminalSessionKey, SessionAccountSwitchProgress>,
     /// When each currently hidden chat surface last became hidden, the clock the
     /// RAM eviction pass ages out. A surface that is visible has no entry, so a
     /// transient hide (a tab drag hides every surface for its duration) neither
@@ -1347,6 +1349,7 @@ impl Render for GhostexGpuiApp {
         self.sync_terminal_search_inputs(window, cx);
         self.drain_pending_gpui_engine_terminal_focus(window, cx);
         self.drain_pending_session_chat_composer_focus_handoff(window, cx);
+        self.sync_session_chat_pane_focus(window, cx, false);
         self.refresh_zmx_persistence_focused_terminal_if_changed(cx);
         let sidebar_chrome_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
         let sidebar_on_left = self.sidebar_side == GpuiSidebarSide::Left;

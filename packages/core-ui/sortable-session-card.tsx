@@ -43,7 +43,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { getSidebarSessionLifecycleState, type SidebarSessionItem } from '../shared/session-grid-contract';
-import { SessionChatHostActionAgentIcon } from './chat/session-chat-host-action-agent-icon';
+import { SidebarAccountMenu } from './accounts/sidebar-account-menu';
 import { resolveSessionChatTranscriptAgent } from '../shared/session-chat';
 import { getEnabledVisibleSidebarSessionTagSections, type SidebarSessionTagListItem } from '../shared/session-tags';
 import { buildSidebarSessionDetailsClipboardText } from '../shared/session-details-copy';
@@ -1552,15 +1552,9 @@ export function SortableSessionCard({
     });
   };
 
-  /*
-  CDXC:AgentProviders 2026-09-03:
-  Advanced > Switch Account opens a third-level submenu of the daemon-resolved
-  same-family accounts (`session.switchableAgents`); picking one asks the
-  runtime to rewrite the row's agent and full-reload it. Positioned like the
-  Advanced submenu itself: centred in the sidebar, beside the clicked row.
-  */
-  const switchableAgents = session.switchableAgents ?? [];
-  const canSwitchAccount = canFullReloadSession && switchableAgents.length > 0;
+  const accountProvider = resolveSessionChatTranscriptAgent(session.agentName, session.agentIcon);
+  const canSwitchAccount = !isProjectSessionListMoreRow && !isBrowserSession && !isStaleRemoteRow && Boolean(vscode.requestSessionAccounts) &&
+    (accountProvider === 'claude' || accountProvider === 'codex');
   const openSwitchAccountSubmenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     if (switchAccountSubmenuPosition) {
       setSwitchAccountSubmenuPosition(undefined);
@@ -1568,7 +1562,7 @@ export function SortableSessionCard({
     }
     const bounds = event.currentTarget.getBoundingClientRect();
     const submenuWidth = 204;
-    const submenuHeight = CONTEXT_MENU_VERTICAL_PADDING_PX + switchableAgents.length * CONTEXT_MENU_ITEM_HEIGHT_PX;
+    const submenuHeight = CONTEXT_MENU_VERTICAL_PADDING_PX + CONTEXT_MENU_ITEM_HEIGHT_PX;
     setSwitchAccountSubmenuPosition({
       x: getCenteredSidebarMenuX(submenuWidth),
       y: Math.max(
@@ -1577,15 +1571,10 @@ export function SortableSessionCard({
       ),
     });
   };
-  const requestSwitchSessionAgent = (agentId: string) => {
+  const closeSwitchAccountMenu = () => {
     setContextMenuPosition(undefined);
     setAdvancedSubmenuPosition(undefined);
     setSwitchAccountSubmenuPosition(undefined);
-    vscode.postMessage({
-      agentId,
-      sessionId: session.sessionId,
-      type: 'switchSessionAgent',
-    });
   };
 
   const canCreateSessionGroupFromSession = sessionGroup?.canCreateSessionGroup === true;
@@ -2050,8 +2039,7 @@ export function SortableSessionCard({
       onClick: requestForkSession,
     });
   }
-  // Full reload sits directly above Switch Account, which is Full reload under
-  // another same-family agent configuration; both sit above Handoff / Export.
+  // Full reload and Switch Account sit above Handoff / Export.
   if (canFullReloadSession) {
     advancedSessionActions.push({
       icon: <IconRefresh aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
@@ -2949,36 +2937,15 @@ export function SortableSessionCard({
             document.body
           )
         : null}
-      {contextMenuPosition && advancedSubmenuPosition && switchAccountSubmenuPosition && !isProjectSessionListMoreRow
+      {contextMenuPosition && advancedSubmenuPosition && switchAccountSubmenuPosition && !isProjectSessionListMoreRow && vscode.requestSessionAccounts
         ? createPortal(
-            <div
-              aria-label='Switch Account'
-              className='session-context-menu session-tag-submenu session-switch-account-submenu'
-              data-empty-space-blocking='true'
-              onClick={(event) => event.stopPropagation()}
-              role='menu'
-              style={{
-                left: `${switchAccountSubmenuPosition.x}px`,
-                top: `${switchAccountSubmenuPosition.y}px`,
-                zIndex: 'var(--sidebar-context-menu-submenu-z-index, 301)',
-              }}
-            >
-              <div className='session-context-menu-section'>
-                {switchableAgents.map((row) => (
-                  <button
-                    aria-label={`Switch to ${row.name}`}
-                    className='session-context-menu-item session-switch-account-item'
-                    key={row.agentId}
-                    onClick={() => requestSwitchSessionAgent(row.agentId)}
-                    role='menuitem'
-                    type='button'
-                  >
-                    <SessionChatHostActionAgentIcon icon={row.icon} />
-                    <span className='session-tag-menu-item-label'>{row.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>,
+            <SidebarAccountMenu
+              sessionId={session.sessionId}
+              requestAccounts={vscode.requestSessionAccounts}
+              position={switchAccountSubmenuPosition}
+              working={session.activity === 'working'}
+              close={closeSwitchAccountMenu}
+            />,
             document.body
           )
         : null}

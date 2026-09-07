@@ -99,6 +99,7 @@ interface SessionChatComposerActionsProps {
    * control next to Send, the rest fold into the dots menu.
    */
   hostActions?: SessionChatHostActions;
+  renderAccountMenu?: (close: () => void) => ReactNode;
   maximized: boolean;
   onAttach?: () => void;
   onDelayedActions?: () => void;
@@ -127,6 +128,7 @@ export function SessionChatComposerActions({
   sendBlocked,
   hasSendableDraft,
   hostActions,
+  renderAccountMenu,
   maximized,
   onAttach,
   onDelayedActions,
@@ -219,6 +221,12 @@ export function SessionChatComposerActions({
     setInputAction(null);
   };
 
+  const [expandedMenuOpen, setExpandedMenuOpen] = useState(false);
+  const [compactMenuOpen, setCompactMenuOpen] = useState(false);
+  const closeMoreActions = () => {
+    setExpandedMenuOpen(false);
+    setCompactMenuOpen(false);
+  };
   const hostActionList = hostActions?.actions ?? [];
   const runHostAction = (action: SessionChatHostAction) => {
     if (action.input) {
@@ -267,6 +275,7 @@ export function SessionChatComposerActions({
   const splitRightHostAction = hostActionList.find((action) => action.id === 'splitSessionRight');
   const foldedHostActions = hostActionList.filter(
     (action) =>
+      !(renderAccountMenu && action.id === 'switchAccount') &&
       action.id !== 'delayedActions' &&
       action.id !== 'closeAfterDone' &&
       action.id !== 'splitSessionRight' &&
@@ -335,11 +344,24 @@ export function SessionChatComposerActions({
       </span>
     ) : null;
 
+  /** CDXC:AgentProviders 2026-09-06 DECISION: User requested the Claude and Codex account controls under More actions > Switch Account as a submenu, replacing the standalone composer Accounts button and the old account row. */
+  const accountSubmenu = renderAccountMenu ? (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <IconSwitchHorizontal aria-hidden='true' />
+        Switch Account
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className='gx-account-submenu' sideOffset={8}>
+        {renderAccountMenu(closeMoreActions)}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  ) : null;
   const agentMenuSection =
-    agentHostActions.length > 0 ? (
+    agentHostActions.length > 0 || accountSubmenu ? (
       <DropdownMenuGroup>
         <DropdownMenuLabel>Agent</DropdownMenuLabel>
         {agentHostActions.map(hostActionMenuItem)}
+        {accountSubmenu}
       </DropdownMenuGroup>
     ) : null;
   const otherHostMenuSection =
@@ -452,7 +474,7 @@ export function SessionChatComposerActions({
     <>
       <div className='ghostex-chat-composer-footer-actions-expanded items-center gap-1.5'>
         {hasExpandedMenu ? (
-          <DropdownMenu>
+          <DropdownMenu open={expandedMenuOpen} onOpenChange={setExpandedMenuOpen}>
             <AppTooltip content={withShortcut('More actions', hostActions?.moreActionsShortcut)}>
               <DropdownMenuTrigger
                 render={
@@ -570,7 +592,7 @@ export function SessionChatComposerActions({
       </div>
 
       <div className='ghostex-chat-composer-footer-actions-compact items-center gap-1.5'>
-        <DropdownMenu>
+        <DropdownMenu open={compactMenuOpen} onOpenChange={setCompactMenuOpen}>
           <AppTooltip content={withShortcut('More actions', hostActions?.moreActionsShortcut)}>
             <DropdownMenuTrigger
               render={

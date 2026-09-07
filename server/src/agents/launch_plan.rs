@@ -56,14 +56,18 @@ pub(crate) fn create_agent_session_params_for_project(
     let agent_config = resolve_project_agent_config(project, &agent_id, Some(&launch_settings));
     let agent_icon = read_text_from_map(&agent_config, "icon")
         .or_else(|| read_text_from_map(&launch_settings, "icon"));
+    let configured_command = read_text_from_map(&agent_config, "command")
+        .or_else(|| read_text_from_map(&launch_settings, "agentCommand"));
+    if let Some(command) = configured_command.as_ref() {
+        runtime_settings.entry("accountBaseCommand").or_insert(json!(command));
+    }
     let account_command = crate::accounts::launch::apply_new_session(db, &agent_id, agent_icon.as_deref(), &mut runtime_settings)?;
     let launch_plan = build_agent_launch_plan(AgentLaunchInput {
         accept_all_mode: read_text_from_map(&agent_config, "acceptAllMode")
             .or_else(|| read_text_from_map(&launch_settings, "acceptAllMode")),
         agent_id: agent_id.clone(),
         agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
-        command: account_command.or_else(|| read_text_from_map(&agent_config, "command"))
-            .or_else(|| read_text_from_map(&launch_settings, "agentCommand")),
+        command: account_command.or(configured_command),
         delayed_send_deadline_at: read_text_from_map(&launch_settings, "delayedSendDeadlineAt"),
         first_user_message: read_text_from_map(&runtime_settings, "firstUserMessage"),
         global_accept_all_enabled: settings

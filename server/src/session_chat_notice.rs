@@ -388,7 +388,9 @@ impl SessionChatTerminalNotice {
             "{}\u{1f}{}\u{1f}{}",
             self.kind,
             self.title,
-            self.dialog.as_ref().map(|dialog| dialog.id.as_str())
+            self.dialog
+                .as_ref()
+                .map(|dialog| dialog.id.as_str())
                 .unwrap_or_else(|| self.detail.as_deref().unwrap_or_default())
         )
     }
@@ -904,14 +906,14 @@ const CODEX_RULES: &[NoticeRule] = &[
             )],
             corroborators: &["Yes, continue", "No, quit"],
         }],
-        // The trust screen commits on the digit, so "1" is unambiguous here
-        // (claude's equivalent dialog is not — see CLAUDE_RULES).
+        // Select Trust explicitly, then confirm: Codex's onboarding shortcut
+        // now only highlights Yes and requires Enter to grant trust.
         actions: &[
             NoticeActionSpec {
                 id: "trustDirectory",
                 label: "Trust and continue",
                 kind: SessionChatTerminalNoticeActionKind::SendKeys,
-                send: Some("1"),
+                send: Some("\x1b[A\r"),
             },
             OPEN_TERMINAL,
         ],
@@ -1160,30 +1162,6 @@ const CLAUDE_RULES: &[NoticeRule] = &[
         kind: SESSION_CHAT_NOTICE_TRUST_PROMPT,
         severity: SessionChatTerminalNoticeSeverity::Warning,
         title: "Claude Code is waiting for folder trust",
-        detail: "Claude Code is asking whether to trust this workspace. Nothing you send reaches the agent until it is answered.",
-        blocks_input: true,
-        signatures: &[NoticeSignature {
-            scope: NoticeScope::Dialog,
-            parts: &[NoticePart::Text("Accessing workspace:")],
-            // This startup dialog always focuses No first. Requiring both rows
-            // keeps the Down + Enter action below scoped to that exact layout.
-            corroborators: &["Quick safety check", "No, exit", "Yes, I trust this folder"],
-        }],
-        actions: &[
-            NoticeActionSpec {
-                id: "trustDirectory",
-                label: "Trust and continue",
-                kind: SessionChatTerminalNoticeActionKind::SendKeys,
-                send: Some("\u{1b}[1;1B\r"),
-            },
-            OPEN_TERMINAL,
-        ],
-        quote_evidence: false,
-    },
-    NoticeRule {
-        kind: SESSION_CHAT_NOTICE_TRUST_PROMPT,
-        severity: SessionChatTerminalNoticeSeverity::Warning,
-        title: "Claude Code is waiting for folder trust",
         detail: "Claude Code is showing its workspace-trust dialog and accepts nothing until it is answered. Which option is focused differs between versions, so answer it in the terminal rather than blind-pressing Enter.",
         blocks_input: true,
         signatures: &[
@@ -1424,15 +1402,44 @@ const CLAUDE_RULES: &[NoticeRule] = &[
     },
 ];
 
+/// CDXC:AgentScreenDetection 2026-09-07 DECISION:
+/// User: show Cursor's workspace trust notice in chat so it can be accepted without switching to the terminal.
+const CURSOR_RULES: &[NoticeRule] = &[NoticeRule {
+    kind: SESSION_CHAT_NOTICE_TRUST_PROMPT,
+    severity: SessionChatTerminalNoticeSeverity::Warning,
+    title: "Cursor is waiting for workspace trust",
+    detail: "Cursor Agent can execute code and access files in this directory. Trust this workspace to continue.",
+    blocks_input: true,
+    signatures: &[NoticeSignature {
+        scope: NoticeScope::Dialog,
+        parts: &[NoticePart::Text("Workspace Trust Required")],
+        corroborators: &[
+            "Do you trust the contents of this directory?",
+            "[a] Trust this workspace",
+            "[q] Quit",
+        ],
+    }],
+    actions: &[
+        NoticeActionSpec {
+            id: "trustDirectory",
+            label: "Trust this workspace",
+            kind: SessionChatTerminalNoticeActionKind::SendKeys,
+            send: Some("a"),
+        },
+        OPEN_TERMINAL,
+    ],
+    quote_evidence: false,
+}];
+
 fn notice_rules(agent: SessionChatOptionAgent) -> &'static [NoticeRule] {
     match agent {
         SessionChatOptionAgent::Claude => CLAUDE_RULES,
         SessionChatOptionAgent::Codex => CODEX_RULES,
+        SessionChatOptionAgent::Cursor => CURSOR_RULES,
         // Grok, Hermes, Omp and Pi have no phrase-catalog rules here. Hermes
         // and Pi have source-derived focused-component detectors after this
         // catalog; the other agents rely on measured composer readiness.
         SessionChatOptionAgent::Antigravity
-        | SessionChatOptionAgent::Cursor
         | SessionChatOptionAgent::Grok
         | SessionChatOptionAgent::Hermes
         | SessionChatOptionAgent::Omp
@@ -1442,7 +1449,7 @@ fn notice_rules(agent: SessionChatOptionAgent) -> &'static [NoticeRule] {
 
 /// Every catalog, for the kind-level queries below. Adding an agent's rules
 /// here is the only step needed to teach the predicate about it.
-const ALL_NOTICE_RULES: &[&[NoticeRule]] = &[CODEX_RULES, CLAUDE_RULES];
+const ALL_NOTICE_RULES: &[&[NoticeRule]] = &[CODEX_RULES, CLAUDE_RULES, CURSOR_RULES];
 
 /*
 CDXC:SessionChat 2026-08-21:
@@ -1585,7 +1592,8 @@ fn notice_from_picker(
     picker: crate::session_chat_resume_prompt::SessionChatTerminalPicker,
 ) -> SessionChatTerminalNotice {
     use crate::session_chat_resume_prompt::SessionChatTerminalPickerKind;
-    let guidance = "Claude Code accepts no input until this is answered. Pick an option to answer it here.";
+    let guidance =
+        "Claude Code accepts no input until this is answered. Pick an option to answer it here.";
     let detail = match picker.detail.as_deref() {
         Some(prose) => format!("{prose} {guidance}"),
         None => guidance.to_string(),
@@ -1757,6 +1765,11 @@ pub fn classify_session_chat_terminal_notice(
     if screen.folded.is_empty() {
         return None;
     }
+    if let Some(notice) =
+        crate::session_chat_workspace_trust::detect_workspace_trust_prompt(agent, screen_text)
+    {
+        return Some(notice);
+    }
     /*
     CDXC:SessionChat 2026-08-21:
     The resume-usage picker outranks the whole catalog below it. Every rule
@@ -1776,6 +1789,12 @@ pub fn classify_session_chat_terminal_notice(
     }
     if agent == SessionChatOptionAgent::Codex {
         if let Some(dialog) = crate::session_chat_codex_dialog::detect_codex_dialog(screen_text) {
+            if dialog.is_codex_directory_trust() {
+                let mut notice = dialog.into_notice(SESSION_CHAT_NOTICE_TRUST_PROMPT);
+                notice.severity = SessionChatTerminalNoticeSeverity::Warning;
+                notice.screen_tail = screen.screen_tail();
+                return Some(notice);
+            }
             return Some(dialog.into_notice(SESSION_CHAT_NOTICE_CODEX_INPUT_BLOCKED));
         }
     }
@@ -1785,6 +1804,25 @@ pub fn classify_session_chat_terminal_notice(
             if !signature_matches(&screen, signature) {
                 return false;
             }
+            if agent == SessionChatOptionAgent::Cursor
+                && rule.kind == SESSION_CHAT_NOTICE_TRUST_PROMPT
+            {
+                // Cursor leaves the answered trust dialog above its new composer.
+                let title_index = screen
+                    .folded
+                    .iter()
+                    .rposition(|line| line.contains("Workspace Trust Required"));
+                if title_index.is_some_and(|index| {
+                    crate::session_chat_composer::detect_session_chat_composer_ready(
+                        Some("cursor"),
+                        &screen.display[index + 1..].join("\n"),
+                    )
+                    .state
+                        == crate::session_chat_composer::SessionChatComposerState::Ready
+                }) {
+                    return false;
+                }
+            }
             if agent == SessionChatOptionAgent::Claude
                 && rule.kind == SESSION_CHAT_NOTICE_USAGE_LIMIT
                 && screen.has_claude_model_switch_after(signature)
@@ -1792,7 +1830,10 @@ pub fn classify_session_chat_terminal_notice(
                 return false;
             }
             if agent != SessionChatOptionAgent::Codex
-                || rule.kind != SESSION_CHAT_NOTICE_UPDATE_PROMPT
+                || !matches!(
+                    rule.kind,
+                    SESSION_CHAT_NOTICE_UPDATE_PROMPT | SESSION_CHAT_NOTICE_TRUST_PROMPT
+                )
             {
                 return true;
             }
@@ -1823,6 +1864,11 @@ pub fn classify_session_chat_terminal_notice(
         }
     }
     if agent == SessionChatOptionAgent::Grok {
+        if let Some(notice) =
+            crate::session_chat_grok_blocking::detect_grok_trust_prompt(screen_text)
+        {
+            return Some(notice);
+        }
         if let Some(blocking) =
             crate::session_chat_grok_blocking::detect_grok_blocking_screen(screen_text)
         {
@@ -1830,6 +1876,11 @@ pub fn classify_session_chat_terminal_notice(
         }
     }
     if agent == SessionChatOptionAgent::Hermes {
+        if let Some(notice) =
+            crate::session_chat_hermes_blocking::detect_hermes_hook_trust(screen_text)
+        {
+            return Some(notice);
+        }
         if let Some(blocking) =
             crate::session_chat_hermes_blocking::detect_hermes_blocking_screen(screen_text)
         {
@@ -1844,6 +1895,9 @@ pub fn classify_session_chat_terminal_notice(
         }
     }
     if agent == SessionChatOptionAgent::Pi {
+        if let Some(notice) = crate::session_chat_pi_blocking::detect_pi_trust_prompt(screen_text) {
+            return Some(notice);
+        }
         if let Some(blocking) =
             crate::session_chat_pi_blocking::detect_pi_blocking_screen(screen_text)
         {
@@ -2079,15 +2133,31 @@ pub fn merge_session_chat_terminal_notices(
     watchdog
 }
 
-/// Store lookup + merge, for the read/frame paths that only hold a screen
-/// classification.
+/// CDXC:AgentProviders 2026-09-07 DECISION:
+/// After an account switch, hide the usage-limit message already shown for the previous login. Only a different message may appear; timestamps and repeated screen captures do not make it new.
+fn suppressed_account_usage_notices() -> &'static Mutex<HashMap<String, String>> {
+    static NOTICES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    NOTICES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+pub(crate) fn suppress_account_usage_notice(project_id: &str, session_id: &str, identity: String) {
+    if let Ok(mut notices) = suppressed_account_usage_notices().lock() {
+        notices.insert(session_chat_notice_key(project_id, session_id), identity);
+    }
+}
+
+/// Store lookup and merge for read/frame paths holding a screen classification.
 pub fn resolve_session_chat_terminal_notice(
     project_id: &str,
     session_id: &str,
     screen: Option<SessionChatTerminalNotice>,
 ) -> Option<SessionChatTerminalNotice> {
+    let suppressed = suppressed_account_usage_notices().lock().ok()
+        .and_then(|notices| notices.get(&session_chat_notice_key(project_id, session_id)).cloned());
+    let visible = |notice: &SessionChatTerminalNotice| {
+        notice.kind != SESSION_CHAT_NOTICE_USAGE_LIMIT || suppressed.as_deref() != Some(notice.identity().as_str())
+    };
     merge_session_chat_terminal_notices(
-        session_chat_watchdog_notice(project_id, session_id),
-        screen,
+        session_chat_watchdog_notice(project_id, session_id).filter(visible),
+        screen.filter(visible),
     )
 }

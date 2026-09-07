@@ -1,3 +1,5 @@
+import { getActiveSidebarProject } from '../sidebar-runtime/active-project-store';
+import { toast } from 'sonner';
 import type { OpenAppModalMessage } from '@/packages/core-ui/app-modal-host-bridge';
 import type {
   OpenAddProjectModalDetail,
@@ -26,6 +28,49 @@ export function installWebAppModalHostShim(): void {
 function handleAppModalHostMessage(message: unknown): void {
   if (!isRecord(message)) {
     console.warn('[ghostex-web] Ignoring invalid app-modal host message.');
+    return;
+  }
+
+  if (message.type === 'accountSetup') {
+    const project = getActiveSidebarProject();
+    if (!project || project.machineId !== message.machineId) {
+      throw new Error('Select a project on this computer before opening its sign-in terminal.');
+    }
+    if (
+      (message.provider !== 'claude' && message.provider !== 'codex') ||
+      typeof message.command !== 'string' ||
+      !message.command.trim()
+    ) {
+      throw new Error('The account sign-in command is unavailable. Refresh Accounts.');
+    }
+    window.dispatchEvent(
+      new CustomEvent('ghostex-web:runTitlebarAction', {
+        detail: {
+          machineId: project.machineId,
+          projectId: project.projectId,
+          action: {
+            actionType: 'terminal',
+            command: message.command,
+            commandId: `account-setup-${crypto.randomUUID()}`,
+            name: `${message.provider === 'claude' ? 'Claude' : 'Codex'} account sign-in`,
+            closeTerminalOnExit: false,
+            isDefault: false,
+            playCompletionSound: false,
+          },
+        },
+      })
+    );
+    window.dispatchEvent(new CustomEvent('ghostex-web:closeAppModal'));
+    return;
+  }
+
+  if (message.type === 'toast' && typeof message.title === 'string') {
+    toast(message.title, {
+      toasterId: 'app-modal',
+      id: typeof message.toastId === 'string' ? message.toastId : undefined,
+      description: typeof message.description === 'string' ? message.description : undefined,
+      duration: message.persistent === true ? Infinity : typeof message.durationMs === 'number' ? message.durationMs : 6000,
+    });
     return;
   }
 
@@ -87,6 +132,7 @@ function handleAppModalHostMessage(message: unknown): void {
     window.dispatchEvent(new CustomEvent('ghostex-web:closeAppModal'));
     const settingsMessage = message as OpenSettingsModalMessage;
     const detail: OpenSettingsModalDetail = {
+      ...(settingsMessage.initialAgentsSection ? { initialAgentsSection: settingsMessage.initialAgentsSection } : {}),
       ...(settingsMessage.initialTab ? { initialTab: settingsMessage.initialTab } : {}),
       ...(settingsMessage.initialRemoteSection ? { initialRemoteSection: settingsMessage.initialRemoteSection } : {}),
     };

@@ -1,3 +1,5 @@
+import type { WebviewApi } from '@/packages/core-ui/webview-api';
+import type { AgentAccountsState } from '@/packages/shared/agent-accounts';
 import {
   GXSERVER_PRESENTATION_CHATS_GROUP_ID,
   createGxserverPresentationSessionsByProjectFromGroups,
@@ -122,9 +124,7 @@ export type WebSidebarRuntime = {
   start(): void;
   stop(): void;
   updateSettings(settings: ghostexSettings): void;
-  vscode: {
-    postMessage(message: SidebarToExtensionMessage): void;
-  };
+  vscode: WebviewApi;
 };
 
 export function createWebSidebarRuntime(): WebSidebarRuntime {
@@ -473,7 +473,7 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
     }
   };
 
-  const createQuickSession = async (kind: 'agent' | 'terminal', agentId?: string): Promise<void> => {
+  const createQuickSession = async (kind: 'agent' | 'terminal', agentId?: string, accountId?: string): Promise<void> => {
     const machineId =
       activeTarget?.machineId ??
       getConnectionStates().find((state) => state.machine.machineId === 'local')?.machine.machineId;
@@ -487,7 +487,7 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
     );
     activeTarget = { machineId, projectId: project.projectId };
     if (kind === 'agent' && agentId) {
-      await createAgentSession(agentId);
+      await createAgentSession(agentId, undefined, accountId);
       return;
     }
     await createSession(createSidebarGroupId(machineId, project.projectId));
@@ -729,9 +729,9 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
       }
       case 'runSidebarAgent':
         if (message.groupId === GXSERVER_PRESENTATION_CHATS_GROUP_ID) {
-          await createQuickSession('agent', message.agentId);
+          await createQuickSession('agent', message.agentId, message.accountId);
         } else {
-          await createAgentSession(message.agentId, message.groupId);
+          await createAgentSession(message.agentId, message.groupId, message.accountId);
         }
         return;
       case 'renameWorkspaceProjectForGroup': {
@@ -974,13 +974,14 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
     });
   };
 
-  const createAgentSession = async (agentId: string, groupId?: string): Promise<void> => {
+  const createAgentSession = async (agentId: string, groupId?: string, accountId?: string): Promise<void> => {
     const target = (groupId ? parseSidebarGroupId(groupId) : undefined) ?? activeTarget;
     if (!target || !agentId.trim()) {
       return;
     }
-    await rpcForMachine(target.machineId, '/api/createAgentSession', {
+    const result = await rpcForMachine<{ session?: { projectId?: string; sessionId?: string } }>(target.machineId, '/api/createAgentSession', {
       agentId: agentId.trim(),
+      runtimeSettings: accountId ? { accountId } : {},
       /*
       CDXC:Drafts 2026-08-28:
       Sidebar agent launches carry no prompt, so the row is created as a draft.
@@ -993,6 +994,16 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
       surface: 'workspace',
       title: `${agentId.trim()} Session`,
     });
+    if (result.session?.sessionId) {
+      const createdTarget = {
+        machineId: target.machineId,
+        projectId: result.session.projectId ?? target.projectId,
+        sessionId: result.session.sessionId,
+      };
+      activeTarget = createdTarget;
+      focusedTarget = createdTarget;
+      dispatchFocusSession(createdTarget);
+    }
   };
 
   const onActiveSessionContext = (event: WindowEventMap['ghostex-web:activeSessionContext']): void => {
@@ -1038,7 +1049,22 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
       settings = nextSettings;
       publish();
     },
-    vscode: { postMessage },
+    vscode: {
+      postMessage,
+      requestGroupAccounts: (groupId, params) => {
+        const target = groupId === GXSERVER_PRESENTATION_CHATS_GROUP_ID ? activeTarget : parseSidebarGroupId(groupId);
+        if (!target) return Promise.reject(new Error('The project’s computer is unavailable.'));
+        return rpcForMachine<AgentAccountsState>(target.machineId, '/api/agentAccounts', params);
+      },
+      requestSessionAccounts: (sessionId, params) => {
+        const target = parseSidebarSessionId(sessionId);
+        if (!target) return Promise.reject(new Error('The session is unavailable.'));
+        return rpcForMachine<AgentAccountsState>(target.machineId, '/api/agentAccounts', {
+          ...params,
+          ...lifecycleParams(target),
+        });
+      },
+    },
   };
 }
 

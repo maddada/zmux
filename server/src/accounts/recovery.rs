@@ -106,6 +106,9 @@ fn collect(state: &AppState, restart: bool) -> Result<Vec<Plan>, DomainStateErro
             let Some(session) = repo.get_session(pid, sid)? else {
                 continue;
             };
+            if let Some(identity) = session.pointer("/runtimeSettings/accountSuppressedUsageNotice").and_then(Value::as_str) {
+                crate::session_chat_notice::suppress_account_usage_notice(pid, sid, identity.to_string());
+            }
             if session
                 .pointer("/runtimeSettings/accountRecovery/status")
                 .and_then(Value::as_str)
@@ -327,7 +330,9 @@ fn collect(state: &AppState, restart: bool) -> Result<Vec<Plan>, DomainStateErro
                     save(state, &repo, &session, recovery)?;
                     continue;
                 }
-                session = repo.get_session(pid, sid)?.unwrap_or(session);
+                // The switch owns its one-shot dot; do not also send the generic recovery prompt.
+                endpoint::publish(state, &repo, &session)?;
+                continue;
             } else if !current.is_some_and(|a| has_room(a, &model, now)) {
                 let reset = current.and_then(|a| {
                     a.usage

@@ -485,6 +485,10 @@ pub(crate) fn merge_observed_session_identity(
     let agent_changed = observed_agent_id.is_some()
         && current_agent_id.is_some()
         && observed_agent_id != current_agent_id;
+    // CDXC:SessionIdentity 2026-09-07 WHY:
+    // Rewinding Codex before its first prompt creates a new UUID without a rollout yet. A new conversation must not inherit the previous conversation's transcript path.
+    let session_changed = observed_identity.agent_session_id.is_some()
+        && observed_identity.agent_session_id != current_identity.agent_session_id;
     ResolvedIdentity {
         agent_id: observed_agent_id.or(current_agent_id),
         agent_session_id: observed_identity.agent_session_id.clone().or_else(|| {
@@ -493,7 +497,7 @@ pub(crate) fn merge_observed_session_identity(
                 .flatten()
         }),
         agent_session_path: observed_identity.agent_session_path.clone().or_else(|| {
-            (!agent_changed)
+            (!agent_changed && !session_changed)
                 .then(|| current_identity.agent_session_path.clone())
                 .flatten()
         }),
@@ -578,7 +582,10 @@ pub(crate) fn apply_session_identity_runtime_settings(
     }
     if let Some(agent_session_path) = identity.agent_session_path.clone() {
         runtime_settings.insert("agentSessionPath".to_string(), json!(agent_session_path));
-    } else if agent_changed {
+    } else if agent_changed
+        || (identity.agent_session_id.is_some()
+            && identity.agent_session_id != current_identity.agent_session_id)
+    {
         runtime_settings.remove("agentSessionPath");
     }
     if agent_changed {

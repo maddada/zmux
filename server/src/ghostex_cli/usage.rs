@@ -284,7 +284,7 @@ pub fn usage() -> String {
         format_help_command("read-session-chat-files <selector> --json", "List the session project's files for @ mentions"),
         format_help_command("send-session-chat-message <selector> <text>", "Send a chat message into an agent session"),
         format_help_command("answer-session-chat-prompt <selector> --answer-json '<json>'", "Answer a pending question/approval prompt or an on-screen picker row"),
-        format_help_command("rewind-session-chat <selector> --message-id <uuid> --json", "Drive Claude Code's own rewind to the point before a user prompt"),
+        format_help_command("rewind-session-chat <selector> --message-id <uuid> --json", "Drive Claude Code or Codex rewind to the point before a user prompt"),
         format_help_command("interrupt-session-chat <selector>", "Interrupt the session's running agent turn"),
         format_help_command("handoff-session-chat-draft <selector>", "Move the agent CLI's composer draft out of the terminal and print it"),
         format_help_command("read-session-chat-queue <selector> --json", "Read the session's queued chat prompts and synced composer draft"),
@@ -379,8 +379,9 @@ pub fn usage() -> String {
     ]
     .join("\n");
 
+    // CDXC:Cli 2026-09-06 DECISION:
+    // User: keep `ghostex web` working, but hide it from the main --help listing while the web app is not shipped.
     let server_commands = [
-        format_help_command("web", "Open the Ghostex web app in the default browser"),
         format_help_command(
             "ports [--json]",
             "List the TCP ports listening on this machine",

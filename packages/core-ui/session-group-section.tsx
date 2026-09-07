@@ -47,7 +47,7 @@ import {
 } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { AppTooltip } from './app-tooltip';
-import { AgentMenuChatIndicator } from './agent-menu-chat-indicator';
+import { AgentLauncherMenuItems } from './accounts/agent-launcher-menu';
 import { SidebarProjectIcon } from './sidebar-project-icon';
 import {
   getSidebarSessionLifecycleState,
@@ -87,6 +87,12 @@ import { resolveSidebarSpaceIcon } from './space-filter-row';
 import { createRemoteSidebarSpaceSectionKey, LOCAL_SIDEBAR_SPACE_SECTION_KEY } from './sidebar-app/space-filtering';
 import { getSidebarSpaceIdsContainingProject, type SidebarSpacesState } from './spaces';
 import { useCollapsibleHeight } from './use-collapsible-height';
+import {
+  DEFAULT_PROJECT_SESSION_SECTION_COLLAPSE_STATE,
+  getProjectSessionSection,
+  type ProjectSessionSection,
+  type ProjectSessionSectionCollapseStateById,
+} from './sidebar-app/project-session-section-state';
 import { useSidebarCollapsiblePresence } from './sidebar-collapse-animation';
 import type { WebviewApi } from './webview-api';
 import { openAppModal } from './app-modal-host-bridge';
@@ -483,6 +489,12 @@ export type SessionGroupSectionProps = {
   onCreateProjectCollection?: (projectId: string) => void;
   onMoveProjectToCollection?: (projectId: string, collectionId: string | undefined) => void;
   onProjectSessionListCollapsedChange?: (projectId: string, collapsed: boolean) => void;
+  onProjectSessionSectionCollapsedChange: (
+    projectId: string,
+    section: ProjectSessionSection,
+    collapsed: boolean
+  ) => void;
+  projectSessionSectionCollapseStateById: ProjectSessionSectionCollapseStateById;
   /*
    * CDXC:Spaces 2026-08-27:
    * Space membership for an UNGROUPED project row. Per the Spaces decision, a
@@ -512,42 +524,12 @@ export type SessionGroupSectionProps = {
   projectCollectionId?: string;
   projectCollectionOptions?: readonly { collectionId: string; color: string; title: string }[];
   projectSessionListCollapsedState?: Readonly<ProjectSessionListCollapsedState>;
-  /**
-   * CDXC:Browser 2026-08-18:
-   * A host reveal request for one session row. The kind sections inside a
-   * project group (Browser / Pinned / Sessions) are this component's own state,
-   * so revealing a row it owns has to reach it as a request instead of being
-   * decided by SidebarApp.
-   */
-  revealSessionRequest?: { requestId: number; sessionId: string };
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
   showHeaderActions?: boolean;
   showSessionDropPositionIndicators?: boolean;
   useColoredAgentIcons?: boolean;
   vscode: WebviewApi;
 };
-
-type ProjectSessionSection = 'browser' | 'pinned' | 'sessions' | 'parked';
-
-const EXPANDED_PROJECT_SESSION_SECTIONS: Readonly<Record<ProjectSessionSection, boolean>> = {
-  browser: false,
-  pinned: false,
-  sessions: false,
-  parked: true,
-};
-
-function getProjectSessionSection(
-  session: SidebarSessionItem | undefined,
-  enableSessionParking: boolean
-): ProjectSessionSection {
-  if (session?.kind === 'browser' || session?.sessionKind === 'browser') {
-    return 'browser';
-  }
-  if (enableSessionParking && session?.isParked === true) {
-    return 'parked';
-  }
-  return session?.isPinned === true ? 'pinned' : 'sessions';
-}
 
 function ProjectSessionSectionToggle({
   count,
@@ -732,6 +714,8 @@ export function SessionGroupSection({
   onCreateProjectCollection,
   onMoveProjectToCollection,
   onProjectSessionListCollapsedChange,
+  onProjectSessionSectionCollapsedChange,
+  projectSessionSectionCollapseStateById,
   onToggleSpaceMembership,
   spaceMemberProjectId,
   spaces,
@@ -747,7 +731,6 @@ export function SessionGroupSection({
   projectCollectionId,
   projectCollectionOptions = [],
   projectSessionListCollapsedState = {},
-  revealSessionRequest,
   sessionDropIndicator,
   sessionDraggingDisabled = false,
   sessionTagListItems,
@@ -756,6 +739,10 @@ export function SessionGroupSection({
   useColoredAgentIcons = false,
   vscode,
 }: SessionGroupSectionProps) {
+  const launchAccountsTransport = useMemo(() => vscode.requestGroupAccounts
+    ? (request: import('@/packages/shared/agent-accounts').AgentAccountsRequest) => vscode.requestGroupAccounts!(groupId, request)
+    : undefined, [vscode, groupId]);
+
   const sidebarItemTooltipDelayMs = useSidebarItemTooltipDelayMs();
   const group = useSidebarStore((state) => state.groupsById[groupId]);
   const storedSessionIds = useSidebarStore((state) => state.sessionIdsByGroup[groupId] ?? []);
@@ -827,9 +814,6 @@ export function SessionGroupSection({
   const [isEditing, setIsEditing] = useState(false);
   const [openControlMenu, setOpenControlMenu] = useState<GroupControlMenu>();
   const [primaryProjectAgentLauncherId, setPrimaryProjectAgentLauncherId] = useState(readPrimaryAgentLauncherId);
-  const [collapsedProjectSessionSections, setCollapsedProjectSessionSections] = useState(
-    EXPANDED_PROJECT_SESSION_SECTIONS
-  );
   const [projectSessionListCollapsedHeight, setProjectSessionListCollapsedHeight] = useState<number>();
   const { collapsibleStyle, contentRef, setContentElement } = useCollapsibleHeight<HTMLDivElement>();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -838,7 +822,6 @@ export function SessionGroupSection({
   const projectTitleButtonRef = useRef<HTMLButtonElement>(null);
   const groupTitleInputRef = useRef<HTMLInputElement>(null);
   const groupSectionRef = useRef<HTMLElement | null>(null);
-  const handledRevealSessionRequestIdRef = useRef<number | undefined>(undefined);
   const sessionsShellRef = useRef<HTMLDivElement | null>(null);
   const debugInstanceIdRef = useRef(createSessionGroupDebugInstanceId());
 
@@ -902,11 +885,14 @@ export function SessionGroupSection({
   const isChatCollection = group?.isChatCollection === true;
   const projectContext = group?.projectContext;
   const projectGitRemoteOriginUrl = projectContext?.gitRemoteOriginUrl?.trim();
-  const rawProjectSessionListStorageId = projectContext?.editor.projectId ?? group?.groupId;
+  const rawProjectSessionListStorageId = projectContext?.editor.projectId ?? groupId;
   const projectSessionListStorageId =
     rawProjectSessionListStorageId && group?.remoteMachineContext?.machineId
       ? `remote:${group.remoteMachineContext.machineId}:${rawProjectSessionListStorageId}`
       : rawProjectSessionListStorageId;
+  const collapsedProjectSessionSections =
+    projectSessionSectionCollapseStateById[projectSessionListStorageId] ??
+    DEFAULT_PROJECT_SESSION_SECTION_COLLAPSE_STATE;
   const isProjectSessionListCollapsed =
     Boolean(projectContext) &&
     projectSessionListStorageId !== undefined &&
@@ -1055,31 +1041,12 @@ export function SessionGroupSection({
     return session?.kind !== 'browser' && session?.sessionKind !== 'browser';
   });
   const toggleProjectSessionSection = (section: ProjectSessionSection) => {
-    setCollapsedProjectSessionSections((previous) => ({
-      ...previous,
-      [section]: !previous[section],
-    }));
-  };
-  /*
-   * CDXC:Browser 2026-08-18:
-   * A revealed row is useless inside a collapsed kind section, so open the one
-   * that owns it (Browser for a new Browser tab) and leave it open — the user
-   * can close it again, and nothing re-collapses it behind their back.
-   */
-  useEffect(() => {
-    if (!revealSessionRequest || handledRevealSessionRequestIdRef.current === revealSessionRequest.requestId) {
-      return;
-    }
-    const revealedSession = sessionsById[revealSessionRequest.sessionId];
-    if (!revealedSession || !orderedSessionIds.includes(revealSessionRequest.sessionId)) {
-      return;
-    }
-    handledRevealSessionRequestIdRef.current = revealSessionRequest.requestId;
-    const revealedSection = getProjectSessionSection(revealedSession, enableSessionParking);
-    setCollapsedProjectSessionSections((previous) =>
-      previous[revealedSection] ? { ...previous, [revealedSection]: false } : previous
+    onProjectSessionSectionCollapsedChange(
+      projectSessionListStorageId,
+      section,
+      !collapsedProjectSessionSections[section]
     );
-  }, [enableSessionParking, orderedSessionIds, revealSessionRequest, sessionsById]);
+  };
   const expandedVisibleSessionIds = projectContext
     ? visibleSessionIds.filter(
         (sessionId) =>
@@ -1679,7 +1646,7 @@ export function SessionGroupSection({
     });
   };
 
-  const requestRunProjectAgent = (agent: SidebarAgentButton | undefined) => {
+  const requestRunProjectAgent = (agent: SidebarAgentButton | undefined, accountId?: string) => {
     setOpenControlMenu(undefined);
     if (!projectContext || !agent) {
       return;
@@ -1687,6 +1654,7 @@ export function SessionGroupSection({
     persistPrimaryProjectAgentLauncher(agent.agentId);
     vscode.postMessage({
       agentId: agent.agentId,
+      accountId,
       groupId: group.groupId,
       type: 'runSidebarAgent',
     });
@@ -3448,32 +3416,8 @@ export function SessionGroupSection({
            * Project-header agent menus can open near the bottom of the native sidebar.
            * Use the measured sidebar menu portal so long agent lists clamp to the visible webview and scroll instead of overflowing past the sidebar edge.
            */}
-          {agents.map((agent) => (
-            <button
-              aria-label={agent.name}
-              aria-pressed={primaryProjectAgent?.agentId === agent.agentId}
-              className='session-context-menu-item group-control-menu-item group-agent-menu-item'
-              data-selected={String(primaryProjectAgent?.agentId === agent.agentId)}
-              key={agent.agentId}
-              onClick={() => requestRunProjectAgent(agent)}
-              role='menuitem'
-              type='button'
-            >
-              <ProjectAgentLauncherIcon agent={agent} colorMode='brand' />
-              <span className='group-agent-menu-label'>{agent.name}</span>
-              <AgentMenuChatIndicator agent={agent} />
-            </button>
-          ))}
-          {agents.length > 0 ? <div className='session-context-menu-divider' role='separator' /> : null}
-          <button
-            className='session-context-menu-item group-control-menu-item group-agent-menu-item'
-            onClick={openConfigureAgentsModal}
-            role='menuitem'
-            type='button'
-          >
-            <IconSettings aria-hidden='true' className='session-context-menu-icon' size={14} />
-            <span className='group-agent-menu-label'>Configure</span>
-          </button>
+          <AgentLauncherMenuItems agents={agents} primaryAgentId={primaryProjectAgent?.agentId}
+            transport={launchAccountsTransport} onRun={requestRunProjectAgent} onConfigure={openConfigureAgentsModal} />
         </SidebarContextMenuPortal>
       ) : null}
       {/**

@@ -125,6 +125,8 @@ export function AgentsSettingsTab({
   isActive,
   agentHookStatus,
   agentHookStatusLoading,
+  hideAccountEmails,
+  onHideAccountEmailsChange,
   agentAcceptAllEnabled,
   customSessionTitleGenerationCommand,
   defaultPromptAgentId,
@@ -148,6 +150,8 @@ export function AgentsSettingsTab({
   isActive: boolean;
   agentHookStatus?: SidebarAgentHookStatusMessage;
   agentHookStatusLoading: boolean;
+  hideAccountEmails: boolean;
+  onHideAccountEmailsChange: (hidden: boolean) => void;
   agentAcceptAllEnabled: boolean;
   customSessionTitleGenerationCommand: string;
   defaultPromptAgentId: string;
@@ -171,6 +175,7 @@ export function AgentsSettingsTab({
   const agentHooksAvailableForUninstall = hasRemovableAgentHooks(agentHookStatus);
   const [editorState, setEditorState] = useState<SettingsAgentEditorState>();
   const agentRosterSectionRef = useRef<HTMLDivElement>(null);
+  const accountsSectionRef = useRef<HTMLDivElement>(null);
   const lastTargetedAgentsSectionRef = useRef<SettingsAgentsSection | undefined>(undefined);
   useEffect(() => {
     if (!isActive) {
@@ -180,12 +185,18 @@ export function AgentsSettingsTab({
     if (!initialAgentsSection || lastTargetedAgentsSectionRef.current === initialAgentsSection) {
       return;
     }
+    if (editorState) {
+      setEditorState(undefined);
+      return;
+    }
+    const sectionRef = initialAgentsSection === 'accounts' ? accountsSectionRef : agentRosterSectionRef;
+    if (!sectionRef.current) return;
     lastTargetedAgentsSectionRef.current = initialAgentsSection;
     const animationFrame = requestAnimationFrame(() => {
-      agentRosterSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     return () => cancelAnimationFrame(animationFrame);
-  }, [initialAgentsSection, isActive]);
+  }, [editorState, initialAgentsSection, isActive, search.tab.isSearching]);
   const [draftAgentIds, setDraftAgentIds] = useState<string[]>();
   /*
    * CDXC:AgentHooks 2026-08-28:
@@ -342,7 +353,7 @@ export function AgentsSettingsTab({
     <SettingsNativeScrollArea className='h-full min-h-0'>
       <div className='settings-page-width flex flex-col gap-6 px-5 pb-5'>
         {search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab) ? searchEmptyState : null}
-        {!editorState && shouldShowSettingsSection(search.sections.accounts) && <AccountsSettingsSection active={isActive} />}
+        {!editorState && shouldShowSettingsSection(search.sections.accounts) && <AccountsSettingsSection active={isActive} sectionRef={accountsSectionRef} hideEmails={hideAccountEmails} onHideEmailsChange={onHideAccountEmailsChange} />}
         {!editorState && shouldShowSettingsSection(search.sections.config) ? (
           <SettingsSection title='Config'>
             {/*

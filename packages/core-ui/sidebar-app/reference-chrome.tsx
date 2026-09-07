@@ -52,7 +52,8 @@ import {
   type SidebarSessionTagListItem,
 } from '../../shared/session-tags';
 import { dismissSidebarTooltips } from '../app-tooltip';
-import { AgentMenuChatIndicator } from '../agent-menu-chat-indicator';
+import { AgentLauncherMenuItems } from '../accounts/agent-launcher-menu';
+import type { AccountsTransport } from '@/packages/shared/agent-accounts';
 import { formatSidebarHotkeyLabel } from '../hotkey-label';
 import { ProjectAgentLauncherIcon } from '../project-agent-launcher-icon';
 import { registerSidebarContextMenuDismissHandler, SidebarContextMenuPortal } from '../sidebar-context-menu-portal';
@@ -810,6 +811,7 @@ export function SidebarReferenceSectionHeader({
   onEdit,
   onFilterChats,
   onRunAgent,
+  accountsTransport,
   onSetActiveSessionsSortMode,
   onToggleShowHidden,
   onToggleSessionTagFilter,
@@ -839,7 +841,8 @@ export function SidebarReferenceSectionHeader({
   onCreateChat?: () => void;
   onEdit?: () => void;
   onFilterChats?: () => void;
-  onRunAgent?: (agent: SidebarAgentButton) => void;
+  onRunAgent?: (agent: SidebarAgentButton, accountId?: string) => void;
+  accountsTransport?: AccountsTransport;
   onSetActiveSessionsSortMode?: (sortMode: SidebarActiveSessionsSortMode) => void;
   onToggleShowHidden?: () => void;
   onToggleSessionTagFilter?: (tag: SidebarSessionTagFilter) => void;
@@ -978,13 +981,13 @@ export function SidebarReferenceSectionHeader({
     onSetActiveSessionsSortMode?.(sortMode);
   };
 
-  const runAgent = (agent: SidebarAgentButton | undefined) => {
+  const runAgent = (agent: SidebarAgentButton | undefined, accountId?: string) => {
     setAgentMenuPosition(undefined);
     if (!agent) {
       onConfigureAgents?.();
       return;
     }
-    onRunAgent?.(agent);
+    onRunAgent?.(agent, accountId);
   };
 
   return (
@@ -1323,35 +1326,10 @@ export function SidebarReferenceSectionHeader({
           }}
           onDismiss={() => setAgentMenuPosition(undefined)}
         >
-          {agents.map((agent) => (
-            <button
-              aria-label={agent.name}
-              aria-pressed={primaryAgent?.agentId === agent.agentId}
-              className='session-context-menu-item group-control-menu-item group-agent-menu-item'
-              data-selected={String(primaryAgent?.agentId === agent.agentId)}
-              key={agent.agentId}
-              onClick={() => runAgent(agent)}
-              role='menuitem'
-              type='button'
-            >
-              <ProjectAgentLauncherIcon agent={agent} colorMode='brand' />
-              <span className='group-agent-menu-label'>{agent.name}</span>
-              <AgentMenuChatIndicator agent={agent} />
-            </button>
-          ))}
-          {agents.length > 0 ? <div className='session-context-menu-divider' role='separator' /> : null}
-          <button
-            className='session-context-menu-item group-control-menu-item group-agent-menu-item'
-            onClick={() => {
-              setAgentMenuPosition(undefined);
-              onConfigureAgents?.();
-            }}
-            role='menuitem'
-            type='button'
-          >
-            <IconSettings aria-hidden='true' className='session-context-menu-icon' size={14} />
-            <span className='group-agent-menu-label'>Configure</span>
-          </button>
+          <AgentLauncherMenuItems agents={agents} primaryAgentId={primaryAgent?.agentId}
+            transport={accountsTransport} onRun={runAgent} onConfigure={() => {
+              setAgentMenuPosition(undefined); onConfigureAgents?.();
+            }} />
         </SidebarContextMenuPortal>
       ) : null}
     </div>

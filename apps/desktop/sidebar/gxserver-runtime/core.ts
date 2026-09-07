@@ -1,3 +1,5 @@
+import { createAccountSwitchTransport } from '../account-switch';
+import type { AccountsTransport } from '@/packages/shared/agent-accounts';
 /*
 CDXC:RepoStructure 2026-08-22:
 Split out of the single 21,861-line `gxserver-runtime.ts`. Pure move: no logic
@@ -57,6 +59,7 @@ import { normalizeNonEmptyString } from './helpers/records';
 import {
   normalizeGpuiSidebarRemoteEvent,
   parseGpuiRemotePresentationProjectId,
+  parseGpuiRemotePresentationGroupId,
   parseGpuiRemotePresentationSessionId,
 } from './helpers/remote-presentation';
 import type { GpuiSidebarRuntimePresentationStreamMethods } from './presentation-stream';
@@ -110,6 +113,8 @@ import { gpuiSidebarRuntimeWorkspaceGroupMethods } from './workspace-groups-sync
 import type { GpuiSidebarRuntimeWorktreeMethods } from './worktrees';
 import { gpuiSidebarRuntimeWorktreeMethods } from './worktrees';
 import type { WebviewApi } from '@/packages/core-ui/webview-api';
+import type { AgentAccountsState } from '@/packages/shared/agent-accounts';
+import { parseGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import { reduceGxserverPresentationDelta } from '@/packages/shared/gxserver-presentation-cache';
 import type {
   GxserverAppUserData,
@@ -267,8 +272,43 @@ export class GpuiSidebarLocalMessageSource {
 }
 
 export class GpuiSidebarRuntime {
+  private readonly accountTransports = new Map<string, AccountsTransport>();
   readonly messageSource = new GpuiSidebarLocalMessageSource();
   readonly vscode: WebviewApi = {
+    requestGroupAccounts: async (groupId, params) => {
+      const remote = parseGpuiRemotePresentationGroupId(groupId);
+      if (remote) return this.requestRemoteGxserver<AgentAccountsState>(remote.machineId, '/api/agentAccounts', params);
+      if (!this.client) throw new Error('The project’s computer is unavailable.');
+      return this.client.rpc<AgentAccountsState>('/api/agentAccounts', params);
+    },
+    requestSessionAccounts: async (sessionId, params) => {
+      let transport = this.accountTransports.get(sessionId);
+      if (!transport) {
+        const remote = parseGpuiRemotePresentationSessionId(sessionId);
+        const local = parseGxserverPresentationProjectSessionId(sessionId);
+        const target = remote ?? local;
+        if (!target) throw new Error('The session’s computer is unavailable.');
+        transport = createAccountSwitchTransport(
+          async (request) => {
+            const payload = { ...request, projectId: target.projectId, sessionId: target.sessionId };
+            if (remote) return this.requestRemoteGxserver<AgentAccountsState>(remote.machineId, '/api/agentAccounts', payload);
+            if (!this.client) throw new Error('The session’s computer is unavailable.');
+            return this.client.rpc<AgentAccountsState>('/api/agentAccounts', payload);
+          },
+          (progress) => {
+            window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
+              type: 'accountSwitchProgress',
+              projectId: target.projectId,
+              sessionId: target.sessionId,
+              machineId: remote?.machineId,
+              progress,
+            });
+          }
+        );
+        this.accountTransports.set(sessionId, transport);
+      }
+      return transport(params);
+    },
     postMessage: (message) => {
       void this.handleSidebarMessage(message);
     },
@@ -1106,7 +1146,7 @@ export class GpuiSidebarRuntime {
         this.openBrowserPaneInGroup(message.groupId);
         return;
       case 'runSidebarAgent':
-        await this.requestAgentSessionLaunch(message.agentId, message.groupId);
+        await this.requestAgentSessionLaunch(message.agentId, message.groupId, message.accountId);
         return;
       case 'confirmAgentHookLaunch':
         await this.confirmAgentHookLaunch(message);

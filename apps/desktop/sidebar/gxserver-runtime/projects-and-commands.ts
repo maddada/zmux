@@ -5,6 +5,7 @@ changed. See `core.ts` for how the runtime's methods are re-attached.
 */
 import { GPUI_SIDEBAR_COMMAND_SELECTOR_MESSAGE_KEYS } from './constants';
 import type { GpuiSidebarRuntime } from './core';
+import { activateGpuiProject } from './project-activation';
 import { createGpuiSidebarSettings } from './helpers/bootstrap';
 import { normalizeGpuiReplacementProjectFolderPick, normalizeGpuiWorkspaceFolderPick } from './helpers/folder-picker';
 import { isGpuiPresentationQuickDomainProject } from './helpers/presentation-projection';
@@ -446,6 +447,10 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
         throw new Error('gxserver did not return the added project.');
       }
       this.upsertDomainProject(project);
+      if (!pick.firstLaunchAgentId) {
+        await activateGpuiProject(this, project.projectId);
+        return;
+      }
       this.focusProjectId(project.projectId);
       await this.refreshDomainPresentationSnapshotFromClient('patch').catch(() => {
         this.publishHudPatch();

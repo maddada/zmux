@@ -1,3 +1,6 @@
+import { AccountText } from './account-text';
+import { IconAdjustmentsHorizontal, IconArrowBackUp, IconRefresh, IconSettings } from '@tabler/icons-react';
+import { AppTooltip } from '../app-tooltip';
 import type { SessionChatContextUsage } from '@/packages/shared/session-chat';
 import {
   resolveSessionChatContextMeterUsage,
@@ -6,8 +9,9 @@ import {
 import { useState } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import type { AgentAccountsRequest, AgentAccountsState } from '@/packages/shared/agent-accounts';
+import { openAppModal } from '../app-modal-host-bridge';
 import { AccountIdentity, PolicyControls, UsageBars } from './controls';
-import { AccountManager } from './manager';
+/** CDXC:Settings 2026-09-06 DECISION: Account management and provider defaults belong only in Settings > Agents. The chat panel keeps session switching and recovery controls; a settings icon opens Settings > Agents at Accounts. Use menu dismissal instead of a Close button, omit the heading subtitle, make Refresh an unframed icon, and keep session controls flat instead of inside a card. */
 export function SessionAccountsPanel({
   data,
   error,
@@ -23,7 +27,6 @@ export function SessionAccountsPanel({
   request: (p: AgentAccountsRequest) => Promise<boolean>;
   close: () => void;
 }) {
-  const [manage, setManage] = useState(false);
   const [customize, setCustomize] = useState(false);
   const context = resolveSessionChatContextMeterUsage(contextUsage);
   const session = data?.session;
@@ -31,25 +34,37 @@ export function SessionAccountsPanel({
   return (
     <div className='gx-accounts gx-account-panel'>
       <div className='gx-account-heading'>
-        <div>
-          <h3>Accounts &amp; limits</h3>
-          <p>The login behind this conversation.</p>
-        </div>
+        <h3>Accounts &amp; limits</h3>
         <div className='gx-account-row-actions'>
-          <Button
-            variant='outline'
-            size='sm'
-            disabled={busy}
-            onClick={() => void request({ operation: 'session', refresh: true })}
-          >
-            Refresh
-          </Button>
-          <Button variant='ghost' size='sm' onClick={() => setManage(!manage)}>
-            {manage ? 'Back to session' : 'Manage accounts'}
-          </Button>
-          <Button variant='ghost' size='sm' onClick={close}>
-            Close
-          </Button>
+          <AppTooltip content='Refresh accounts and usage'>
+            <Button
+              aria-label='Refresh accounts and usage'
+              variant='ghost'
+              size='icon-sm'
+              disabled={busy}
+              onClick={() => void request({ operation: 'session', refresh: true })}
+            >
+              <IconRefresh aria-hidden='true' />
+            </Button>
+          </AppTooltip>
+          <AppTooltip content='Manage accounts in Settings'>
+            <Button
+              aria-label='Manage accounts in Settings'
+              variant='ghost'
+              size='icon-sm'
+              onClick={() => {
+                openAppModal({
+                  type: 'open',
+                  modal: 'settings',
+                  initialTab: 'agents',
+                  initialAgentsSection: 'accounts',
+                });
+                close();
+              }}
+            >
+              <IconSettings aria-hidden='true' />
+            </Button>
+          </AppTooltip>
         </div>
       </div>
       {error && (
@@ -59,8 +74,6 @@ export function SessionAccountsPanel({
       )}
       {!data ? (
         <p aria-live='polite'>{busy ? 'Reading accounts and usage…' : 'Could not load accounts.'}</p>
-      ) : manage ? (
-        <AccountManager data={data} busy={busy} request={request} />
       ) : !session ? (
         <p>Account management supports Claude and Codex sessions.</p>
       ) : (
@@ -89,8 +102,8 @@ export function SessionAccountsPanel({
               <div className='gx-account-current'>
                 {current && <AccountIdentity account={current} />}
                 <div>
-                  <strong>{current?.name ?? 'Default CLI login'}</strong>
-                  <p>{current?.email ?? 'Uses the CLI’s ordinary login on this computer.'}</p>
+                  <strong><AccountText text={current?.name ?? 'Default CLI login'} /></strong>
+                  <p><AccountText text={current?.email ?? 'Uses the CLI’s ordinary login on this computer.'} /></p>
                 </div>
               </div>
               {current?.usageError && <p>{current.usageError}</p>}
@@ -139,8 +152,8 @@ export function SessionAccountsPanel({
                   >
                     <AccountIdentity account={a} />
                     <span className='gx-account-row-copy'>
-                      <strong>{a.name}</strong>
-                      <small>{a.email}</small>
+                      <strong><AccountText text={a.name} /></strong>
+                      <small><AccountText text={a.email} /></small>
                     </span>
                     <span>{a.status === 'ready' ? 'Use account →' : 'Reconnect'}</span>
                   </button>
@@ -158,20 +171,25 @@ export function SessionAccountsPanel({
               <p>Switching resumes the same conversation. Stop an active turn before switching.</p>
             </section>
             <section>
-              <h3>Keep going at a limit</h3>
-              <p>New {session.provider === 'claude' ? 'Claude' : 'Codex'} sessions</p>
-              <PolicyControls
-                policy={data.defaults[session.provider]}
-                scope='New sessions'
-                disabled={busy}
-                onChange={(policy) => void request({ operation: 'defaults', provider: session.provider, policy })}
-              />
               <div className='gx-account-local-policy'>
-                <h3>This session</h3>
+                <div className='gx-account-session-policy-heading'>
+                  <h3>Keep going at a limit</h3>
+                  {!customize && !session.override && (
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      aria-label='Customize this session'
+                      onClick={() => setCustomize(true)}
+                    >
+                      <IconAdjustmentsHorizontal aria-hidden='true' />
+                      Customize
+                    </Button>
+                  )}
+                </div>
                 <p>
                   {session.override
-                    ? 'Custom continuation settings'
-                    : `Saved defaults: ${session.policy.enabled ? (session.policy.atLimit === 'wait' ? 'wait for reset' : 'switch when eligible') : 'automatic continuation off'}`}
+                    ? 'Custom settings · This session only'
+                    : `Session defaults · ${session.policy.enabled ? (session.policy.atLimit === 'wait' ? 'Wait for reset' : 'Switch when eligible') : 'Automatic continuation off'}`}
                 </p>
                 {customize || session.override ? (
                   <>
@@ -184,19 +202,17 @@ export function SessionAccountsPanel({
                     <Button
                       variant='ghost'
                       size='sm'
+                      className='gx-account-policy-reset'
                       disabled={busy}
                       onClick={async () => {
                         if (await request({ operation: 'sessionPolicy', policy: null })) setCustomize(false);
                       }}
                     >
+                      <IconArrowBackUp aria-hidden='true' />
                       Use session defaults
                     </Button>
                   </>
-                ) : (
-                  <Button variant='outline' size='sm' onClick={() => setCustomize(true)}>
-                    Customize this session
-                  </Button>
-                )}
+                ) : null}
               </div>
             </section>
           </div>

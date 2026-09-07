@@ -599,6 +599,7 @@ child window with no gxserver client, so its export request comes back with
 only the toggles and the runtime resolves everything else from this context.
 */
 export type GpuiExportTranscriptRequestContext = {
+  sessionTitle: string;
   /** The session's agent when known upfront (local sessions). */
   agentId?: string;
   /** Absent for the local daemon; set for a remote machine's own daemon. */
@@ -610,6 +611,7 @@ export type GpuiExportTranscriptRequestContext = {
 };
 
 export type GpuiExportedTranscriptResult = {
+  sessionTitle: string;
   /** The exported session's agent, so the dialog can preselect the same one. */
   agentId?: string;
   /** Absolute path of the markdown file, on `machineId`'s disk. */

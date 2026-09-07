@@ -1,5 +1,9 @@
 import type { GxserverSidebarHudCommandButton } from '@/packages/shared/gxserver-protocol';
-import type { OpenAppModalMessage, SettingsRemoteSection } from '@/packages/core-ui/app-modal-host-bridge';
+import type {
+  OpenAppModalMessage,
+  SettingsAgentsSection,
+  SettingsRemoteSection,
+} from '@/packages/core-ui/app-modal-host-bridge';
 import type { SettingsModalTab } from '@/packages/core-ui/settings-modal';
 
 export type OpenRecentProjectsModalDetail = Pick<
@@ -75,6 +79,7 @@ export interface RunTitlebarActionDetail {
  * card the Remote Setup modal hands off to.
  */
 export interface OpenSettingsModalDetail {
+  initialAgentsSection?: SettingsAgentsSection;
   initialRemoteSection?: SettingsRemoteSection;
   initialTab?: SettingsModalTab;
 }

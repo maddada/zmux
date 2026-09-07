@@ -236,6 +236,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       'resourcesTitlebarButtonHidden',
       DEFAULT_ghostex_SETTINGS.resourcesTitlebarButtonHidden
     ),
+    devServersTitlebarButtonHidden: readBoolean(
+      source,
+      'devServersTitlebarButtonHidden',
+      DEFAULT_ghostex_SETTINGS.devServersTitlebarButtonHidden
+    ),
     extensionsTitlebarButtonHidden: readBoolean(
       source,
       'extensionsTitlebarButtonHidden',
@@ -382,6 +387,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       'showCloseButtonOnSessionCards',
       DEFAULT_ghostex_SETTINGS.showCloseButtonOnSessionCards
     ),
+    hideAccountEmails: readBoolean(source, 'hideAccountEmails', DEFAULT_ghostex_SETTINGS.hideAccountEmails),
     /**
      * CDXC:Sessions 2026-05-15-08:57
      * Older settings files should preserve the current session-card timestamp
@@ -830,6 +836,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
      * migration or fallback execution path.
      */
     hotkeys: normalizeghostexHotkeySettings(source.hotkeys),
+    showActivePaneOutline: readBoolean(source, 'showActivePaneOutline', DEFAULT_ghostex_SETTINGS.showActivePaneOutline),
     workspaceActivePaneBorderColor:
       readString(
         source,

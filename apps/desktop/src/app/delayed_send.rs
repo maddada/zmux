@@ -1979,6 +1979,9 @@ impl GhostexGpuiApp {
                 if let Some(group_id) = bounded_text("groupId", 512) {
                     message["groupId"] = serde_json::json!(group_id);
                 }
+                if let Some(account_id) = bounded_text("accountId", 256) {
+                    message["accountId"] = serde_json::json!(account_id);
+                }
                 self.dispatch_gpui_sidebar_host_message(message, cx);
             }
             "removeProject" => {

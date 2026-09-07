@@ -116,6 +116,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   docsViewTabHidden: false,
   tipsAndTricksTitlebarButtonHidden: false,
   resourcesTitlebarButtonHidden: false,
+  devServersTitlebarButtonHidden: false,
   extensionsTitlebarButtonHidden: false,
   gitActionsTitlebarButtonHidden: false,
   quickActionsTitlebarButtonHidden: false,
@@ -256,6 +257,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * diff stats.
    */
   hideLastActiveTimeOnSessionCards: SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideLastActiveTimeOnSessionCards,
+  hideAccountEmails: false,
   showSessionCloseContextMenuAction: false,
   showSessionCommandCopyActions: false,
   showSessionDetailsCopyAction: false,
@@ -514,6 +516,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   promptEditorBackend: 'monaco',
   hotkeys: DEFAULT_ghostex_HOTKEYS,
+  showActivePaneOutline: false,
   workspaceActivePaneBorderColor: '#3b82f6',
   /**
    * CDXC:Workarea 2026-06-07-16:53:

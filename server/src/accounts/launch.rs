@@ -6,6 +6,100 @@ use crate::{
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
+
+/// CDXC:AgentProviders 2026-09-07 DECISION:
+/// Picking an account for a custom agent keeps its model, instructions and other command arguments. Replace only the provider invocation, retaining the original command for later account switches and resumes.
+pub(crate) fn with_account_command(
+    base: &str,
+    provider: Provider,
+    wrapper: &str,
+) -> Result<String, DomainStateError> {
+    let invalid = || {
+        DomainStateError::bad_request(format!(
+        "Account selection needs a {} command (or {} run). Update this custom agent's command while keeping its arguments.",
+        provider.id(), provider.helper()
+    ))
+    };
+    let mut offset = 0;
+    while let Some((start, end, word)) = command_word(base, offset) {
+        offset = end;
+        // Environment assignments and the standard invocation prefixes keep their original shell spelling.
+        if word.contains('=') || matches!(word.as_str(), "env" | "exec" | "command") {
+            continue;
+        }
+        let executable = Path::new(&word)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if executable == provider.id() {
+            return Ok(format!("{}{wrapper}{}", &base[..start], &base[end..]));
+        }
+        if executable == provider.helper() {
+            let (_, run_end, run) = command_word(base, offset).ok_or_else(invalid)?;
+            if run != "run" {
+                return Err(invalid());
+            }
+            let (_, slot_end, _) = command_word(base, run_end).ok_or_else(invalid)?;
+            offset = slot_end;
+            while let Some((_, end, word)) = command_word(base, offset) {
+                if word == "--" {
+                    return Ok(format!("{}{wrapper}{}", &base[..start], &base[end..]));
+                }
+                if !matches!(
+                    word.as_str(),
+                    "--share-history" | "--no-share" | "--require-session"
+                ) {
+                    return Ok(format!("{}{wrapper}{}", &base[..start], &base[offset..]));
+                }
+                offset = end;
+            }
+            return Ok(format!("{}{wrapper}", &base[..start]));
+        }
+        return Err(invalid());
+    }
+    Err(invalid())
+}
+
+// Read just enough shell spelling to locate the invocation; arguments are retained verbatim, including quotes and expansions.
+fn command_word(command: &str, from: usize) -> Option<(usize, usize, String)> {
+    let start = from + command.get(from..)?.len() - command.get(from..)?.trim_start().len();
+    if start == command.len() {
+        return None;
+    }
+    let mut word = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for (relative, ch) in command[start..].char_indices() {
+        if escaped {
+            word.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && quote != Some('\'') {
+            escaped = true;
+            continue;
+        }
+        if quote == Some(ch) {
+            quote = None;
+            continue;
+        }
+        if quote.is_none() {
+            if matches!(ch, '\'' | '"') {
+                quote = Some(ch);
+                continue;
+            }
+            if ch.is_whitespace() {
+                return Some((start, start + relative, word));
+            }
+        }
+        word.push(ch);
+    }
+    if quote.is_some() || escaped {
+        return None;
+    }
+    Some((start, command.len(), word))
+}
+
 pub(crate) fn provider(project: &Value, session: &Value) -> Option<Provider> {
     match crate::agents::session_agent_family_id(project, session).as_deref() {
         Some("claude") => Some(Provider::Claude),
@@ -27,7 +121,19 @@ pub(crate) fn command(home: &Path, account: &SavedAccount) -> Result<String, Dom
         quote_shell_arg(&account.selector)
     ))
 }
-pub(crate) fn assign(runtime: &mut Map<String, Value>, account: &SavedAccount, command: String) {
+pub(crate) fn assign(
+    runtime: &mut Map<String, Value>,
+    account: &SavedAccount,
+    command: String,
+) -> Result<String, DomainStateError> {
+    let base = runtime
+        .get("accountBaseCommand")
+        .or_else(|| runtime.get("agentCommand"))
+        .and_then(Value::as_str)
+        .unwrap_or(account.provider.id())
+        .to_string();
+    let command = with_account_command(&base, account.provider, &command)?;
+    runtime.entry("accountBaseCommand").or_insert(json!(base));
     for (k, v) in [
         ("accountId", json!(account.id)),
         ("accountProvider", json!(account.provider)),
@@ -38,6 +144,7 @@ pub(crate) fn assign(runtime: &mut Map<String, Value>, account: &SavedAccount, c
     ] {
         runtime.insert(k.into(), v);
     }
+    Ok(command)
 }
 pub(crate) fn apply_new_session(
     db: &Connection,
@@ -59,7 +166,11 @@ pub(crate) fn apply_new_session(
             .cloned()
             .unwrap_or_default()));
     if runtime.get("accountId").is_some_and(Value::is_null) {
-        return Ok(Some(provider.id().into()));
+        let base = runtime
+            .get("accountBaseCommand")
+            .and_then(Value::as_str)
+            .unwrap_or(provider.id());
+        return Ok(Some(with_account_command(base, provider, provider.id())?));
     }
     let id = runtime
         .get("accountId")
@@ -77,8 +188,7 @@ pub(crate) fn apply_new_session(
         })?;
     let home = home()?;
     let cmd = command(&home, account)?;
-    assign(runtime, account, cmd.clone());
-    Ok(Some(cmd))
+    Ok(Some(assign(runtime, account, cmd)?))
 }
 pub(crate) fn home() -> Result<PathBuf, DomainStateError> {
     std::env::var_os("HOME")

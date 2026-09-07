@@ -18,9 +18,16 @@ impl AccountRuntime {
             .clone()
     }
     pub fn refresh(&self, home: &Path, force: bool) -> Snapshot {
-        let _gate = self.poll_gate.lock().unwrap_or_else(|e| e.into_inner());
         let cached = self.snapshot();
         let age = if force { 15 } else { 120 };
+        if cached
+            .fetched_at
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(age))
+        {
+            return cached;
+        }
+        let _gate = self.poll_gate.lock().unwrap_or_else(|e| e.into_inner());
+        let cached = self.snapshot();
         if cached
             .fetched_at
             .is_some_and(|t| t.elapsed() < Duration::from_secs(age))

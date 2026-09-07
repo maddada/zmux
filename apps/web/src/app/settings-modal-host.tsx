@@ -51,6 +51,7 @@ export function SettingsModalHost({ runtime }: { runtime: WebSidebarRuntime }) {
     <Suspense fallback={null}>
       <SettingsModal
         appIconPickerUnavailable
+        initialAgentsSection={openDetail?.initialAgentsSection}
         initialRemoteSection={openDetail?.initialRemoteSection}
         initialTab={openDetail?.initialTab}
         isOpen

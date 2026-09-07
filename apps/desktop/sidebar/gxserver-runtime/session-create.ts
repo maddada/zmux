@@ -68,7 +68,7 @@ export interface GpuiSidebarRuntimeSessionCreateMethods {
   resolveSessionTitleGenerationCommandForGxserver(settings: ghostexSettings): string | undefined;
   createQuickProject(kind: 'agent' | 'terminal'): Promise<GxserverProjectDomainState | undefined>;
   createQuickTerminal(): Promise<void>;
-  createQuickAgentSession(agentId: string): Promise<void>;
+  createQuickAgentSession(agentId: string, accountId?: string): Promise<void>;
   openQuickBrowserTab(): void;
   openBrowserPaneInGroup(groupId: string): void;
   createSession(groupId?: string | undefined): Promise<void>;
@@ -91,12 +91,12 @@ export interface GpuiSidebarRuntimeSessionCreateMethods {
     prompt?: string,
     renameCommand?: string
   ): Promise<void>;
-  createAgentSessionFromSidebarLaunch(agentId: string, groupId?: string | undefined): Promise<void>;
-  requestAgentSessionLaunch(agentId: string, groupId?: string | undefined): Promise<void>;
+  createAgentSessionFromSidebarLaunch(agentId: string, groupId?: string | undefined, accountId?: string): Promise<void>;
+  requestAgentSessionLaunch(agentId: string, groupId?: string | undefined, accountId?: string): Promise<void>;
   confirmAgentHookLaunch(
     message: Extract<SidebarToExtensionMessage, { type: 'confirmAgentHookLaunch' }>
   ): Promise<void>;
-  createAgentSession(agentId: string, groupId?: string | undefined): Promise<void>;
+  createAgentSession(agentId: string, groupId?: string | undefined, accountId?: string): Promise<void>;
   searchPreviousSessionsByText(): void;
   handleGpuiOsIntegrationCommand(payload: unknown): Promise<void>;
   createOsIntegrationTerminal(input: { command?: string; cwd?: string; title?: string }): Promise<void>;
@@ -218,7 +218,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     }
   },
 
-  async createQuickAgentSession(this: GpuiSidebarRuntime, agentId: string): Promise<void> {
+  async createQuickAgentSession(this: GpuiSidebarRuntime, agentId: string, accountId?: string): Promise<void> {
     /*
     Match macOS createNativeAgentChat: a Quick agent never launches inside the
     active code project. Give it a new projectless chat workspace, then reuse
@@ -226,7 +226,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     */
     const project = await this.createQuickProject('agent');
     if (project) {
-      await this.createAgentSession(agentId, createGxserverPresentationProjectGroupId(project.projectId));
+      await this.createAgentSession(agentId, createGxserverPresentationProjectGroupId(project.projectId), accountId);
     }
   },
 
@@ -539,25 +539,27 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
   async createAgentSessionFromSidebarLaunch(
     this: GpuiSidebarRuntime,
     agentId: string,
-    groupId?: string | undefined
+    groupId?: string | undefined,
+    accountId?: string
   ): Promise<void> {
     if (groupId === GPUI_GXSERVER_CHATS_GROUP_ID) {
-      await this.createQuickAgentSession(agentId);
+      await this.createQuickAgentSession(agentId, accountId);
       return;
     }
-    await this.createAgentSession(agentId, groupId);
+    await this.createAgentSession(agentId, groupId, accountId);
   },
 
   async requestAgentSessionLaunch(
     this: GpuiSidebarRuntime,
     agentId: string,
-    groupId?: string | undefined
+    groupId?: string | undefined,
+    accountId?: string
   ): Promise<void> {
     const normalizedAgentId = agentId.trim();
     const agent = this.resolveSidebarAgent(normalizedAgentId);
     const hookAgentId = getDefaultSidebarAgentByIcon(agent?.icon)?.agentId;
     if (!normalizedAgentId || !agent || !hookAgentId) {
-      await this.createAgentSessionFromSidebarLaunch(agentId, groupId);
+      await this.createAgentSessionFromSidebarLaunch(agentId, groupId, accountId);
       return;
     }
 
@@ -582,7 +584,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
 
     const hookStatus = status.agents.find((row) => row.agentId === hookAgentId);
     if (!hookStatus || hookStatus.status === 'installed' || hookStatus.status === 'cliMissing') {
-      await this.createAgentSessionFromSidebarLaunch(agentId, groupId);
+      await this.createAgentSessionFromSidebarLaunch(agentId, groupId, accountId);
       return;
     }
 
@@ -591,6 +593,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       agentName: agent.name,
       groupId,
       hookAgentId,
+      accountId,
       modal: 'agentHooksRequired',
       type: 'open',
     });
@@ -607,7 +610,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
         description:
           'Install and approve the hooks in order for Chat View to work correctly. Resuming and working/done indicators also require hooks.',
       });
-      await this.createAgentSessionFromSidebarLaunch(message.agentId, message.groupId);
+      await this.createAgentSessionFromSidebarLaunch(message.agentId, message.groupId, message.accountId);
       return;
     }
 
@@ -638,10 +641,10 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       });
       return;
     }
-    await this.createAgentSessionFromSidebarLaunch(message.agentId, message.groupId);
+    await this.createAgentSessionFromSidebarLaunch(message.agentId, message.groupId, message.accountId);
   },
 
-  async createAgentSession(this: GpuiSidebarRuntime, agentId: string, groupId = this.activeGroupId): Promise<void> {
+  async createAgentSession(this: GpuiSidebarRuntime, agentId: string, groupId = this.activeGroupId, accountId?: string): Promise<void> {
     const remoteGroup = groupId ? parseGpuiRemotePresentationGroupId(groupId) : undefined;
     if (remoteGroup) {
       const normalizedAgentId = agentId.trim();
@@ -673,7 +676,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
           draft: true,
           projectId: remoteGroup.projectId,
           requireLaunchCommand: true,
-          runtimeSettings: this.createFirstPromptTitleRuntimeSettings(),
+          runtimeSettings: { ...this.createFirstPromptTitleRuntimeSettings(), ...(accountId ? { accountId } : {}) },
           surface: 'workspace',
           title,
         }
@@ -754,6 +757,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
               normalizedAgentId
             ),
             projectId,
+            accountId,
             type: 'ghostex.gpui.sidebar.createProjectAgent',
             version: 1,
           })
@@ -792,7 +796,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
           icon: agent.icon,
         },
         projectId,
-        runtimeSettings: this.createFirstPromptTitleRuntimeSettings(),
+        runtimeSettings: { ...this.createFirstPromptTitleRuntimeSettings(), ...(accountId ? { accountId } : {}) },
         surface: 'workspace',
         title: createAgentSessionDefaultTitle(agent.name),
       });

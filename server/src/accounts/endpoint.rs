@@ -28,11 +28,17 @@ pub(crate) fn dispatch(
     params: &Map<String, Value>,
 ) -> Result<Value, DomainStateError> {
     let operation = required(params, "operation")?;
-    let snapshot = state.accounts.refresh(
-        &state.paths.home_dir,
-        params.get("refresh").and_then(Value::as_bool) == Some(true)
-            || matches!(operation, "register" | "select"),
-    );
+    // CDXC:AgentProviders 2026-09-07 WHY:
+    // A manual switch already has a selected saved login and validates its identity locally in launch::command. Polling both providers' usage first could delay the restart by an unrelated network timeout.
+    let snapshot = if operation == "select" {
+        state.accounts.snapshot()
+    } else {
+        state.accounts.refresh(
+            &state.paths.home_dir,
+            params.get("refresh").and_then(Value::as_bool) == Some(true)
+                || operation == "register",
+        )
+    };
     let _gate = state.accounts.mutations.lock().map_err(store::error)?;
     let db = crate::storage::open_gxserver_database(&state.paths).map_err(store::error)?;
     let repository = DomainRepository::new(&db, &state.metadata.server_id);
@@ -105,7 +111,7 @@ pub(crate) fn dispatch(
                         .as_object()
                         .cloned()
                         .unwrap_or_default();
-                    launch::assign(&mut runtime, account, command.clone());
+                    launch::assign(&mut runtime, account, command.clone())?;
                     let mut settings = session["launchSettings"]
                         .as_object()
                         .cloned()
@@ -351,7 +357,7 @@ pub(crate) fn select(
             ));
         }
         let command = launch::command(&state.paths.home_dir, account)?;
-        launch::assign(&mut runtime, account, command);
+        launch::assign(&mut runtime, account, command)?;
     } else {
         for k in [
             "accountId",
@@ -364,9 +370,17 @@ pub(crate) fn select(
             runtime.remove(k);
         }
         runtime.insert("accountId".into(), Value::Null);
-        runtime.insert("accountCommand".into(), json!(provider.id()));
+        let base = runtime.get("accountBaseCommand").and_then(Value::as_str).unwrap_or(provider.id());
+        let command = launch::with_account_command(base, provider, provider.id())?;
+        runtime.insert("accountCommand".into(), json!(command));
     }
     runtime.remove("accountRecovery");
+    let old_limit = crate::session_chat_options::cached_session_chat_terminal_notice(
+        state, session["projectId"].as_str().unwrap_or_default(), session["sessionId"].as_str().unwrap_or_default(),
+    ).filter(|notice| notice.kind == "usageLimit").map(|notice| notice.identity());
+    if let Some(identity) = &old_limit {
+        runtime.insert("accountSuppressedUsageNotice".into(), json!(identity));
+    }
     let prompted = session
         .pointer("/runtimeSettings/agentSessionId")
         .and_then(Value::as_str)
@@ -400,6 +414,11 @@ pub(crate) fn select(
     }
     let updated = update_session(repository, session, runtime)?;
     repository.update_session(&json!({"projectId":session["projectId"],"sessionId":session["sessionId"],"launchSettings":launch_settings}).as_object().unwrap().clone())?;
+    if let Some(identity) = old_limit {
+        crate::session_chat_notice::suppress_account_usage_notice(
+            session["projectId"].as_str().unwrap_or_default(), session["sessionId"].as_str().unwrap_or_default(), identity,
+        );
+    }
     if was_running {
         cycle(state, repository, &updated, "/api/wakeSession")?;
     }
@@ -408,6 +427,10 @@ pub(crate) fn select(
         session["projectId"].as_str().unwrap_or(""),
         session["sessionId"].as_str().unwrap_or(""),
     );
+    super::continuation::start(state, repository, session)?;
+    crate::session_chat_options::session_chat_terminal_notice_publisher(
+        state, session["projectId"].as_str().unwrap_or_default(), session["sessionId"].as_str().unwrap_or_default(),
+    )();
     Ok(())
 }
 pub(crate) fn cycle(
