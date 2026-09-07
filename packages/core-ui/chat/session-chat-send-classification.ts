@@ -2,7 +2,7 @@
 // firstToken is NOT trimmed — a leading space means prose, because the agent
 // TUIs only treat LINE-LEADING tokens as commands.
 
-export type SessionChatSendClassification = 'chat' | 'command' | 'unknown-token';
+export type SessionChatSendClassification = 'chat' | 'command' | 'local-command' | 'unknown-token';
 
 /**
  * Default verified catalog used for local "Ran /x" markers. Only catalog
@@ -22,6 +22,9 @@ export function classifySessionChatSend(
   }
   if (firstToken.startsWith('/')) {
     return 'unknown-token';
+  }
+  if (firstToken.startsWith('!')) {
+    return 'local-command';
   }
   if (skillPrefix === '$' && firstToken.startsWith('$')) {
     // `$` is Codex grammar only; elsewhere `$PATH` is prose.
