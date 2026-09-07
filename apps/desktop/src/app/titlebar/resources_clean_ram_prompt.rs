@@ -32,11 +32,11 @@ pub(crate) fn gpui_resources_clean_ram_prompt(snapshot: &GpuiNativeResourcesSnap
         snapshot.inactive_terminal_sleep_count,
     ));
     for (label, rows) in [
-        ("Dev servers".to_string(), &snapshot.server_rows),
         (
             format!("{} sessions", snapshot.project_label),
             &snapshot.session_rows,
         ),
+        ("Other projects".to_string(), &snapshot.other_session_rows),
         ("Code IDE".to_string(), &snapshot.code_rows),
         ("Browser".to_string(), &snapshot.browser_rows),
         ("Orphaned / detached".to_string(), &snapshot.orphan_rows),

@@ -360,8 +360,8 @@ impl GhostexGpuiApp {
             });
 
         for (label, rows) in [
-            ("Dev Servers", snapshot.server_rows),
             ("Ghostex", snapshot.session_rows),
+            ("Other projects", snapshot.other_session_rows),
             ("Code IDE", snapshot.code_rows),
             ("Browser Tabs", snapshot.browser_rows),
             ("Orphaned / Detached", snapshot.orphan_rows),

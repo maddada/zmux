@@ -6,8 +6,9 @@
 // for one of them here and qualify its call sites instead.
 pub(crate) mod extension_titlebar_panel;
 pub(crate) mod modal_host;
-pub(crate) mod titlebar_panels;
 pub(crate) mod remote_sites;
+mod resources_style;
+pub(crate) mod titlebar_panels;
 pub(crate) mod toast;
 
 pub(crate) use extension_titlebar_panel::*;

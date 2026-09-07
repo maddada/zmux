@@ -93,6 +93,11 @@ pub(crate) fn gpui_native_resources_snapshot_json(
             snapshot.project_label.to_uppercase(),
             &snapshot.session_rows,
         ),
+        (
+            "otherProjects",
+            "OTHER PROJECTS".to_string(),
+            &snapshot.other_session_rows,
+        ),
         ("codeIde", "CODE IDE".to_string(), &snapshot.code_rows),
         (
             "browserTabs",
@@ -123,6 +128,7 @@ pub(crate) fn gpui_native_resources_snapshot_json(
     for rows in [
         &snapshot.server_rows,
         &snapshot.session_rows,
+        &snapshot.other_session_rows,
         &snapshot.code_rows,
         &snapshot.browser_rows,
         &snapshot.orphan_rows,
@@ -161,6 +167,7 @@ pub(crate) fn gpui_native_resources_snapshot_json(
         "projectLabel": snapshot.project_label,
         "sampledAt": gpui_status_generated_at(),
         "sections": sections,
+        "sessionInventoryError": snapshot.session_inventory_error,
     })
 }
 

@@ -12,6 +12,7 @@
 //
 // Cluster: titlebar menus, popups, actions, and titlebar render_* builders
 
+use super::resources_session_inventory::read_resource_session_owners;
 use std::collections::{HashMap, HashSet};
 
 // RefCell backs cross-platform runtime state (window frame persistence), not
@@ -46,6 +47,7 @@ impl GhostexGpuiApp {
         let children_by_parent = gpui_native_resource_children_by_parent(&processes);
         let mut claimed_pids = HashSet::new();
         let mut session_rows = Vec::new();
+        let mut other_session_rows = Vec::new();
         let mut inactive_terminal_sleep_count = 0;
         let mut sleep_all_session_count = 0;
 
@@ -76,12 +78,15 @@ impl GhostexGpuiApp {
             .projects
             .iter()
             .flat_map(|project| {
-                project.sessions.iter().map(move |session| {
-                    (
-                        format!("-{}-{}", project.project_id, session.session_id),
+                project.sessions.iter().filter_map(move |session| {
+                    // CDXC:Resources 2026-09-06 WHY:
+                    // The bridge carries combined-session:<project>:<session>, not a raw daemon ID; concatenating it made live sessions look orphaned and disabled Sleep Inactive.
+                    let key = gpui_combined_presentation_session_key(&session.session_id)?;
+                    Some((
+                        format!("-{}-{}", key.project_id, key.session_id),
                         project.title.clone(),
                         session.clone(),
-                    )
+                    ))
                 })
             })
             .collect::<Vec<_>>();
@@ -139,7 +144,9 @@ impl GhostexGpuiApp {
                 .iter()
                 .filter(|process| {
                     !claimed_pids.contains(&process.pid)
-                        && zmx_session_name.is_some_and(|name| process.command.contains(name))
+                        && zmx_session_name.is_some_and(|name| {
+                            gpui_native_resource_zmx_session_name(process) == Some(name)
+                        })
                 })
                 .cloned()
                 .collect::<Vec<_>>();
@@ -179,25 +186,13 @@ impl GhostexGpuiApp {
                 label: title,
                 memory_mb,
                 pids: tree.iter().map(|process| process.system_pid).collect(),
+                termination_targets: Vec::new(),
                 session_id: Some(session_id),
                 sleep_candidate,
                 url: None,
             });
         }
 
-        /*
-        CDXC:Resources 2026-09-04 WHY:
-        The workspace mounts panes lazily, so after a restart or a project
-        switch most of the project's live sessions have no entry in
-        `terminal_sessions`. Their daemons and agents then fell into
-        Orphaned / Detached as bare "zmx pid N" rows and never counted for
-        Sleep Inactive, which read disabled while sixteen idle sessions were
-        awake. Seed those sessions from the sidebar's status-indicator
-        inventory instead, matching their processes by the zmx name suffix
-        `-<project>-<session>` (names are `<server>-<project>-<session>`, see
-        create_zmx_session_name in server/src/ids.rs). Their moon and Sleep
-        Project go through the sidebar runtime since no pane owns them.
-        */
         let represented_session_ids = session_rows
             .iter()
             .filter_map(|row| row.session_id.clone())
@@ -205,65 +200,57 @@ impl GhostexGpuiApp {
         let active_project_id =
             gpui_active_project_id_from_snapshot(self.latest_sidebar_project_snapshot.as_ref())
                 .map(str::to_string);
-        if let Some(active_project_id) = active_project_id.as_deref() {
-            let active_project_sessions = self
-                .sidebar_session_status_indicators
-                .projects
-                .iter()
-                .filter(|project| project.project_id == active_project_id)
-                .flat_map(|project| project.sessions.iter().cloned())
-                .collect::<Vec<_>>();
-            for indicator in active_project_sessions {
-                let session_id =
-                    gpui_combined_presentation_session_id(active_project_id, &indicator.session_id);
-                if represented_session_ids.contains(&session_id) {
-                    continue;
-                }
-                let zmx_name_suffix = format!("-{}-{}", active_project_id, indicator.session_id);
-                let seeds = processes
-                    .iter()
-                    .filter(|process| {
-                        !claimed_pids.contains(&process.pid)
-                            && process.command.contains(&zmx_name_suffix)
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let tree = gpui_collect_native_resource_process_tree_bounded(
-                    &seeds,
-                    &children_by_parent,
-                    &|candidate| claimed_pids.contains(&candidate.pid),
-                );
-                if tree.is_empty() {
-                    continue;
-                }
-                claimed_pids.extend(tree.iter().map(|process| process.pid));
-                let (cpu, memory_mb) = gpui_sum_native_resource_processes(&tree);
-                sleep_all_session_count += 1;
-                let sleep_candidate =
-                    zmx_session_is_idle(active_project_id, &indicator.session_id, &processes);
-                let seed = seeds.first();
-                session_rows.push(GpuiNativeResourceRow {
-                    action: GpuiNativeResourceAction::Session,
-                    agent_icon: None,
-                    children: gpui_native_resource_child_rows(&tree, seed.map(|row| row.pid)),
-                    cpu,
-                    detail: match seed {
-                        Some(process) => format!(
-                            "{} terminal pid {}",
-                            gpui_native_resource_process_name(process),
-                            process.system_pid
-                        ),
-                        None => "Active, not loaded".to_string(),
-                    },
-                    icon_path: "titlebar/terminal-2.svg",
-                    label: indicator.title.clone(),
-                    memory_mb,
-                    pids: tree.iter().map(|process| process.system_pid).collect(),
-                    session_id: Some(session_id),
-                    sleep_candidate,
-                    url: None,
-                });
+        let inventory = read_resource_session_owners(&processes);
+        let session_inventory_error = inventory.as_ref().err().cloned();
+        for owner in inventory.into_iter().flatten() {
+            let session_id =
+                gpui_combined_presentation_session_id(&owner.project_id, &owner.session_id);
+            if represented_session_ids.contains(&session_id) {
+                continue;
             }
+            let seeds = processes
+                .iter()
+                .filter(|process| {
+                    !claimed_pids.contains(&process.pid)
+                        && gpui_native_resource_zmx_session_name(process)
+                            == Some(owner.zmx_name.as_str())
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let tree = gpui_collect_native_resource_process_tree_bounded(
+                &seeds,
+                &children_by_parent,
+                &|candidate| claimed_pids.contains(&candidate.pid),
+            );
+            if tree.is_empty() {
+                continue;
+            }
+            claimed_pids.extend(tree.iter().map(|process| process.pid));
+            let (cpu, memory_mb) = gpui_sum_native_resource_processes(&tree);
+            sleep_all_session_count += 1;
+            let sleep_candidate =
+                zmx_session_is_idle(&owner.project_id, &owner.session_id, &processes);
+            let is_active_project = active_project_id.as_deref() == Some(owner.project_id.as_str());
+            let rows = if is_active_project {
+                &mut session_rows
+            } else {
+                &mut other_session_rows
+            };
+            rows.push(GpuiNativeResourceRow {
+                action: GpuiNativeResourceAction::Session,
+                agent_icon: None,
+                children: gpui_native_resource_child_rows(&tree, seeds.first().map(|row| row.pid)),
+                cpu,
+                detail: format!("{} • zmx", owner.project_title),
+                icon_path: "titlebar/terminal-2.svg",
+                label: owner.title,
+                memory_mb,
+                pids: tree.iter().map(|process| process.system_pid).collect(),
+                termination_targets: Vec::new(),
+                session_id: Some(session_id),
+                sleep_candidate,
+                url: None,
+            });
         }
 
         let mut browser_rows = Vec::new();
@@ -303,6 +290,7 @@ impl GhostexGpuiApp {
                 icon_path: BROWSER_ICON_WORLD,
                 label: tab.display_title(),
                 memory_mb,
+                termination_targets: Vec::new(),
                 pids: browser_processes
                     .iter()
                     .map(|process| process.system_pid)
@@ -333,6 +321,7 @@ impl GhostexGpuiApp {
                 icon_path: BROWSER_ICON_WORLD,
                 label: "Browser runtime".to_string(),
                 memory_mb,
+                termination_targets: Vec::new(),
                 pids: browser_runtime_processes
                     .iter()
                     .map(|process| process.system_pid)
@@ -420,6 +409,7 @@ impl GhostexGpuiApp {
             });
             if !claimed_pids.contains(&server.pid)
                 && !gpui_native_resource_is_ghostex_owned_process(process)
+                && !gpui_native_resource_is_ghostex_web_process(process)
                 && !runs_in_active_project
             {
                 continue;
@@ -447,10 +437,13 @@ impl GhostexGpuiApp {
             let Some(process) = processes.iter().find(|process| process.pid == server.pid) else {
                 continue;
             };
-            let owning_session = session_rows.iter().find(|row| {
-                matches!(row.action, GpuiNativeResourceAction::Session)
-                    && row.pids.contains(&server.pid)
-            });
+            let owning_session = session_rows
+                .iter()
+                .chain(other_session_rows.iter())
+                .find(|row| {
+                    matches!(row.action, GpuiNativeResourceAction::Session)
+                        && row.pids.contains(&server.pid)
+                });
             let tree = gpui_collect_native_resource_process_tree_bounded(
                 std::slice::from_ref(process),
                 &children_by_parent,
@@ -505,6 +498,7 @@ impl GhostexGpuiApp {
                 label: server.label,
                 memory_mb,
                 pids: tree.iter().map(|process| process.system_pid).collect(),
+                termination_targets: tree.clone(),
                 session_id: owning_session.and_then(|row| row.session_id.clone()),
                 sleep_candidate: false,
                 url: Some(server.url),
@@ -550,18 +544,24 @@ impl GhostexGpuiApp {
                 label: "Code".to_string(),
                 memory_mb,
                 pids: tree.iter().map(|process| process.system_pid).collect(),
+                termination_targets: Vec::new(),
                 session_id: None,
                 sleep_candidate: false,
                 url: None,
             });
         }
 
+        let protected_pids = gpui_native_resource_protected_pids(&processes);
         let orphan_roots = processes
             .iter()
             .filter(|process| {
                 !claimed_pids.contains(&process.pid)
                     && gpui_native_resource_is_ghostex_owned_process(process)
                     && gpui_native_resource_is_user_runtime_process(process)
+                    && !protected_pids.contains(&process.pid)
+                    && !gpui_native_resource_is_zmx_client(process)
+                    && (session_inventory_error.is_none()
+                        || gpui_native_resource_zmx_session_name(process).is_none())
             })
             .filter(|process| {
                 !processes.iter().any(|parent| {
@@ -571,55 +571,32 @@ impl GhostexGpuiApp {
                         && gpui_native_resource_is_user_runtime_process(parent)
                 })
             })
-            .take(16)
             .cloned()
             .collect::<Vec<_>>();
         let mut orphan_rows = Vec::new();
         for root in orphan_roots {
-            let tree = gpui_collect_native_resource_process_tree(
+            let tree = gpui_collect_native_resource_process_tree_bounded(
                 std::slice::from_ref(&root),
                 &children_by_parent,
-            )
-            .into_iter()
-            .filter(|process| !claimed_pids.contains(&process.pid))
-            .collect::<Vec<_>>();
+                &|process| {
+                    claimed_pids.contains(&process.pid) || protected_pids.contains(&process.pid)
+                },
+            );
             claimed_pids.extend(tree.iter().map(|process| process.pid));
             let (cpu, memory_mb) = gpui_sum_native_resource_processes(&tree);
-            /*
-            A daemon of another project's session is not an orphan to the
-            user: name it after the session and say which project it belongs
-            to, so the Sleep Inactive count and this section describe the same
-            processes. Only a daemon with no session in the inventory keeps
-            the bare process name.
-            */
-            let known_session = indicator_sessions
-                .iter()
-                .find(|(suffix, _, _)| gpui_native_resource_process_is_zmx_session(&root, suffix));
-            let (label, detail, sleep_candidate) = match known_session {
-                Some((suffix, project_title, session)) => (
-                    session.title.clone(),
-                    format!("{project_title} • zmx pid {}", root.system_pid),
-                    session.status == GpuiStatusIndicatorStatus::Available
-                        && gpui_native_resource_process_is_zmx_session(&root, suffix),
-                ),
-                None => (
-                    gpui_native_resource_process_name(&root),
-                    format!("pid {}", root.system_pid),
-                    false,
-                ),
-            };
             orphan_rows.push(GpuiNativeResourceRow {
                 action: GpuiNativeResourceAction::Orphan,
                 agent_icon: None,
                 children: gpui_native_resource_child_rows(&tree, Some(root.pid)),
                 cpu,
-                detail,
+                detail: format!("pid {}", root.system_pid),
                 icon_path: TITLEBAR_ICON_BOX,
-                label,
+                label: gpui_native_resource_process_name(&root),
                 memory_mb,
                 pids: tree.iter().map(|process| process.system_pid).collect(),
+                termination_targets: tree.clone(),
                 session_id: None,
-                sleep_candidate,
+                sleep_candidate: false,
                 url: None,
             });
         }
@@ -640,9 +617,11 @@ impl GhostexGpuiApp {
             code_rows,
             inactive_terminal_sleep_count,
             orphan_rows,
+            other_session_rows,
             project_label: active_project_label,
             server_rows,
             session_rows,
+            session_inventory_error,
             sleep_all_session_count,
             total_cpu,
             total_memory_mb,
