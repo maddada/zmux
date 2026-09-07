@@ -1,5 +1,50 @@
 # Changelog
 
+## 8.10.0 - 2026-09-07
+
+- New Features
+  - Sign in to several Claude or Codex accounts, switch a session between them, and let Ghostex move to the next account when one hits its limit. A setup guide walks you through each provider, and you can blur account emails when sharing your screen.
+  - Diagrams written in chat messages or Docs now draw as pictures you can open full screen.
+  - Dev Servers lists the local web servers your projects are running, with a titlebar button you can hide if you do not use it.
+  - A minimap beside long conversations lets you jump back to any earlier turn.
+  - Save a prompt you wrote straight from the chat into your Saved Prompts library.
+  - Pick the model and the reasoning effort for Claude and Codex from the chat bar.
+  - Browse the web servers running on a remote computer over SSH, inside Ghostex's browser.
+  - Split the session you are on into a second pane on the right.
+  - Mastra Code joins the agents you can launch.
+  - Restart Ghostex from the app menu.
+- Major Improvements
+  - The terminal engine moves to zmx 0.8.1. Installing this version restarts your running sessions once. Agents come back automatically, but anything they had in flight at that moment is lost, so update at a quiet time.
+  - Questions that used to appear only in the terminal now show up as cards in chat with buttons you can click: trust this folder, Codex dialogs, and the Grok, Hermes, and Pi permission prompts.
+  - Long Codex transcripts open in a pager you can restore back to the chat view, and rewinding a conversation now works for Codex as well as Claude.
+  - Chats you are not looking at release their memory against a budget, so keeping many sessions open costs noticeably less RAM.
+  - Codex shows its local command output and its sub-agent activity in chat as they happen.
+- Minor Improvements
+  - Edit in the chat box with the keyboard: move the caret by word or line, reach the last queued message with Alt+Up, and use the usual text shortcuts.
+  - Scroll continuously through models and effort levels in the picker instead of one step per gesture.
+  - The chat box gets out of the way while you scroll the conversation and returns when you stop.
+  - Context usage is shown as a percentage.
+  - Notices, questions, tool runs, and activity rows share one card look across the chat.
+  - A transcript you hand to another agent arrives as a named link instead of a bare file path.
+  - The Resources panel lists sessions from every project, not only the one you are in.
+  - The sidebar collapse, update, Back, and Forward buttons are one square family in the titlebar.
+  - Terminal, browser, and editor panes follow the window's rounded corners.
+  - Docs can reveal the file you have open, peek at the files list when you hover the expand button, and floats that list over a narrow pane instead of squeezing the page.
+  - Docs uses the same palette as the Kanban board.
+  - Settings previews the pairing QR code, and its search finds more of what is there.
+  - The web app shows the same toasts as the desktop app and is served by its own `ghostex web` command.
+  - Projects remember the session you were last on, and Quick Access reopens it.
+  - The session list keeps the sections you collapsed.
+- Stabilization
+  - Restored terminals keep their soft wraps, so resizing the window reflows the text instead of leaving broken lines.
+  - Sessions parked in the background stay attached and resize correctly when you come back to them.
+  - Composer text is versioned, so the newest edit wins when the desktop, web, and phone apps are typing into the same session.
+  - Arrow keys reach the agent list prompts that expect them.
+  - A forked session no longer inherits an unbounded Codex history.
+  - Codex sub-agent transcripts no longer set off agent hooks.
+  - Command terminals for a remote project are created on that machine, and reconnecting recovers them.
+  - Reading an agent's screen now takes a bounded slice of the terminal instead of the whole scrollback.
+
 ## 8.9.0 - 2026-09-05
 
 - Major
