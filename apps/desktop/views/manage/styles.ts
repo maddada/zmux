@@ -10,6 +10,14 @@ import { quickLabelColor } from './annotation-store';
 export const MANAGE_STYLES = `
   :root {
     color-scheme: dark;
+    /*
+     * CDXC:Docs 2026-09-07 WHY:
+     * The shared menu's default level 300 paints underneath the floating files sidebar at 650, making right-click menus invisible and unclickable.
+     * Keep the existing menu and its dismissal layer above Docs chrome and below app dialogs.
+     */
+    --sidebar-context-menu-backdrop-z-index: 749;
+    --sidebar-context-menu-z-index: 750;
+    --sidebar-context-menu-submenu-z-index: 751;
     --manage-bg: #0e0e0e;
     --manage-panel: #0e0e0e;
     --manage-panel-strong: #161616;
@@ -101,7 +109,7 @@ export const MANAGE_STYLES = `
 
   /*
    * CDXC:Docs 2026-06-30-13:45:
-   * When the Manage page is below 690px wide, Docs should use a floating sidebar above the full-width preview instead of squeezing the preview into a second grid column. Keep the sidebar side preference for which edge the floating panel opens from, and let outside clicks hide it.
+   * Floating mode keeps the preview full-width and preserves the sidebar side preference for which edge the panel opens from. The shell width breakpoint is owned by MANAGE_FLOATING_SIDEBAR_MAX_WIDTH.
    *
    * CDXC:Docs 2026-06-30-21:52:
    * The floating Docs sidebar must paint above the copied Meo Markdown toolbar, whose z-index is 500, so the file tree covers the entire editor chrome instead of starting visually below the toolbar. Cast the floating shadow from the sidebar edge that overlaps the Markdown editor so the panel reads as a raised sheet.
@@ -120,8 +128,12 @@ export const MANAGE_STYLES = `
    * CDXC:Docs 2026-09-05 DECISION:
    * User: make the files list match the existing app sidebar, including its lightweight text, neutral row states, and context menu.
    */
+  /*
+   * CDXC:Docs 2026-09-07 DECISION:
+   * User: Docs files sidebar, search row, and header rows (including header button resting fills when set) use #0b0b0b.
+   */
   .manage-sidebar {
-    background: var(--app-background);
+    background: #0b0b0b;
     color: var(--app-foreground);
     box-sizing: border-box;
     display: flex;
@@ -297,16 +309,13 @@ export const MANAGE_STYLES = `
     width: 42px;
   }
 
-  /*
-   * CDXC:Docs 2026-06-30-04:55:
-   * Docs sidebar header actions should now use the same 42px width, including the rightmost action, so the top control strip stays evenly spaced.
-   */
   .manage-sidebar-header .manage-icon-button:last-child {
-    width: 42px;
+    width: 40px;
   }
 
   .manage-sidebar-restore-button {
     border-right: 1px solid #252525;
+    width: 40px;
   }
 
   .manage-sidebar-header .manage-icon-button:not(:disabled):hover,
@@ -462,18 +471,19 @@ export const MANAGE_STYLES = `
   .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="markdown"] .manage-preview-header,
   .manage-shell[data-sidebar-hidden="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="html"] .manage-preview-header,
   .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="html"] .manage-preview-header {
-    padding-right: 38px;
+    padding-right: 40px;
   }
 
   .manage-search {
+    /* CDXC:Docs 2026-09-06 DECISION: User: make the Docs file search bar 3px taller. */
     align-items: center;
-    background: transparent;
+    background: #0b0b0b;
     border: 0;
     border-bottom: 1px solid #292929;
     box-sizing: border-box;
     display: flex;
     gap: 11px;
-    height: var(--manage-control-height);
+    height: calc(var(--manage-control-height) + 3px);
     margin: 0 0 4px;
     padding: 7px 10px;
     width: 100%;
@@ -706,14 +716,15 @@ export const MANAGE_STYLES = `
     padding: 0 5px;
   }
 
-  .sidebar-context-menu-backdrop {
-    z-index: 60;
-  }
-
   .manage-file-context-menu {
     color: var(--app-foreground);
     font-size: 12px;
     font-weight: 400;
+  }
+
+  /* The tooltip positioner owns stacking; its popup cannot escape a level below the Markdown toolbar. */
+  .tooltip-positioner {
+    z-index: var(--ghostex-tooltip-z-index, 1400);
   }
 
   .manage-file-context-menu-item {
@@ -816,13 +827,10 @@ export const MANAGE_STYLES = `
     grid-template-rows: auto minmax(0, 1fr);
   }
 
-  /*
-   * CDXC:Docs 2026-09-05 DECISION:
-   * User: keep this bar's square full-height buttons and their existing sizes and widths; only fonts and colors may change.
-   */
   .manage-preview-header {
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
     align-items: center;
+    background: #0b0b0b;
     border-bottom: 1px solid var(--manage-border);
     box-sizing: border-box;
     display: flex;
@@ -847,6 +855,12 @@ export const MANAGE_STYLES = `
      * icon anchored at the left edge.
      */
     align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    color: inherit;
+    padding: 0;
+    text-align: left;
     display: flex;
     flex: 1 1 0;
     font-size: 12px;
@@ -861,6 +875,15 @@ export const MANAGE_STYLES = `
     flex: 0 0 auto;
     height: 15px;
     width: 15px;
+  }
+
+  .manage-preview-title:hover {
+    color: #ffffff;
+  }
+
+  .manage-preview-title:focus-visible {
+    outline: 1px solid var(--manage-muted);
+    outline-offset: -1px;
   }
 
   .manage-preview-title span {
@@ -1074,7 +1097,24 @@ export const MANAGE_STYLES = `
   }
 
   .manage-preview-header-actions .manage-annotation-dropdown-trigger {
+    flex: 0 0 85px;
     padding: 0 9px;
+    width: 85px;
+  }
+
+  .manage-preview-header-actions .manage-add-global-comment-button,
+  .manage-preview-header-actions .manage-copy-feedback-button,
+  .manage-preview-header-actions .manage-clear-annotations-button,
+  .manage-preview-header-actions .manage-file-reload-button {
+    flex: 0 0 42px;
+    padding: 0;
+    width: 42px;
+  }
+
+  .manage-preview-header-actions .manage-add-global-comment-button > span,
+  .manage-preview-header-actions .manage-copy-feedback-button > span,
+  .manage-preview-header-actions .manage-clear-annotations-button > span {
+    display: none;
   }
 
   .manage-preview-header-actions .manage-count-badge {
@@ -1089,7 +1129,6 @@ export const MANAGE_STYLES = `
   }
 
   .manage-preview-header-actions .manage-file-reload-button {
-    padding: 0 10px;
     position: relative;
   }
 
@@ -1123,7 +1162,7 @@ export const MANAGE_STYLES = `
    * Keep Meo's single-row toolbar layout, measure before hiding the three secondary right-side utility buttons, and use one Live/Source toggle button instead of a two-option segmented control.
    */
   .manage-meo-markdown-editor .mode-toolbar {
-    background: #0d0d0d;
+    background: #0b0b0b;
     box-shadow: inset 0 -1px 0 var(--manage-border);
     box-sizing: border-box;
     display: flex;

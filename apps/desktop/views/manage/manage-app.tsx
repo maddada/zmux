@@ -407,13 +407,17 @@ export function ManageApp() {
   const contentAutosaveTimerRef = useRef<number | undefined>(undefined);
   const [error, setError] = useState<string>();
   const [annotationsByPath, setAnnotationsByPath] = useState<Record<string, ManageAnnotation[]>>({});
-  const [annotationPersistenceState, setAnnotationPersistenceState] = useState<
+  const [, setAnnotationPersistenceState] = useState<
     'idle' | 'loading' | 'ready' | 'saving' | 'saved' | 'error'
   >('idle');
   const [sidebarSide, setSidebarSide] = useState<ManageSidebarSide>(() => readStoredManageSidebarSide());
   const [sidebarWidth, setSidebarWidth] = useState(() => readStoredManageSidebarWidth());
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  /** CDXC:Docs 2026-09-06 DECISION: User: hovering over the expand button reveals the files list for as long as the cursor stays inside it. */
+  const [sidebarHoverExpanded, setSidebarHoverExpanded] = useState(false);
   const [sidebarFloating, setSidebarFloating] = useState(() => window.innerWidth < MANAGE_FLOATING_SIDEBAR_MAX_WIDTH);
+  const sidebarVisible = !sidebarHidden || sidebarHoverExpanded;
+  const sidebarOverlay = sidebarFloating || sidebarHoverExpanded;
   const [collapsedDirectoryPaths, setCollapsedDirectoryPaths] = useState<Set<string>>(() => new Set());
   const [creatingArtifactKind, setCreatingArtifactKind] = useState<ManageArtifactKind>();
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
@@ -424,6 +428,7 @@ export function ManageApp() {
   const [dropTarget, setDropTarget] = useState<ManageDropTarget>();
   const shellRef = useRef<HTMLElement | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
+  const [revealOpenFileRequested, setRevealOpenFileRequested] = useState(false);
   const annotationsLoadedRef = useRef(false);
   const annotationsSaveTimerRef = useRef<number | undefined>(undefined);
   const hasInitializedDirectoryCollapseRef = useRef(false);
@@ -686,7 +691,7 @@ export function ManageApp() {
     }
     /*
      * CDXC:Docs 2026-06-30-13:45:
-     * The Docs sidebar becomes a floating panel when the Manage page itself is narrower than 690px, not when the whole app window crosses a generic breakpoint. Measure the shell element so embedded and resized Manage surfaces use the same behavior.
+     * Measure the Docs shell element against MANAGE_FLOATING_SIDEBAR_MAX_WIDTH so embedded and resized Docs panes use their own viewport width.
      *
      * CDXC:Docs 2026-06-30-22:58:
      * Startup must apply floating sidebar mode before the first Docs paint when the project editor pane is already narrow. Use a layout effect so the shell width, not the larger app window width, decides the initial rendered mode.
@@ -713,7 +718,7 @@ export function ManageApp() {
   }, []);
 
   useEffect(() => {
-    if (!sidebarFloating || sidebarHidden) {
+    if (!sidebarOverlay || !sidebarVisible) {
       return undefined;
     }
     const hideFloatingSidebarOnOutsidePointerDown = (event: PointerEvent) => {
@@ -728,12 +733,33 @@ export function ManageApp() {
         return;
       }
       setSidebarHidden(true);
+      setSidebarHoverExpanded(false);
     };
     window.addEventListener('pointerdown', hideFloatingSidebarOnOutsidePointerDown, true);
     return () => {
       window.removeEventListener('pointerdown', hideFloatingSidebarOnOutsidePointerDown, true);
     };
-  }, [sidebarFloating, sidebarHidden]);
+  }, [sidebarOverlay, sidebarVisible]);
+
+  useEffect(() => {
+    if (!sidebarHoverExpanded) return;
+    const closeHoverSidebar = () => setSidebarHoverExpanded(false);
+    const trackSidebarPointer = (event: PointerEvent) => {
+      const bounds = sidebarRef.current?.getBoundingClientRect();
+      if (!bounds || event.clientX < bounds.left || event.clientX >= bounds.right ||
+          event.clientY < bounds.top || event.clientY >= bounds.bottom) {
+        closeHoverSidebar();
+      }
+    };
+    window.addEventListener('pointermove', trackSidebarPointer);
+    window.addEventListener('blur', closeHoverSidebar);
+    document.documentElement.addEventListener('pointerleave', closeHoverSidebar);
+    return () => {
+      window.removeEventListener('pointermove', trackSidebarPointer);
+      window.removeEventListener('blur', closeHoverSidebar);
+      document.documentElement.removeEventListener('pointerleave', closeHoverSidebar);
+    };
+  }, [sidebarHoverExpanded]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1753,6 +1779,30 @@ export function ManageApp() {
   }, [collapsedDirectoryPaths, query, treeOrderedEntries]);
   const isFileSearchActive = query.trim().length > 0;
 
+  /**
+   * CDXC:Docs 2026-09-07 DECISION:
+   * User: add a button immediately left of New file that takes the sidebar to the currently open file.
+   * Clear the filter and expand its ancestors before scrolling and focusing its row.
+   */
+  const revealOpenFile = useCallback(() => {
+    if (!selectedPath) return;
+    setQuery('');
+    setCollapsedDirectoryPaths((current) => {
+      const next = new Set(current);
+      for (const path of manageAncestorDirectoryPaths(selectedPath)) next.delete(path);
+      return next;
+    });
+    setRevealOpenFileRequested(true);
+  }, [selectedPath]);
+
+  useLayoutEffect(() => {
+    if (!revealOpenFileRequested) return;
+    const row = sidebarRef.current?.querySelector<HTMLButtonElement>('.manage-file-row[aria-selected="true"]');
+    row?.scrollIntoView({ block: 'center', inline: 'nearest' });
+    row?.focus({ preventScroll: true });
+    setRevealOpenFileRequested(false);
+  }, [revealOpenFileRequested, visibleEntries]);
+
   const contextMenuEntry = fileContextMenu ? entries.find((entry) => entry.path === fileContextMenu.path) : undefined;
   const contextMenuOperation =
     contextMenuEntry && fileOperation?.path === contextMenuEntry.path ? fileOperation.action : undefined;
@@ -1789,13 +1839,13 @@ export function ManageApp() {
   return (
     <main
       className='manage-shell'
-      data-sidebar-floating={String(sidebarFloating)}
-      data-sidebar-hidden={String(sidebarHidden)}
+      data-sidebar-floating={String(sidebarOverlay)}
+      data-sidebar-hidden={String(!sidebarVisible)}
       data-sidebar-side={sidebarSide}
       ref={shellRef}
       style={{ '--manage-sidebar-width': `${sidebarWidth}px` } as CSSProperties}
     >
-      {!sidebarHidden ? (
+      {sidebarVisible ? (
         <aside
           className='manage-sidebar'
           data-drag-active={String(Boolean(dragEntry))}
@@ -1803,10 +1853,12 @@ export function ManageApp() {
           onDragLeave={handleSidebarDragLeave}
           onDragOver={updateRootDropTarget}
           onDrop={dropOnRoot}
+          onPointerLeave={() => setSidebarHoverExpanded(false)}
           ref={sidebarRef}
         >
           <div className='manage-sidebar-header' data-root-drop-target={String(dropTarget?.kind === 'root')}>
             <ManageSidebarActions
+              canRevealOpenFile={entries.some((entry) => entry.kind === 'file' && entry.path === selectedPath)}
               creatingKind={creatingArtifactKind}
               isRefreshing={listState === 'loading'}
               isCreatingFolder={isCreatingFolder}
@@ -1814,9 +1866,13 @@ export function ManageApp() {
               hasExpandedDirectories={hasExpandedDirectories}
               onCreate={(kind) => void createArtifactFile(kind)}
               onCreateFolder={() => void createFolder()}
-              onHideSidebar={() => setSidebarHidden(true)}
+              onHideSidebar={() => {
+                setSidebarHidden(true);
+                setSidebarHoverExpanded(false);
+              }}
               onOpenDocsFoldersSettings={() => void openDocsFoldersSettings()}
               onRefresh={() => void refreshFiles()}
+              onRevealOpenFile={revealOpenFile}
               onSwitchSide={switchSidebarSide}
               onToggleAllDirectories={toggleAllDirectories}
               sidebarSide={sidebarSide}
@@ -1910,6 +1966,9 @@ export function ManageApp() {
           aria-label='Show file sidebar'
           className='manage-sidebar-restore-button manage-icon-button'
           onClick={() => setSidebarHidden(false)}
+          onPointerEnter={(event) => {
+            if (event.pointerType === 'mouse') setSidebarHoverExpanded(true);
+          }}
           type='button'
         >
           {sidebarSide === 'right' ? (
@@ -1919,7 +1978,7 @@ export function ManageApp() {
           )}
         </button>
       )}
-      {!sidebarHidden && !sidebarFloating ? (
+      {sidebarVisible && !sidebarOverlay ? (
         <AppTooltip content='Resize file sidebar'>
           <div
             aria-label='Resize file sidebar'
@@ -1938,7 +1997,6 @@ export function ManageApp() {
       <section className='manage-preview'>
         <ManagePreview
           annotations={annotationsForSelectedPath}
-          annotationPersistenceState={annotationPersistenceState}
           draftContent={draftContent}
           error={error}
           isDirty={isDirty}

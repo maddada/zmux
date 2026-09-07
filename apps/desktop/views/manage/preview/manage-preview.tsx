@@ -7,7 +7,7 @@ import {
   IconMessagePlus,
   IconMessages,
   IconRefresh,
-  IconX,
+  IconTrash,
 } from '@tabler/icons-react';
 import { type ProjectDocsFilePreview as ManageFilePreview } from '@/packages/shared/project-docs';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -36,8 +36,8 @@ import { ManageMarkdownReviewViewer } from './markdown-review-viewer';
 import { ManagePreviewMessage, isEditableEventTarget } from './preview-shared';
 import { ManageTextEditor } from './text-editor';
 import { ManageTooltipButton } from '../manage-tooltip-button';
+import { ManageDocumentTitle } from './document-title';
 import {
-  annotationPersistenceLabel,
   defaultManageSelectionAnchor,
   formatManageAnnotationsAsMarkdown,
   normalizeAnnotationQuote,
@@ -49,7 +49,6 @@ import { formatFileSize, isExcalidrawPath, isHtmlPath, isMarkdownPath, languageL
 
 export function ManagePreview({
   annotations,
-  annotationPersistenceState,
   draftContent,
   error,
   hasExternalChanges,
@@ -64,7 +63,6 @@ export function ManagePreview({
   selectedPath,
 }: {
   annotations: ManageAnnotation[];
-  annotationPersistenceState: 'idle' | 'loading' | 'ready' | 'saving' | 'saved' | 'error';
   draftContent: string;
   error?: string;
   hasExternalChanges: boolean;
@@ -468,8 +466,6 @@ export function ManagePreview({
    */
   const previewDisplayPath = preview.displayPath ?? preview.path;
   const previewTitle = usesCompactArtifactHeader ? previewDisplayPath : preview.name;
-  const annotationPersistenceTitle = annotationPersistenceLabel(annotationPersistenceState);
-
   return (
     <div
       className='manage-preview-content'
@@ -477,14 +473,17 @@ export function ManagePreview({
       data-kind={isMarkdown ? 'markdown' : isDrawing ? 'drawing' : isHtml ? 'html' : 'text'}
     >
       <header className='manage-preview-header'>
-        <div className='manage-preview-title'>
-          {isDrawing ? (
-            <IconEdit aria-hidden='true' size={17} stroke={1.85} />
-          ) : (
-            <IconFileText aria-hidden='true' size={17} stroke={1.85} />
-          )}
-          <span>{previewTitle}</span>
-        </div>
+        <ManageDocumentTitle
+          key={preview.path}
+          title={previewTitle}
+          icon={
+            isDrawing ? (
+              <IconEdit aria-hidden='true' size={17} stroke={1.85} />
+            ) : (
+              <IconFileText aria-hidden='true' size={17} stroke={1.85} />
+            )
+          }
+        />
         <div className='manage-preview-meta'>
           <span>{language}</span>
           {preview.size !== undefined ? <span>{formatFileSize(preview.size)}</span> : null}
@@ -492,8 +491,31 @@ export function ManagePreview({
         </div>
         {isMarkdown ? (
           <div className='manage-preview-header-actions'>
+            {/*
+              CDXC:Docs 2026-09-06 DECISION:
+              User: order the Markdown header actions from right to left as files-list toggle, Reload, Clear, Copy, Add global comment, and Annotations list; make the files-list toggle 40px, the four action buttons 42px each, and Annotations list 85px; use a trash icon for Clear and label the annotations tooltip "Annotations list".
+            */}
+            <div className='manage-annotation-dropdown-shell' ref={annotationsDropdownRef}>
+              <ManageTooltipButton
+                aria-controls='manage-markdown-annotation-dropdown'
+                aria-expanded={annotationsDropdownOpen}
+                aria-haspopup='dialog'
+                aria-label='Show annotations'
+                className='manage-annotation-dropdown-trigger'
+                onClick={() => setAnnotationsDropdownOpen((current) => !current)}
+                tooltip='Annotations list'
+                type='button'
+              >
+                <IconMessages aria-hidden='true' size={14} />
+                <span className='manage-count-badge'>{annotations.length}</span>
+              </ManageTooltipButton>
+              {annotationsDropdownOpen ? (
+                <ManageAnnotationDropdown annotations={annotations} onRemoveAnnotation={removeAnnotation} />
+              ) : null}
+            </div>
             <ManageTooltipButton
               aria-label='Add global comment'
+              className='manage-add-global-comment-button'
               onClick={(event) =>
                 openGlobalComment(
                   selectionAnchorFromRect(event.currentTarget.getBoundingClientRect()) ?? defaultManageSelectionAnchor()
@@ -507,6 +529,7 @@ export function ManagePreview({
             </ManageTooltipButton>
             <ManageTooltipButton
               aria-label='Copy feedback'
+              className='manage-copy-feedback-button'
               disabled={annotations.length === 0}
               onClick={() => void copyFeedback()}
               tooltip='Copy feedback'
@@ -528,31 +551,9 @@ export function ManagePreview({
               tooltip='Clear All Annotations'
               type='button'
             >
-              {/*
-                CDXC:Docs 2026-06-30-04:55:
-                The Markdown feedback toolbar's Clear action should use an X icon instead of a trash can because it clears review annotations rather than deleting a file.
-              */}
-              <IconX aria-hidden='true' size={14} />
+              <IconTrash aria-hidden='true' size={14} />
               <span>{clearAnnotationsConfirming ? 'Confirm' : 'Clear'}</span>
             </ManageTooltipButton>
-            <div className='manage-annotation-dropdown-shell' ref={annotationsDropdownRef}>
-              <ManageTooltipButton
-                aria-controls='manage-markdown-annotation-dropdown'
-                aria-expanded={annotationsDropdownOpen}
-                aria-haspopup='dialog'
-                aria-label='Show annotations'
-                className='manage-annotation-dropdown-trigger'
-                onClick={() => setAnnotationsDropdownOpen((current) => !current)}
-                tooltip={`Annotations (${annotations.length}) · ${annotationPersistenceTitle}`}
-                type='button'
-              >
-                <IconMessages aria-hidden='true' size={14} />
-                <span className='manage-count-badge'>{annotations.length}</span>
-              </ManageTooltipButton>
-              {annotationsDropdownOpen ? (
-                <ManageAnnotationDropdown annotations={annotations} onRemoveAnnotation={removeAnnotation} />
-              ) : null}
-            </div>
             <ManageTooltipButton
               aria-label={hasExternalChanges ? 'Reload file with new changes' : 'Reload file'}
               className='manage-file-reload-button'

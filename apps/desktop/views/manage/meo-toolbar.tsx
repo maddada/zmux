@@ -723,10 +723,10 @@ export function applyManageMeoTheme(): void {
   rootStyle.setProperty('--vscode-editor-font-weight', '400');
   rootStyle.setProperty('--vscode-editor-background', MANAGE_MEO_THEME.backgroundColor);
   rootStyle.setProperty('--vscode-editor-foreground', MANAGE_MEO_THEME.colors.base01);
-  rootStyle.setProperty('--vscode-sideBar-background', '#0d0d0d');
+  rootStyle.setProperty('--vscode-sideBar-background', '#0b0b0b');
   rootStyle.setProperty('--vscode-panel-border', 'rgba(255, 255, 255, 0.10)');
   rootStyle.setProperty('--vscode-editor-selectionBackground', 'rgba(155, 188, 224, 0.28)');
-  rootStyle.setProperty('--vscode-editorWidget-background', '#0d0d0d');
+  rootStyle.setProperty('--vscode-editorWidget-background', '#0b0b0b');
   rootStyle.setProperty('--vscode-toolbar-hoverBackground', '#242424');
   applyMeoThemeSettings(MANAGE_MEO_THEME);
 }

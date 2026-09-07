@@ -18,6 +18,7 @@ import {
   IconChevronRight,
   IconCopy,
   IconCopyPlus,
+  IconCurrentLocation,
   IconEdit,
   IconFile,
   IconFileTypeHtml,
@@ -53,6 +54,7 @@ import { fileIconForPath } from './file-tree-utils';
 import '@/packages/core-ui/styles/session-overlays.css';
 
 export function ManageSidebarActions({
+  canRevealOpenFile,
   creatingKind,
   isRefreshing,
   isCreatingFolder,
@@ -63,10 +65,12 @@ export function ManageSidebarActions({
   onHideSidebar,
   onOpenDocsFoldersSettings,
   onRefresh,
+  onRevealOpenFile,
   onSwitchSide,
   onToggleAllDirectories,
   sidebarSide,
 }: {
+  canRevealOpenFile: boolean;
   creatingKind?: ManageArtifactKind;
   isRefreshing: boolean;
   isCreatingFolder: boolean;
@@ -77,6 +81,7 @@ export function ManageSidebarActions({
   onHideSidebar: () => void;
   onOpenDocsFoldersSettings: () => void;
   onRefresh: () => void;
+  onRevealOpenFile: () => void;
   onSwitchSide: () => void;
   onToggleAllDirectories: () => void;
   sidebarSide: ManageSidebarSide;
@@ -140,6 +145,20 @@ export function ManageSidebarActions({
         type='button'
       >
         <BulkDirectoryIcon aria-hidden='true' size={14} stroke={1.9} />
+      </ManageTooltipButton>
+      <ManageTooltipButton
+        aria-label='Reveal open file'
+        className='manage-icon-button'
+        disabled={!canRevealOpenFile}
+        onClick={() => {
+          setCreateMenuOpen(false);
+          setMenuOpen(false);
+          onRevealOpenFile();
+        }}
+        tooltip='Reveal open file in sidebar'
+        type='button'
+      >
+        <IconCurrentLocation aria-hidden='true' size={15} stroke={1.9} />
       </ManageTooltipButton>
       <ManageTooltipButton
         aria-expanded={createMenuOpen}
