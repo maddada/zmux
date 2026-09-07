@@ -167,6 +167,7 @@ export type TitlebarProjectState = {
   docsViewTabHidden: boolean;
   tipsAndTricksTitlebarButtonHidden: boolean;
   resourcesTitlebarButtonHidden: boolean;
+  devServersTitlebarButtonHidden: boolean;
   gitActionsTitlebarButtonHidden: boolean;
   quickActionsTitlebarButtonHidden: boolean;
   openInTitlebarButtonHidden: boolean;

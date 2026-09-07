@@ -27,6 +27,7 @@ export type GhostexOfficialExtensionSettingsKey = Extract<
   | 'automateViewTabHidden'
   | 'browserViewTabHidden'
   | 'codeViewTabHidden'
+  | 'devServersTitlebarButtonHidden'
   | 'docsViewTabHidden'
   | 'extensionsTitlebarButtonHidden'
   | 'gitActionsTitlebarButtonHidden'
@@ -44,6 +45,7 @@ export type GhostexOfficialExtensionId =
   | 'automate'
   | 'browser'
   | 'code'
+  | 'devServers'
   | 'docs'
   | 'extensionsButton'
   | 'gitActions'
@@ -105,6 +107,13 @@ export const GHOSTEX_OFFICIAL_EXTENSIONS: readonly GhostexOfficialExtension[] = 
     placement: 'titlebar-button',
     settingsKey: 'tipsAndTricksTitlebarButtonHidden',
     title: 'Tips & Tricks',
+  },
+  {
+    description: 'Title bar button that lists development servers running on this computer.',
+    id: 'devServers',
+    placement: 'titlebar-button',
+    settingsKey: 'devServersTitlebarButtonHidden',
+    title: 'Dev servers',
   },
   {
     description: 'Title bar button that opens Ghostex docs, guides, and community links.',
