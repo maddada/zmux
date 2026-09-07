@@ -10,6 +10,7 @@ pub(crate) struct CefSurface {
     pub(crate) focus_handle: FocusHandle,
     id: String,
     visible: bool,
+    session_chat_pane_focused: Option<bool>,
 }
 
 impl CefSurface {
@@ -123,6 +124,7 @@ impl CefSurface {
             focus_handle: cx.focus_handle().tab_stop(false),
             id,
             visible,
+            session_chat_pane_focused: None,
         }
     }
 
@@ -131,7 +133,20 @@ impl CefSurface {
     }
 
     pub(crate) fn load_url(&mut self, url: &str) {
+        self.session_chat_pane_focused = None;
         self.browser.load_url(url);
+    }
+
+    pub(crate) fn set_session_chat_pane_focused(&mut self, focused: bool, force: bool) {
+        if !force && self.session_chat_pane_focused == Some(focused) {
+            return;
+        }
+        let script = format!(
+            "(() => {{ const ns = window.ghostexGpui = window.ghostexGpui || {{}}; ns.sessionChatPaneFocused = {focused}; ns.onSessionChatPaneFocusChanged?.({focused}); }})();"
+        );
+        if self.execute_app_owned_script(&script) {
+            self.session_chat_pane_focused = Some(focused);
+        }
     }
 
     pub(crate) fn refresh_sidebar_runtime_settings(
@@ -436,6 +451,12 @@ impl Element for CefElement {
 
         self.browser.set_visible(true);
         self.browser.set_bounds(bounds, window.scale_factor());
+        #[cfg(target_os = "macos")]
+        if let Some(native_view) = self.browser.native_view() {
+            // Fullscreen and window-edge changes can change clipping even
+            // when the browser's own cached frame is unchanged.
+            super::window_corner_pane::refresh_native_window_corner_clip(native_view);
+        }
         let hitbox = window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal);
         let browser = self.browser.clone();
         let focus_handle = self.focus_handle.clone();

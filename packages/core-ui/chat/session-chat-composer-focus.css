@@ -1,0 +1,16 @@
+/* Reuse Monaco's positioned caret when the pane owns focus but the editor does not. */
+.ghostex-chat-composer[data-pane-focused='true'] .ghostex-chat-composer-monaco:not(:focus-within) .cursors-layer,
+.ghostex-chat-composer[data-pane-focused='true']
+  .ghostex-chat-composer-monaco:not(:focus-within)
+  .cursors-layer
+  > .cursor {
+  animation: none !important;
+  opacity: 1 !important;
+}
+
+.ghostex-chat-composer[data-pane-focused='true']
+  .ghostex-chat-composer-monaco:not(:focus-within)
+  .cursors-layer
+  > .cursor {
+  visibility: visible !important;
+}
