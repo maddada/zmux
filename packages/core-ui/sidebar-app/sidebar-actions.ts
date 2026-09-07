@@ -99,7 +99,7 @@ export function useSidebarActions({
     openAppModal({ ...(machineId ? { machineId } : {}), modal: 'addProject', type: 'open' });
   };
 
-  const createReferenceAgentChat = (agent: SidebarAgentButton) => {
+  const createReferenceAgentChat = (agent: SidebarAgentButton, accountId?: string) => {
     const quickGroupId = displayedReferenceChatGroupIds[0];
     if (!quickGroupId) {
       return;
@@ -115,6 +115,7 @@ export function useSidebarActions({
     vscode.postMessage({
       agentId: agent.agentId,
       groupId: quickGroupId,
+      accountId,
       type: 'runSidebarAgent',
     });
   };

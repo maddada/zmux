@@ -109,6 +109,10 @@ import {
   type PrimaryAgentLauncherChangedEvent,
 } from './primary-agent-launcher';
 import { type ProjectSessionListCollapsedState } from './project-session-list-toggle';
+import {
+  getProjectSessionSection,
+  useProjectSessionSectionCollapseState,
+} from './sidebar-app/project-session-section-state';
 import { hasKnownSidebarProjectInventory } from './sidebar-project-empty-state';
 import {
   createLocalProjectCollectionCollapseKey,
@@ -293,6 +297,8 @@ export function SidebarApp({
   const [windowScopeId] = useState(() => normalizeSidebarWindowScopeId(rawWindowScopeId));
   const [initialUiCollapseStateRead] = useState(() => readSidebarUiCollapseState(windowScopeId));
   const initialUiCollapseState = initialUiCollapseStateRead.state;
+  const { collapsedProjectSessionSectionsById, setProjectSessionSectionCollapsed } =
+    useProjectSessionSectionCollapseState(initialUiCollapseState.collapsedProjectSessionSectionsById);
   const [isStartupInteractionBlocked, setIsStartupInteractionBlocked] = useState(true);
   const [autoEditingGroupId, setAutoEditingGroupId] = useState<string>();
   const [agentCreateRequestId, setAgentCreateRequestId] = useState(0);
@@ -2603,6 +2609,7 @@ export function SidebarApp({
       collapsedGroupsById,
       collapsedProjectCollectionsByKey,
       collapsedProjectSessionListsById,
+      collapsedProjectSessionSectionsById,
       isReferenceChatsCollapsed,
       selectedSpaceIdBySectionKey,
     };
@@ -2618,6 +2625,7 @@ export function SidebarApp({
     collapsedGroupsById,
     collapsedProjectCollectionsByKey,
     collapsedProjectSessionListsById,
+    collapsedProjectSessionSectionsById,
     isReferenceChatsCollapsed,
     selectedSpaceIdBySectionKey,
     windowScopeId,
@@ -2862,8 +2870,8 @@ export function SidebarApp({
    * Opening a Browser tab must leave the user able to SEE it in the sidebar.
    * Every collapsed container between the sidebar scroller and the row is
    * expanded for real (the same persisted collapse state the chevrons write, so
-   * the expansion sticks), the group section is told to open the row's own
-   * kind section, and the row is scrolled into view only if it is off screen.
+   * the expansion sticks), including the row's own kind section, and the row
+   * is scrolled into view only if it is off screen.
    *
    * The scroll waits for the expand transitions the browser actually created
    * instead of a matching JS timer, exactly like `useSidebarCollapsiblePresence`
@@ -2927,6 +2935,13 @@ export function SidebarApp({
       }
       setGroupCollapsed(groupId, false);
       const projectId = groupsById[groupId]?.projectContext?.editor.projectId;
+      const sectionStateId = projectId ?? groupId;
+      // CDXC:Projects 2026-09-06 WHY: Consume reveals at sidebar lifetime so remounting a project after a Space switch cannot replay an old request and reopen a group the user collapsed.
+      setProjectSessionSectionCollapsed(
+        machineId ? `remote:${machineId}:${sectionStateId}` : sectionStateId,
+        getProjectSessionSection(sessionsById[sessionId], effectiveSettings.enableSessionParking),
+        false
+      );
       if (projectId) {
         setProjectSessionListCollapsed(machineId ? `remote:${machineId}:${projectId}` : projectId, false);
       }
@@ -3003,6 +3018,10 @@ export function SidebarApp({
     displayedProjectCollectionItems,
     displayedWorkspaceSessionIdsByGroup,
     groupsById,
+    sessionsById,
+    effectiveSettings.enableSessionParking,
+    collapsedProjectSessionSectionsById,
+    setProjectSessionSectionCollapsed,
     sessionRevealRequest,
   ]);
 
@@ -3438,6 +3457,8 @@ export function SidebarApp({
         onFocusRequested={focusSidebarSessionFromNavigation}
         onMoveProjectToCollection={enableProjectCollections ? moveProjectToCollection : undefined}
         onProjectSessionListCollapsedChange={setProjectSessionListCollapsed}
+        onProjectSessionSectionCollapsedChange={setProjectSessionSectionCollapsed}
+        projectSessionSectionCollapseStateById={collapsedProjectSessionSectionsById}
         onToggleSpaceMembership={
           spacesState && projectId ? (spaceId) => toggleLocalSpaceProjectMembership(spaceId, projectId) : undefined
         }
@@ -3454,7 +3475,6 @@ export function SidebarApp({
         projectCollectionId={projectId ? projectCollectionIdByProjectId.get(projectId) : undefined}
         projectCollectionOptions={enableProjectCollections ? projectCollections.collections : undefined}
         projectSessionListCollapsedState={collapsedProjectSessionListsById}
-        revealSessionRequest={sessionRevealRequest}
         selectedSearchSessionId={
           isSessionSearchSelectionVisible && selectedSessionSearchResult?.kind === 'session'
             ? selectedSessionSearchResult.sessionId
@@ -3834,6 +3854,8 @@ export function SidebarApp({
                                           : undefined
                                       }
                                       onProjectSessionListCollapsedChange={setProjectSessionListCollapsed}
+                                      onProjectSessionSectionCollapsedChange={setProjectSessionSectionCollapsed}
+                                      projectSessionSectionCollapseStateById={collapsedProjectSessionSectionsById}
                                       onToggleSpaceMembership={
                                         machineSpaces && rawProjectId
                                           ? (spaceId) =>

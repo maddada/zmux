@@ -5,6 +5,11 @@ import {
   type ProjectSessionListCollapsedState,
 } from '../project-session-list-toggle';
 import type { SidebarKeepAwakeRuntimeState } from './types';
+import {
+  normalizeProjectSessionSectionCollapseState,
+  persistedProjectSessionSectionCollapseState,
+  type ProjectSessionSectionCollapseStateById,
+} from './project-session-section-state';
 
 export const SIDEBAR_KEEP_AWAKE_RUNTIME_STORAGE_KEY = 'ghostex.titlebar.keepAwakeRuntime';
 export function isSidebarRecord(value: unknown): value is Record<string, unknown> {
@@ -42,6 +47,7 @@ export type SidebarUiCollapseState = {
   collapsedGroupsById: Record<string, true>;
   collapsedProjectCollectionsByKey: Record<string, true>;
   collapsedProjectSessionListsById: ProjectSessionListCollapsedState;
+  collapsedProjectSessionSectionsById: ProjectSessionSectionCollapseStateById;
   isReferenceChatsCollapsed: boolean;
   /*
    * CDXC:Spaces 2026-08-27:
@@ -76,7 +82,9 @@ export type SidebarUiCollapseState = {
  * ones are ignored on read and gone after the next write.
  */
 export type SidebarUiCollapseStorage = {
-  state: SidebarUiCollapseState;
+  state: Omit<SidebarUiCollapseState, 'collapsedProjectSessionSectionsById'> & {
+    collapsedProjectSessionSectionsById: ReturnType<typeof persistedProjectSessionSectionCollapseState>;
+  };
   version: 3;
 };
 
@@ -105,6 +113,7 @@ export function createDefaultSidebarUiCollapseState(): SidebarUiCollapseState {
     collapsedGroupsById: {},
     collapsedProjectCollectionsByKey: {},
     collapsedProjectSessionListsById: {},
+    collapsedProjectSessionSectionsById: {},
     isReferenceChatsCollapsed: false,
     selectedSpaceIdBySectionKey: {},
   };
@@ -136,6 +145,9 @@ export function normalizeSidebarUiCollapseState(candidate: unknown): SidebarUiCo
     collapsedGroupsById: normalizeStoredCollapsedGroupsById(state.collapsedGroupsById),
     collapsedProjectCollectionsByKey: normalizeStoredCollapsedGroupsById(state.collapsedProjectCollectionsByKey),
     collapsedProjectSessionListsById: normalizeStoredCollapsedGroupsById(state.collapsedProjectSessionListsById),
+    collapsedProjectSessionSectionsById: normalizeProjectSessionSectionCollapseState(
+      state.collapsedProjectSessionSectionsById
+    ),
     isReferenceChatsCollapsed: state.isReferenceChatsCollapsed === true,
     selectedSpaceIdBySectionKey: normalizeStoredSelectedSpaceIdBySectionKey(state.selectedSpaceIdBySectionKey),
   };
@@ -258,7 +270,12 @@ export function writeSidebarUiCollapseState(
 
   try {
     const serialized = JSON.stringify({
-      state,
+      state: {
+        ...state,
+        collapsedProjectSessionSectionsById: persistedProjectSessionSectionCollapseState(
+          state.collapsedProjectSessionSectionsById
+        ),
+      },
       version: 3,
     } satisfies SidebarUiCollapseStorage);
     window.localStorage.setItem(getSidebarUiCollapseStateStorageKey(windowScopeId), serialized);
