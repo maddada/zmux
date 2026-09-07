@@ -1,4 +1,5 @@
 #import <AppKit/AppKit.h>
+#import "GpuiWindowCorners.h"
 #import <Carbon/Carbon.h>
 #import <QuartzCore/QuartzCore.h>
 #if __has_include(<UniformTypeIdentifiers/UniformTypeIdentifiers.h>)
@@ -1078,6 +1079,7 @@ void GhostexGpuiTerminalSetNativeViewFrame(void *nativeView, double x, double y,
 
   NSView *parent = [view superview];
   view.frame = GhostexGpuiTerminalFrameInParent(parent, x, y, width, height);
+  GhostexGpuiClipNativeViewWindowCorners(view);
 }
 
 void GhostexGpuiTerminalShowNativeView(void *nativeView) {
@@ -1086,6 +1088,7 @@ void GhostexGpuiTerminalShowNativeView(void *nativeView) {
     return;
   }
 
+  GhostexGpuiClipNativeViewWindowCorners(view);
   view.hidden = NO;
 }
 

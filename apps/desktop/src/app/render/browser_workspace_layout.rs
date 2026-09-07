@@ -240,6 +240,7 @@ impl GhostexGpuiApp {
                 this.child(find_bar)
             })
             .child(self.render_browser_body(leaf, cx))
+            .window_corner_pane()
             .into_any_element()
     }
 

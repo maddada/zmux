@@ -1,4 +1,5 @@
 #import <AppKit/AppKit.h>
+#import "GpuiWindowCorners.h"
 #import <Carbon/Carbon.h>
 #import <Foundation/Foundation.h>
 #import <dispatch/dispatch.h>
@@ -1065,6 +1066,10 @@ void GhostexGpuiCEFSetNativeViewFrame(void *nativeView, double x, double y,
             frameMs, x, nativeY, width, height);
     }
   }
+}
+
+void GhostexGpuiCEFRefreshNativeViewWindowCorners(void *nativeView) {
+  GhostexGpuiClipNativeViewWindowCorners((__bridge NSView *)nativeView);
 }
 
 void GhostexGpuiCEFLogResizeDiagnostic(int browserId, int width, int height,

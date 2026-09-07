@@ -128,6 +128,7 @@ impl GhostexGpuiApp {
                     ),
             )
             .child(self.render_project_editor_companion_terminal_body(mode, window, cx))
+            .window_corner_pane()
             .into_any_element()
     }
 
@@ -449,11 +450,12 @@ impl GhostexGpuiApp {
             .w_full()
             .overflow_hidden()
             .when(has_terminal_split, |this| {
-                this.border_1().border_color(if show_focus_outline {
-                    workspace_pane_focused_border_color()
-                } else {
-                    rgb(0x000000).opacity(0.0).into()
-                })
+                this.border_1()
+                    .border_color(if show_focus_outline && show_active_pane_outline() {
+                        workspace_pane_focused_border_color()
+                    } else {
+                        rgb(0x000000).opacity(0.0).into()
+                    })
             })
             .bg(workspace_terminal_placeholder_color())
             .when_some(search_bar, |this, search_bar| this.child(search_bar))
@@ -467,6 +469,7 @@ impl GhostexGpuiApp {
                 ),
                 |this, bar| this.child(bar),
             )
+            .window_corner_pane()
             .into_any_element()
     }
 
@@ -503,11 +506,12 @@ impl GhostexGpuiApp {
             .w_full()
             .overflow_hidden()
             .when(has_terminal_split, |this| {
-                this.border_1().border_color(if show_focus_outline {
-                    workspace_pane_focused_border_color()
-                } else {
-                    rgb(0x000000).opacity(0.0).into()
-                })
+                this.border_1()
+                    .border_color(if show_focus_outline && show_active_pane_outline() {
+                        workspace_pane_focused_border_color()
+                    } else {
+                        rgb(0x000000).opacity(0.0).into()
+                    })
             })
             .bg(gpui_session_chat_background_color())
             .on_mouse_down(
@@ -520,6 +524,7 @@ impl GhostexGpuiApp {
                 }),
             )
             .child(content)
+            .window_corner_pane()
             .into_any_element()
     }
 

@@ -344,6 +344,7 @@ impl GhostexGpuiApp {
                 self.render_agents_pane_terminal_agent_action_bar(leaf, cx),
                 |this, bar| this.child(bar),
             )
+            .window_corner_pane()
             .into_any_element()
     }
 }

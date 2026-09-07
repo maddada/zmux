@@ -529,6 +529,7 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let ghosttykit_archive = manifest_dir.join(GHOSTTYKIT_ARCHIVE);
     let gpui_hooks = manifest_dir.join("native/macos/GpuiCefAppKitHooks.m");
+    println!("cargo:rerun-if-changed=native/macos/GpuiWindowCorners.h");
     let gpui_terminal_appkit_adapter =
         manifest_dir.join("native/macos/GpuiTerminalAppKitAdapter.m");
     let gpui_terminal_mouse_cursor = manifest_dir.join("native/macos/GpuiTerminalMouseCursor.m");

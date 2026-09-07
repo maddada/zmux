@@ -2,10 +2,6 @@
 // lines, itself moved verbatim out of main.rs) into descriptively named
 // modules; pure move, no logic changes. Cluster: command-pane leaf chrome (pane titlebar, bottom reservation, floating reserved bar) and the command-pane tab strip/tab element.
 
-use gpui::div;
-use gpui::prelude::FluentBuilder as _;
-use gpui::px;
-use gpui::relative;
 use gpui::AnyElement;
 use gpui::AppContext as _;
 use gpui::FontWeight;
@@ -18,6 +14,10 @@ use gpui::ParentElement as _;
 use gpui::ScrollWheelEvent;
 use gpui::StatefulInteractiveElement as _;
 use gpui::Styled as _;
+use gpui::div;
+use gpui::prelude::FluentBuilder as _;
+use gpui::px;
+use gpui::relative;
 use gpui_component::h_flex;
 use gpui_component::tooltip::ManagedTooltipExt as _;
 use gpui_component::tooltip::ManagedTooltipPlacement;
@@ -99,7 +99,7 @@ impl GhostexGpuiApp {
             .border_l_1()
             .when(has_pane_to_right, |this| this.border_r_1())
             .border_color(command_pane_side_edge_color())
-            .child(group)
+            .child(group.window_corner_pane())
             .into_any_element()
     }
 

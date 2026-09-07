@@ -288,7 +288,8 @@ impl GhostexGpuiApp {
                                     surface_border_state,
                                 ))
                         })
-                        .child(self.render_project_editor_surface(mode, window, cx)),
+                        .child(self.render_project_editor_surface(mode, window, cx))
+                        .window_corner_pane(),
                 )
                 .into_any_element()
         } else {
@@ -330,7 +331,8 @@ impl GhostexGpuiApp {
                                     surface_border_state,
                                 ))
                         })
-                        .child(self.render_project_editor_surface(mode, window, cx)),
+                        .child(self.render_project_editor_surface(mode, window, cx))
+                        .window_corner_pane(),
                 )
                 .into_any_element()
         }
