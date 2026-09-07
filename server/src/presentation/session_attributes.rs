@@ -86,6 +86,14 @@ pub(crate) fn presentation_actions(session: &Value, activity: &str) -> Value {
 }
 
 pub(crate) fn presentation_activity(session: &Value, generated_at: &str) -> String {
+    // CDXC:SessionStatus 2026-09-06 DECISION:
+    // User: a Claude Code or Codex thread with active subagents must stay working everywhere, including the sidebar and chat.
+    if effective_lifecycle_state(session) == "running"
+        && (crate::session_chat_compacting::session_chat_fleet_detected_at(session).is_some()
+            || crate::session_chat_compacting::session_chat_monitor_detected_at(session).is_some())
+    {
+        return "working".to_string();
+    }
     if effective_lifecycle_state(session) == "running"
         && crate::session_chat_compacting::session_chat_compacting_detected_at(session).is_some()
     {

@@ -376,7 +376,15 @@ pub(crate) fn session_effective_working_started_at(
     let generated_at_ms = parse_iso_ms(generated_at).unwrap_or_else(now_ms);
     effective_working_started_at(session_agent_activity(session), generated_at_ms).or_else(|| {
         (presentation_activity(session, generated_at) == "working")
-            .then(|| crate::session_chat_compacting::session_chat_compacting_detected_at(session))
+            .then(|| {
+                crate::session_chat_compacting::session_chat_compacting_detected_at(session)
+                    .or_else(|| {
+                        crate::session_chat_compacting::session_chat_fleet_detected_at(session)
+                    })
+                    .or_else(|| {
+                        crate::session_chat_compacting::session_chat_monitor_detected_at(session)
+                    })
+            })
             .flatten()
     })
 }

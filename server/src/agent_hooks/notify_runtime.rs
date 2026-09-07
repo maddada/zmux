@@ -453,6 +453,11 @@ fn post_gxserver_hook_event(
     params.insert("eventName".to_string(), json!(event_name));
     params.insert("projectId".to_string(), json!(project_id));
     params.insert("rawEventName".to_string(), json!(event_name));
+    if agent_key == "codex" {
+        if let Some(source) = payload.get("source").and_then(Value::as_str) {
+            params.insert("hookSource".to_string(), json!(source));
+        }
+    }
     params.insert("sessionId".to_string(), json!(surface_id));
     insert_json_string(&mut params, "agentSessionId", session_id);
     insert_json_string(&mut params, "agentSessionPath", transcript_path);

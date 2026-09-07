@@ -1,3 +1,4 @@
+import type { SessionChatDraftVersion } from './session-chat-queue';
 /*
 CDXC:ServerApi 2026-05-30-14:04:
 The gxserver protocol is the shared contract for the daemon, future gx/ghostex CLI clients, macOS clients, and remote clients. JSON fields and endpoint path tokens stay camelCase; protocol mismatch is a hard failure that asks the user to update instead of falling back to compatibility behavior.
@@ -239,6 +240,7 @@ export type GxserverEndpointPath =
   | '/api/startSessionProvider'
   | '/api/killSession'
   | '/api/probeSessionProvider'
+  | '/api/readResourceSessionOwners'
   | '/api/listSessions'
   | '/api/removeSession'
   | '/api/readSessionText'
@@ -2330,6 +2332,9 @@ export interface GxserverSessionLifecycleParams {
  * last synced push, which is what the reconcile compares against.
  */
 export interface GxserverSessionChatDraftListEntry {
+  version?: SessionChatDraftVersion;
+  consumedDrafts?: SessionChatDraftVersion[];
+  originClientId?: string;
   content: string;
   projectId: GxserverProjectId;
   sessionId: GxserverSessionId;
@@ -3123,7 +3128,7 @@ export interface GxserverSessionForkBranchesResult {
  * before `messageId`, a user prompt row of the active conversation. The daemon
  * verifies every dialog step against the screen and cancels on any mismatch.
  * On success the chat readers hide the rewound rows immediately; the transcript
- * confirms the branch when the next prompt is sent. Claude only for now.
+ * confirms the branch when the next prompt is sent. Codex drives its Escape picker and adopts the resulting conversation.
  */
 export interface GxserverRewindSessionChatParams {
   projectId: GxserverProjectId;
@@ -3136,7 +3141,7 @@ export interface GxserverRewindSessionChatResult {
   ok: true;
   /** Row id the conversation is now positioned before. */
   targetMessageId: string;
-  /** `uuid` of the new active leaf; null when rewound to before the first prompt. */
+  /** Claude's new active leaf UUID; null before the first prompt or for Codex's new branch. */
   leafId: string | null;
 }
 

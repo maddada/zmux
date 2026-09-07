@@ -328,17 +328,24 @@ mod tests {
             }]
         );
 
-        // Inter-agent traffic: readable header text survives, the encrypted
-        // envelope is skipped rather than dropping the whole record.
+        // Inter-agent traffic: a header whose payload is only the encrypted
+        // envelope is dropped; a readable payload survives with its sender.
+        assert!(decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"agent_message","author":"/root/worker","recipient":"/root","content":[{"type":"input_text","text":"Message Type: MESSAGE\nTask name: /root\nSender: /root/worker\nPayload:\n"},{"type":"encrypted_content","encrypted_content":"gAAA"}]}}"#,
+            "fb",
+        )
+        .is_none());
         let agent_message = decode_codex_transcript_line(
-            r#"{"type":"response_item","payload":{"type":"agent_message","author":"/root/worker","recipient":"/root","content":[{"type":"input_text","text":"Message Type: MESSAGE"},{"type":"encrypted_content","encrypted_content":"gAAA"}]}}"#,
+            r#"{"type":"response_item","payload":{"type":"agent_message","author":"/root/worker","recipient":"/root","content":[{"type":"input_text","text":"Message Type: MESSAGE\nTask name: /root\nSender: /root/worker\nPayload:\nDone with the parser."}]}}"#,
             "fb",
         )
         .expect("agent_message decodes");
         assert_eq!(agent_message.role, SessionChatRole::System);
         assert_eq!(
             agent_message.blocks,
-            vec![text_block("Message Type: MESSAGE")]
+            vec![text_block(
+                "Message from /root/worker\n\nDone with the parser."
+            )]
         );
     }
 

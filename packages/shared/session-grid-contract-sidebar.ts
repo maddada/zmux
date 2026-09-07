@@ -3003,11 +3003,13 @@ export type SidebarToExtensionMessage =
   | {
       type: 'runSidebarAgent';
       agentId: string;
+      accountId?: string;
       groupId?: string;
     }
   | {
       type: 'confirmAgentHookLaunch';
       agentId: string;
+      accountId?: string;
       groupId?: string;
       hookAgentId: string;
       installHooks: boolean;

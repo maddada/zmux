@@ -37,6 +37,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
+import {
+  MERMAID_ASSET_DIR_NAME,
+  mermaidClassicScriptEsbuildPlugin,
+  writeMermaidClassicAssets,
+} from './mermaid-classic-assets.mjs';
 
 import {
   SHIKI_ASSET_DIR_NAME,
@@ -121,7 +126,7 @@ const result = await esbuild.build({
   },
   minify: true,
   outdir: 'out',
-  plugins: [mobileChatTextImportPlugin, shikiClassicScriptEsbuildPlugin()],
+  plugins: [mobileChatTextImportPlugin, shikiClassicScriptEsbuildPlugin(), mermaidClassicScriptEsbuildPlugin()],
   target: ['safari16', 'chrome110'],
   write: false,
 });
@@ -203,6 +208,7 @@ fs.writeFileSync(
 );
 
 const shiki = await writeShikiClassicAssets(path.join(outDir, SHIKI_ASSET_DIR_NAME));
+await writeMermaidClassicAssets(path.join(outDir, MERMAID_ASSET_DIR_NAME));
 
 // The page used to ship as one generated TypeScript string module. Remove it
 // so a stale 946 KiB copy cannot linger in the app bundle or be imported by

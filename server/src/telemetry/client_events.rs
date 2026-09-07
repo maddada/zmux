@@ -74,25 +74,29 @@ fn record_surface_opened(properties: Option<&Value>) {
     capture::surface_opened(surface);
 }
 
-/*
-CDXC:Telemetry 2026-09-03:
-The mobile hello. `client` is pinned to `mobile` for the same reason
-`app.launched` pins `desktop`: the web app's attach is observed server-side at
-`/api/webBootstrap`, so the only client that legitimately reaches this path is
-the phone, via `ghostex client-hello`. The OS must be one of the two mobile
-platforms; a body claiming anything else is dropped whole rather than sent as a
-mobile event with a desktop OS on it. Versions are optional and clamped, so an
-older app that sends neither still counts as a mobile attach.
-*/
+/// CDXC:Telemetry 2026-09-06 WHY:
+/// The standalone `ghostex web` bootstrap forwards its hello through this endpoint because analytics remain owned by gxserver.
+/// Older mobile callers omit `client`, so retain their mobile classification and OS validation while accepting an explicit web client with a browser-derived platform.
 fn record_client_connected(properties: Option<&Value>) {
-    let Some(os) = properties
-        .and_then(|properties| properties.get("client_os"))
-        .and_then(Value::as_str)
-        .and_then(|os| taxonomy::match_enum(taxonomy::MOBILE_PLATFORMS, os))
-    else {
-        super::debug_log("recordClientEvent client.connected has no mobile client_os".to_string());
-        return;
+    let client = match properties.and_then(|value| value.get("client")) {
+        None => "mobile",
+        Some(Value::String(client)) if client == "mobile" => "mobile",
+        Some(Value::String(client)) if client == "web" => "web",
+        _ => return,
     };
+    let platforms = if client == "web" {
+        taxonomy::CLIENT_PLATFORMS
+    } else {
+        taxonomy::MOBILE_PLATFORMS
+    };
+    let raw_os = properties.and_then(|value| value.get("client_os"));
+    let os = raw_os
+        .and_then(Value::as_str)
+        .and_then(|os| taxonomy::match_enum(platforms, os));
+    if os.is_none() && (client == "mobile" || raw_os.is_some_and(|value| !value.is_null())) {
+        super::debug_log("recordClientEvent client.connected has no valid client_os".to_string());
+        return;
+    }
     let version = |key: &str| {
         properties
             .and_then(|properties| properties.get(key))
@@ -100,9 +104,9 @@ fn record_client_connected(properties: Option<&Value>) {
             .and_then(taxonomy::normalize_version_string)
     };
     capture::client_connected(
-        "mobile",
+        client,
         ClientPlatform {
-            os: Some(os),
+            os,
             os_version: version("client_os_version"),
             app_version: version("client_app_version"),
         },

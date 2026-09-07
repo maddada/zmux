@@ -1,3 +1,4 @@
+import type { SessionChatDraftVersion } from './session-chat-queue';
 // Session Chat — normalized chat projection of an agent terminal session.
 // Canonical wire types shared by gxserver (Rust mirror in server/src/session_chat.rs),
 // the shared React chat components (packages/core-ui/chat/), and every client host.
@@ -537,9 +538,21 @@ export interface SessionChatReturnedPrompt {
   at: string;
 }
 
+/** The goal cell Codex printed for a `/goal` command. */
+export interface SessionChatCodexGoal {
+  /** Codex's own label: `active`, `paused`, `stalled`, `usage limited`, `limited by budget`, `complete`, `cleared`. */
+  status: string;
+  /** The objective as Codex echoed it, without the trailing usage summary. */
+  objective: string;
+  /** `Time: 2m · Tokens: 63.9K/50K`, when Codex appended usage. */
+  usage?: string;
+}
+
 export interface SessionChatAppCommand {
   /** Codex's local command result, which its conversation transcript omits. */
   output?: string;
+  /** Parsed from `output` for `/goal`, so the chat shows a goal card instead of raw screen text. */
+  goal?: SessionChatCodexGoal;
   /** Stable within a session; two sends can carry identical text. */
   id: string;
   /** Verbatim command as written to the terminal, e.g. `/rename Fix parser`. */
@@ -815,7 +828,7 @@ export interface GxserverReadSessionChatSkillsResult {
 /**
  * Composer "@" file mentions. gxserver walks the session's project on its own
  * machine and answers with project-relative paths, so the composer can insert
- * the same "@path" the agent resolves against its working directory.
+ * a descriptive Markdown file link that the agent resolves against its working directory.
  */
 export interface GxserverReadSessionChatFilesResult {
   /** Absolute project root the paths are relative to. */
@@ -839,6 +852,7 @@ export interface GxserverReadSessionChatFilesResult {
 export type SessionChatSendKey = 'enter' | 'shift-tab' | 'shift-up' | 'shift-down';
 
 export interface GxserverSendSessionChatMessageParams {
+  draftVersion?: SessionChatDraftVersion;
   projectId: string;
   sessionId: string;
   /** Message body. Omitted (or empty) when `key` carries the request. */
@@ -1000,6 +1014,8 @@ export interface GxserverUnsubscribeSessionChatMessage {
 }
 
 interface SessionChatFrameBase {
+  /** Provider family on authoritative snapshots and replacements. */
+  agent?: string;
   projectId: string;
   sessionId: string;
   /** Follower generation; bumps on start/replace/re-resolve. */
