@@ -6,6 +6,7 @@ import {
   IconCopy,
   IconExternalLink,
   IconFolderOpen,
+  IconPencil,
   IconPlayerPlay,
   IconTrash,
 } from '@tabler/icons-react';
@@ -505,8 +506,14 @@ export function AutomationDefinitionDetail({
              * Enable/pause lives only on the list rows; the detail pane keeps
              * just run/edit/delete so the same control is not shown twice.
              */}
-            <Button onClick={() => onEdit(automation)} size='sm' type='button' variant='ghost'>
-              Edit
+            <Button
+              aria-label={`Edit ${automation.name}`}
+              onClick={() => onEdit(automation)}
+              size='icon-sm'
+              type='button'
+              variant='ghost'
+            >
+              <IconPencil />
             </Button>
             <Button
               aria-label={`Delete ${automation.name}`}
