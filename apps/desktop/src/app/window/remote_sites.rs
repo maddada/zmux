@@ -1,5 +1,7 @@
-//! CDXC:Browser 2026-09-05 DECISION:
-//! User: implement the globe menu in GPUI using the Resources/Tips native popup pattern, and match docs/2026-09-05/dev-server-status/01-server-list.html.
+//! CDXC:Browser 2026-09-06 DECISION:
+//! User: name the native globe dropdown Dev servers and move the local servers here from Resources, with this computer always first, followed by remote computers with page titles and favicons.
+//! Its proportions now match Resources exactly through resources_style.rs, superseding the HTML mockup sizing.
+use super::resources_style::*;
 use crate::app::helpers::*;
 use crate::*;
 use futures::{FutureExt as _, StreamExt as _};
@@ -9,11 +11,28 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Clone)]
 struct MachineGroup {
     id: String,
+    local: bool,
     name: String,
+    transport: &'static str,
     connected: bool,
     loading: bool,
     error: Option<String>,
     sites: Vec<RemoteBrowserSite>,
+}
+
+impl MachineGroup {
+    fn local() -> Self {
+        Self {
+            id: String::new(),
+            local: true,
+            name: "This computer".into(),
+            transport: "Local",
+            connected: true,
+            loading: false,
+            error: None,
+            sites: Vec::new(),
+        }
+    }
 }
 
 pub(crate) struct RemoteSitesPanel {
@@ -21,6 +40,9 @@ pub(crate) struct RemoteSitesPanel {
     groups: Vec<MachineGroup>,
     scroll: ScrollHandle,
     epoch: u64,
+    local_checked_at: Option<std::time::Instant>,
+    info_open: bool,
+    copied: Option<(String, std::time::Instant)>,
     expanded: HashSet<String>,
     canceled: Arc<AtomicBool>,
 }
@@ -40,6 +62,12 @@ impl RemoteSitesPanel {
                 if this
                     .update(cx, |panel, cx| {
                         panel.update_loaded_page_metadata(cx);
+                        if panel
+                            .local_checked_at
+                            .is_some_and(|checked| checked.elapsed() >= Duration::from_secs(3))
+                        {
+                            panel.refresh_local(cx);
+                        }
                         cx.notify();
                     })
                     .is_err()
@@ -51,9 +79,12 @@ impl RemoteSitesPanel {
         .detach();
         Self {
             main_app,
-            groups: Vec::new(),
+            groups: vec![MachineGroup::local()],
             scroll: ScrollHandle::new(),
             epoch: 0,
+            local_checked_at: None,
+            info_open: false,
+            copied: None,
             expanded: HashSet::new(),
             canceled: Arc::new(AtomicBool::new(false)),
         }
@@ -83,7 +114,15 @@ impl RemoteSitesPanel {
                     .to_string();
                 Some(MachineGroup {
                     id,
+                    local: false,
                     name,
+                    transport: if machine.get("transport").and_then(serde_json::Value::as_str)
+                        == Some("easyConnect")
+                    {
+                        "Easy Connect"
+                    } else {
+                        "SSH"
+                    },
                     connected: false,
                     loading: false,
                     error: None,
@@ -92,7 +131,8 @@ impl RemoteSitesPanel {
             })
             .collect();
         self.groups.sort_by_key(|group| group.name.to_lowercase());
-        for group in &mut self.groups {
+        self.groups.insert(0, MachineGroup::local());
+        for group in self.groups.iter_mut().filter(|group| !group.local) {
             let id = group.id.clone();
             let connection = self
                 .main_app
@@ -165,6 +205,55 @@ impl RemoteSitesPanel {
                 });
             }).detach();
         }
+        self.refresh_local(cx);
+        cx.notify();
+    }
+
+    fn refresh_local(&mut self, cx: &mut gpui::Context<Self>) {
+        let Some(group) = self.groups.iter_mut().find(|group| group.local) else {
+            return;
+        };
+        if group.loading {
+            return;
+        }
+        group.loading = true;
+        group.error = None;
+        let epoch = self.epoch;
+        let canceled = self.canceled.clone();
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let (tx, mut rx) = futures::channel::mpsc::unbounded();
+            let mut work = background.spawn(async move { discover_local_dev_servers(canceled, tx) }).fuse();
+            let result = loop {
+                futures::select! {
+                    result = work => break result,
+                    site = rx.next() => {
+                        let Some(site) = site else { break work.await; };
+                        let _ = this.update(cx, |panel, cx| {
+                            if panel.epoch != epoch { return; }
+                            if let Some(group) = panel.groups.iter_mut().find(|group| group.local) {
+                                if let Some(existing) = group.sites.iter_mut().find(|existing| existing.port == site.port) { *existing = site; }
+                                else { group.sites.push(site); group.sites.sort_by_key(|site| site.port); }
+                            }
+                            cx.notify();
+                        });
+                    }
+                }
+            };
+            let _ = this.update(cx, |panel, cx| {
+                if panel.epoch != epoch { return; }
+                panel.local_checked_at = Some(std::time::Instant::now());
+                if let Some(group) = panel.groups.iter_mut().find(|group| group.local) {
+                    group.loading = false;
+                    match result {
+                        Ok(sites) => group.sites = sites,
+                        Err(error) => { group.sites.clear(); group.error = Some(error); }
+                    }
+                }
+                panel.update_loaded_page_metadata(cx);
+                cx.notify();
+            });
+        }).detach();
         cx.notify();
     }
 
@@ -183,7 +272,12 @@ impl RemoteSitesPanel {
                                 .flat_map(|tabs| tabs.tabs.iter()),
                         )
                         .find(|tab| {
-                            tab.remote_machine_id.as_deref() == Some(group.id.as_str())
+                            tab.remote_machine_id.as_deref()
+                                == if group.local {
+                                    None
+                                } else {
+                                    Some(group.id.as_str())
+                                }
                                 && browser_url_origin_key(&tab.url) == origin
                         });
                     if let Some(tab) = tab {
@@ -255,76 +349,117 @@ impl RemoteSitesPanel {
 
     fn render_group(&self, group: &MachineGroup, cx: &mut gpui::Context<Self>) -> AnyElement {
         let id = group.id.clone();
-        let mut section = v_flex().gap(px(8.0)).mb(px(14.0)).child(
-            h_flex()
-                .items_center()
-                .gap(px(8.0))
-                .px(px(10.0))
-                .py(px(9.0))
-                .child(
-                    svg()
-                        .path(TITLEBAR_ICON_DEVICE_DESKTOP)
-                        .size(px(15.0))
-                        .text_color(rgb(0xaaaaaa)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(group.name.clone()),
-                )
-                .child(div().text_size(px(11.0)).text_color(rgb(0x999999)).child(
-                    if group.loading {
-                        if group.connected {
-                            "Checking…".into()
-                        } else {
-                            "Connecting…".into()
-                        }
-                    } else if group.connected {
-                        format!("{} locations", group.sites.len())
-                    } else {
-                        "Disconnected".into()
-                    },
-                )),
-        );
+        let connection = if group.loading {
+            if group.connected {
+                "Checking…"
+            } else {
+                "Connecting…"
+            }
+        } else if group.connected {
+            group.transport
+        } else {
+            "Disconnected"
+        };
+        let mut rows = v_flex().w_full().gap(px(7.0));
         if let Some(error) = &group.error {
-            section = section.child(
-                div()
-                    .px(px(10.0))
-                    .text_size(px(12.0))
-                    .text_color(rgb(0xd5ae6b))
-                    .child(error.clone()),
+            rows = rows.child(
+                resource_row_frame().child(
+                    resource_row_content()
+                        .text_size(px(12.0))
+                        .text_color(rgb(0xd5ae6b))
+                        .child(error.clone()),
+                ),
             );
         }
         if !group.connected {
-            section = section.child(
-                h_flex()
-                    .px(px(10.0))
-                    .pb(px(10.0))
-                    .gap(px(12.0))
-                    .items_center()
+            rows = rows.child(
+                resource_row_frame().child(
+                    resource_row_content()
+                        .child(
+                            h_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(div().flex_shrink_0().size(px(20.0)))
+                                .child(
+                                    resource_avatar_tile()
+                                        .child(site_icon(TITLEBAR_ICON_DEVICE_DESKTOP, 15.0)),
+                                )
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .gap(px(2.0))
+                                        .child(resource_name_text().child(if group.loading {
+                                            "Connecting to this computer…"
+                                        } else {
+                                            "Connect to see local sites"
+                                        }))
+                                        .child(resource_detail_text().child(group.transport)),
+                                ),
+                        )
+                        .when(!group.loading, |row| {
+                            row.child(site_button(format!("connect-{id}"), "Connect").on_click(
+                                cx.listener(move |panel, _, _, cx| panel.connect(id.clone(), cx)),
+                            ))
+                        }),
+                ),
+            );
+        } else if group.sites.is_empty() && group.error.is_none() {
+            rows = rows.child(
+                resource_row_frame().child(
+                    resource_row_content()
+                        .text_size(px(12.0))
+                        .text_color(rgb(0xffffff).opacity(0.58))
+                        .child(if group.loading {
+                            "Checking this computer's local sites…"
+                        } else {
+                            "No dev servers found. Start a server on this computer."
+                        }),
+                ),
+            );
+        }
+        for site in &group.sites {
+            rows = rows.child(self.render_site(group, site, cx));
+        }
+        v_flex()
+            .w_full()
+            .flex_shrink_0()
+            .child(
+                resource_section_heading()
                     .child(
                         div()
                             .flex_1()
-                            .text_size(px(12.0))
-                            .text_color(rgb(0x929292))
-                            .child("Connect to discover this computer's local sites."),
+                            .min_w_0()
+                            .truncate()
+                            .child(group.name.to_uppercase()),
                     )
-                    .when(!group.loading, |row| {
-                        row.child(site_button(format!("connect-{id}"), "Connect").on_click(
-                            cx.listener(move |panel, _, _, cx| panel.connect(id.clone(), cx)),
-                        ))
-                    }),
-            );
-        } else if group.sites.is_empty() && !group.loading && group.error.is_none() {
-            section = section.child(div().px(px(10.0)).pb(px(12.0)).text_size(px(12.0)).text_color(rgb(0x929292)).child("No listening ports found. Start a dev server on this computer, then recheck."));
-        }
-        for site in &group.sites {
-            section = section.child(self.render_site(group, site, cx));
-        }
-        section.into_any_element()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .text_color(rgb(0xffffff).opacity(0.52))
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .child(status_dot(if group.connected {
+                                        0x9bb79f
+                                    } else {
+                                        0x666666
+                                    }))
+                                    .child(connection),
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0xffffff).opacity(0.38))
+                                    .child(group.sites.len().to_string()),
+                            ),
+                    ),
+            )
+            .child(rows)
+            .into_any_element()
     }
 
     fn render_site(
@@ -334,54 +469,143 @@ impl RemoteSitesPanel {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let key = format!("{}-{}", group.id, site.port);
-        let machine_id = group.id.clone();
+        let machine_id = (!group.local).then(|| group.id.clone());
         let open_site = site.clone();
         let color = site.status_color();
-        let icon = div()
-            .flex()
-            .items_center()
-            .justify_center()
-            .flex_shrink_0()
-            .size(px(32.0))
-            .rounded(px(8.0))
-            .border_1()
-            .border_color(rgb(0x3c3c3c))
-            .bg(rgb(0x242424));
         let icon = if let Some(favicon) = &site.favicon {
-            icon.child(img(favicon.image.clone()).size(px(20.0)))
+            resource_avatar_tile().child(img(favicon.image.clone()).size(px(15.0)))
         } else {
-            icon.child(
-                svg()
-                    .path(BROWSER_ICON_WORLD)
-                    .size(px(17.0))
-                    .text_color(rgb(0xb9b9b9)),
-            )
+            resource_avatar_tile().child(site_icon(BROWSER_ICON_WORLD, 15.0))
         };
-        let age = site.checked_at.elapsed().unwrap_or_default().as_secs();
-        let evidence = format!("{} · {}s ago", site.detail, age);
-        let action = if site.can_open { "Open ↗" } else { "Inspect" };
         let action_key = key.clone();
-        v_flex().px(px(10.0)).py(px(14.0)).border_t_1().border_color(rgb(0x2b2b2b))
-            .when(site.status.is_some_and(|code| code >= 500), |row| row.bg(rgb(0x221b1b)).rounded(px(8.0)).border_color(rgb(0x4a3232)))
-            .child(h_flex().items_start().gap(px(11.0)).child(icon)
-                .child(v_flex().flex_1().min_w_0().gap(px(6.0))
-                    .child(div().truncate().font_weight(FontWeight::SEMIBOLD).child(site.label()))
-                    .child(div().truncate().text_size(px(11.0)).text_color(rgb(0xb7b7b7)).child(site.url.clone()))
-                    .child(div().truncate().text_size(px(11.0)).text_color(rgb(0x858585)).child(site.process.clone().unwrap_or_else(|| "Process unavailable".into()))))
-                .child(v_flex().items_end().gap(px(7.0)).w(px(185.0)).flex_shrink_0()
-                    .child(h_flex().items_center().gap(px(6.0)).text_size(px(11.0)).text_color(rgb(color))
-                        .child(div().size(px(6.0)).rounded_full().bg(rgb(color))).child(site.status_label()))
-                    .child(div().text_size(px(10.0)).text_color(rgb(0x929292)).child(evidence))
-                    .child(site_button(format!("open-{key}"), action).on_click(cx.listener(move |panel, _, window, cx| {
-                        if open_site.can_open {
-                            let _ = panel.main_app.update_in(cx, |app, main_window, cx| app.open_remote_browser_site(machine_id.clone(), open_site.clone(), main_window, cx));
-                            panel.close(window, cx);
+        let copy_key = key.clone();
+        let copy_url = site.url.clone();
+        let copied = self
+            .copied
+            .as_ref()
+            .is_some_and(|(id, time)| id == &key && time.elapsed() < Duration::from_secs(2));
+        let evidence = if site.status.is_some() {
+            site.detail
+                .strip_prefix("HTTP ")
+                .unwrap_or(&site.detail)
+                .to_string()
+        } else {
+            "No HTTP".into()
+        };
+        let detail = site.detail.clone();
+        let title = site.label();
+        let full_title = title.clone();
+        let address = site
+            .url
+            .strip_prefix("http://")
+            .unwrap_or(&site.url)
+            .trim_end_matches('/')
+            .to_string();
+        let subtitle = match &site.process {
+            Some(process) => format!("{address} · {process}"),
+            None => address,
+        };
+        let identity = h_flex()
+            .flex_1()
+            .min_w_0()
+            .items_center()
+            .gap(px(8.0))
+            .child(div().flex_shrink_0().size(px(20.0)))
+            .child(icon)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(2.0))
+                    .child(
+                        resource_name_text()
+                            .id(format!("title-{key}"))
+                            .child(title)
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(full_title.clone()).build(window, cx)
+                            }),
+                    )
+                    .child(
+                        resource_detail_text()
+                            .id(format!("subtitle-{key}"))
+                            .child(subtitle.clone())
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(subtitle.clone()).build(window, cx)
+                            }),
+                    ),
+            );
+        let primary = site_action_slot().child(
+            site_icon_button(
+                format!("open-{key}"),
+                if site.can_open {
+                    "titlebar/focus-2.svg"
+                } else {
+                    TITLEBAR_ICON_INFO
+                },
+                if site.can_open {
+                    "Open in the embedded browser"
+                } else {
+                    "Inspect web check"
+                },
+            )
+            .on_click(cx.listener(move |panel, _, window, cx| {
+                if open_site.can_open {
+                    let _ = panel.main_app.update_in(cx, |app, main_window, cx| {
+                        if let Some(machine_id) = &machine_id {
+                            app.open_remote_browser_site(
+                                machine_id.clone(),
+                                open_site.clone(),
+                                main_window,
+                                cx,
+                            );
                         } else {
-                            if !panel.expanded.remove(&action_key) { panel.expanded.insert(action_key.clone()); }
-                            cx.notify();
+                            app.open_local_dev_server(open_site.clone(), main_window, cx);
                         }
-                    })))))
-            .when(self.expanded.contains(&key), |row| row.child(div().mt(px(12.0)).p(px(10.0)).rounded(px(8.0)).bg(rgb(0x1d1d1d)).text_size(px(12.0)).text_color(rgb(0xaaaaaa)).child("This TCP port is listening, but the HTTP/HTTPS check did not return a web response. It may be a non-web service, still starting, or require a trusted certificate.")))
+                    });
+                    panel.close(window, cx);
+                } else {
+                    if !panel.expanded.remove(&action_key) {
+                        panel.expanded.insert(action_key.clone());
+                    }
+                    cx.notify();
+                }
+            })),
+        );
+        let secondary = site_action_slot().child(
+            site_icon_button(
+                format!("copy-{key}"),
+                if copied {
+                    "titlebar/check.svg"
+                } else {
+                    "titlebar/copy.svg"
+                },
+                if copied { "Copied" } else { "Copy URL" },
+            )
+            .on_click(cx.listener(move |panel, _, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_url.clone()));
+                panel.copied = Some((copy_key.clone(), std::time::Instant::now()));
+                cx.notify();
+            })),
+        );
+        let status = match site.status_label() {
+            "Login required" => "Login",
+            "Certificate issue" => "Certificate",
+            "No web response" => "No HTTP",
+            label => label,
+        };
+        let status_detail = site.status_label();
+        resource_row_frame().flex_shrink_0()
+            .child(resource_row_content().child(identity).child(primary).child(secondary)
+                .child(h_flex().flex_shrink_0().w(px(200.0)).gap(px(8.0))
+                    .child(resource_metric(86.0).id(format!("status-{key}"))
+                        .child(status_dot(color)).child(status)
+                        .tooltip(move |window, cx| Tooltip::new(status_detail).build(window, cx)))
+                    .child(resource_metric(106.0).id(format!("evidence-{key}"))
+                        .child(evidence)
+                        .tooltip(move |window, cx| Tooltip::new(detail.clone()).build(window, cx)))))
+            .when(self.expanded.contains(&key), |row| row.child(div().pb(px(8.0)).pr(px(8.0)).pl(px(64.0))
+                .text_size(px(12.0)).text_color(rgb(0xffffff).opacity(0.58))
+                .child(format!("{}. This TCP port is listening, but the HTTP/HTTPS check did not return a web response. It may be a non-web service or still starting.", site.detail))))
             .into_any_element()
     }
 }
@@ -392,20 +616,72 @@ impl Drop for RemoteSitesPanel {
     }
 }
 
-fn site_button(id: String, label: &'static str) -> gpui::Stateful<gpui::Div> {
+fn site_icon(path: &'static str, size: f32) -> gpui::Svg {
+    svg()
+        .path(path)
+        .size(px(size))
+        .text_color(rgb(0xffffff).opacity(0.82))
+}
+
+fn status_dot(color: u32) -> gpui::Div {
     div()
+        .flex_shrink_0()
+        .size(px(5.0))
+        .rounded_full()
+        .bg(rgb(color))
+}
+
+fn site_action_slot() -> gpui::Div {
+    div()
+        .flex_shrink_0()
+        .flex()
+        .w(px(24.0))
+        .items_center()
+        .justify_center()
+}
+
+fn site_icon_button(
+    id: String,
+    icon: &'static str,
+    tooltip: &'static str,
+) -> gpui::Stateful<gpui::Div> {
+    resource_square_button(id)
+        .child(site_icon(icon, 12.0).text_color(rgb(0xffffff).opacity(0.90)))
+        .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+}
+
+fn site_button(id: String, label: &'static str) -> gpui::Stateful<gpui::Div> {
+    h_flex()
         .id(id)
-        .px(px(10.0))
-        .py(px(5.0))
-        .rounded(px(6.0))
+        .flex_shrink_0()
+        .h(px(22.0))
+        .items_center()
+        .justify_center()
         .border_1()
-        .border_color(rgb(0x3b3b3b))
-        .bg(rgb(0x252525))
+        .border_color(rgb(0xffffff).opacity(0.13))
+        .bg(rgb(0xffffff).opacity(0.08))
+        .px(px(8.0))
         .text_size(px(11.0))
-        .text_color(rgb(0xeeeeee))
+        .text_color(rgb(0xffffff).opacity(0.86))
         .cursor_pointer()
-        .hover(|style| style.bg(rgb(0x303030)))
+        .hover(|this| this.bg(rgb(0xffffff).opacity(0.14)))
         .child(label)
+}
+
+fn toolbar_segment(id: &'static str) -> gpui::Stateful<gpui::Div> {
+    h_flex()
+        .id(id)
+        .h_full()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .gap(px(8.0))
+        .px(px(15.0))
+        .border_l_1()
+        .border_color(rgb(0xffffff).opacity(0.12))
+        .text_size(px(TITLEBAR_POPUP_READING_HEADER_BUTTON_TEXT_SIZE))
+        .font_weight(FontWeight::NORMAL)
+        .text_color(rgb(0xffffff).opacity(0.78))
 }
 
 impl Render for RemoteSitesPanel {
@@ -415,27 +691,64 @@ impl Render for RemoteSitesPanel {
             .iter()
             .map(|group| group.sites.len())
             .sum::<usize>();
-        let responding = self
+        let connected = self
+            .groups
+            .iter()
+            .filter(|group| group.connected && !group.local)
+            .count();
+        let loading = self.groups.iter().any(|group| group.loading);
+        let checked = self
             .groups
             .iter()
             .flat_map(|group| &group.sites)
-            .filter(|site| site.status.is_some_and(|code| (200..300).contains(&code)))
-            .count();
-        let loading = self.groups.iter().any(|group| group.loading);
-        v_flex().size_full().rounded(px(12.0)).border_1().border_color(rgb(0x363636)).bg(rgb(0x161616)).text_color(rgb(0xeeeeee)).text_size(px(13.0)).overflow_hidden()
-            .child(h_flex().px(px(20.0)).py(px(17.0)).gap(px(10.0)).items_center().border_b_1().border_color(rgb(0x2c2c2c))
-                .child(svg().path(BROWSER_ICON_WORLD).size(px(17.0)).text_color(rgb(0xb7b7b7)))
-                .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).text_size(px(15.0)).child("Remote dev servers"))
-                .child(site_button("remote-sites-close".into(), "Close").on_click(cx.listener(|panel, _, window, cx| panel.close(window, cx)))))
-            .child(h_flex().px(px(20.0)).py(px(15.0)).items_center().gap(px(8.0))
-                .child(div().font_weight(FontWeight::SEMIBOLD).child("Localhost locations"))
-                .child(div().rounded(px(5.0)).px(px(6.0)).py(px(1.0)).bg(rgb(0x303030)).text_size(px(11.0)).child(total.to_string()))
-                .child(div().flex_1())
-                .child(site_button("remote-sites-refresh".into(), if loading { "Checking…" } else { "↻ Recheck all" }).on_click(cx.listener(move |panel, _, _, cx| { if !loading { panel.refresh(cx); } }))))
-            .child(div().px(px(20.0)).pb(px(14.0)).text_size(px(11.0)).text_color(rgb(0xb4b4b4)).child(format!("{responding} responding   ·   {} need attention   ·   {} computers", total - responding, self.groups.len())))
-            .child(v_flex().id("remote-sites-scroll").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.scroll).px(px(12.0))
-                .when(self.groups.is_empty(), |body| body.child(v_flex().p(px(20.0)).gap(px(8.0)).child("Your remote sites will appear here").child(div().text_size(px(12.0)).text_color(rgb(0x929292)).child("Add a computer in Settings → Remote using Easy Connect or SSH."))))
-                .children(self.groups.iter().map(|group| self.render_group(group, cx))))
-            .child(div().px(px(20.0)).py(px(12.0)).border_t_1().border_color(rgb(0x2c2c2c)).text_size(px(10.0)).text_color(rgb(0x888888)).child("Checks confirm a response from the shown URL. Opened tabs browse through that computer."))
+            .map(|site| site.checked_at)
+            .max();
+        let freshness = if loading {
+            "Checking…".to_string()
+        } else if let Some(checked) = checked {
+            let age = checked.elapsed().unwrap_or_default().as_secs();
+            if age < 5 {
+                "Checked just now".into()
+            } else if age < 60 {
+                format!("Checked {age}s ago")
+            } else {
+                format!("Checked {}m ago", age / 60)
+            }
+        } else {
+            "No sites checked".into()
+        };
+        resource_panel_frame().child(v_flex().size_full().overflow_hidden()
+            .child(resource_header()
+                .child(resource_heading()
+                    .child(site_icon(BROWSER_ICON_WORLD, 18.0).text_color(rgb(0xffffff).opacity(0.96)))
+                    .child(div().truncate().child("Dev servers")))
+                .child(toolbar_segment("remote-sites-info").px_0().w(px(TITLEBAR_POPUP_READING_HEADER_HEIGHT))
+                    .cursor_pointer().hover(|this| this.bg(rgb(0xffffff).opacity(0.14)))
+                    .when(self.info_open, |this| this.bg(rgb(0xffffff).opacity(0.14)))
+                    .child(site_icon(TITLEBAR_ICON_INFO, TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE))
+                    .tooltip(|window, cx| Tooltip::new("About dev servers").build(window, cx))
+                    .on_click(cx.listener(|panel, _, _, cx| { panel.info_open = !panel.info_open; cx.notify(); })))
+                .child(toolbar_segment("remote-sites-refresh")
+                    .when(!loading, |this| this.cursor_pointer().hover(|this| this.bg(rgb(0xffffff).opacity(0.14))))
+                    .when(loading, |this| this.text_color(rgb(0xffffff).opacity(0.30)).opacity(0.55))
+                    .child(site_icon(BROWSER_ICON_RELOAD, TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE)
+                        .text_color(rgb(0xffffff).opacity(if loading { 0.30 } else { 0.78 })))
+                    .child(if loading { "Checking…" } else { "Recheck all" })
+                    .on_click(cx.listener(|panel, _, _, cx| { if !panel.groups.iter().any(|group| group.loading) { panel.refresh(cx); } })))
+                .child(toolbar_segment("remote-sites-connected").px(px(12.0)).gap(px(5.0)).text_color(rgb(0xffffff).opacity(0.72))
+                    .child(site_icon(TITLEBAR_ICON_DEVICE_DESKTOP, 13.0).text_color(rgb(0xffffff).opacity(0.62)))
+                    .child(format!("{connected} remote"))))
+            .when(self.info_open, |panel| panel.child(div().flex_shrink_0().p(px(10.0)).border_b_1()
+                .border_color(rgb(0xffffff).opacity(0.14)).bg(rgb(0x3a3a3a)).text_size(px(12.0)).line_height(px(16.2)).text_color(rgb(0xffffff).opacity(0.62))
+                .child("Dev servers on this computer appear first and update automatically. Remote computers follow below. Open browses through the computer running that server; Copy URL copies its localhost address. Recheck all refreshes discovery and web checks.")))
+            .child(div().relative().w_full().min_h_0().flex_1()
+                .child(v_flex().id("remote-sites-scroll").size_full().overflow_y_scroll().track_scroll(&self.scroll)
+                    .p(px(10.0)).pt(px(8.0)).gap(px(8.0))
+                    .children(self.groups.iter().map(|group| self.render_group(group, cx))))
+                .child(Scrollbar::vertical(&self.scroll).thickness(px(TITLEBAR_DROPDOWN_SCROLLBAR_WIDTH))))
+            .child(h_flex().flex_shrink_0().px(px(12.0)).py(px(7.0)).gap(px(8.0)).items_center()
+                .border_t_1().border_color(rgb(0xffffff).opacity(0.12)).text_size(px(11.0)).text_color(rgb(0xffffff).opacity(0.52))
+                .child(div().flex_1().min_w_0().truncate().child("Local first · Remote sites use their computer"))
+                .child(format!("{total} locations · {freshness}"))))
     }
 }

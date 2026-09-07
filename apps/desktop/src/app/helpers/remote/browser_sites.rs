@@ -88,7 +88,7 @@ pub(crate) fn discover_remote_browser_sites(
                     let canceled = &canceled;
                     let progress = &progress;
                     scope.spawn(move || {
-                        let site = probe_remote_browser_site(port, tunnel.port, canceled);
+                        let site = probe_browser_site(port, Some(tunnel.port), canceled);
                         let _ = progress.unbounded_send(site.clone());
                         site
                     })
@@ -121,26 +121,28 @@ struct PageResponse {
     location: Option<String>,
 }
 
-fn fetch_remote_page(url: &str, proxy_port: u16) -> Result<PageResponse, &'static str> {
-    let mut child = Command::new("curl")
-        .args([
-            "--disable",
-            "--silent",
-            "--http1.1",
-            "--include",
-            "--max-time",
-            "3",
-            "--connect-timeout",
-            "2",
-            "--noproxy",
-            "",
-            "--socks5-hostname",
-            &format!("127.0.0.1:{proxy_port}"),
-            "--proto",
-            "=http,https",
-            "--url",
-            url,
-        ])
+fn fetch_browser_page(url: &str, proxy_port: Option<u16>) -> Result<PageResponse, &'static str> {
+    let mut command = Command::new("curl");
+    command.args([
+        "--disable",
+        "--silent",
+        "--http1.1",
+        "--include",
+        "--max-time",
+        "3",
+        "--connect-timeout",
+        "2",
+        "--noproxy",
+        if proxy_port.is_some() { "" } else { "*" },
+        "--proto",
+        "=http,https",
+        "--url",
+        url,
+    ]);
+    if let Some(proxy_port) = proxy_port {
+        command.args(["--socks5-hostname", &format!("127.0.0.1:{proxy_port}")]);
+    }
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -196,9 +198,9 @@ fn fetch_remote_page(url: &str, proxy_port: u16) -> Result<PageResponse, &'stati
     }
 }
 
-fn probe_remote_browser_site(
+pub(crate) fn probe_browser_site(
     port: &GpuiRemoteListeningPort,
-    proxy_port: u16,
+    proxy_port: Option<u16>,
     canceled: &AtomicBool,
 ) -> RemoteBrowserSite {
     let start = Instant::now();
@@ -219,7 +221,7 @@ fn probe_remote_browser_site(
             break;
         }
         let url = format!("{scheme}://localhost:{}/", port.port);
-        let mut response = match fetch_remote_page(&url, proxy_port) {
+        let mut response = match fetch_browser_page(&url, proxy_port) {
             Ok(response) => response,
             Err(detail) => {
                 if scheme == "http" || detail.contains("certificate") {
@@ -257,7 +259,7 @@ fn probe_remote_browser_site(
             else {
                 break;
             };
-            let Ok(next_response) = fetch_remote_page(next.as_str(), proxy_port) else {
+            let Ok(next_response) = fetch_browser_page(next.as_str(), proxy_port) else {
                 break;
             };
             document_url = next;
@@ -291,7 +293,7 @@ fn probe_remote_browser_site(
             if remote_browser_loopback_url(&icon_url)
                 && icon_url.port_or_known_default() == Some(port.port)
             {
-                if let Ok(icon) = fetch_remote_page(icon_url.as_str(), proxy_port) {
+                if let Ok(icon) = fetch_browser_page(icon_url.as_str(), proxy_port) {
                     if (200..300).contains(&icon.status)
                         && icon.body.len() <= BROWSER_FAVICON_IMAGE_MAX_BYTES
                     {
@@ -337,7 +339,7 @@ pub(crate) fn fetch_remote_browser_favicon(
     {
         return None;
     }
-    let response = fetch_remote_page(parsed.as_str(), proxy_port).ok()?;
+    let response = fetch_browser_page(parsed.as_str(), Some(proxy_port)).ok()?;
     if !(200..300).contains(&response.status)
         || response.body.len() > BROWSER_FAVICON_IMAGE_MAX_BYTES
     {

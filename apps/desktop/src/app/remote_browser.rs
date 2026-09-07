@@ -287,6 +287,39 @@ impl GhostexGpuiApp {
 
     /// CDXC:Browser 2026-09-05 DECISION:
     /// User: open remote localhost sites in the embedded GPUI browser from a globe button to the left of Resources, grouped by machine with page titles and favicons where available.
+    pub(crate) fn open_local_dev_server(
+        &mut self,
+        site: RemoteBrowserSite,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.titlebar_mode_available(TitlebarMode::Browser) {
+            self.copy_path_for_disabled_project_workarea(&site.url, "Browser", cx);
+            return;
+        }
+        let profile = self.browser_profiles.active_profile_id();
+        if let Some(tab_id) = self.browser_tabs.add_loaded_popup_tab(
+            site.url.clone(),
+            profile,
+            cef::BrowserPopupPlacement::Selected,
+        ) {
+            if let Some(tab) = self
+                .browser_tabs
+                .tabs
+                .iter_mut()
+                .find(|tab| tab.id == tab_id)
+            {
+                tab.remote_machine_id = None;
+                tab.runtime_page_title = site.title;
+                tab.runtime_favicon_image = site.favicon;
+            }
+            self.open_gpui_browser_action_url(site.url, window, cx);
+            self.request_sidebar_browser_tab_reveal(tab_id);
+            self.persist_shell_layout_state();
+            cx.notify();
+        }
+    }
+
     pub(crate) fn open_remote_browser_site(
         &mut self,
         machine_id: String,

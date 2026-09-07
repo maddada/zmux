@@ -18,7 +18,7 @@ endpoint and no renderer-supplied hosts, ports, paths, or command text. The
 rendered page is written under the local state directory and only ever
 contains the saved ssh host plus parsed port/address/process fields.
 */
-pub(crate) const GPUI_REMOTE_LISTENING_PORTS_COMMAND: &str = "if command -v ss >/dev/null 2>&1; then ss -tlnp 2>/dev/null || ss -tln; else netstat -an 2>/dev/null | grep LISTEN; fi";
+pub(crate) const GPUI_REMOTE_LISTENING_PORTS_COMMAND: &str = "if command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP -sTCP:LISTEN -F pcn 2>/dev/null; [ $? -le 1 ]; elif command -v ss >/dev/null 2>&1; then ss -tlnp 2>/dev/null || ss -tln; else netstat -an 2>/dev/null | grep LISTEN; fi";
 
 pub(crate) struct GpuiRemoteListeningPort {
     pub(crate) address: String,
@@ -81,20 +81,37 @@ pub(crate) fn gpui_prepare_remote_ports_browser_page(
 pub(crate) fn gpui_parse_remote_listening_ports(stdout: &str) -> Vec<GpuiRemoteListeningPort> {
     let mut by_port: std::collections::BTreeMap<u16, GpuiRemoteListeningPort> =
         std::collections::BTreeMap::new();
+    let mut lsof_process = None;
     for line in stdout.lines() {
-        let tokens = line.split_whitespace().collect::<Vec<_>>();
-        if tokens.len() < 4 {
+        if line
+            .strip_prefix('p')
+            .is_some_and(|pid| pid.parse::<u32>().is_ok())
+        {
+            lsof_process = None;
             continue;
         }
-        let (local, process) = if tokens[0].eq_ignore_ascii_case("LISTEN") {
-            // ss: State Recv-Q Send-Q Local:Port Peer [users:(("name",…))]
+        if let Some(command) = line.strip_prefix('c') {
+            lsof_process = Some(command.to_string());
+            continue;
+        }
+        let tokens = line.split_whitespace().collect::<Vec<_>>();
+        let (local, process) = if let Some(endpoint) = line.strip_prefix('n') {
+            (endpoint, lsof_process.clone())
+        } else if tokens
+            .first()
+            .is_some_and(|state| state.eq_ignore_ascii_case("LISTEN"))
+            && tokens.len() >= 4
+        {
+            // Linux ss: State Recv-Q Send-Q Local:Port Peer [users:(("name",…))]
             (tokens[3], gpui_remote_ss_process_name(line))
-        } else if tokens[0].starts_with("tcp")
+        } else if tokens
+            .first()
+            .is_some_and(|protocol| protocol.starts_with("tcp"))
+            && tokens.len() >= 4
             && tokens
                 .last()
-                .is_some_and(|token| token.eq_ignore_ascii_case("LISTEN"))
+                .is_some_and(|state| state.eq_ignore_ascii_case("LISTEN"))
         {
-            // netstat: Proto Recv-Q Send-Q Local Foreign State
             (tokens[3], None)
         } else {
             continue;

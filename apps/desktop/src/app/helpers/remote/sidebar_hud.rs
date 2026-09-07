@@ -197,12 +197,12 @@ pub(crate) fn gpui_remote_titlebar_actions_for_project(
     .unwrap_or_default()
 }
 
-pub(crate) fn gpui_run_remote_project_action_terminal(
+pub(crate) fn gpui_create_remote_command_terminal(
     config: &GpuiRemoteMachineConfig,
     target: &GpuiRemoteGxserverRequestTarget,
     project: &GpuiRemoteProjectReference,
     title: &str,
-    command: &str,
+    startup_text: Option<&str>,
 ) -> Result<
     (
         GpuiRemoteAttachSessionReference,
@@ -261,14 +261,17 @@ pub(crate) fn gpui_run_remote_project_action_terminal(
         project_id,
         session_id,
     };
+    let mut provider_params = serde_json::json!({
+        "projectId": reference.project_id.as_str(),
+        "sessionId": reference.session_id.as_str(),
+    });
+    if let Some(startup_text) = startup_text {
+        provider_params["startupText"] = serde_json::json!(startup_text);
+    }
     gpui_remote_gxserver_rpc_result(
         target,
         "/api/startSessionProvider",
-        &serde_json::json!({
-            "projectId": reference.project_id.as_str(),
-            "sessionId": reference.session_id.as_str(),
-            "startupText": command,
-        }),
+        &provider_params,
         Duration::from_secs(30),
     )?;
     /*

@@ -7,9 +7,9 @@
 // for one of them here and qualify its call sites instead. See
 // docs/2026-08-22/repo-restructure/SPLITS.md C1.
 pub(crate) mod attach;
-pub(crate) mod browser_tunnel;
-pub(crate) mod browser_sites;
 pub(crate) mod attach_terminal_process;
+pub(crate) mod browser_sites;
+pub(crate) mod browser_tunnel;
 pub(crate) mod command_action;
 pub(crate) mod config;
 pub(crate) mod connect;
@@ -29,9 +29,9 @@ pub(crate) mod types;
 pub(crate) mod websocket_presentation;
 
 pub(crate) use attach::*;
-pub(crate) use browser_tunnel::*;
-pub(crate) use browser_sites::*;
 pub(crate) use attach_terminal_process::*;
+pub(crate) use browser_sites::*;
+pub(crate) use browser_tunnel::*;
 pub(crate) use command_action::*;
 pub(crate) use config::*;
 pub(crate) use connect::*;
