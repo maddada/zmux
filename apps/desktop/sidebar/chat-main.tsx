@@ -1,3 +1,7 @@
+import { AccountPrivacyContext } from '@/packages/core-ui/accounts/account-text';
+import { createAccountSwitchTransport } from './account-switch';
+import { createSessionChatDiagnosticRecorder } from '@/packages/core-ui/chat/session-chat-diagnostics';
+import type { GxserverSetSessionChatDraftResult } from '@/packages/shared/session-chat-queue';
 import { createRoot } from 'react-dom/client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@/packages/core-ui/styles.css';
@@ -91,6 +95,7 @@ declare global {
   interface Window {
     ghostexSetSessionChatCustomTranscriptWidthEnabled?: (enabled: unknown) => void;
     ghostexSetSessionChatFontFamily?: (fontFamily: unknown) => void;
+    ghostexSetHideAccountEmails?: (hidden: unknown) => void;
     ghostexSetSessionChatTheme?: (theme: unknown) => void;
     ghostexSetSessionChatTranscriptWidthPercent?: (widthPercent: unknown) => void;
     ghostexSetSessionChatVerboseMode?: (verboseMode: unknown) => void;
@@ -106,6 +111,8 @@ interface ChatBridgeNamespace {
    * only way a drop resolves to real local paths.
    */
   sessionChatDropPaths?: unknown;
+  sessionChatPaneFocused?: boolean;
+  onSessionChatPaneFocusChanged?: (focused: boolean) => void;
   onGxserverBootstrapChanged?: (bootstrap: ChatGxserverBootstrap) => void;
   onSessionChatFocusComposerRequested?: () => void;
   onSessionChatEvictionProbeRequested?: (nonce: string) => void;
@@ -306,7 +313,10 @@ function createGpuiSessionChatTransport(
   remote: boolean
 ): SessionChatTransport {
   return {
-    accounts: (params) => rpc(bootstrap, '/api/agentAccounts', { ...params, projectId, sessionId }),
+    accounts: createAccountSwitchTransport(
+      (params) => rpc(bootstrap, '/api/agentAccounts', { ...params, projectId, sessionId }),
+      (progress) => { postSessionChatHostAction('accountSwitchProgress', { progress }); }
+    ),
     async answerPrompt(params) {
       await rpc(bootstrap, '/api/answerSessionChatPrompt', {
         ...params,
@@ -377,11 +387,12 @@ function createGpuiSessionChatTransport(
         sessionId,
       });
     },
-    async send(text, imagePaths) {
+    async send(text, imagePaths, draftVersion) {
       await rpc(bootstrap, '/api/sendSessionChatMessage', {
         projectId,
         sessionId,
         text,
+        draftVersion,
         ...(imagePaths && imagePaths.length > 0 ? { imagePaths } : {}),
       });
     },
@@ -474,6 +485,7 @@ function createGpuiSessionChatTransport(
         projectId,
         sessionId,
         text: params.text,
+        draftVersion: params.draftVersion,
       });
     },
     updateQueuedPrompt(params) {
@@ -546,9 +558,10 @@ function createGpuiSessionChatTransport(
     // verbatim: a per-call or per-mount id would make this client's own draft
     // echo look like another device and pop the conflict bar for nothing.
     async setDraft(params) {
-      await rpc(bootstrap, '/api/setSessionChatDraft', {
+      return rpc<GxserverSetSessionChatDraftResult>(bootstrap, '/api/setSessionChatDraft', {
         clientId: params.clientId,
         content: params.content,
+        draftVersion: params.draftVersion,
         projectId,
         sessionId,
       });
@@ -577,8 +590,10 @@ function createGpuiSessionChatTransport(
         url.searchParams.set('protocolVersion', String(GXSERVER_PROTOCOL_VERSION));
         url.searchParams.set('authToken', bootstrap.authToken);
         const nextSocket = new WebSocket(url.toString());
+        postSessionChatDiagnosticLog('sessionChat.socketConnecting', { reconnectAttempt });
         socket = nextSocket;
         nextSocket.addEventListener('open', () => {
+          postSessionChatDiagnosticLog('sessionChat.socketOpened');
           reconnectAttempt = 0;
           const limit = currentLimit?.();
           nextSocket.send(
@@ -614,11 +629,17 @@ function createGpuiSessionChatTransport(
           }
           onEvent(frame as unknown as GxserverSessionChatEvent);
         });
-        nextSocket.addEventListener('close', () => {
+        nextSocket.addEventListener('close', (event) => {
+          postSessionChatDiagnosticLog('sessionChat.socketClosed', {
+            code: event.code,
+            wasClean: event.wasClean,
+            intentional: closed,
+          });
           if (closed || socket !== nextSocket) {
             return;
           }
           const delay = RECONNECT_DELAYS_MS[Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)];
+          postSessionChatDiagnosticLog('sessionChat.socketReconnectScheduled', { reconnectAttempt, delayMs: delay });
           reconnectAttempt += 1;
           reconnectTimeoutId = window.setTimeout(connect, delay);
         });
@@ -713,9 +734,9 @@ them to gpui-terminal-focus-debug.log only while the native.terminal.focus
 scenario (plus Show debug UI controls) is enabled — same gate as the native
 first-responder log they are meant to be correlated with.
 */
-function postSessionChatDiagnosticLog(event: string, details?: Record<string, unknown>): void {
+const postSessionChatDiagnosticLog = createSessionChatDiagnosticRecorder((event, details) => {
   postSessionChatHostAction('diagnosticLog', { details: details ?? {}, event });
-}
+});
 
 function postSessionChatHostAction(action: string, fields?: Record<string, unknown>): boolean {
   const handler = appModalHostMessageHandler();
@@ -743,6 +764,7 @@ function createGpuiSessionChatComposerBridge(
   sessionId: string
 ): SessionChatHostComposerBridge {
   return {
+    providesPaneFocus: true,
     register(actions) {
       const namespace = chatBridgeNamespace();
       const insertPrompt = (payload: { content?: unknown }): void => {
@@ -793,6 +815,7 @@ function createGpuiSessionChatComposerBridge(
           });
       };
       const requestFocus = (): void => actions.focus();
+      const updatePaneFocus = (focused: boolean): void => actions.setPaneFocused(focused);
       const requestHandoffToTerminal = (): void => {
         void actions
           .handoffToTerminal()
@@ -809,6 +832,8 @@ function createGpuiSessionChatComposerBridge(
       const requestStash = (): void => actions.requestStash();
       namespace.onSessionChatEvictionProbeRequested = requestEvictionProbe;
       namespace.onSessionChatFocusComposerRequested = requestFocus;
+      namespace.onSessionChatPaneFocusChanged = updatePaneFocus;
+      updatePaneFocus(namespace.sessionChatPaneFocused === true);
       namespace.onSessionChatHandoffToTerminalRequested = requestHandoffToTerminal;
       namespace.onSessionChatInsertPromptRequested = insertPrompt;
       namespace.onSessionChatStashPromptRequested = requestStash;
@@ -821,6 +846,9 @@ function createGpuiSessionChatComposerBridge(
         }
         if (namespace.onSessionChatFocusComposerRequested === requestFocus) {
           delete namespace.onSessionChatFocusComposerRequested;
+        }
+        if (namespace.onSessionChatPaneFocusChanged === updatePaneFocus) {
+          delete namespace.onSessionChatPaneFocusChanged;
         }
         if (namespace.onSessionChatHandoffToTerminalRequested === requestHandoffToTerminal) {
           delete namespace.onSessionChatHandoffToTerminalRequested;
@@ -1515,6 +1543,7 @@ function GpuiSessionChatPage({
   );
 
   return (
+    <AccountPrivacyContext value={hideAccountEmails}>
     <div className='native-sidebar-shell gpui-session-chat'>
       <SessionChatView
         agentLabel={agentLabel}
@@ -1538,6 +1567,7 @@ function GpuiSessionChatPage({
         verboseMode={chatVerboseMode}
       />
     </div>
+    </AccountPrivacyContext>
   );
 }
 
@@ -1569,6 +1599,7 @@ try {
   hotkeysValue = {};
 }
 const GPUI_SESSION_CHAT_HOST_ACTIONS = createGpuiSessionChatHostActions(hotkeysValue);
+let hideAccountEmails = searchParams.get('hideAccountEmails') === 'true';
 let chatTheme = normalizeSessionChatTheme(searchParams.get('theme'));
 let chatFontFamily = searchParams.get('fontFamily')?.trim() ?? '';
 let chatCustomTranscriptWidthEnabled = searchParams.get('customTranscriptWidthEnabled') === 'true';
@@ -1615,6 +1646,10 @@ document.body.classList.add('vscode-dark', 'native-sidebar-body');
 applyDocumentChatTheme(chatTheme);
 applyDocumentChatFontFamily(chatFontFamily);
 applyDocumentChatTranscriptWidthPercent(chatTranscriptWidthPercent);
+window.ghostexSetHideAccountEmails = (value) => {
+  hideAccountEmails = value === true;
+  renderReadyChat?.(chatTheme);
+};
 window.ghostexSetSessionChatTheme = (value) => {
   chatTheme = normalizeSessionChatTheme(value);
   applyDocumentChatTheme(chatTheme);
