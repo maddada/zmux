@@ -63,6 +63,8 @@ export function SessionChatModelPicker({
   const [controlsHeight, setControlsHeight] = useState(56);
   const { pressed, press, pulse } = useModelPickerKeyFeedback();
   const [popup, setPopup] = useState<HTMLDivElement | null>(null);
+  const [pointerRailStart, setPointerRailStart] = useState<number | null>(null);
+  const pointerRailTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closingRef = useRef(false);
   const selectedTile = useRef<HTMLButtonElement>(null);
   const [controls, setControls] = useState<HTMLElement | null>(null);
@@ -78,16 +80,21 @@ export function SessionChatModelPicker({
     Math.min(1, (paneSize.width - 28) / (narrow ? 240 : 1060), (viewportHeight - 24) / (3 * 142))
   );
   const visibleModels = Math.min(request.models.length, Math.max(3, Math.floor((viewportHeight - 24) / (142 * scale))));
-  const firstVisible = Math.max(
-    0,
-    Math.min(request.models.length - visibleModels, modelIndex - Math.floor(visibleModels / 2))
-  );
+  const firstVisible =
+    pointerRailStart ??
+    Math.max(0, Math.min(request.models.length - visibleModels, modelIndex - Math.floor(visibleModels / 2)));
   const stageHeight = viewportHeight / scale;
   const railOffset = (stageHeight - visibleModels * 142) / 2 - firstVisible * 142;
   const centerY = 71 + modelIndex * 142 + railOffset;
   const effortSplit = Math.ceil(request.efforts.length / 2);
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      clearTimeout(pointerRailTimer.current);
+    },
+    []
+  );
   useLayoutEffect(() => {
     const size = () => {
       setPaneSize({ width: container.clientWidth, height: container.clientHeight });
@@ -103,33 +110,46 @@ export function SessionChatModelPicker({
     selectedTile.current?.focus({ preventScroll: true });
   }, [selection.model, selection.effort]);
 
-  const finish = (save: boolean) => {
+  const finish = (save: boolean, choice = selection) => {
     if (closingRef.current) return;
     closingRef.current = true;
     setCommitting(save);
     setClosing(true);
     timer.current = setTimeout(
-      () => (save ? onSave(selection) : onClose()),
+      () => (save ? onSave(choice) : onClose()),
       window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 190
     );
   };
   useEffect(() => {
     if (cancelRequested) finish(false);
   }, [cancelRequested]);
-  const chooseModel = (index: number) => {
+  /**
+   * CDXC:SessionChat 2026-09-06 DECISION:
+   * User: single-clicking a model or effort card previews it; double-clicking saves that choice and closes the picker.
+   * CDXC:SessionChat 2026-09-06 WHY:
+   * Briefly hold the model rail after a pointer click so recentering cannot move the card away from the second click.
+   */
+  const chooseModel = (index: number, save = false, pointer = false) => {
     const next = request.models[index];
     if (!next || closingRef.current) return;
-    setSelection((current) => ({
+    clearTimeout(pointerRailTimer.current);
+    setPointerRailStart(pointer ? firstVisible : null);
+    if (pointer) pointerRailTimer.current = setTimeout(() => setPointerRailStart(null), 350);
+    const choice = {
       model: next.value,
-      effort: next.efforts.some((effort) => effort.value === current.effort)
-        ? current.effort
+      effort: next.efforts.some((effort) => effort.value === selection.effort)
+        ? selection.effort
         : (next.efforts.find((effort) => effort.value === next.defaultEffort)?.value ?? next.efforts[0]?.value ?? ''),
-    }));
+    };
+    setSelection(choice);
+    if (save) finish(true, choice);
   };
-  const chooseEffort = (index: number) => {
+  const chooseEffort = (index: number, save = false) => {
     const next = request.efforts[index];
-    if (next && model.efforts.some((entry) => entry.value === next.value) && !closingRef.current)
-      setSelection((current) => ({ ...current, effort: next.value }));
+    if (!next || !model.efforts.some((entry) => entry.value === next.value) || closingRef.current) return;
+    const choice = { ...selection, effort: next.value };
+    setSelection(choice);
+    if (save) finish(true, choice);
   };
   const moveEffort = (direction: number) => {
     for (let index = effortIndex + direction; index >= 0 && index < request.efforts.length; index += direction) {
@@ -316,7 +336,8 @@ export function SessionChatModelPicker({
                       } as CSSProperties
                     }
                     tabIndex={index >= firstVisible && index < firstVisible + visibleModels ? 0 : -1}
-                    onClick={() => chooseModel(index)}
+                    onClick={(event) => chooseModel(index, false, event.detail > 0)}
+                    onDoubleClick={() => chooseModel(index, true)}
                   >
                     <span className='model-picker-artwork'>
                       <ModelPickerIcon model={entry.value} />
@@ -383,6 +404,7 @@ export function SessionChatModelPicker({
                         } as CSSProperties
                       }
                       onClick={() => chooseEffort(index)}
+                      onDoubleClick={() => chooseEffort(index, true)}
                     >
                       <ModelPickerEffortIcon effort={entry.value} />
                       <span>{entry.label}</span>

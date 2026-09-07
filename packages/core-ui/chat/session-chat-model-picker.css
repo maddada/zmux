@@ -385,14 +385,20 @@
   font-size: 12px;
 }
 .model-picker-help > span,
+/* CDXC:SessionChat 2026-09-06 DECISION:
+ * User: pad footer buttons on every side while keeping the bar's positions and gaps.
+ * Matching negative margins preserve the existing content layout; arrow padding stays within its smaller inter-key gap.
+ */
 .ghostex-model-picker .model-picker-help > button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
 .ghostex-model-picker .model-picker-help > button {
-  padding: 0;
+  padding: 6px 8px;
+  margin: -6px -8px;
   border: 0;
+  border-radius: 8px;
   background: none;
   color: inherit;
   font: inherit;
@@ -400,8 +406,10 @@
 }
 .ghostex-model-picker .model-picker-help > span > button {
   display: inline-flex;
-  padding: 0;
+  padding: 6px 2px;
+  margin: -6px -2px;
   border: 0;
+  border-radius: 8px;
   background: none;
   color: inherit;
   font: inherit;

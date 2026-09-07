@@ -235,8 +235,7 @@ export interface SessionChatSessionOptionPillsProps {
   /**
    * Applies a `model-picker` choice by driving the agent's own picker on the
    * daemon (`/api/selectSessionChatModel`). Absent when the host has no route
-   * to it: the model pill then keeps its terminal handoff row and the effort
-   * rows are not offered.
+   * to it. Hosts with `onQueueModel` use the durable selection route instead.
    */
   onPickModel?: (params: { model: string; effort: string }) => Promise<void>;
   onQueueModel?: (params: { model: string; effort: string }) => Promise<SessionChatPendingModelSelection>;
@@ -532,6 +531,10 @@ export function SessionChatSessionOptionPills({
   }, []);
 
   const { catalog, optionDescriptors, beginDispatch, state } = controller;
+  // CDXC:SessionChat 2026-09-06 WHY: The queued selection route replaced direct picking on desktop; checking only onPickModel hid choices even while the quick picker could apply them.
+  const canPickModel =
+    onPickModel !== undefined ||
+    (onQueueModel !== undefined && (catalog?.modelIcon === 'codex' || catalog?.modelIcon === 'claude'));
   const visibleOptions = useMemo(
     () =>
       optionDescriptors.filter(
@@ -540,9 +543,9 @@ export function SessionChatSessionOptionPills({
             descriptor.dispatch.kind !== 'bounded-key-steps' &&
             descriptor.dispatch.kind !== 'cyclic-key-steps') ||
             canSendKey) &&
-          (descriptor.dispatch.kind !== 'model-picker' || onPickModel !== undefined)
+          (descriptor.dispatch.kind !== 'model-picker' || canPickModel)
       ),
-    [canSendKey, onPickModel, optionDescriptors]
+    [canSendKey, canPickModel, optionDescriptors]
   );
 
   const dispatch = useCallback(
@@ -788,7 +791,7 @@ export function SessionChatSessionOptionPills({
    */
   const menuRows = (descriptor: SessionChatOptionDescriptor): ReactNode => {
     const current = state[descriptor.id];
-    if (descriptor.dispatch.kind === 'model-picker' && onPickModel === undefined) {
+    if (descriptor.dispatch.kind === 'model-picker' && !canPickModel) {
       return (
         <DropdownMenuItem className='rounded-md whitespace-nowrap' onClick={() => dispatch(descriptor)}>
           {descriptor.actionLabel ?? "Open the CLI's model picker"}

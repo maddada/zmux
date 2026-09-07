@@ -90,10 +90,10 @@ export function useModelPickerKeyFeedback() {
 }
 
 /**
- * CDXC:SessionChat 2026-09-05 DECISION:
- * User: trackpad scrolling navigates models vertically and effort horizontally.
- * CDXC:SessionChat 2026-09-05 WHY:
- * A gesture advances one choice; momentum from that gesture must not race through the remaining cards.
+ * CDXC:SessionChat 2026-09-06 DECISION:
+ * User: continuously scroll between models vertically and efforts horizontally, without having to stop scrolling between choices.
+ * User: slow scrolling by 30%; both the distance threshold and step interval are divided by 0.7.
+ * This replaces the one-choice-per-gesture lock; the short step interval limits speed without waiting for silence.
  */
 export function useModelPickerWheelNavigation(
   element: HTMLElement | null,
@@ -105,9 +105,9 @@ export function useModelPickerWheelNavigation(
   useEffect(() => {
     if (!element) return;
     let lastEvent = 0;
-    let x = 0;
-    let y = 0;
-    let fired: { horizontal: boolean; sign: number } | null = null;
+    let lastStep = -Infinity;
+    let distance = 0;
+    let direction: PickerDirection | null = null;
     const wheel = (event: WheelEvent) => {
       if (event.ctrlKey || event.metaKey) return;
       event.preventDefault();
@@ -117,21 +117,20 @@ export function useModelPickerWheelNavigation(
       const dy = (event.shiftKey ? 0 : event.deltaY) * unit;
       if (!dx && !dy) return;
       const now = performance.now();
-      const reversed = fired && Math.sign(fired.horizontal ? dx : dy) === -fired.sign;
-      if (now - lastEvent > 180 || reversed) {
-        x = 0;
-        y = 0;
-        fired = null;
+      const horizontal = Math.abs(dx) > Math.abs(dy);
+      const delta = horizontal ? dx : dy;
+      const nextDirection = horizontal ? (delta > 0 ? 'ArrowRight' : 'ArrowLeft') : delta > 0 ? 'ArrowDown' : 'ArrowUp';
+      if (now - lastEvent > 180 || nextDirection !== direction) {
+        distance = 0;
+        lastStep = -Infinity;
       }
       lastEvent = now;
-      if (fired) return;
-      x += dx;
-      y += dy;
-      if (Math.max(Math.abs(x), Math.abs(y)) < 28) return;
-      const horizontal = Math.abs(x) > Math.abs(y);
-      const sign = Math.sign(horizontal ? x : y);
-      fired = { horizontal, sign };
-      latest.current(horizontal ? (sign > 0 ? 'ArrowRight' : 'ArrowLeft') : sign > 0 ? 'ArrowDown' : 'ArrowUp');
+      direction = nextDirection;
+      distance += Math.abs(delta);
+      if (distance < 40 || now - lastStep < 100 / 0.7) return;
+      distance = 0;
+      lastStep = now;
+      latest.current(direction);
     };
     element.addEventListener('wheel', wheel, { passive: false });
     return () => element.removeEventListener('wheel', wheel);
