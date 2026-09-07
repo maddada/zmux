@@ -34,6 +34,7 @@ import { parseGpuiRemotePresentationProjectId, parseGpuiRemotePresentationSessio
 import { gpuiStatusPetActivationSessionIdAllowed } from './status-indicators';
 import { parseGxserverPresentationProjectSessionId } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import type { GxserverSessionTransitionResult } from '@/packages/shared/gxserver-protocol';
+import { sessionChatHandoffDraft } from '@/packages/shared/session-chat-file-references';
 
 export function gpuiWorkspaceTerminalTitleCommandForAgent(agentId: string): 'name' | 'rename' | 'title' {
   const normalizedAgentId = agentId.trim().toLowerCase();
@@ -82,11 +83,11 @@ CDXC:TranscriptExport 2026-08-20:
 The follow-up conversation's staged input, not a prompt. gxserver types this
 into the new agent's composer and never submits it, so the user writes their
 own prompt around the mention: sending anything on their behalf was rejected.
-The trailing space completes the `@` file mention and separates it from what
+The trailing space separates the handoff link from what
 they type next, so it must survive untrimmed all the way to the daemon.
 */
-export function createExportedTranscriptMentionDraft(path: string): string {
-  return `@${path} `;
+export function createExportedTranscriptMentionDraft(path: string, sessionTitle: string): string {
+  return sessionChatHandoffDraft(path, sessionTitle);
 }
 
 export function normalizeGpuiWorkspaceTerminalRuntimeAction(

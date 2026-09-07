@@ -368,11 +368,12 @@ interface MarkdownAstNode {
     hProperties?: Record<string, unknown>;
   };
   type?: string;
+  url?: string;
   value?: unknown;
 }
 
-/** Whitespace-delimited prose token; the path resolver remains authoritative. */
-const BARE_PROSE_TOKEN = /\S+/g;
+/** Composer mentions may quote paths containing spaces; ordinary prose is tokenized on whitespace. */
+const BARE_PROSE_TOKEN = /[([{'"<]*@"[^\r\n]+?"(?=$|[\s)\]},.!?;'">])|\S+/g;
 /** Sentence punctuation that cannot be part of a path under PATH_SEGMENT. */
 const LEADING_PROSE_PUNCTUATION = /^[([{'"<]+/;
 const TRAILING_PROSE_PUNCTUATION = /[)\]},.!?;'">]+$/;
@@ -395,8 +396,11 @@ function taggedInlineCode(value: string): MarkdownAstNode {
  *
  * Links and existing code are left alone. Candidate discovery only splits on
  * whitespace and sentence punctuation; resolveSessionChatInlineCodeFilePath
- * still makes every actual path/not-path decision, so commands, hosts,
- * versions, package names, and extensionless directory names remain prose.
+ * still makes every implicit path/not-path decision.
+ *
+ * CDXC:SessionChat 2026-09-06 DECISION:
+ * User: @file mentions must follow all the same chat rules as [File #N](path) references, including images and other files.
+ * Explicit mentions become link nodes so image previews, file opening, positions, and context menus all use the attachment renderer; the @ marker is never part of the destination.
  */
 export function remarkSessionChatBareFilePaths() {
   return (tree: MarkdownAstNode): void => {
@@ -423,17 +427,38 @@ export function remarkSessionChatBareFilePaths() {
           const rawToken = match[0];
           const leading = LEADING_PROSE_PUNCTUATION.exec(rawToken)?.[0].length ?? 0;
           const withoutLeading = rawToken.slice(leading);
-          const trailing = TRAILING_PROSE_PUNCTUATION.exec(withoutLeading)?.[0].length ?? 0;
+          const quotedMention = withoutLeading.startsWith('@"') && withoutLeading.endsWith('"');
+          let trailing = quotedMention ? 0 : (TRAILING_PROSE_PUNCTUATION.exec(withoutLeading)?.[0].length ?? 0);
+          if (withoutLeading.startsWith('@') && !quotedMention) {
+            // Keep closing delimiters owned by the filename, such as @report(final).pdf or @reports/(final).
+            while (trailing > 0) {
+              const closing = withoutLeading[withoutLeading.length - trailing];
+              const opening = closing === ')' ? '(' : closing === ']' ? '[' : closing === '}' ? '{' : null;
+              if (!opening) break;
+              const kept = withoutLeading.slice(0, withoutLeading.length - trailing);
+              if (kept.split(opening).length <= kept.split(closing!).length) break;
+              trailing -= 1;
+            }
+          }
           const candidate = withoutLeading.slice(0, withoutLeading.length - trailing);
-          const reference = resolveSessionChatInlineCodeFilePath(candidate);
-          if (reference) {
+          const mentionPath = quotedMention
+            ? candidate.slice(2, -1)
+            : candidate.startsWith('@') && !candidate.startsWith('@"')
+              ? candidate.slice(1)
+              : '';
+          const reference = mentionPath === '' ? resolveSessionChatInlineCodeFilePath(candidate) : null;
+          if (mentionPath !== '' || reference) {
             changed = true;
             const candidateStart = match.index + leading;
             const candidateEnd = candidateStart + candidate.length;
             if (candidateStart > cursor) {
               rebuilt.push({ type: 'text', value: value.slice(cursor, candidateStart) });
             }
-            rebuilt.push(taggedInlineCode(candidate));
+            rebuilt.push(
+              mentionPath !== ''
+                ? { type: 'link', url: mentionPath, children: [{ type: 'text', value: mentionPath }] }
+                : taggedInlineCode(candidate)
+            );
             cursor = candidateEnd;
           }
           match = pattern.exec(value);

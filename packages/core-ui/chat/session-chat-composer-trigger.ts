@@ -11,6 +11,7 @@
 // ordinary text.
 
 import type { SessionChatSkill } from '../../shared/session-chat';
+import { sessionChatFileReference } from '../../shared/session-chat-file-references';
 
 export type SessionChatComposerTriggerKind = 'path' | 'skill';
 
@@ -67,32 +68,12 @@ export function sessionChatDisplaySkillDirectoryPath(path: string): string {
  * host's file-link route only opens files.
  */
 export function linkedSessionChatSkillMention(skill: SessionChatSkill): string {
-  const label = skill.name.replace(/[\\\[\]]/g, '\\$&');
-  return `[$${label}](${markdownLinkDestination(skill.skillFilePath)})`;
+  return sessionChatFileReference(skill.skillFilePath, `$${skill.name}`);
 }
 
-/**
- * A markdown link destination: bare with the delimiters escaped, or angle-
- * bracketed when the path carries whitespace a bare destination would end at.
- */
-function markdownLinkDestination(path: string): string {
-  if (/\s/.test(path)) {
-    return `<${path.replace(/[\\<>]/g, '\\$&')}>`;
-  }
-  return path.replace(/[\\()]/g, '\\$&');
-}
-
-const SIMPLE_MENTION_PATH_PATTERN = /^[^\s@"\\]+$/;
-
-/**
- * "@path" as the agent CLIs parse it: bare when the path has no whitespace or
- * quoting hazard, quoted otherwise.
- */
-export function sessionChatFileMention(path: string): string {
-  if (SIMPLE_MENTION_PATH_PATTERN.test(path)) {
-    return `@${path}`;
-  }
-  return `@"${path.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+/** The @ picker completes to a named file link using the draft's next reference number. */
+export function sessionChatFileMention(path: string, index: number): string {
+  return sessionChatFileReference(path, `${sessionChatFileBasename(path)} #${index}`);
 }
 
 export function sessionChatFileBasename(path: string): string {

@@ -51,12 +51,18 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
     const requestId = `export-transcript-${globalThis.crypto.randomUUID()}`;
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     if (remoteSession) {
+      const sourceSession = this.remotePresentations
+        .get(remoteSession.machineId)
+        ?.sessions.find(
+          (session) => session.projectId === remoteSession.projectId && session.sessionId === remoteSession.sessionId
+        );
       this.pendingExportedTranscript = undefined;
       this.pendingExportTranscriptRequest = {
         machineId: remoteSession.machineId,
         projectId: remoteSession.projectId,
         requestId,
         sessionId: remoteSession.sessionId,
+        sessionTitle: sourceSession?.displayTitle || sourceSession?.title || 'Session',
       };
       openAppModal({
         // A remote export lives on the remote machine's disk, so this host has
@@ -86,6 +92,7 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
       projectId: reference.projectId,
       requestId,
       sessionId: reference.sessionId,
+      sessionTitle: sourceSession.displayTitle || sourceSession.title,
     };
     openAppModal({
       ...(agentId ? { agentId } : {}),
@@ -151,6 +158,7 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
         path,
         projectId: request.projectId,
         requestId: request.requestId,
+        sessionTitle: request.sessionTitle,
       };
       postAppModalHostMessage(
         {
@@ -264,7 +272,7 @@ export const gpuiSidebarRuntimeExportTranscriptMethods = {
     typed into the parked terminal. A Terminal preference keeps the terminal
     exactly as before.
     */
-    const draft = createExportedTranscriptMentionDraft(exported.path);
+    const draft = createExportedTranscriptMentionDraft(exported.path, exported.sessionTitle);
     const title = createAgentSessionDefaultTitle(agent.name);
     const preferredInterface = resolveEffectivePreferredAgentInterface(
       createGpuiSidebarSettings(this.runtimeSettings),

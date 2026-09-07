@@ -14,7 +14,7 @@ const REFERENCE_PILL_MAX_LABEL_CHARACTERS = 18;
 const REFERENCE_PILL_ICON_SPACE = '\u00a0\u00a0\u00a0\u00a0\u2009';
 const REFERENCE_PILL_TRAILING_SPACE = '\u2009';
 
-const REFERENCE_LABEL_PATTERN = /\[((?:Image|File|Folder) #\d+|\$(?:\\.|[^\]\\\r\n])+)]\(/g;
+const REFERENCE_LABEL_PATTERN = /\[((?:\\.|[^\]\\\r\n])+)]\(/g;
 const IMAGE_PATH_PATTERN = /\.(?:avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)(?:[?#].*)?$/i;
 const FILE_EXTENSION_PATTERN = /\.[A-Za-z][A-Za-z0-9_+-]*$/;
 const EXTENSIONLESS_FILE_NAMES = new Set([
@@ -144,7 +144,7 @@ function linkedDestination(text: string, destinationStart: number): { end: numbe
   return null;
 }
 
-/** Finds the attachment and skill links Monaco replaces with compact pills. */
+/** Finds local file and skill links, including descriptive labels, for every composer backend. */
 export function sessionChatComposerReferences(text: string): SessionChatComposerReference[] {
   const references: SessionChatComposerReference[] = [];
   for (const match of text.matchAll(REFERENCE_LABEL_PATTERN)) {
@@ -154,13 +154,21 @@ export function sessionChatComposerReferences(text: string): SessionChatComposer
       continue;
     }
     const label = unescapeMarkdown(sourceLabel);
-    const kind = explicitReferenceKind(label);
+    if (label.endsWith(SESSION_CHAT_REFERENCE_REVEAL_MARKER) || text[start - 1] === '!') continue;
     const destinationStart = start + match[0].length;
     const destination = linkedDestination(text, destinationStart);
-    if (!kind || !destination || destination.path === '') {
+    if (!destination || destination.path === '') {
       continue;
     }
-    if (kind === 'skill' && !/(?:^|[\\/])SKILL\.md$/i.test(destination.path)) {
+    const pathWithoutPosition = destination.path.replace(/:\d+(?:-\d+|:\d+)?$/, '');
+    if (
+      destination.path.startsWith('#') ||
+      (/^[a-z][a-z0-9+.-]*:/i.test(pathWithoutPosition) && !/^(?:[a-z]:[\\/]|file:\/\/)/i.test(pathWithoutPosition))
+    ) {
+      continue;
+    }
+    const kind = sessionChatReferenceKind(label, destination.path);
+    if (label.startsWith('$') && !/(?:^|[\\/])SKILL\.md$/i.test(destination.path)) {
       continue;
     }
     references.push({

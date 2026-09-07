@@ -515,7 +515,7 @@ function insertImageMarkdown(imagePath: string): void {
 }
 
 function getNextPromptEditorImageIndex(text: string): number {
-  const imageLabelPattern = /\[Image #(\d+)\]\(/g;
+  const imageLabelPattern = /\[Image #(\d+)·?\]\(/g;
   let highestIndex = 0;
   for (const match of text.matchAll(imageLabelPattern)) {
     const index = Number.parseInt(match[1] ?? '', 10);

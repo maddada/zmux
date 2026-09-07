@@ -119,13 +119,7 @@ export class SessionChatMonacoReferenceModel {
   }
 
   private virtualize(canonical: string, reusableToken?: (source: string) => string | undefined): string {
-    if (
-      !canonical.includes('](') ||
-      (!canonical.includes('[Image #') &&
-        !canonical.includes('[File #') &&
-        !canonical.includes('[Folder #') &&
-        !canonical.includes('[$'))
-    ) {
+    if (!canonical.includes('](')) {
       return canonical;
     }
     const references = sessionChatComposerReferences(canonical);

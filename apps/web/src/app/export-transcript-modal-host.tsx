@@ -16,6 +16,7 @@ import {
 } from '@/packages/core-ui/export-transcript-result-modal';
 import { useSidebarStore } from '@/packages/core-ui/sidebar-store';
 import type { GxserverExportSessionTranscriptResult } from '@/packages/shared/gxserver-protocol';
+import { sessionChatHandoffDraft } from '@/packages/shared/session-chat-file-references';
 import { rpcForMachine } from '../connections/connection-registry';
 import type { GhostexWebFocusSessionDetail } from '../sidebar-runtime/sidebar-runtime';
 import type { ExportTranscriptStatusDetail } from './action-events';
@@ -32,8 +33,8 @@ submits it, so all we stage is a mention of the exported markdown. The trailing
 space is load-bearing — it separates the mention from the prompt the user types
 after it — so the value must reach gxserver verbatim, untrimmed.
 */
-function transcriptMentionDraft(path: string): string {
-  return `@${path} `;
+function transcriptMentionDraft(path: string, sessionTitle: string): string {
+  return sessionChatHandoffDraft(path, sessionTitle);
 }
 
 export function ExportTranscriptModalHost() {
@@ -121,7 +122,7 @@ export function ExportTranscriptModalHost() {
         agentId,
         projectId: detail.projectId,
         requireLaunchCommand: true,
-        runtimeSettings: { firstUserInputDraft: transcriptMentionDraft(path) },
+        runtimeSettings: { firstUserInputDraft: transcriptMentionDraft(path, detail.sessionTitle) },
         surface: 'workspace',
         title: `${agentName} Session`,
       });
