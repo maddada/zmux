@@ -94,6 +94,7 @@ impl GpuiPreferredAgentInterface {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct GpuiSidebarCreateProjectAgentMessage {
+    pub(crate) account_id: Option<String>,
     pub(crate) agent_id: String,
     pub(crate) preferred_interface: GpuiPreferredAgentInterface,
     pub(crate) project_id: String,

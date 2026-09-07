@@ -1931,8 +1931,8 @@ impl GhostexGpuiApp {
         the pane was swapped away) between creating the tab and the remote
         session's identity landing on it, so retire the leftover tab instead of
         asking the local daemon for a session it can never create and reporting
-        that as a command-terminal error on every launch. Plain command tabs are
-        untouched: they still take the local path and its honest failure.
+        that as a command-terminal error on every launch. Plain command tabs use
+        remote creation below because they have no Action command to recover.
         */
         if self.active_gpui_remote_project_reference().is_some()
             && self
@@ -1959,6 +1959,16 @@ impl GhostexGpuiApp {
             .command_gxserver_attach_pending
             .contains(&slot_id.session_id)
         {
+            return;
+        }
+        if let Some(reference) = self.active_gpui_remote_project_reference() {
+            self.start_new_remote_command_terminal_for_slot(
+                slot_id,
+                reference,
+                title,
+                startup_text,
+                cx,
+            );
             return;
         }
         let input = match self.command_terminal_create_input_for_active_project(

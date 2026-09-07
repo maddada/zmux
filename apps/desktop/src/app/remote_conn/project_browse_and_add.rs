@@ -399,10 +399,10 @@ impl GhostexGpuiApp {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                let added_project_path = match &result {
+                let added_project_id = match &result {
                     Ok(value) if operation == GpuiAddProjectDialogOperation::Add => value
                         .get("project")
-                        .and_then(|project| project.get("path"))
+                        .and_then(|project| project.get("projectId"))
                         .and_then(serde_json::Value::as_str)
                         .map(str::to_string),
                     _ => None,
@@ -442,6 +442,15 @@ impl GhostexGpuiApp {
                         cx,
                     ),
                 }
+                // CDXC:AddProject 2026-09-06 DECISION: User: newly added projects become active, switch to their Space, expand their sidebar groups, and scroll into view, just like Quick Access project activation.
+                // Completed clones register through Add too; the shared activation route refreshes the project and focuses or creates its default session.
+                if let Some(project_id) = added_project_id {
+                    let scoped_project_id = match remote_machine_id.as_deref() {
+                        Some(machine_id) => gpui_remote_scoped_project_id(machine_id, &project_id),
+                        None => project_id,
+                    };
+                    this.dispatch_gpui_menu_bar_project_activation(&scoped_project_id, cx);
+                }
                 if operation != GpuiAddProjectDialogOperation::Add
                     && !clone_completed
                     && !clone_answer_lost
@@ -476,24 +485,7 @@ impl GhostexGpuiApp {
                             }
                         }
                     }
-                    /*
-                    The local sidebar runtime owns local project state and does
-                    not receive daemon pushes, so a successful local add is
-                    reported through the same workspace-folder bridge the OS
-                    folder picker used. The runtime re-registers idempotently,
-                    focuses the project, and pulls a fresh local presentation.
-                    */
-                    None => {
-                        if let Some(project_path) = added_project_path {
-                            this.dispatch_gpui_workspace_folder_picked_message(
-                                serde_json::json!({
-                                    "path": project_path,
-                                    "type": "workspaceFolderPicked",
-                                }),
-                                cx,
-                            );
-                        }
-                    }
+                    None => {}
                 }
             });
         })

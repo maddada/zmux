@@ -32,6 +32,10 @@ pub(crate) struct ParkedAgentsTerminalRuntime {
     pub(crate) runtime_sessions: AgentsTerminalRuntimeSessionRegistry,
     pub(crate) gpui_engine_terminals:
         HashMap<TerminalSessionId, terminal_gpui_engine::GpuiEngineTerminalRecord>,
+    /// CDXC:Terminal 2026-09-06 WHY:
+    /// Project layout restoration omits zmx names, but reuses live attach clients; losing their identity disables visibility claims while the daemon still ignores ordinary resizes.
+    /// Keep the attach names with their process-local owners and restore them before visibility reconciliation.
+    pub(crate) zmx_session_names: HashMap<TerminalSessionId, String>,
     pub(crate) runtime_osc_states:
         HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
     pub(crate) gpui_engine_close_confirms: HashSet<AgentsTerminalBodyMountSlotId>,

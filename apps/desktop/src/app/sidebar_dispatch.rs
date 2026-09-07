@@ -144,6 +144,11 @@ impl GhostexGpuiApp {
         }
 
         self.sidebar_gxserver_bootstrap = next_bootstrap.clone();
+        if let Some(handle) = self.app_modal_window {
+            let _ = handle.update(cx, |host, _, cx| {
+                host.refresh_gxserver_bootstrap(next_bootstrap.clone(), cx);
+            });
+        }
         self.refresh_extensions_in_background(cx);
         if let Some(sidebar) = self.sidebar.clone() {
             sidebar.update(cx, |surface, _| {

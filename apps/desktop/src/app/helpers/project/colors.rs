@@ -14,6 +14,15 @@ use gpui::{
 use crate::app::helpers::*;
 use crate::*;
 
+static SHOW_ACTIVE_PANE_OUTLINE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static ACTIVE_PANE_OUTLINE_RGB: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0x3b82f6);
+
+pub(crate) fn show_active_pane_outline() -> bool {
+    SHOW_ACTIVE_PANE_OUTLINE.load(Ordering::Relaxed)
+}
+
 pub(crate) fn gpui_project_icon_image_from_data_url(value: &str) -> Option<Arc<Image>> {
     /*
     CDXC:Titlebar 2026-07-04-03:00:
@@ -70,6 +79,17 @@ pub(crate) fn refresh_gpui_visual_settings(
     settings: &shared_settings::SharedSidebarSettingsSnapshot,
 ) {
     let object = settings.object();
+    SHOW_ACTIVE_PANE_OUTLINE.store(
+        object
+            .get("showActivePaneOutline")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true),
+        Ordering::Relaxed,
+    );
+    ACTIVE_PANE_OUTLINE_RGB.store(
+        gpui_settings_hex_rgb(object.get("workspaceActivePaneBorderColor")).unwrap_or(0x3b82f6),
+        Ordering::Relaxed,
+    );
     let configured_workspace = object
         .get("workspaceBackgroundColor")
         .and_then(serde_json::Value::as_str)
@@ -598,7 +618,7 @@ pub(crate) fn workspace_pane_border_color() -> Hsla {
 }
 
 pub(crate) fn workspace_pane_focused_border_color() -> Hsla {
-    rgb(0x6d6d6d).into()
+    rgb(ACTIVE_PANE_OUTLINE_RGB.load(Ordering::Relaxed)).into()
 }
 
 pub(crate) fn workspace_pane_attention_border_color() -> Hsla {
@@ -607,8 +627,12 @@ pub(crate) fn workspace_pane_attention_border_color() -> Hsla {
 
 pub(crate) fn workspace_pane_border_color_for_state(state: WorkspacePaneBorderState) -> Hsla {
     match state {
-        WorkspacePaneBorderState::Neutral => workspace_pane_border_color(),
-        WorkspacePaneBorderState::Focused => workspace_pane_focused_border_color(),
+        WorkspacePaneBorderState::Focused if show_active_pane_outline() => {
+            workspace_pane_focused_border_color()
+        }
+        WorkspacePaneBorderState::Neutral | WorkspacePaneBorderState::Focused => {
+            workspace_pane_border_color()
+        }
         WorkspacePaneBorderState::Attention => workspace_pane_attention_border_color(),
     }
 }
@@ -617,8 +641,12 @@ pub(crate) fn project_editor_companion_border_color_for_state(
     state: WorkspacePaneBorderState,
 ) -> Hsla {
     match state {
-        WorkspacePaneBorderState::Neutral => rgb(0x252525).into(),
-        WorkspacePaneBorderState::Focused => workspace_pane_focused_border_color(),
+        WorkspacePaneBorderState::Focused if show_active_pane_outline() => {
+            workspace_pane_focused_border_color()
+        }
+        WorkspacePaneBorderState::Neutral | WorkspacePaneBorderState::Focused => {
+            rgb(0x252525).into()
+        }
         WorkspacePaneBorderState::Attention => workspace_pane_attention_border_color(),
     }
 }
@@ -688,11 +716,7 @@ pub(crate) fn command_pane_hidden_border_color() -> Hsla {
 }
 
 pub(crate) fn command_pane_focused_border_color() -> Hsla {
-    /*
-    CDXC:CommandPane 2026-06-25-13:19:
-    Native focused terminal pane chrome is a neutral #737373 outline at 95% alpha, while #95d7f6 remains reserved for attention/done status. Do not tint command focus blue.
-    */
-    rgb(0x737373).opacity(0.95).into()
+    workspace_pane_focused_border_color()
 }
 
 pub(crate) fn command_pane_tab_background_color(is_active: bool, is_sleeping: bool) -> Hsla {

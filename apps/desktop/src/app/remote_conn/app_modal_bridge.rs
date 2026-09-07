@@ -34,6 +34,38 @@ impl GhostexGpuiApp {
         };
 
         match message_type {
+            // CDXC:Settings 2026-09-06 DECISION: Account setup runs its displayed sign-in command with one click in an interactive terminal, using the existing terminal launcher.
+            "accountSetup" => {
+                if message.get("machineId").and_then(serde_json::Value::as_str) != Some("local") {
+                    return;
+                }
+                let title = match message.get("provider").and_then(serde_json::Value::as_str) {
+                    Some("claude") => "Claude account sign-in",
+                    Some("codex") => "Codex account sign-in",
+                    _ => return,
+                };
+                let Some(command) = message
+                    .get("command")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                else {
+                    return;
+                };
+                let Some(home) = std::env::var_os("HOME")
+                    .map(std::path::PathBuf::from)
+                    .filter(|p| p.is_absolute())
+                else {
+                    return;
+                };
+                if self.dispatch_gpui_os_integration_command_message(
+                    serde_json::json!({
+                        "action": "createQuickTerminal", "command": command, "cwd": home, "title": title,
+                    }),
+                    cx,
+                ) {
+                    self.close_gpui_app_modal_window_and_restore_command_focus(cx);
+                }
+            }
             "findPromptsHostAction" => {
                 self.receive_find_prompts_modal_host_action(&message, window, cx);
             }
@@ -564,6 +596,26 @@ impl GhostexGpuiApp {
                 self.start_gpui_local_gxserver_bootstrap(cx);
                 self.dispatch_gpui_titlebar_resources_project_state_update(cx);
             }
+            "accountSwitchProgress" => {
+                let (Some(project_id), Some(session_id)) =
+                    (message["projectId"].as_str(), message["sessionId"].as_str())
+                else {
+                    return;
+                };
+                let key = if let Some(machine_id) = message["machineId"].as_str() {
+                    GpuiWorkspaceTerminalSessionKey::Remote(GpuiRemoteAttachSessionKey {
+                        remote_machine_id: machine_id.to_string(),
+                        project_id: project_id.to_string(),
+                        session_id: session_id.to_string(),
+                    })
+                } else {
+                    GpuiWorkspaceTerminalSessionKey::Local(GpuiLocalWorkspaceSessionKey {
+                        project_id: project_id.to_string(),
+                        session_id: session_id.to_string(),
+                    })
+                };
+                self.set_session_account_switch_progress(key, &message["progress"], None, cx);
+            }
             "gxserverPresentationReady" => {
                 if !self.sidebar_timer_presentations_replayed_after_ready {
                     /*
@@ -901,6 +953,7 @@ fn gpui_app_modal_open_message_allowed_fields(
     modal: GpuiAppModalKind,
 ) -> Option<&'static [&'static str]> {
     match modal {
+        GpuiAppModalKind::MermaidDiagram => Some(&["source"]),
         GpuiAppModalKind::RecentProjects => Some(&["machineId", "machineName"]),
         GpuiAppModalKind::SidebarSpaceEditor => Some(&[
             "memberCollectionId",

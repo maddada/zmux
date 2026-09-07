@@ -28,6 +28,7 @@ pub(crate) fn gpui_settings_action_status_message(
 pub(crate) fn gpui_create_local_project_workspace_agent(
     project_id: &str,
     agent_id: &str,
+    account_id: Option<&str>,
 ) -> Result<
     (
         GpuiLocalWorkspaceSessionKey,
@@ -44,6 +45,7 @@ pub(crate) fn gpui_create_local_project_workspace_agent(
         "/api/createAgentSession",
         &serde_json::json!({
             "agentId": agent_id,
+            "runtimeSettings": account_id.map(|id| serde_json::json!({"accountId": id})).unwrap_or_else(|| serde_json::json!({})),
             /*
             CDXC:Drafts 2026-08-28:
             The Windows project-header agent launch is the same promptless

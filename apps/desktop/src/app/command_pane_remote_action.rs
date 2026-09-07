@@ -205,18 +205,81 @@ impl GhostexGpuiApp {
         self.persist_shell_layout_state();
         cx.notify();
 
+        self.create_remote_command_terminal_for_slot(
+            slot_id,
+            reference,
+            config,
+            target,
+            title,
+            Some(command),
+            cx,
+        );
+    }
+
+    /// CDXC:RemoteMachines 2026-09-06 WHY:
+    /// The command-pane + button and F12 used local creation for remote projects, which rejected their machine-scoped project IDs and immediately removed the new tabs.
+    /// Plain terminals must use the owning remote daemon and the same SSH attach lifecycle as Action terminals.
+    pub(crate) fn start_new_remote_command_terminal_for_slot(
+        &mut self,
+        slot_id: CommandTerminalBodyMountSlotId,
+        reference: GpuiRemoteProjectReference,
+        title: String,
+        startup_text: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(target) =
+            self.gpui_remote_gxserver_request_target(reference.remote_machine_id.as_str())
+        else {
+            return;
+        };
+        let settings = shared_settings::shared_sidebar_settings_snapshot();
+        let Some(config) = gpui_remote_machine_config_from_settings(
+            settings.object(),
+            reference.remote_machine_id.as_str(),
+        ) else {
+            self.close_command_terminal_after_gxserver_attach_failure(
+                slot_id,
+                "The saved remote machine is missing required SSH settings.",
+                cx,
+            );
+            return;
+        };
+        self.command_gxserver_attach_pending
+            .insert(slot_id.session_id);
+        self.create_remote_command_terminal_for_slot(
+            slot_id,
+            reference,
+            config,
+            target,
+            title,
+            startup_text,
+            cx,
+        );
+    }
+
+    pub(crate) fn create_remote_command_terminal_for_slot(
+        &mut self,
+        slot_id: CommandTerminalBodyMountSlotId,
+        reference: GpuiRemoteProjectReference,
+        config: GpuiRemoteMachineConfig,
+        target: GpuiRemoteGxserverRequestTarget,
+        title: String,
+        startup_text: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let session_id = slot_id.session_id;
         let remote_machine_id = reference.remote_machine_id.clone();
         let command_pane_project_epoch = self.command_pane_project_epoch;
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let result = background
                 .spawn(async move {
-                    gpui_run_remote_project_action_terminal(
+                    gpui_create_remote_command_terminal(
                         &config,
                         &target,
                         &reference,
                         title.as_str(),
-                        command.as_str(),
+                        startup_text.as_deref(),
                     )
                 })
                 .await;

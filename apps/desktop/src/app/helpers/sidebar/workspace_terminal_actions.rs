@@ -179,6 +179,7 @@ pub(crate) fn gpui_sidebar_create_project_agent_from_json(
             "type",
             "projectId",
             "agentId",
+            "accountId",
             "preferredInterface",
             "requestId",
         ],
@@ -213,7 +214,18 @@ pub(crate) fn gpui_sidebar_create_project_agent_from_json(
         .filter(|value| gpui_remote_sidebar_agent_id_allowed(value))
         .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?
         .to_string();
+    let account_id = match object.get("accountId") {
+        None => None,
+        Some(value) => Some(
+            value
+                .as_str()
+                .filter(|id| !id.is_empty() && id.len() <= 256)
+                .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?
+                .to_string(),
+        ),
+    };
     Ok(GpuiSidebarCreateProjectAgentMessage {
+        account_id,
         agent_id,
         preferred_interface,
         project_id,

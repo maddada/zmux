@@ -71,6 +71,9 @@ pub(crate) fn gpui_native_resource_is_app_bundle_process(
 pub(crate) fn gpui_native_resource_is_app_shell_process(
     process: &GpuiNativeResourceProcess,
 ) -> bool {
+    if gpui_native_resource_is_ghostex_web_process(process) {
+        return false;
+    }
     let command = process.command.to_ascii_lowercase();
     [
         "/ghostex.app/contents/macos/",
@@ -91,16 +94,9 @@ pub(crate) fn gpui_native_resource_is_app_shell_process(
             .any(|executable| command.contains(executable)))
 }
 
-/*
-CDXC:Resources 2026-08-24:
-gxserver is the app's own control plane, and it binds an ephemeral loopback
-port the user never types or opens. It lives in `Contents/Resources/`, so the
-bundle-path markers above (which deliberately stay narrow, because the same
-folder also holds zmx and the terminal runtimes that DO belong to session rows)
-never matched it and every launch grew a permanent `localhost:<random>` Dev
-Servers row. Identify it by executable name so the bundled runtime, a
-`~/.ghostex/` install, and a dev build are all recognised.
-*/
+/// CDXC:Resources 2026-09-06 WHY:
+/// gxserver's API listener belongs to the control plane, so keep it out of Dev Servers.
+/// This supersedes the old assumption that its port was ephemeral: it uses port 58744, and web hosting now belongs to a separate `ghostex web` process.
 pub(crate) fn gpui_native_resource_is_gxserver_process(
     process: &GpuiNativeResourceProcess,
 ) -> bool {
@@ -110,6 +106,23 @@ pub(crate) fn gpui_native_resource_is_gxserver_process(
             .as_str(),
         "gxserver" | "gxserver.exe"
     )
+}
+
+/// CDXC:Resources 2026-09-06 DECISION:
+/// User: the separately launched `ghostex web` server must appear in Resources instead of being filtered with gxserver's ports.
+/// Match the CLI invocation so it also appears when started outside the active project directory.
+/// SEE-ALSO: server/src/ghostex_cli/web.rs.
+pub(crate) fn gpui_native_resource_is_ghostex_web_process(
+    process: &GpuiNativeResourceProcess,
+) -> bool {
+    let mut arguments = process.command.split_whitespace();
+    let executable = arguments
+        .next()
+        .and_then(|path| Path::new(path).file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    matches!(executable, "ghostex" | "gx" | "ghostex.exe" | "gx.exe")
+        && arguments.next() == Some("web")
 }
 
 pub(crate) fn gpui_native_resource_is_ghostex_owned_process(
@@ -167,10 +180,60 @@ pub(crate) fn gpui_native_resource_process_is_zmx_session(
     process: &GpuiNativeResourceProcess,
     suffix: &str,
 ) -> bool {
-    gpui_native_resource_process_name(process)
-        .to_ascii_lowercase()
-        .starts_with("zmx")
-        && process.command.contains(suffix)
+    gpui_native_resource_zmx_session_name(process).is_some_and(|name| name.ends_with(suffix))
+}
+
+pub(crate) fn gpui_native_resource_zmx_session_name(
+    process: &GpuiNativeResourceProcess,
+) -> Option<&str> {
+    let mut args = process.command.split_whitespace();
+    let executable = Path::new(args.next()?).file_name()?.to_str()?;
+    if !matches!(executable, "zmx" | "zmx.exe")
+        || !matches!(args.next()?, "run" | "attach" | "watch-title")
+    {
+        return None;
+    }
+    args.next()
+}
+
+/// CDXC:Resources 2026-09-06 WHY:
+/// Attach clients and title watchers belong to the app's terminal and server lifecycle; exposing their raw PID as an orphan close action bypasses that lifecycle.
+pub(crate) fn gpui_native_resource_is_zmx_client(process: &GpuiNativeResourceProcess) -> bool {
+    matches!(
+        gpui_native_resource_process_name(process).as_str(),
+        "zmx" | "zmx.exe"
+    ) && process.command.split_whitespace().nth(1) != Some("run")
+}
+
+/// CDXC:Resources 2026-09-06 WHY:
+/// An agent can launch Ghostex itself, so an unbounded runtime tree can include the app or a launcher whose termination takes the app down too.
+/// Protect the shell, its infrastructure and their ancestors before constructing or executing raw process close actions.
+pub(crate) fn gpui_native_resource_protected_pids(
+    processes: &[GpuiNativeResourceProcess],
+) -> HashSet<u32> {
+    let mut protected = HashSet::new();
+    let by_pid = processes
+        .iter()
+        .map(|p| (p.pid, p))
+        .collect::<HashMap<_, _>>();
+    for process in processes.iter().filter(|p| {
+        gpui_native_resource_is_app_shell_process(p)
+            || gpui_native_resource_is_zmx_client(p)
+            || (p.system_pid == std::process::id()
+                && (!cfg!(target_os = "windows") || p.pid != p.system_pid))
+    }) {
+        let mut pid = process.pid;
+        while protected.insert(pid) {
+            let Some(parent) = by_pid.get(&pid) else {
+                break;
+            };
+            if parent.ppid <= 1 {
+                break;
+            }
+            pid = parent.ppid;
+        }
+    }
+    protected
 }
 
 pub(crate) fn gpui_native_resource_process_name(process: &GpuiNativeResourceProcess) -> String {
@@ -410,3 +473,40 @@ pub(crate) const GPUI_BUNDLED_GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-move-codex-session",
     "ghostex-manage-beads",
 ];
+
+/// CDXC:Resources 2026-09-06 WHY:
+/// Resources keeps the opening snapshot while PIDs can exit and be reused; signaling those numbers blindly can terminate Ghostex itself.
+/// Recheck the sampled process identity and current app ancestry on the worker before sending a signal.
+pub(crate) fn gpui_terminate_native_resource_processes(
+    targets: Vec<GpuiNativeResourceProcess>,
+    signal: &'static str,
+) {
+    if targets.is_empty() {
+        return;
+    }
+    thread::spawn(move || {
+        let processes = gpui_read_native_resource_processes();
+        let protected = gpui_native_resource_protected_pids(&processes);
+        let pids = targets
+            .iter()
+            .filter_map(|target| {
+                processes
+                    .iter()
+                    .find(|process| {
+                        process.pid == target.pid
+                            && process.system_pid == target.system_pid
+                            && process.command == target.command
+                            && process.system_pid > 1
+                            && !protected.contains(&process.pid)
+                    })
+                    .map(|process| process.system_pid.to_string())
+            })
+            .collect::<HashSet<_>>();
+        if pids.is_empty() {
+            return;
+        }
+        let mut command = Command::new("/bin/kill");
+        command.arg(format!("-{signal}")).args(pids);
+        let _ = command.status();
+    });
+}

@@ -271,7 +271,7 @@ impl GpuiShellLayoutState {
         */
         let command_pane_project_id = json_string_field(object, "commandPaneProjectId")
             .map(str::trim)
-            .filter(|project_id| gpui_remote_sidebar_project_id_allowed(project_id))
+            .filter(|project_id| gpui_workspace_project_key_allowed(project_id))
             .map(str::to_string);
         let parked_command_panes_by_project = object
             .get("commandPanesByProject")
@@ -280,7 +280,7 @@ impl GpuiShellLayoutState {
                 parked
                     .iter()
                     .filter(|(project_id, pane_value)| {
-                        gpui_remote_sidebar_project_id_allowed(project_id.trim())
+                        gpui_workspace_project_key_allowed(project_id.trim())
                             && pane_value.is_object()
                     })
                     .map(|(project_id, pane_value)| {

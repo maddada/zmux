@@ -114,12 +114,7 @@ impl GpuiAppModalHostWindow {
                 disabled with "server connection unavailable", so the modal
                 must be in this allowlist.
                 */
-                matches!(
-                    modal,
-                    GpuiAppModalKind::FindPrompts
-                        | GpuiAppModalKind::Settings
-                        | GpuiAppModalKind::RemoteSetup
-                )
+                modal.needs_gxserver_bootstrap()
                 .then_some(sidebar_gxserver_bootstrap)
                 .flatten(),
                 None,
@@ -186,9 +181,11 @@ impl GpuiAppModalHostWindow {
         open_message: serde_json::Value,
         sidebar_state_message: serde_json::Value,
         modal: GpuiAppModalKind,
+        gxserver_bootstrap: Option<cef::SidebarGxserverBootstrap>,
         cx: &mut gpui::Context<Self>,
     ) {
         self.current_modal = modal;
+        self.refresh_gxserver_bootstrap(gxserver_bootstrap, cx);
         self.presented_modal = None;
         self.latest_sidebar_state_message = sidebar_state_message;
         if !self.current_modal.uses_react_modal_host() {
@@ -207,6 +204,20 @@ impl GpuiAppModalHostWindow {
         }
         self.dispatch_message(open_message, cx);
         cx.notify();
+    }
+
+    pub(crate) fn refresh_gxserver_bootstrap(
+        &mut self,
+        bootstrap: Option<cef::SidebarGxserverBootstrap>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.current_modal.needs_gxserver_bootstrap() {
+            if let Some(surface) = &self.surface {
+                surface.update(cx, |surface, _| {
+                    surface.refresh_session_chat_gxserver_bootstrap(bootstrap);
+                });
+            }
+        }
     }
 
     pub(crate) fn receive_bridge_message(

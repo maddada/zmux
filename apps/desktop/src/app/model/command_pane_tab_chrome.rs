@@ -909,7 +909,9 @@ pub(crate) fn command_pane_group_border_color(
     CDXC:FocusRouting 2026-06-25-18:02:
     Native pinned command panels hide inactive command borders while floating command panels keep the inactive command outline. Keep the GPUI border frame stable but make pinned inactive command groups transparent so the visual state follows AppKit without resizing panes.
     */
-    if command_pane_group_has_first_responder_border(shell_focus, focused_group, group_id) {
+    if show_active_pane_outline()
+        && command_pane_group_has_first_responder_border(shell_focus, focused_group, group_id)
+    {
         command_pane_focused_border_color()
     } else if mode == CommandPaneMode::Pinned {
         command_pane_hidden_border_color()

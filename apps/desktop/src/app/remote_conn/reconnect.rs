@@ -239,6 +239,8 @@ impl GhostexGpuiApp {
                         self.refresh_titlebar_actions_in_background(cx);
                     }
                     self.ensure_source_code_server_runtime_for_current_context(cx);
+                    // Restored chat panes cannot create their page until the remote bootstrap is available.
+                    self.reconcile_agents_pane_surfaces(cx);
                 }
                 self.dispatch_gpui_remote_machine_status(
                     remote_machine_id.as_str(),
