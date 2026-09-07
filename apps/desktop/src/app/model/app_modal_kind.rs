@@ -36,6 +36,7 @@ pub(crate) enum GpuiAppModalKind {
     SidebarSpaceEditor,
     GitCommit,
     GitFileDiff,
+    MermaidDiagram,
     PortlessSetup,
     DiscoverGhostex,
     Extension(ExtensionId),
@@ -74,6 +75,7 @@ impl GpuiAppModalKind {
             "sidebarSpaceEditor" => Some(Self::SidebarSpaceEditor),
             "gitCommit" => Some(Self::GitCommit),
             "gitFileDiff" => Some(Self::GitFileDiff),
+            "mermaidDiagram" => Some(Self::MermaidDiagram),
             "portlessSetup" => Some(Self::PortlessSetup),
             "discoverGhostex" => Some(Self::DiscoverGhostex),
             value if value.starts_with("extension:") => {
@@ -115,6 +117,7 @@ impl GpuiAppModalKind {
             Self::SidebarSpaceEditor => "sidebarSpaceEditor",
             Self::GitCommit => "gitCommit",
             Self::GitFileDiff => "gitFileDiff",
+            Self::MermaidDiagram => "mermaidDiagram",
             Self::PortlessSetup => "portlessSetup",
             Self::DiscoverGhostex => "discoverGhostex",
             Self::Extension(id) => extension_modal_id(id),
@@ -153,6 +156,7 @@ impl GpuiAppModalKind {
             Self::SidebarSpaceEditor => "Ghostex Space",
             Self::GitCommit => "Ghostex Commit Changes",
             Self::GitFileDiff => "Ghostex File Diff",
+            Self::MermaidDiagram => "Ghostex Diagram",
             Self::PortlessSetup => "Ghostex Portless Setup",
             Self::DiscoverGhostex => "Discover Ghostex",
             Self::Extension(_) => "Ghostex Extension",
@@ -272,6 +276,10 @@ impl GpuiAppModalKind {
             ),
             Self::FirstLaunchSetup => size(px(1120.0), px(850.0)),
             Self::WatchGhostexVideo => size(px(1120.0), px(750.0)),
+            // CDXC:SessionChat 2026-09-06 DECISION:
+            // User: start only the diagram dialog 20% wider and taller (1248x912, previously 1040x760).
+            // SEE-ALSO: packages/core-ui/mermaid/mermaid-diagram.tsx and mermaid.css own the shared React dialog dimensions.
+            Self::MermaidDiagram => size(px(1248.0), px(912.0)),
         }
     }
 
@@ -310,6 +318,12 @@ impl GpuiAppModalKind {
                 | Self::ConfigureActions
                 | Self::OpenTargets
         )
+    }
+
+    /// CDXC:Settings 2026-09-07 WHY:
+    /// Configure Agents and the other Settings entry points expose Accounts and Extensions too; omitting their server connection made Accounts incorrectly ask the local user to connect a computer.
+    pub(crate) fn needs_gxserver_bootstrap(self) -> bool {
+        self.is_settings_modal_entry() || matches!(self, Self::FindPrompts | Self::RemoteSetup)
     }
 
     pub(crate) fn requires_sidebar_state(self) -> bool {
@@ -363,6 +377,9 @@ impl GpuiAppModalKind {
             | Self::FirstLaunchSetup => serde_json::json!({
                 "modal": self.modal_id(),
                 "type": "open",
+            }),
+            Self::MermaidDiagram => serde_json::json!({
+                "modal": self.modal_id(), "source": "", "type": "open",
             }),
             Self::Extension(_) => serde_json::Value::Null,
             Self::UpdateAvailable => serde_json::json!({

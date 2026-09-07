@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { notifyAccountsConnectionsChanged } from '@/packages/core-ui/accounts/transport';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Toaster, toast } from 'sonner';
 import { AddProjectModal } from '@/packages/core-ui/add-project-modal/add-project-modal';
@@ -41,6 +42,7 @@ import {
 import { SessionNoteModal } from '@/packages/core-ui/session-note-modal';
 import { SessionRenameModal } from '@/packages/core-ui/session-rename-modal';
 import { SpaceEditorModal } from '@/packages/core-ui/space-editor-modal';
+import { MermaidDiagramModal } from '@/packages/core-ui/mermaid/mermaid-diagram';
 import { WatchGhostexVideoModal } from '@/packages/core-ui/watch-ghostex-video-modal';
 import { UpdateAvailableModal, type UpdateAvailableModalState } from '@/packages/core-ui/update-available-modal';
 import { FirstLaunchSetupModal } from '@/packages/core-ui/first-launch-setup-modal';
@@ -102,6 +104,7 @@ type AppModalKind =
   | 'discoverGhostex'
   | 'exportTranscriptResult'
   | 'watchGhostexVideo'
+  | 'mermaidDiagram'
   | 'hotkeys'
   | 'missingProjectFolder'
   | 'gitCommit'
@@ -234,8 +237,10 @@ type AppModalHostMessage =
       filePath?: string;
       gitCommitDraft?: GitCommitModalDraft;
       gitFileDiff?: GitFileDiffModalDraft;
+      source?: string;
       groupId?: string;
       hookAgentId?: string;
+      accountId?: string;
       worktreeDeleteDraft?: WorktreeDeleteModalDraft;
       worktreeRenameDraft?: WorktreeRenameModalDraft;
       initialRemoteMachineId?: string;
@@ -548,6 +553,7 @@ type AgentHooksRequiredModalState = {
   agentName: string;
   groupId?: string;
   hookAgentId: string;
+  accountId?: string;
 };
 
 declare global {
@@ -1158,6 +1164,7 @@ function AppModalHost() {
     firstUserMessage,
     gitCommit,
     gitFileDiff,
+    mermaidSource,
     worktreeDelete,
     worktreeRename,
     missingProjectFolder,
@@ -1267,6 +1274,7 @@ function AppModalHost() {
     firstUserMessage,
     gitCommit,
     gitFileDiff,
+    mermaidSource,
     worktreeDelete,
     worktreeRename,
     missingProjectFolder,
@@ -1745,6 +1753,7 @@ function AppModalHost() {
             agentId: agentHooksRequired.agentId,
             groupId: agentHooksRequired.groupId,
             hookAgentId: agentHooksRequired.hookAgentId,
+            accountId: agentHooksRequired.accountId,
             installHooks: true,
             type: 'confirmAgentHookLaunch',
           } satisfies SidebarToExtensionMessage);
@@ -1758,6 +1767,7 @@ function AppModalHost() {
             agentId: agentHooksRequired.agentId,
             groupId: agentHooksRequired.groupId,
             hookAgentId: agentHooksRequired.hookAgentId,
+            accountId: agentHooksRequired.accountId,
             installHooks: false,
             type: 'confirmAgentHookLaunch',
           } satisfies SidebarToExtensionMessage);
@@ -2400,6 +2410,9 @@ function AppModalHost() {
         appIconState={appIconState}
       />
       <DiscoverGhostexModal isOpen={activeModal === 'discoverGhostex'} onClose={closeModal} theme={theme} />
+      {activeModal === 'mermaidDiagram' && mermaidSource !== undefined && (
+        <MermaidDiagramModal source={mermaidSource} onClose={closeModal} />
+      )}
       <WatchGhostexVideoModal isOpen={activeModal === 'watchGhostexVideo'} onClose={closeModal} theme={theme} />
       <FirstLaunchSetupModal
         agentHookStatus={agentHookStatus}
@@ -2727,6 +2740,7 @@ function useModalStateFromNative() {
   const [firstUserMessage, setFirstUserMessage] = useState<FirstUserMessageModalState>();
   const [gitCommit, setGitCommit] = useState<GitCommitModalDraft>();
   const [gitFileDiff, setGitFileDiff] = useState<GitFileDiffModalDraft>();
+  const [mermaidSource, setMermaidSource] = useState<string>();
   const [worktreeDelete, setWorktreeDelete] = useState<WorktreeDeleteModalDraft>();
   const [worktreeRename, setWorktreeRename] = useState<WorktreeRenameModalDraft>();
   const [missingProjectFolder, setMissingProjectFolder] = useState<MissingProjectFolderModalState>();
@@ -2937,6 +2951,7 @@ function useModalStateFromNative() {
                   agentName: message.agentName,
                   groupId: typeof message.groupId === 'string' && message.groupId.trim() ? message.groupId : undefined,
                   hookAgentId: message.hookAgentId,
+                  accountId: typeof message.accountId === 'string' ? message.accountId : undefined,
                 }
               : undefined
           );
@@ -3287,6 +3302,9 @@ function useModalStateFromNative() {
             }
             setGitFileDiff(message.gitFileDiff);
             return;
+          } else if (message.modal === 'mermaidDiagram') {
+            if (typeof message.source !== 'string') throw new Error('Missing Mermaid diagram source.');
+            setMermaidSource(message.source);
           } else if (message.modal === 'agentConfig') {
             if (!message.agentDraft) {
               throw new Error('Agent config modal request is missing agentDraft.');
@@ -3342,7 +3360,11 @@ function useModalStateFromNative() {
                 ? message.initialRemoteSection
                 : undefined
             );
-            setSettingsInitialAgentsSection(message.initialAgentsSection === 'agentHooks' ? 'agentHooks' : undefined);
+            setSettingsInitialAgentsSection(
+              message.initialAgentsSection === 'agentHooks' || message.initialAgentsSection === 'accounts'
+                ? message.initialAgentsSection
+                : undefined
+            );
             setSettingsInitialTabOverride(isSettingsModalTab(message.initialTab) ? message.initialTab : undefined);
           } else {
             setSettingsInitialSection(undefined);
@@ -3599,6 +3621,7 @@ function useModalStateFromNative() {
     firstUserMessage,
     gitCommit,
     gitFileDiff,
+    mermaidSource,
     worktreeDelete,
     worktreeRename,
     missingProjectFolder,
@@ -3758,6 +3781,7 @@ function isModalRenderable({
   firstUserMessage,
   gitCommit,
   gitFileDiff,
+  mermaidSource,
   worktreeDelete,
   worktreeRename,
   missingProjectFolder,
@@ -3782,6 +3806,7 @@ function isModalRenderable({
   firstUserMessage: FirstUserMessageModalState | undefined;
   gitCommit: GitCommitModalDraft | undefined;
   gitFileDiff: GitFileDiffModalDraft | undefined;
+  mermaidSource: string | undefined;
   worktreeDelete: WorktreeDeleteModalDraft | undefined;
   worktreeRename: WorktreeRenameModalDraft | undefined;
   missingProjectFolder: MissingProjectFolderModalState | undefined;
@@ -3818,6 +3843,8 @@ function isModalRenderable({
       return gitCommit !== undefined;
     case 'gitFileDiff':
       return gitFileDiff !== undefined;
+    case 'mermaidDiagram':
+      return mermaidSource !== undefined;
     case 'missingProjectFolder':
       return missingProjectFolder !== undefined;
     case 'deleteWorktree':
@@ -3895,4 +3922,11 @@ if (window.__ghostex_APP_MODAL_HOST_SURFACE__ === 'nativeWindow') {
   }
 }
 installAppModalGlobalErrorLogging('AppModals:modalHost');
+// CDXC:Settings 2026-09-07 WHY:
+// CEF can install the server connection after Settings renders, including when reusing another modal's window. Re-read Accounts connections on that existing bootstrap callback instead of retaining the initial empty list.
+const accountsBootstrapBridge = (window as unknown as {
+  ghostexGpui?: { onGxserverBootstrapChanged?: () => void };
+});
+accountsBootstrapBridge.ghostexGpui ??= {};
+accountsBootstrapBridge.ghostexGpui.onGxserverBootstrapChanged = notifyAccountsConnectionsChanged;
 createRoot(document.getElementById('root')!).render(<AppModalHost />);

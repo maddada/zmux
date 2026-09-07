@@ -35,6 +35,7 @@ build_cef_sidebar_bundle_if_needed() {
 		--path "$REPO_ROOT/packages/shared" \
 		--path "$REPO_ROOT/apps/web/src" \
 		--path "$REPO_ROOT/tooling/shiki-classic-assets.mjs" \
+		--path "$REPO_ROOT/tooling/mermaid-classic-assets.mjs" \
 		--path "$REPO_ROOT/package.json" \
 		--path "$REPO_ROOT/bun.lock" \
 		--path "$REPO_ROOT/tsconfig.json")"
@@ -48,6 +49,7 @@ build_cef_sidebar_bundle_if_needed() {
 		"$GPUI_DIR/dist/sidebar/modal-host.html"
 		"$GPUI_DIR/dist/sidebar/titlebar-host.html"
 		"$GPUI_DIR/dist/sidebar/monaco/vs/loader.js"
+		"$GPUI_DIR/dist/sidebar/mermaid/runtime.js"
 	)
 	if cache_matches "cef-sidebar-bundle" "$bundle_digest" "${bundle_outputs[@]}"; then
 		echo "CEF sidebar bundle is current; skipping web build."

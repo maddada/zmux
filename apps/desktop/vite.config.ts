@@ -4,6 +4,11 @@ import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 import { defineConfig, type Plugin } from 'vite';
 import {
+  MERMAID_ASSET_DIR_NAME,
+  mermaidClassicScriptEsbuildPlugin,
+  writeMermaidClassicAssets,
+} from '../../tooling/mermaid-classic-assets.mjs';
+import {
   SHIKI_ASSET_DIR_NAME,
   shikiClassicScriptEsbuildPlugin,
   writeShikiClassicAssets,
@@ -142,6 +147,7 @@ function stageShikiChatRuntime(): Plugin {
     name: 'ghostex-gpui-stage-shiki-chat-runtime',
     async closeBundle() {
       await writeShikiClassicAssets(path.join(sidebarOutDir, SHIKI_ASSET_DIR_NAME));
+      await writeMermaidClassicAssets(path.join(sidebarOutDir, MERMAID_ASSET_DIR_NAME));
     },
   };
 }
@@ -302,6 +308,7 @@ function createCefSingleFileEsbuildPlugin(): esbuild.Plugin {
       // The shared plugin swaps both dynamic-import modules for that loader
       // before esbuild can inline the highlighter into every chat pane.
       shikiClassicScriptEsbuildPlugin().setup(build);
+      mermaidClassicScriptEsbuildPlugin().setup(build);
       build.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async (args) => {
         const contents = await fs.promises.readFile(args.path, 'utf8');
         return {

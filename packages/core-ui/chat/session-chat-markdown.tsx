@@ -50,6 +50,7 @@ import {
 } from 'react';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { MermaidDiagram } from '../mermaid/mermaid-diagram';
 import { Button } from '../../components/ui/button';
 import {
   DropdownMenu,
@@ -196,6 +197,7 @@ function sessionChatOrderedListGutter(itemCount: number, start: number | undefin
  * SessionChatMarkdown having to guess.
  */
 const SessionChatMarkdownStreamingContext = createContext(false);
+const SessionChatMarkdownSourceContext = createContext('');
 
 /**
  * Renders `fallback` once a descendant throws. Highlighting must never take a
@@ -391,6 +393,8 @@ function OpenFenceFileButton({
 }
 
 function MarkdownCodeBlock({ children, node }: ComponentProps<'pre'> & ExtraProps) {
+  const isStreaming = useContext(SessionChatMarkdownStreamingContext);
+  const markdown = useContext(SessionChatMarkdownSourceContext);
   const [copied, setCopied] = useState(false);
   /*
    * Wrapping is the block's own state, seeded from the last choice made
@@ -427,6 +431,23 @@ function MarkdownCodeBlock({ children, node }: ComponentProps<'pre'> & ExtraProp
   const titleReference = title === null ? null : resolveSessionChatFenceTitleFilePath(title);
   const wrapLabel = wrapped ? 'Stop wrapping lines' : 'Wrap lines';
   const copyLabel = copied ? 'Copied' : 'Copy code';
+
+  if (fenceInfo?.toLowerCase() === 'mermaid') {
+    const fence = markdown.slice(node?.position?.start.offset, node?.position?.end.offset);
+    const lines = fence.trimEnd().split('\n');
+    const opening = lines[0]?.match(/(`{3,}|~{3,})/);
+    const closing = lines
+      .at(-1)
+      ?.replace(/^(?:\s*>\s*)+/, '')
+      .trim();
+    const closed =
+      lines.length > 1 &&
+      opening !== null &&
+      opening !== undefined &&
+      closing !== undefined &&
+      new RegExp(`^${opening[1][0]}{${opening[1].length},}$`).test(closing);
+    return <MermaidDiagram source={text} pending={isStreaming && !closed} />;
+  }
 
   return (
     // data-wrap drives the wrapping rule in chat.css, which is written against
@@ -948,8 +969,7 @@ export function SessionChatMarkdown({
   chatText?: boolean;
   /**
    * True while this body is still being appended to by a working agent. Only
-   * syntax highlighting reads it (see ShikiCodeBody); the markdown itself
-   * renders identically either way.
+   * syntax highlighting and Mermaid rendering use it to avoid work on unfinished fences.
    */
   isStreaming?: boolean;
   markdown: string;
@@ -964,11 +984,13 @@ export function SessionChatMarkdown({
   const source = chatText ? sessionChatUserMarkdownSource(listSafe) : listSafe;
   return (
     <SessionChatMarkdownStreamingContext value={isStreaming}>
-      <div className='ghostex-chat-markdown'>
-        <ReactMarkdown components={components} remarkPlugins={chatText ? CHAT_TEXT_REMARK_PLUGINS : REMARK_PLUGINS}>
-          {source}
-        </ReactMarkdown>
-      </div>
+      <SessionChatMarkdownSourceContext value={source}>
+        <div className='ghostex-chat-markdown'>
+          <ReactMarkdown components={components} remarkPlugins={chatText ? CHAT_TEXT_REMARK_PLUGINS : REMARK_PLUGINS}>
+            {source}
+          </ReactMarkdown>
+        </div>
+      </SessionChatMarkdownSourceContext>
     </SessionChatMarkdownStreamingContext>
   );
 }

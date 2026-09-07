@@ -7,7 +7,7 @@ import type { SidebarAgentIcon } from '../shared/sidebar-agents';
 /** The Settings → Remote cards a deep link can scroll to. */
 export type SettingsRemoteSection = 'easyConnect' | 'tailscale';
 /** Agents tab card a Settings deep link scrolls to; see AgentsSettingsTab. */
-export type SettingsAgentsSection = 'agentHooks';
+export type SettingsAgentsSection = 'agentHooks' | 'accounts';
 
 export type AppModalKind =
   | 'addProject'
@@ -22,6 +22,7 @@ export type AppModalKind =
   | 'watchGhostexVideo'
   | 'gitCommit'
   | 'gitFileDiff'
+  | 'mermaidDiagram'
   | 'deleteWorktree'
   | 'hotkeys'
   | 'missingProjectFolder'
@@ -44,6 +45,7 @@ export type AppModalKind =
   | 'firstLaunchSetup';
 
 export type OpenAppModalMessage =
+  | { modal: 'mermaidDiagram'; source: string; type: 'open' }
   | {
       modal: Exclude<
         AppModalKind,
@@ -57,6 +59,7 @@ export type OpenAppModalMessage =
         | 'firstUserMessage'
         | 'gitCommit'
         | 'gitFileDiff'
+        | 'mermaidDiagram'
         | 'deleteWorktree'
         | 'missingProjectFolder'
         | 'portlessSetup'
@@ -103,6 +106,7 @@ export type OpenAppModalMessage =
       agentName: string;
       groupId?: string;
       hookAgentId: string;
+      accountId?: string;
       modal: 'agentHooksRequired';
       type: 'open';
     }

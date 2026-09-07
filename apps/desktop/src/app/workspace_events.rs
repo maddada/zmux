@@ -60,6 +60,26 @@ impl GhostexGpuiApp {
                 ProjectWorkareaCefSurfaceSlotKey::Manage,
                 cef::ProjectWorkareaBridgeEvent::ManageFilesRequest(payload),
             ) => {
+                // CDXC:Docs 2026-09-06 SEE-ALSO: The shared Mermaid viewer opens through the same native child-window route as chat (packages/core-ui/mermaid/mermaid-diagram.tsx).
+                if let Ok(request) = serde_json::from_str::<serde_json::Value>(&payload)
+                    && request.get("action").and_then(serde_json::Value::as_str)
+                        == Some("openMermaidDiagram")
+                {
+                    if let Some(source) = request.get("source").and_then(serde_json::Value::as_str)
+                    {
+                        self.receive_app_modal_host_bridge_event(
+                            cef::AppModalHostBridgeEvent::Message(
+                                serde_json::json!({
+                                    "type": "open", "modal": "mermaidDiagram", "source": source,
+                                })
+                                .to_string(),
+                            ),
+                            window,
+                            cx,
+                        );
+                    }
+                    return;
+                }
                 /*
                 CDXC:Docs 2026-07-11:
                 This arm previously ran synchronously inside the bridge event
@@ -1082,6 +1102,7 @@ impl GhostexGpuiApp {
             authoritative project path, configured command, launch policy,
             and attach metadata.
             */
+            let account_id = message.account_id;
             let agent_id = message.agent_id;
             let preferred_interface = message.preferred_interface;
             let project_id = message.project_id;
@@ -1093,6 +1114,7 @@ impl GhostexGpuiApp {
                         gpui_create_local_project_workspace_agent(
                             project_id.as_str(),
                             agent_id.as_str(),
+                            account_id.as_deref(),
                         )
                     })
                     .await;
@@ -1976,6 +1998,8 @@ impl GhostexGpuiApp {
             ("projectId", project_id),
             ("sessionId", gxserver_session_id),
             ("agentId", agent.to_string()),
+            ("hideAccountEmails", shared_settings::shared_sidebar_settings_snapshot().object()
+                .get("hideAccountEmails").and_then(serde_json::Value::as_bool).unwrap_or(false).to_string()),
             (
                 "theme",
                 gpui_session_chat_theme_from_settings(
@@ -2246,6 +2270,7 @@ impl GhostexGpuiApp {
         self.agents_chat_page_states.insert(session_id, page_state);
         self.agents_chat_surfaces
             .insert(session_id, surface.clone());
+        self.record_session_chat_lifecycle(session_id, "sessionChat.nativePageCreated", "ensure");
         Some(surface)
     }
 
@@ -2285,6 +2310,11 @@ impl GhostexGpuiApp {
             })
             .collect::<Vec<_>>();
         for session_id in stale_surface_ids {
+            self.record_session_chat_lifecycle(
+                session_id,
+                "sessionChat.nativePageRemoved",
+                "sessionNoLongerInShell",
+            );
             self.session_chat_composer_ready_sessions
                 .remove(&session_id);
             self.session_chat_composer_empty_reports.remove(&session_id);
@@ -2325,7 +2355,8 @@ impl GhostexGpuiApp {
         }
         let mut visibility_changed = false;
         for (session_id, surface) in &self.agents_chat_surfaces {
-            let visible = visible_session_ids.contains(session_id);
+            let visible = visible_session_ids.contains(session_id)
+                && self.session_account_switch_progress(*session_id).is_none();
             surface.update(cx, |surface, _| surface.set_visible(visible));
             /*
             CDXC:SessionChat 2026-08-24:
@@ -2372,7 +2403,9 @@ impl GhostexGpuiApp {
         let Some(session) = self.agents_workspace.session(session_id) else {
             return false;
         };
-        if session.activity != AgentTerminalActivity::Idle {
+        if session.activity != AgentTerminalActivity::Idle
+            || self.session_account_switch_progress(session_id).is_some()
+        {
             return false;
         }
         // A composer with typed text or attached images is unsent user content
@@ -2440,11 +2473,25 @@ impl GhostexGpuiApp {
         .detach();
     }
 
+    #[track_caller]
     pub(crate) fn remove_agents_chat_surface_for_session(
         &mut self,
         session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) {
+        let caller = std::panic::Location::caller();
+        let file = std::path::Path::new(caller.file())
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown");
+        self.record_session_chat_lifecycle(
+            session_id,
+            "sessionChat.nativePageRemoved",
+            &format!("{file}:{}", caller.line()),
+        );
+        if let Some(key) = self.workspace_terminal_key_for_shell_session(session_id) {
+            self.account_switch_progress.remove(&key);
+        }
         self.agents_chat_mode_sessions.remove(&session_id);
         self.session_chat_composer_ready_sessions
             .remove(&session_id);
@@ -2487,8 +2534,9 @@ impl GhostexGpuiApp {
     membership is cleared here and reinstated by the caller from the incoming
     project's parked shell-state JSON.
 
-    The rest is deliberately still cleared, exactly as before: the auto-switch
-    observation set and the pending launch intents are switch-scoped, and the two
+    Default-view observations travel with the project so restoring its saved
+    Terminal view does not trigger another automatic Chat switch.
+    The pending launch intents are switch-scoped, and the two
     draft-handoff records are dropped under the same contract as the per-session
     teardown above (every dropped handoff still has its Saved Prompts row, which
     only a confirmed terminal paste deletes).
@@ -2506,11 +2554,11 @@ impl GhostexGpuiApp {
             .copied()
             .collect();
         self.agents_chat_mode_sessions.clear();
-        self.agents_chat_auto_switch_observed_sessions.clear();
         self.pending_agents_chat_launch_intents.clear();
         self.pending_session_terminal_composer_insert.clear();
         self.pending_session_chat_draft_handoffs.clear();
         for (session_id, surface) in &self.agents_chat_surfaces {
+            self.record_session_chat_lifecycle(*session_id, "sessionChat.nativePageParked", "projectSwitch");
             surface.update(cx, |surface, _| surface.set_visible(false));
             // A parked surface is hidden by definition, so it must carry the
             // eviction clock into the park or it would age forever. Same
@@ -2521,6 +2569,9 @@ impl GhostexGpuiApp {
                 .or_insert_with(Instant::now);
         }
         ParkedAgentsChatRuntime {
+            auto_switch_observed_sessions: std::mem::take(
+                &mut self.agents_chat_auto_switch_observed_sessions,
+            ),
             page_states: std::mem::take(&mut self.agents_chat_page_states),
             protected_sessions,
             surfaces: std::mem::take(&mut self.agents_chat_surfaces),
@@ -2542,6 +2593,7 @@ impl GhostexGpuiApp {
         parked: ParkedAgentsChatRuntime,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.agents_chat_auto_switch_observed_sessions = parked.auto_switch_observed_sessions;
         self.agents_chat_page_states = parked.page_states;
         self.agents_chat_surfaces = parked.surfaces;
         self.agents_chat_surface_hidden_since = parked.surface_hidden_since;
@@ -2559,6 +2611,7 @@ impl GhostexGpuiApp {
         */
         for (session_id, surface) in &self.agents_chat_surfaces {
             let bootstrap = self.agents_session_chat_gxserver_bootstrap(*session_id);
+            self.record_session_chat_lifecycle(*session_id, "sessionChat.nativePageRestored", "projectSwitch");
             surface.update(cx, |surface, _| {
                 surface.refresh_session_chat_gxserver_bootstrap(bootstrap);
             });
