@@ -31,6 +31,8 @@ export interface SessionChatChoiceRowsProps {
    * matching keyboard handler, so the badge can never promise a dead key.
    */
   showShortcuts?: boolean;
+  /** Override the default numeric shortcuts when the owning card uses another key map. */
+  shortcutLabels?: readonly (string | null)[];
   /** Tighter rows, laid out side by side, for a collapsed picker that shows only its leading options. */
   dense?: boolean;
 }
@@ -42,12 +44,13 @@ export function SessionChatChoiceRows({
   readOnly = false,
   selected,
   showShortcuts = false,
+  shortcutLabels,
 }: SessionChatChoiceRowsProps) {
   return (
     <div className={cn('max-h-[45vh] overflow-y-auto', dense ? 'grid grid-cols-2 gap-1.5' : 'space-y-1.5')}>
       {options.map((option, optionIndex) => {
         const isSelected = selected.includes(optionIndex);
-        const shortcutKey = showShortcuts && optionIndex < 9 ? optionIndex + 1 : null;
+        const shortcutKey = !showShortcuts ? null : shortcutLabels ? shortcutLabels[optionIndex] ?? null : optionIndex < 9 ? optionIndex + 1 : null;
         return (
           <button
             className={cn(
@@ -55,7 +58,7 @@ export function SessionChatChoiceRows({
               dense ? 'py-1.5' : 'py-2',
               isSelected
                 ? 'border-primary/30 bg-primary/10 text-foreground'
-                : 'border-transparent bg-foreground/[0.045] text-foreground/85 hover:border-border hover:bg-foreground/[0.08]',
+                : 'border-border bg-background text-foreground hover:bg-muted dark:bg-transparent dark:hover:bg-input/30',
               readOnly && 'cursor-default opacity-60'
             )}
             data-chat-answer-control=''
@@ -72,15 +75,15 @@ export function SessionChatChoiceRows({
             type='button'
           >
             <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
-              <span className='text-sm leading-snug font-medium'>{option.label}</span>
+              <span className='ghostex-chat-card-option-label text-sm leading-snug font-normal'>{option.label}</span>
               {option.description && option.description !== option.label ? (
-                <span className='text-xs leading-snug text-muted-foreground'>{option.description}</span>
+                <span className='ghostex-chat-card-content text-xs leading-snug text-muted-foreground'>{option.description}</span>
               ) : null}
             </span>
             {isSelected ? (
               <IconCheck aria-hidden='true' className='ghostex-chat-glyph-semantic text-primary' />
             ) : shortcutKey !== null ? (
-              <kbd className='flex size-5 shrink-0 items-center justify-center rounded border border-border/60 bg-background/40 text-[11px] font-medium text-muted-foreground tabular-nums transition-colors duration-150 group-hover/option:text-foreground'>
+              <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.6875rem] flex h-5 min-w-5 shrink-0 items-center justify-center whitespace-nowrap rounded border border-border/60 bg-background/40 px-1 text-[11px] font-medium text-muted-foreground tabular-nums transition-colors duration-150 group-hover/option:text-foreground'>
                 {shortcutKey}
               </kbd>
             ) : null}

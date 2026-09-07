@@ -94,7 +94,7 @@ export function SessionChatActivityRow({ activity, className }: SessionChatActiv
     <div
       aria-live='polite'
       className={cn(
-        'ghostex-chat-activity-row my-2 grid gap-2 rounded-2xl border border-border/65 bg-muted/20 px-4 py-3',
+        'ghostex-chat-prompt-card ghostex-chat-activity-row my-2 grid gap-2 rounded-2xl border border-border/65 bg-muted/20 px-4 py-3',
         className
       )}
       data-kind={activity.kind}
@@ -106,14 +106,14 @@ export function SessionChatActivityRow({ activity, className }: SessionChatActiv
         ) : (
           <span aria-hidden='true' className='size-1.5 shrink-0 animate-pulse rounded-full bg-primary' />
         )}
-        <span className='min-w-0 flex-1 truncate text-sm text-foreground/90'>{activity.label}</span>
+        <span className='ghostex-chat-card-title min-w-0 flex-1 truncate text-sm text-foreground/90'>{activity.label}</span>
         {elapsed !== null ? (
-          <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>
+          <span className='ghostex-chat-card-hint shrink-0 text-xs text-muted-foreground tabular-nums'>
             {formatSessionChatActivityElapsed(elapsed)}
           </span>
         ) : null}
         {percent !== null ? (
-          <span className='shrink-0 text-xs font-medium text-foreground/80 tabular-nums'>{percent}%</span>
+          <span className='ghostex-chat-card-hint shrink-0 text-xs font-medium text-foreground/80 tabular-nums'>{percent}%</span>
         ) : null}
       </div>
       {percent !== null ? (

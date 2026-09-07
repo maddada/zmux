@@ -96,14 +96,14 @@ export function SessionChatComposerNotReadyNotice({
   return (
     <SessionChatNoticeCard kind='composerNotReady' role='alert' severity='error'>
       <div className='flex min-w-0 flex-col px-3 py-2.5'>
-        <div className='text-sm leading-snug font-medium text-foreground'>{NOT_READY_HEADLINE}</div>
+        <div className='ghostex-chat-card-title text-sm leading-snug font-medium text-foreground'>{NOT_READY_HEADLINE}</div>
         {reason && reason !== NOT_READY_HEADLINE ? (
-          <div className='mt-1 text-xs leading-snug text-muted-foreground'>{reason}</div>
+          <div className='ghostex-chat-card-content mt-1 text-xs leading-snug text-muted-foreground'>{reason}</div>
         ) : null}
         {onReadTerminalTail || onOpenTerminal ? (
           <div className='mt-3 flex flex-wrap items-center gap-1.5'>
             {onReadTerminalTail ? (
-              <Button aria-expanded={expanded} onClick={toggle} size='xs' type='button' variant='outline'>
+              <Button aria-expanded={expanded} onClick={toggle} size='sm' type='button' variant='outline'>
                 <IconChevronRight
                   aria-hidden='true'
                   className={cn('transition-transform', expanded && 'rotate-90')}
@@ -113,7 +113,7 @@ export function SessionChatComposerNotReadyNotice({
               </Button>
             ) : null}
             {onOpenTerminal ? (
-              <Button onClick={onOpenTerminal} size='xs' type='button' variant='outline'>
+              <Button onClick={onOpenTerminal} size='sm' type='button' variant='outline'>
                 <IconTerminal2 aria-hidden='true' stroke={1.8} />
                 Open Terminal
               </Button>
@@ -123,18 +123,18 @@ export function SessionChatComposerNotReadyNotice({
         {expanded ? (
           <div className='mt-2 min-w-0 overflow-hidden rounded-lg border border-input bg-muted/40'>
             {loading ? (
-              <div className='flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground'>
+              <div className='ghostex-chat-card-content flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground'>
                 <IconLoader2 aria-hidden='true' className='size-3.5 animate-spin' stroke={2} />
                 Reading the terminal…
               </div>
             ) : tailError !== null ? (
-              <div className='px-3 py-2 text-xs text-muted-foreground'>{tailError}</div>
+              <div className='ghostex-chat-card-content px-3 py-2 text-xs text-muted-foreground'>{tailError}</div>
             ) : excerpt !== null ? (
               <pre className='max-h-48 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-[1.45] text-foreground'>
                 {excerpt}
               </pre>
             ) : (
-              <div className='px-3 py-2 text-xs text-muted-foreground'>
+              <div className='ghostex-chat-card-content px-3 py-2 text-xs text-muted-foreground'>
                 {tail && !tail.captured
                   ? 'Ghostex could not read this session’s terminal screen.'
                   : 'The terminal screen is empty.'}

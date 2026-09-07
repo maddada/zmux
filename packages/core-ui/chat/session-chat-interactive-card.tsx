@@ -72,7 +72,7 @@ interface DraftAnswer {
 function CardShell({ children, kind }: { children?: React.ReactNode; kind: string }) {
   return (
     <div
-      className='ghostex-chat-question-card min-w-0 overflow-hidden rounded-3xl border border-input bg-card'
+      className='ghostex-chat-question-card ghostex-chat-prompt-card min-w-0 overflow-hidden rounded-3xl border border-input bg-card'
       data-kind={kind}
     >
       {children}
@@ -111,7 +111,7 @@ function CardHeader({
     <>
       <span
         className={cn(
-          'text-[11px] font-semibold text-muted-foreground',
+          'ghostex-chat-card-title text-[11px] font-semibold text-muted-foreground',
           uppercase ? 'tracking-widest uppercase' : 'tracking-wide',
           onToggleCollapsed && 'group-hover/header:text-foreground'
         )}
@@ -119,12 +119,12 @@ function CardHeader({
         {label}
       </span>
       {counter ? (
-        <span className='flex h-5 shrink-0 items-center rounded-md bg-muted/60 px-1.5 text-[10px] font-medium text-muted-foreground tabular-nums'>
+        <span className='flex h-5 shrink-0 items-center rounded-md bg-muted/60 px-1.5 ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] text-[10px] font-medium text-muted-foreground tabular-nums'>
           {counter}
         </span>
       ) : null}
       {collapsed && collapsedSummary ? (
-        <span className='min-w-0 flex-1 truncate text-xs text-muted-foreground'>{collapsedSummary}</span>
+        <span className='ghostex-chat-card-content min-w-0 flex-1 truncate text-xs text-muted-foreground'>{collapsedSummary}</span>
       ) : null}
     </>
   );
@@ -156,7 +156,7 @@ function CardHeader({
         <div className='flex min-w-0 flex-1 items-center gap-3 px-2.5 py-1.5'>{labelRow}</div>
       )}
       {onDismiss ? (
-        <Button aria-label='Dismiss' onClick={onDismiss} size='icon-xs' variant='ghost'>
+        <Button className='ghostex-chat-card-dismiss' aria-label='Dismiss' onClick={onDismiss} size='icon-xs' variant='outline'>
           <IconX aria-hidden='true' stroke={2} />
         </Button>
       ) : null}
@@ -176,14 +176,14 @@ function CardNotice({
   return (
     <div
       className={cn(
-        'flex items-center gap-2 text-[11px]',
+        'ghostex-chat-card-content flex items-center gap-2 text-[11px]',
         tone === 'destructive' ? 'text-destructive/80' : 'text-muted-foreground'
       )}
       role='status'
     >
       <span className='min-w-0 flex-1 leading-snug'>{text}</span>
       {onSwitchToTerminal ? (
-        <Button onClick={onSwitchToTerminal} size='xs' variant='outline'>
+        <Button onClick={onSwitchToTerminal} size='sm' variant='outline'>
           <IconTerminal2 aria-hidden='true' stroke={2} />
           Terminal
         </Button>
@@ -197,7 +197,7 @@ function CardActionRow({ children, notice }: { children: React.ReactNode; notice
   return (
     <div className='grid gap-2 px-4 py-2.5'>
       {notice}
-      <div className='flex items-center gap-2'>{children}</div>
+      <div className='ghostex-chat-card-input-row flex items-center gap-2'>{children}</div>
     </div>
   );
 }
@@ -424,6 +424,7 @@ export function SessionChatInteractiveCard({
                 submitAnswer({ approvalSend: '1', kind: 'approval' });
               }}
               size='sm'
+              variant='outline'
             >
               Allow
             </Button>
@@ -540,6 +541,7 @@ export function SessionChatInteractiveCard({
           disabled={readOnly || submitting || (isLastQuestion && !hasAnswer)}
           onClick={advance}
           size='sm'
+          variant='outline'
         >
           {trailingLabel}
         </Button>

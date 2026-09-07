@@ -56,7 +56,7 @@ export function SessionChatTerminalToolRow({ activity }: { activity: SessionChat
   return (
     <div
       aria-live='polite'
-      className='ghostex-chat-activity-row my-1 grid gap-2 rounded-2xl border border-border/65 bg-muted/20 px-4 py-3'
+      className='ghostex-chat-activity-row ghostex-chat-status-card grid gap-2 rounded-2xl border border-border/65 bg-muted/20 px-4 py-3'
       data-kind={activity.kind}
       role='status'
     >

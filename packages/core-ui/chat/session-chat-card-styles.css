@@ -1,0 +1,87 @@
+/* CDXC:SessionChat 2026-09-06 DECISION:
+ * User: card titles, content and buttons match the chat text size. Titles are medium weight and #fcfcfc; content is regular weight and #b4b8bf. Text actions use the outlined Previous/Next button style with regular-weight text. Shortcut text keeps its color and weight and grows by 2px.
+ */
+.ghostex-chat-prompt-card {
+  --chat-card-text-size: 0.875rem;
+  font-size: var(--chat-card-text-size);
+  font-weight: 400;
+  color: #b4b8bf;
+}
+
+.ghostex-chat-prompt-card :is(p, pre, input, textarea, .ghostex-chat-card-content):not(.ghostex-chat-card-title):not(.ghostex-chat-card-hint) {
+  color: #b4b8bf;
+  font-size: var(--chat-card-text-size);
+  font-weight: 400;
+}
+
+.ghostex-chat-prompt-card .ghostex-chat-card-title {
+  color: #fcfcfc;
+  font-size: var(--chat-card-text-size);
+  font-weight: 500;
+}
+
+.ghostex-chat-prompt-card :is([data-slot='button'], .ghostex-chat-card-action),
+.ghostex-chat-prompt-card .ghostex-chat-card-option-label {
+  color: #fcfcfc;
+  font-size: var(--chat-card-text-size);
+  font-weight: 400;
+}
+
+.ghostex-chat-prompt-card .ghostex-chat-card-hint {
+  font-size: calc(var(--chat-card-hint-base, 0.75rem) + 2px);
+}
+
+.ghostex-chat-prompt-card kbd.ghostex-chat-card-hint {
+  min-width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* CDXC:SessionChat 2026-09-07 DECISION:
+ * User: task rows remain 2px larger than the title size; sub-agent rows are now 1px smaller than their previous size, with 3px more space between rows. This supersedes the 2px increase for sub-agent rows; the headers keep their existing size.
+ */
+.ghostex-chat-prompt-card :is(.ghostex-chat-agent-tasks-rows, .ghostex-chat-agent-fleet-rows) {
+  --chat-card-row-text-increase: 2px;
+  --chat-card-text-size: calc(0.875rem + var(--chat-card-row-text-increase));
+}
+
+.ghostex-chat-prompt-card .ghostex-chat-agent-fleet-rows {
+  --chat-card-row-text-increase: 1px;
+}
+
+.ghostex-chat-prompt-card :is(.ghostex-chat-agent-tasks-rows, .ghostex-chat-agent-fleet-rows) .ghostex-chat-card-hint {
+  font-size: calc(var(--chat-card-hint-base, 0.75rem) + 2px + var(--chat-card-row-text-increase));
+}
+
+/* CDXC:SessionChat 2026-09-07 DECISION:
+ * User: card inputs have consistent rounded corners. Single-line input buttons match the input height; textarea buttons sit below the field at the bottom right with normal button height. This supersedes stretching buttons beside textareas.
+ * The extra chat scope keeps the app's later input radius reset from restoring the square primitive style.
+ */
+.ghostex-session-chat-scope .ghostex-chat-prompt-card :is(input, textarea) {
+  border-radius: calc(var(--radius, 0.625rem) - 2px);
+}
+
+.ghostex-chat-card-input-row:has(> input) {
+  align-items: stretch;
+}
+
+.ghostex-chat-card-input-row > input {
+  min-height: 2.25rem;
+}
+
+.ghostex-chat-card-input-row:has(> input) > [data-slot='button'] {
+  align-self: stretch;
+  height: auto;
+}
+
+.ghostex-chat-card-input-row:has(> textarea) {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.ghostex-chat-card-input-row:has(> textarea) > [data-slot='button'] {
+  align-self: flex-end;
+}
+
+/* CDXC:SessionChat 2026-09-07 DECISION:
+ * User: card X buttons match Open terminal's color, outline and background. Their shared Button outline variant owns the appearance, replacing the custom #dfdfdf border and #121212 background.
+ */

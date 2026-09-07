@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { cn } from '@/packages/components/utils';
 import type { SessionChatTerminalNotice } from '@/packages/shared/session-chat';
 
@@ -21,12 +21,14 @@ export function SessionChatNoticeCard({
   children,
   className,
   kind,
+  ref,
   role = 'status',
   severity,
 }: {
   children: ReactNode;
   className?: string;
   kind: string;
+  ref?: Ref<HTMLDivElement>;
   role?: 'alert' | 'status';
   severity: SessionChatNoticeSeverity;
 }) {
@@ -41,7 +43,8 @@ export function SessionChatNoticeCard({
 
   return (
     <div
-      className={cn('min-w-0 overflow-hidden rounded-2xl border', severityShell, className)}
+      ref={ref}
+      className={cn('ghostex-chat-prompt-card min-w-0 overflow-hidden rounded-2xl border', severityShell, className)}
       data-kind={kind}
       data-severity={severity}
       role={role}
