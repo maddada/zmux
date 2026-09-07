@@ -1,151 +1,18 @@
-use super::*;
-
-pub(crate) fn handle_web_bootstrap(
-    state: &AppState,
-    headers: &HeaderMap,
-    uri: &Uri,
-    method: Method,
-    request_id: String,
-) -> RoutedResponse {
-    let endpoint_path = Some("/api/webBootstrap".to_string());
-    if method != Method::POST {
-        return routed_json(
-            endpoint_path,
-            StatusCode::METHOD_NOT_ALLOWED,
-            rpc_error(
-                "methodNotAllowed",
-                "/api/webBootstrap requires POST.",
-                Some(request_id),
-            ),
-        );
-    }
-    let Some(base_url) = request_host_origin(headers, uri) else {
-        return routed_json(
-            endpoint_path,
-            StatusCode::BAD_REQUEST,
-            rpc_error(
-                "badRequest",
-                "A valid Host header is required for web bootstrap.",
-                Some(request_id),
-            ),
-        );
-    };
-    if !web_bootstrap_origin_matches(headers, &base_url) {
-        return routed_json(
-            endpoint_path,
-            StatusCode::FORBIDDEN,
-            rpc_error(
-                "forbidden",
-                "/api/webBootstrap is available only to the same origin.",
-                Some(request_id),
-            ),
-        );
-    }
-    let machine_label = match local_machine_label() {
-        Ok(machine_label) => machine_label,
-        Err(message) => {
-            return routed_json(
-                endpoint_path,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                rpc_error("internalError", message, Some(request_id)),
-            );
-        }
-    };
-    /*
-    CDXC:Telemetry 2026-08-26:
-    `/api/webBootstrap` is the browser handshake — it is how the web app gets
-    its auth token, and nothing else calls it — so a successful one is the
-    definitive "a web client attached" signal. The emitter throttles to one per
-    hour per client kind, which is what keeps a reloading tab from counting as
-    a hundred users. The browser's OS family rides along (see
-    `telemetry::client_platform`); the User-Agent itself is never sent.
-    */
-    let client_os = headers
-        .get(header::USER_AGENT)
-        .and_then(|value| value.to_str().ok())
-        .map(crate::telemetry::client_platform::platform_from_user_agent);
-    crate::telemetry::client_connected(
-        "web",
-        crate::telemetry::ClientPlatform {
-            os: client_os,
-            ..Default::default()
-        },
-    );
-    routed_json(
-        endpoint_path,
-        StatusCode::OK,
-        rpc_success(
-            request_id,
-            json!({
-                "authToken": state.auth_token,
-                "baseUrl": base_url,
-                "machineLabel": machine_label,
-                "protocolVersion": GXSERVER_PROTOCOL_VERSION,
-            }),
-        ),
-    )
-}
-
-pub(crate) fn request_host_origin(headers: &HeaderMap, uri: &Uri) -> Option<String> {
-    let host = headers
-        .get(header::HOST)
-        .and_then(|host| host.to_str().ok())
-        .or_else(|| uri.authority().map(|authority| authority.as_str()))?
-        .trim();
-    let authority = host.parse::<axum::http::uri::Authority>().ok()?;
-    Some(format!("http://{authority}"))
-}
-
-pub(crate) fn web_bootstrap_origin_matches(headers: &HeaderMap, base_url: &str) -> bool {
-    let mut origins = headers.get_all(header::ORIGIN).iter();
-    match origins.next() {
-        None => true,
-        Some(origin) => {
-            matches!(origin.to_str(), Ok(origin) if origin == base_url) && origins.next().is_none()
-        }
-    }
-}
-
-#[cfg(unix)]
-pub(crate) fn local_machine_label() -> std::result::Result<String, String> {
-    let mut buffer = [0_u8; 256];
-    let status = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) };
-    if status != 0 {
-        return Err("Failed to read the local machine hostname.".to_string());
-    }
-    let length = buffer
-        .iter()
-        .position(|byte| *byte == 0)
-        .ok_or_else(|| "The local machine hostname is too long.".to_string())?;
-    let hostname = std::str::from_utf8(&buffer[..length])
-        .map_err(|_| "The local machine hostname is not valid UTF-8.".to_string())?;
-    if hostname.is_empty() {
-        return Err("The local machine hostname is empty.".to_string());
-    }
-    Ok(hostname.to_string())
-}
-
-#[cfg(windows)]
-pub(crate) fn local_machine_label() -> std::result::Result<String, String> {
-    use windows_sys::Win32::System::WindowsProgramming::GetComputerNameW;
-
-    let mut buffer = [0_u16; 256];
-    let mut length = buffer.len() as u32;
-    if unsafe { GetComputerNameW(buffer.as_mut_ptr(), &mut length) } == 0 {
-        return Err("Failed to read the local machine hostname.".to_string());
-    }
-    let hostname = String::from_utf16(&buffer[..length as usize])
-        .map_err(|_| "The local machine hostname is not valid UTF-16.".to_string())?;
-    if hostname.is_empty() {
-        return Err("The local machine hostname is empty.".to_string());
-    }
-    Ok(hostname)
-}
+use crate::config::GxserverConfig;
+use axum::{
+    body::Body,
+    http::{header, HeaderValue, Response, StatusCode},
+    response::IntoResponse,
+};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub(crate) async fn serve_web_static(
     config: &GxserverConfig,
     request_path: &str,
-) -> RoutedResponse {
+) -> Response<Body> {
     let config = config.clone();
     let request_path = request_path.to_string();
     match tokio::task::spawn_blocking(move || serve_web_static_sync(&config, &request_path)).await {
@@ -154,7 +21,7 @@ pub(crate) async fn serve_web_static(
     }
 }
 
-pub(crate) fn serve_web_static_sync(config: &GxserverConfig, request_path: &str) -> RoutedResponse {
+pub(crate) fn serve_web_static_sync(config: &GxserverConfig, request_path: &str) -> Response<Body> {
     let relative_path = match decode_web_path(request_path) {
         Ok(path) => path,
         Err(()) => return static_status_response(StatusCode::FORBIDDEN),
@@ -250,7 +117,7 @@ pub(crate) fn decode_hex_digit(byte: u8) -> Option<u8> {
 pub(crate) fn read_static_file(
     dist_dir: &Path,
     path: &Path,
-) -> std::result::Result<Option<RoutedResponse>, ()> {
+) -> std::result::Result<Option<Response<Body>>, ()> {
     let canonical_path = match fs::canonicalize(path) {
         Ok(path) => path,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -283,10 +150,7 @@ pub(crate) fn read_static_file(
         header::CACHE_CONTROL,
         HeaderValue::from_static(cache_control),
     );
-    Ok(Some(RoutedResponse {
-        endpoint_path: None,
-        response,
-    }))
+    Ok(Some(response))
 }
 
 pub(crate) fn static_content_type(path: &Path) -> &'static str {
@@ -316,7 +180,7 @@ pub(crate) fn is_hashed_asset(path: &Path) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-pub(crate) fn web_not_built_response() -> RoutedResponse {
+pub(crate) fn web_not_built_response() -> Response<Body> {
     let html = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Ghostex Web</title></head><body><h1>The Ghostex web app is not built</h1><p>Run <code>bun run web:build</code> from the Ghostex checkout.</p></body></html>";
     let mut response = Response::new(Body::from(html));
     response.headers_mut().insert(
@@ -326,15 +190,9 @@ pub(crate) fn web_not_built_response() -> RoutedResponse {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    RoutedResponse {
-        endpoint_path: None,
-        response,
-    }
+    response
 }
 
-pub(crate) fn static_status_response(status: StatusCode) -> RoutedResponse {
-    RoutedResponse {
-        endpoint_path: None,
-        response: status.into_response(),
-    }
+pub(crate) fn static_status_response(status: StatusCode) -> Response<Body> {
+    status.into_response()
 }

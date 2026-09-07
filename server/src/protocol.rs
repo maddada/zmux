@@ -463,6 +463,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/startSessionProvider"
         | "/api/killSession"
         | "/api/probeSessionProvider"
+        | "/api/readResourceSessionOwners"
         | "/api/listSessions"
         | "/api/removeSession"
         | "/api/readSessionText"

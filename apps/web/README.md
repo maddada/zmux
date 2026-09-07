@@ -7,21 +7,24 @@ Ghostex Web is the static browser version of Ghostex's sidebar and Agents worksp
 From the repository root:
 
 ```bash
-bun run web:build
-ghostex web
+bun run start:web
 ```
 
-The build writes `ghostex-web/dist`. `ghostex web` opens the SPA served by the local gxserver at `http://127.0.0.1:58744/`; the same-origin bootstrap supplies the local connection token to the page.
+This builds `apps/web/dist`, compiles the checkout's CLI, and starts a separate foreground server at `http://127.0.0.1:4173/`, opening it in the browser. Ctrl+C stops that web server. Resources lists its listener under Dev Servers. gxserver continues to own the API on port 58744 and does not serve the web app or its bootstrap endpoint.
+
+Pass options through, for example `bun run start:web --port 4180 --no-open`, to select another web port or skip opening the browser. The underlying `ghostex web` command remains available but is hidden from the CLI's main help listing. It also accepts `--dist-dir <directory>` for a separately built web distribution and reads the existing `web.distDir` configuration. Desktop releases do not bundle the web distribution.
+
+The web server's same-origin bootstrap supplies the local connection token and gxserver API address. The browser then connects directly to gxserver for authenticated HTTP and terminal/event WebSockets. gxserver must already be running; this command does not start or restart it.
 
 ## Development
 
-Run the Vite development server from the repository root:
+Keep `bun run start:web --no-open` running on its default port for browser bootstrap, then run the Vite development server from the repository root in another terminal:
 
 ```bash
 bun run web:dev
 ```
 
-Vite proxies HTTP and WebSocket `/api` traffic to the local gxserver on port 58744. Use `bun run web:typecheck` and `bun run web:build` before handing off changes.
+Vite proxies `/api/webBootstrap` to the standalone web server on port 4173 and other HTTP and WebSocket `/api` traffic to gxserver on port 58744. Use `bun run web:typecheck` and `bun run web:build` before handing off changes.
 
 ## Additional machines
 

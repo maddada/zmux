@@ -99,7 +99,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': {
+      // CDXC:ServerApi 2026-09-06 SEE-ALSO:
+      // Browser bootstrap is owned by `ghostex web` (server/src/ghostex_cli/web.rs); gxserver serves only the authenticated APIs.
+      '/api/webBootstrap': {
         changeOrigin: true,
         configure(proxy) {
           const stripBootstrapOrigin = (
@@ -113,6 +115,10 @@ export default defineConfig({
           proxy.on('proxyReq', stripBootstrapOrigin);
           proxy.on('proxyReqWs', stripBootstrapOrigin);
         },
+        target: 'http://127.0.0.1:4173',
+      },
+      '/api': {
+        changeOrigin: true,
         target: 'http://127.0.0.1:58744',
         ws: true,
       },

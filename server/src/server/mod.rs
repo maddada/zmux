@@ -182,7 +182,6 @@ pub mod telemetry_tasks;
 mod tests;
 pub mod title_generation;
 pub mod typed_operation_http;
-pub mod web_static;
 pub mod worktree_ops;
 pub mod ws;
 pub mod zmx_http;
@@ -200,7 +199,6 @@ pub(crate) use telemetry_http::*;
 pub(crate) use telemetry_tasks::*;
 pub(crate) use title_generation::*;
 pub(crate) use typed_operation_http::*;
-pub(crate) use web_static::*;
 pub(crate) use worktree_ops::*;
 pub(crate) use ws::*;
 pub(crate) use zmx_http::*;
@@ -620,6 +618,8 @@ pub async fn run_gxserver_foreground(
     let session_git_status_refresh_task = spawn_session_git_status_refresh_task(&state);
     let worktree_branch_rename_task = spawn_worktree_branch_rename_task(&state);
     let session_chat_follower_sync_task = spawn_session_chat_follower_sync_task(&state);
+    let session_chat_fleet_status_task =
+        crate::session_chat_fleet_status::spawn_fleet_status_task(&state);
     /*
     CDXC:Telemetry 2026-08-26:
     Analytics exists only in the long-running daemon. Starting it here rather
@@ -648,6 +648,7 @@ pub async fn run_gxserver_foreground(
     session_git_status_refresh_task.abort();
     worktree_branch_rename_task.abort();
     session_chat_follower_sync_task.abort();
+    session_chat_fleet_status_task.abort();
     /*
     The telemetry flush task is AWAITED rather than aborted, because it does a
     final flush after the shutdown broadcast: aborting it would throw away
@@ -723,13 +724,10 @@ async fn handle_http_request(
         .extensions()
         .get::<SocketAddr>()
         .map(|address| address.ip().to_string());
-    let is_web_bootstrap = request.uri().path() == "/api/webBootstrap";
     let headers = request.headers().clone();
     let request_id = request_id(&headers);
     let mut routed = route_http(state.clone(), request, request_id.clone()).await;
-    if !is_web_bootstrap {
-        apply_cors_headers(&headers, &mut routed.response, &state.config);
-    }
+    apply_cors_headers(&headers, &mut routed.response, &state.config);
     let status = routed.response.status().as_u16();
     let _ = state.logger.log_routine(
         DiagnosticLogScenario::ApiRequests,
@@ -769,14 +767,8 @@ async fn route_http(
     let path = parts.uri.path().to_string();
     let method = parts.method.clone();
 
-    if path == "/api/webBootstrap" {
-        return handle_web_bootstrap(&state, &parts.headers, &parts.uri, method, request_id);
-    }
     if method == Method::GET && path.starts_with("/ext/") {
         return serve_extension_static(state.extension_registry.clone(), path).await;
-    }
-    if method == Method::GET && !path.starts_with("/api/") {
-        return serve_web_static(&state.config, &path).await;
     }
 
     let endpoint = endpoint_for(&path);
@@ -1275,6 +1267,31 @@ async fn route_http(
                     &session_id,
                 )?;
                 Ok(json!({ "session": session }))
+            },
+        ),
+        "/api/readResourceSessionOwners" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _, params, _| {
+                let names = params
+                    .get("zmxNames")
+                    .and_then(Value::as_array)
+                    .filter(|names| names.len() <= 4096)
+                    .ok_or_else(|| {
+                        DomainStateError::bad_request("zmxNames must be a bounded array.")
+                    })?;
+                let names = names
+                    .iter()
+                    .map(|name| {
+                        name.as_str()
+                            .filter(|name| !name.is_empty() && name.len() <= 256)
+                            .map(str::to_string)
+                            .ok_or_else(|| DomainStateError::bad_request("Invalid zmx session name."))
+                    })
+                    .collect::<Result<std::collections::HashSet<_>, _>>()?;
+                Ok(json!({ "sessions": repository.resource_session_owners(&names)? }))
             },
         ),
         "/api/listSessions" => handle_domain_http(

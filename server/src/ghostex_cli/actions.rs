@@ -1103,7 +1103,7 @@ fn with_resolved_gxserver_session_params(payload: &Value, flags: &Flags) -> CliR
 // ---------------------------------------------------------------------------
 
 fn evaluate_parser(parser: Parser, rest: &[String], flags: &Flags) -> CliResult<Value> {
-    Ok(match parser {
+    let mut value = match parser {
         Parser::None => json!({}),
         Parser::OpenPaths => parse_open_paths(rest, flags),
         Parser::EditPaths => parse_edit_paths(rest, flags),
@@ -1154,7 +1154,13 @@ fn evaluate_parser(parser: Parser, rest: &[String], flags: &Flags) -> CliResult<
         Parser::SessionChatDraft => parse_session_chat_draft(rest, flags)?,
         Parser::KeepSessionsAwake => parse_keep_sessions_awake(flags)?,
         Parser::ClientHello => parse_client_hello(flags)?,
-    })
+    };
+    if let Some(raw) = flags.text("draftVersionJson") {
+        let version: Value = serde_json::from_str(&raw)
+            .map_err(|error| CliError::Other(format!("Invalid --draft-version-json: {error}")))?;
+        value["draftVersion"] = version;
+    }
+    Ok(value)
 }
 
 /*
