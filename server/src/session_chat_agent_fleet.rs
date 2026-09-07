@@ -114,7 +114,7 @@ pub struct SessionChatAgentFleet {
 }
 
 impl SessionChatAgentFleet {
-    fn new(agents: Vec<SessionChatSubAgent>) -> Self {
+    pub(crate) fn new(agents: Vec<SessionChatSubAgent>) -> Self {
         Self {
             agents,
             detected_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -193,7 +193,7 @@ fn split_fleet_row(line: &str) -> Option<&str> {
 /// The block's first row: the main agent's name and nothing else. A bare `main`
 /// cannot be anything else on this screen — a status line always reports work.
 fn is_agent_fleet_header(line: &str) -> bool {
-    split_fleet_row(line) == Some(AGENT_FLEET_MAIN_AGENT)
+    split_fleet_row(line.trim_start_matches('❯').trim_start()) == Some(AGENT_FLEET_MAIN_AGENT)
 }
 
 /*
@@ -293,7 +293,7 @@ pub fn detect_session_chat_agent_fleet(
     let start = agent_fleet_block_start(&lines)?;
     let agents: Vec<SessionChatSubAgent> = lines[start + 1..]
         .iter()
-        .map_while(|line| split_fleet_row(line))
+        .map_while(|line| split_fleet_row(line.trim_start_matches('❯').trim_start()))
         .filter_map(sub_agent_from_row)
         .collect();
     (!agents.is_empty()).then(|| SessionChatAgentFleet::new(agents))

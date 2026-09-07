@@ -27,6 +27,25 @@ use crate::storage::open_gxserver_database;
 /// domain session.
 pub const SESSION_CHAT_COMPACTING_DETECTED_AT_KEY: &str = "sessionChatCompactingDetectedAt";
 
+pub(crate) const SESSION_CHAT_FLEET_DETECTED_AT_KEY: &str = "sessionChatFleetDetectedAt";
+pub(crate) const SESSION_CHAT_MONITOR_DETECTED_AT_KEY: &str = "sessionChatMonitorDetectedAt";
+
+pub(crate) fn session_chat_monitor_detected_at(session: &Value) -> Option<String> {
+    session
+        .pointer("/runtimeSettings/sessionChatMonitorDetectedAt")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub(crate) fn session_chat_fleet_detected_at(session: &Value) -> Option<String> {
+    session
+        .pointer("/runtimeSettings/sessionChatFleetDetectedAt")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 pub fn session_chat_compacting_detected_at(session: &Value) -> Option<String> {
     session
         .get("runtimeSettings")
@@ -57,11 +76,54 @@ impl SessionChatCompactingPublisher {
     }
 
     pub(crate) fn publish(&self, project_id: &str, session_id: &str, detected_at: Option<&str>) {
+        self.publish_marker(
+            project_id,
+            session_id,
+            SESSION_CHAT_COMPACTING_DETECTED_AT_KEY,
+            detected_at,
+        );
+    }
+
+    pub(crate) fn publish_fleet(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        detected_at: Option<&str>,
+    ) {
+        self.publish_marker(
+            project_id,
+            session_id,
+            SESSION_CHAT_FLEET_DETECTED_AT_KEY,
+            detected_at,
+        );
+    }
+
+    pub(crate) fn publish_monitor(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        detected_at: Option<&str>,
+    ) {
+        self.publish_marker(
+            project_id,
+            session_id,
+            SESSION_CHAT_MONITOR_DETECTED_AT_KEY,
+            detected_at,
+        );
+    }
+
+    fn publish_marker(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        key: &str,
+        detected_at: Option<&str>,
+    ) {
         let Ok(db) = open_gxserver_database(&self.paths) else {
             return;
         };
         let repository = DomainRepository::new(&db, self.server_id.as_str());
-        let json_path = format!("$.{SESSION_CHAT_COMPACTING_DETECTED_AT_KEY}");
+        let json_path = format!("$.{key}");
         /*
         Activity hooks and screen detection can land together at both ends of
         a compaction. Mutate only this JSON member in SQLite, atomically, so a
@@ -76,6 +138,7 @@ impl SessionChatCompactingPublisher {
                     updatedAt = ?5
                 WHERE projectId = ?1 AND sessionId = ?2
                   AND json_extract(runtimeSettingsJson, ?3) IS NOT ?4
+                  AND (?6 = 0 OR json_type(runtimeSettingsJson, ?3) IS NULL)
                 "#,
                 rusqlite::params![
                     project_id,
@@ -83,6 +146,7 @@ impl SessionChatCompactingPublisher {
                     json_path,
                     detected_at,
                     crate::domain::now_iso(),
+                    key != SESSION_CHAT_COMPACTING_DETECTED_AT_KEY,
                 ],
             ),
             None => db.execute(

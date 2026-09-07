@@ -225,6 +225,12 @@ pub(crate) fn ingest_agent_hook_event(
         }
         return Ok(Value::Object(result));
     }
+    if let Some(restarted) =
+        crate::session_chat_fleet_status::record_codex_start(repository, &session, params)?
+    {
+        session = restarted;
+        changed = true;
+    }
     let mut activity_update: Option<ActivityUpdate> = None;
     let mut session_chat_prompt_changed = false;
     let mut session_chat_activity_changed = false;
@@ -395,10 +401,12 @@ pub(crate) fn ingest_agent_hook_event(
         changed = true;
         auto_title_claimed = true;
     }
-    if reconciled.changed {
-        reason = reconciled.reason;
-    } else if auto_title_claimed {
+    // CDXC:SessionTitles 2026-09-06 WHY:
+    // The HTTP and sidecar schedulers dispatch on the claim reason. Adopting Codex's provisional title in this same hook must not hide a successful claim, leaving its persisted status running without a job and blocking later hooks from retrying.
+    if auto_title_claimed {
         reason = "first-prompt-auto-title-claimed".to_string();
+    } else if reconciled.changed {
+        reason = reconciled.reason;
     } else if activity_reason != "metadata-only" {
         reason = activity_reason;
     }

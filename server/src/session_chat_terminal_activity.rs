@@ -209,6 +209,25 @@ pub fn publishable_session_chat_terminal_activity(
     activity.filter(|activity| working || activity.remains_live_when_ready())
 }
 
+/// CDXC:SessionStatus 2026-09-06 DECISION:
+/// User: Claude must be considered working while its footer reports one or more monitors running.
+pub(crate) fn is_session_chat_monitor_activity(
+    activity: Option<&SessionChatTerminalActivity>,
+) -> bool {
+    activity.is_some_and(|activity| {
+        activity.kind == SESSION_CHAT_ACTIVITY_SHELLS_RUNNING
+            && activity
+                .label
+                .rsplit_once(" · ")
+                .is_some_and(|(_, status)| {
+                    status.split_once(' ').is_some_and(|(count, suffix)| {
+                        count.parse::<u64>().is_ok_and(|count| count > 0)
+                            && matches!(suffix, "monitor still running" | "monitors still running")
+                    })
+                })
+    })
+}
+
 /// Follower reconciles (1s each) probed back-to-back after the transcript
 /// records a command that starts long on-screen work. Claude paints the
 /// compaction row within a second or two of the `/compact` record; eight

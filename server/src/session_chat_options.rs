@@ -147,7 +147,7 @@ impl SessionChatOptionEvidence {
 /*
 CDXC:AgentScreenDetection 2026-09-03 WHY:
 Claude's statusLine payload reports how full the context window is. The chat
-composer renders it as a usage ring (the t3code meter): percentage when Claude
+composer renders it as a usage ring: percentage when Claude
 reports one, tokens over window size when it reports those. Both are optional
 in the payload and both are carried, so the client can show whichever exists.
 */
@@ -321,6 +321,8 @@ pub struct SessionChatTerminalDetection {
     third: it must never cost a spawn.
     */
     pub fleet: Option<crate::session_chat_agent_fleet::SessionChatAgentFleet>,
+    /// Claude requires a whole screen; Codex requires a readable spawn graph and child rollouts.
+    pub fleet_observed: bool,
     /*
     CDXC:SessionChat 2026-09-03: Claude's task list, read from its
     on-disk task store rather than the screen. It rides in the same detection
@@ -2089,15 +2091,18 @@ pub fn detect_session_chat_terminal_state(
         claude_session_id.as_deref(),
         claude_session_path.as_deref(),
     );
-    let mut diff_panel_on_screen = false;
+    let mut diff_panel_screen = None;
     let capture = crate::zmx::read_zmx_session_history_capture(repository, project_id, session_id)
         .ok()
         .map(|mut capture| {
-            // Read on the whole capture: the panel's header is what the cut
-            // below removes (see session_chat_diff_panel.rs).
-            diff_panel_on_screen = agent == Some(SessionChatOptionAgent::Claude)
+            // CDXC:SessionChatTerminalActivity 2026-09-06 WHY:
+            // The close helper rechecks the diff header, so passing the stripped conversation made auto-close reject the pane we had just detected.
+            if agent == Some(SessionChatOptionAgent::Claude)
                 && !capture.truncated
-                && crate::session_chat_diff_panel::claude_diff_panel_on_screen(&capture.text);
+                && crate::session_chat_diff_panel::claude_diff_panel_on_screen(&capture.text)
+            {
+                diff_panel_screen = Some(capture.text.clone());
+            }
             // One cut for every detector below (see session_chat_screen_pane.rs).
             // CDXC:AgentScreenDetection 2026-09-05 WHY:
             // Agent dialogs align descriptions and setting values in columns; the diff-pane heuristic mistook those columns for a side pane and deleted them.
@@ -2115,6 +2120,12 @@ pub fn detect_session_chat_terminal_state(
     let screen = capture.as_ref().filter(|capture| !capture.truncated);
     if agent == Some(SessionChatOptionAgent::Codex) {
         if let Some(capture) = screen {
+            crate::session_chat_codex_pager::close_codex_transcript_pager_if_unwatched(
+                repository,
+                project_id,
+                session_id,
+                &capture.text,
+            );
             crate::session_chat_app_command::refresh_codex_command_output(project_id, session_id, &capture.text);
         }
     }
@@ -2131,16 +2142,14 @@ pub fn detect_session_chat_terminal_state(
         ),
         None => crate::session_chat_composer::SessionChatComposerReadiness::default(),
     };
-    if diff_panel_on_screen {
-        if let Some(capture) = screen {
-            crate::session_chat_diff_panel::hide_claude_diff_panel_if_unwatched(
-                repository,
-                project_id,
-                session_id,
-                &capture.text,
-                composer.state == crate::session_chat_composer::SessionChatComposerState::Ready,
-            );
-        }
+    if let Some(screen_text) = diff_panel_screen.as_deref() {
+        crate::session_chat_diff_panel::hide_claude_diff_panel_if_unwatched(
+            repository,
+            project_id,
+            session_id,
+            screen_text,
+            composer.state == crate::session_chat_composer::SessionChatComposerState::Ready,
+        );
     }
     let activity = if agent == Some(SessionChatOptionAgent::Cursor)
         && composer.state == crate::session_chat_composer::SessionChatComposerState::Ready
@@ -2157,9 +2166,24 @@ pub fn detect_session_chat_terminal_state(
             )
         })
     };
-    let fleet = screen.and_then(|capture| {
-        crate::session_chat_agent_fleet::detect_session_chat_agent_fleet(agent_id, &capture.text)
-    });
+    let (fleet, fleet_observed) = if agent == Some(SessionChatOptionAgent::Codex) {
+        match repository
+            .get_session(project_id, session_id)
+            .ok()
+            .flatten()
+            .and_then(|session| crate::session_chat_codex_fleet::read_codex_fleet(&session).ok())
+        {
+            Some(fleet) => (fleet, true),
+            None => (None, false),
+        }
+    } else {
+        (
+            screen.and_then(|capture| {
+                crate::session_chat_agent_fleet::detect_session_chat_agent_fleet(agent_id, &capture.text)
+            }),
+            screen.is_some(),
+        )
+    };
     let prompt = screen.and_then(|capture| {
         crate::session_chat::detect_cursor_question_prompt(agent_id, &capture.text)
     });
@@ -2186,6 +2210,7 @@ pub fn detect_session_chat_terminal_state(
         notice,
         activity,
         fleet,
+        fleet_observed,
         tasks,
         captured: screen.is_some(),
         attempted,
@@ -2726,6 +2751,8 @@ pub(crate) struct SessionChatOptionCacheEntry {
     reported working).
     */
     pub(crate) projected_compacting: Option<bool>,
+    pub(crate) projected_fleet: Option<bool>,
+    pub(crate) projected_monitor: Option<bool>,
     /// First capture that was settle-eligible except for its missing model —
     /// the anchor `SESSION_CHAT_OPTION_MODEL_SETTLE_GRACE` counts from. Cleared
     /// the moment a model (or a screen-owning notice) shows up.
@@ -2869,8 +2896,39 @@ impl SessionChatOptionDetector {
             );
         }
         let mut compacting_transition: Option<Option<String>> = None;
+        let mut fleet_transition: Option<Option<String>> = None;
+        let mut monitor_transition: Option<Option<String>> = None;
         if let Ok(mut cache) = self.cache.lock() {
             let previous_compacting = cache.get(&key).and_then(|entry| entry.projected_compacting);
+            let previous_fleet = cache.get(&key).and_then(|entry| entry.projected_fleet);
+            let previous_monitor = cache.get(&key).and_then(|entry| entry.projected_monitor);
+            let detected_monitor = if detected.captured {
+                Some(crate::session_chat_terminal_activity::is_session_chat_monitor_activity(
+                    detected.activity.as_ref(),
+                ))
+            } else {
+                previous_monitor
+            };
+            if detected_monitor != previous_monitor {
+                if let Some(active) = detected_monitor {
+                    monitor_transition = Some(
+                        active.then(|| detected.activity.as_ref().unwrap().detected_at.clone()),
+                    );
+                }
+            }
+            let detected_fleet = if detected.fleet_observed {
+                Some(detected.fleet.is_some())
+            } else {
+                detected.fleet = cache.get(&key).and_then(|entry| entry.value.fleet.clone());
+                previous_fleet
+            };
+            if detected_fleet != previous_fleet {
+                if let Some(active) = detected_fleet {
+                    fleet_transition = Some(
+                        active.then(|| detected.fleet.as_ref().unwrap().detected_at.clone()),
+                    );
+                }
+            }
             // A notice that left the screen recently still counts as the
             // instance to inherit from; see `retired_notice`.
             let recently_retired_notice = cache
@@ -2975,6 +3033,8 @@ impl SessionChatOptionDetector {
                 SessionChatOptionCacheEntry {
                     fetched_at: std::time::Instant::now(),
                     projected_compacting: detected_compacting,
+                    projected_fleet: detected_fleet,
+                    projected_monitor: detected_monitor,
                     model_grace_started,
                     retired_notice,
                     value: detected.clone(),
@@ -2998,6 +3058,14 @@ impl SessionChatOptionDetector {
         if let Some(detected_at) = compacting_transition {
             self.compacting_publisher
                 .publish(project_id, session_id, detected_at.as_deref());
+        }
+        if let Some(detected_at) = fleet_transition {
+            self.compacting_publisher
+                .publish_fleet(project_id, session_id, detected_at.as_deref());
+        }
+        if let Some(detected_at) = monitor_transition {
+            self.compacting_publisher
+                .publish_monitor(project_id, session_id, detected_at.as_deref());
         }
         detected
     }
@@ -3244,6 +3312,10 @@ pub(crate) fn forget_session_chat_options(state: &AppState, project_id: &str, se
     // working status from a run that ended while the provider was stopped.
     crate::session_chat_compacting::SessionChatCompactingPublisher::new(state)
         .publish(project_id, session_id, None);
+    crate::session_chat_compacting::SessionChatCompactingPublisher::new(state)
+        .publish_fleet(project_id, session_id, None);
+    crate::session_chat_compacting::SessionChatCompactingPublisher::new(state)
+        .publish_monitor(project_id, session_id, None);
 }
 
 /*
@@ -3308,7 +3380,7 @@ pub(crate) fn schedule_session_chat_option_redetect(
                     detection.activity.as_ref(),
                     published_activity.as_ref(),
                 );
-            let fleet_changed = detection.captured
+            let fleet_changed = detection.fleet_observed
                 && !crate::session_chat_agent_fleet::same_session_chat_agent_fleet(
                     detection.fleet.as_ref(),
                     published_fleet.as_ref(),

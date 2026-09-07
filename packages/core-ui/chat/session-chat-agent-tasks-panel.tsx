@@ -30,6 +30,7 @@ inside each group, so the eye lands on what is happening now first.
 */
 
 import { useEffect, useState } from 'react';
+import { Button } from '@/packages/components/ui/button';
 import { IconChevronDown, IconCircleCheckFilled, IconLoader2, IconListCheck } from '@tabler/icons-react';
 import type { SessionChatAgentTask, SessionChatAgentTasks } from '../../shared/session-chat';
 import { cn } from '@/packages/components/utils';
@@ -118,7 +119,7 @@ export function SessionChatAgentTasksPanel({ tasks }: SessionChatAgentTasksPanel
   return (
     <section
       aria-label='Agent tasks'
-      className={cn('ghostex-chat-agent-tasks', collapsed && 'ghostex-chat-agent-tasks-collapsed')}
+      className={cn('ghostex-chat-prompt-card ghostex-chat-agent-tasks', collapsed && 'ghostex-chat-agent-tasks-collapsed')}
       data-collapsed={collapsed ? 'true' : undefined}
     >
       <button
@@ -129,8 +130,8 @@ export function SessionChatAgentTasksPanel({ tasks }: SessionChatAgentTasksPanel
         type='button'
       >
         <IconListCheck aria-hidden='true' className='ghostex-chat-agent-tasks-icon' size={14} stroke={1.8} />
-        <span className='ghostex-chat-agent-tasks-title'>Tasks</span>
-        <span className='ghostex-chat-agent-tasks-count'>
+        <span className='ghostex-chat-card-title ghostex-chat-agent-tasks-title'>Tasks</span>
+        <span className='ghostex-chat-card-hint [--chat-card-hint-base:0.6875rem] ghostex-chat-agent-tasks-count'>
           {doneCount}/{total}
         </span>
         <span aria-hidden='true' className='ghostex-chat-agent-tasks-bar'>
@@ -142,11 +143,11 @@ export function SessionChatAgentTasksPanel({ tasks }: SessionChatAgentTasksPanel
         {/* Only the collapsed header carries the running task: expanded, the
             rows below say it, and saying it twice reads as a glitch. */}
         {collapsed && headline ? (
-          <span className='ghostex-chat-agent-tasks-headline' title={headline.subject}>
+          <span className='ghostex-chat-card-content ghostex-chat-agent-tasks-headline' title={headline.subject}>
             {headline.status === 'in_progress' ? (headline.activeForm ?? headline.subject) : headline.subject}
           </span>
         ) : (
-          <span className='ghostex-chat-agent-tasks-headline' />
+          <span className='ghostex-chat-card-content ghostex-chat-agent-tasks-headline' />
         )}
         <IconChevronDown aria-hidden='true' className='ghostex-chat-agent-tasks-chevron' size={14} stroke={2} />
       </button>
@@ -163,14 +164,15 @@ export function SessionChatAgentTasksPanel({ tasks }: SessionChatAgentTasksPanel
           ))}
           {foldedDone.length > 0 ? (
             <li className='ghostex-chat-agent-tasks-fold'>
-              <button
+              <Button
                 aria-expanded={showCompleted}
-                className='ghostex-chat-agent-tasks-fold-button'
+                size='sm'
+                variant='outline'
                 onClick={() => setShowCompleted((value) => !value)}
                 type='button'
               >
                 {showCompleted ? 'Hide completed' : `+${foldedDone.length} more completed`}
-              </button>
+              </Button>
             </li>
           ) : null}
         </ul>
@@ -204,9 +206,9 @@ function TaskRow({
           <span className='ghostex-chat-agent-tasks-dot' />
         )}
       </span>
-      <span className='ghostex-chat-agent-tasks-subject'>{task.subject}</span>
+      <span className='ghostex-chat-card-content ghostex-chat-agent-tasks-subject'>{task.subject}</span>
       {group === 'pending' && blockers.length > 0 ? (
-        <span className='ghostex-chat-agent-tasks-blocked'>waits for #{blockers.join(', #')}</span>
+        <span className='ghostex-chat-card-hint [--chat-card-hint-base:0.6875rem] ghostex-chat-agent-tasks-blocked'>waits for #{blockers.join(', #')}</span>
       ) : null}
     </li>
   );
