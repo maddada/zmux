@@ -76,6 +76,6 @@ pub(crate) struct SessionAccountSwitchProgress {
     pub(crate) title: String,
     pub(crate) email: String,
     pub(crate) provider: &'static str,
-    pub(crate) color: u32,
+    pub(crate) indicator: String,
     pub(crate) page_generation: Option<u64>,
 }

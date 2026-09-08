@@ -103,9 +103,16 @@ fn collect(state: &AppState, restart: bool) -> Result<Vec<Plan>, DomainStateErro
             else {
                 continue;
             };
-            let Some(session) = repo.get_session(pid, sid)? else {
+            let Some(mut session) = repo.get_session(pid, sid)? else {
                 continue;
             };
+            if let Some(account) = registry.accounts.iter().find(|account| session.pointer("/runtimeSettings/accountId").and_then(Value::as_str) == Some(account.id.as_str())) {
+                let mut runtime = session["runtimeSettings"].as_object().cloned().unwrap_or_default();
+                runtime.insert("accountSlot".into(), json!(account.selector));
+                runtime.remove("accountColor");
+                endpoint::update_session(&repo, &session, runtime)?;
+                session = repo.get_session(pid, sid)?.unwrap_or(session);
+            }
             if let Some(identity) = session.pointer("/runtimeSettings/accountSuppressedUsageNotice").and_then(Value::as_str) {
                 crate::session_chat_notice::suppress_account_usage_notice(pid, sid, identity.to_string());
             }
@@ -232,6 +239,17 @@ fn collect(state: &AppState, restart: bool) -> Result<Vec<Plan>, DomainStateErro
         }
         if recovery["status"].as_str() == Some("retrying") {
             continue;
+        }
+        if recovery["status"].as_str() == Some("waiting")
+            && crate::session_chat_notice_progress::has_cleared_error(state, pid, sid)
+            && crate::session_chat_options::cached_session_chat_terminal_notice(state, pid, sid)
+                .is_none()
+        {
+            recovery["status"] = json!("resumed");
+            recovery["reason"] = json!("The agent is responding again.");
+            recovery["nextAttemptAt"] = Value::Null;
+            recovery["updatedAt"] = json!(now.to_rfc3339());
+            save(state, &repo, &session, recovery.clone())?;
         }
         if detection.activity.is_some()
             || (crate::presentation::presentation_activity(&session, &now.to_rfc3339())

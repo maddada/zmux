@@ -1,4 +1,3 @@
-import { accountIconColor } from '@/packages/shared/agent-accounts';
 import {
   IconClock,
   IconLoader2,
@@ -258,7 +257,6 @@ export function SessionCardContent({
           {hasHeaderAgentIcon ? (
             <SessionHeaderAgentIcon
               agentIcon={session.agentIcon}
-              accountColor={session.accountColor}
               faviconDataUrl={session.faviconDataUrl}
               isDraft={session.isDraft === true}
               isGeneratingFirstPromptTitle={session.isGeneratingFirstPromptTitle}
@@ -842,7 +840,6 @@ export function getSessionTitleTooltipOptions({
 }
 
 type SessionAgentIconProps = {
-  accountColor?: string;
   agentIcon: SidebarSessionItem['agentIcon'];
   closeAfterDone?: boolean;
   closeAfterDoneDeadlineAt?: string;
@@ -906,7 +903,6 @@ type SessionAgentIconDecorationProps = SessionAgentIconProps & {
 };
 
 function SessionAgentIconDecoration({
-  accountColor,
   agentIcon,
   className,
   faviconDataUrl,
@@ -991,11 +987,10 @@ function SessionAgentIconDecoration({
     '--session-agent-logo-colored': `url("${COLORED_AGENT_LOGOS[agentIcon]}")`,
   };
 
-  return <span aria-hidden='true' className={className} data-agent-icon={agentIcon} style={accountColor && (agentIcon === 'claude' || agentIcon === 'codex') ? { ...agentLogoStyle, backgroundImage: 'none', backgroundColor: accountIconColor(accountColor), maskImage: `url("${AGENT_LOGOS[agentIcon]}")`, WebkitMaskImage: `url("${AGENT_LOGOS[agentIcon]}")`, maskSize: 'contain', WebkitMaskSize: 'contain', maskRepeat: 'no-repeat', WebkitMaskRepeat: 'no-repeat' } : agentLogoStyle} />;
+  return <span aria-hidden='true' className={className} data-agent-icon={agentIcon} style={agentLogoStyle} />;
 }
 
 export function SessionFloatingAgentIcon({
-  accountColor,
   agentIcon,
   closeAfterDone,
   closeAfterDoneDeadlineAt,
@@ -1121,7 +1116,6 @@ export function SessionFloatingAgentIcon({
       {effectiveSessionTag ? <SessionTagSidebarIcon sessionTag={effectiveSessionTag} /> : null}
       <SessionAgentIconDecoration
         agentIcon={agentIcon}
-        accountColor={accountColor}
         className='session-floating-agent-icon'
         faviconDataUrl={faviconDataUrl}
         isDraft={isDraft}
@@ -1266,7 +1260,6 @@ function SessionTagSidebarIcon({ sessionTag }: { sessionTag: SidebarSessionTag }
 }
 
 function SessionHeaderAgentIcon({
-  accountColor,
   agentIcon,
   faviconDataUrl,
   isDraft = false,
@@ -1280,7 +1273,6 @@ function SessionHeaderAgentIcon({
     <>
       <SessionAgentIconDecoration
         agentIcon={agentIcon}
-        accountColor={accountColor}
         className='session-header-agent-icon'
         faviconDataUrl={faviconDataUrl}
         isDraft={isDraft}

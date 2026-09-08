@@ -1,10 +1,9 @@
-import { accountIconColor } from '@/packages/shared/agent-accounts';
 import type { AccountsTransport, AgentAccountsState } from '@/packages/shared/agent-accounts';
 
 export interface AccountSwitchProgress {
   provider: 'claude' | 'codex';
   email: string;
-  color: string;
+  indicator: string;
 }
 
 /** CDXC:AgentProviders 2026-09-07 DECISION: Show the selected provider and account email during a switch, starting before the request and clearing on success or failure. */
@@ -18,10 +17,8 @@ export function createAccountSwitchTransport(
       ? accounts?.accounts.find((row) => row.id === params.accountId)
       : undefined;
     const progress = account
-      ? { provider: account.provider, email: account.email || account.name, color: accountIconColor(account.color) }
-      : params.operation === 'select' && params.accountId === null && accounts?.session
-        ? { provider: accounts.session.provider, email: 'Default CLI login', color: accountIconColor() }
-        : null;
+      ? { provider: account.provider, email: account.email || account.name, indicator: account.indicator || account.selector }
+      : null;
     const switching = params.operation === 'select' && progress && accounts?.session?.accountId !== params.accountId;
     if (switching) publish(progress);
     try {

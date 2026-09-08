@@ -138,7 +138,7 @@ pub(crate) fn assign(
         ("accountId", json!(account.id)),
         ("accountProvider", json!(account.provider)),
         ("accountName", json!(account.name)),
-        ("accountColor", json!(account.color)),
+        ("accountSlot", json!(account.selector)),
         ("accountCommand", json!(command)),
         ("agentCommand", json!(command)),
     ] {
@@ -165,18 +165,12 @@ pub(crate) fn apply_new_session(
             .get(&provider)
             .cloned()
             .unwrap_or_default()));
-    if runtime.get("accountId").is_some_and(Value::is_null) {
-        let base = runtime
-            .get("accountBaseCommand")
-            .and_then(Value::as_str)
-            .unwrap_or(provider.id());
-        return Ok(Some(with_account_command(base, provider, provider.id())?));
-    }
+    // CDXC:AgentProviders 2026-09-08 DECISION: Claude and Codex launches require a saved account; the CLI login is no longer a separate launch choice.
     let id = runtime
         .get("accountId")
         .and_then(Value::as_str)
         .or_else(|| registry.default_accounts.get(&provider).map(String::as_str));
-    let Some(id) = id else { return Ok(None) };
+    let id = id.or_else(|| registry.accounts.iter().filter(|a| a.provider == provider).min_by_key(|a| a.selector.parse::<u32>().unwrap_or(u32::MAX)).map(|a| a.id.as_str())).ok_or_else(|| DomainStateError::bad_request("Add an account in Settings > Agents > Accounts before launching this agent."))?;
     let account = registry
         .accounts
         .iter()

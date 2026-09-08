@@ -1,5 +1,9 @@
+import { AccountIndicator } from './indicator';
+import { AccountTitlebarStar } from './titlebar-star';
+import { AccountConnectFlow } from './connect-flow';
+import { accountSetupOwner } from './setup-monitor';
 import { AccountPrivacyContext, AccountText, useAccountText, useHideAccountEmails } from './account-text';
-import { useId, useMemo, useState, useSyncExternalStore, type RefObject } from 'react';
+import { useEffect, useRef, useMemo, useState, useSyncExternalStore, type RefObject } from 'react';
 import { IconBook, IconChevronRight, IconPlus, IconRefresh, IconX } from '@tabler/icons-react';
 import { Checkbox } from '@/packages/components/ui/checkbox';
 import { AppTooltip } from '../app-tooltip';
@@ -8,18 +12,16 @@ import { Switch } from '@/packages/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/packages/components/ui/select';
 import { SettingsInput, SettingsSection } from '../settings-modal/fields';
 import type {
-  AccountIconColor,
   AccountProvider,
   AgentAccount,
   AgentAccountsRequest,
   AgentAccountsState,
 } from '@/packages/shared/agent-accounts';
-import { getAccountsConnections, getAccountsConnectionRevision, subscribeAccountsConnections, runAccountSetup, showAccountFlowToast } from './transport';
-import { AccountLoginButton } from './login-button';
+import { getAccountsConnections, getAccountsConnectionRevision, subscribeAccountsConnections, showAccountFlowToast } from './transport';
 import { CopyCommand } from './copy-command';
 import { AccountConnectionGuide } from './connection-guide';
 import { useAccounts } from './use-accounts';
-import { AccountColorSelect, AccountIdentity, AccountLogo, PolicyControls } from './controls';
+import { AccountIdentity, AccountLogo, PolicyControls } from './controls';
 type Mutation = (request: AgentAccountsRequest) => Promise<boolean>;
 export function AccountsSettingsSection({
   active,
@@ -35,8 +37,26 @@ export function AccountsSettingsSection({
   const connectionRevision = useSyncExternalStore(subscribeAccountsConnections, getAccountsConnectionRevision);
   const connections = useMemo(() => (active ? getAccountsConnections() : []), [active, connectionRevision]);
   const [selected, setSelected] = useState('');
+  useEffect(() => {
+    if (!active) return;
+    let stopped = false;
+    let lastCompleted = '';
+    const poll = async () => {
+      const results = await Promise.allSettled(connections.map(async (connection) => ({ connection, jobs: (await connection.request({ operation: 'setupStatus', owner: accountSetupOwner() })).setupJobs ?? [] })));
+      if (stopped) return;
+      const completed = results.flatMap((result) => result.status === 'fulfilled' ? result.value.jobs.filter((job) => job.status === 'complete').map((job) => ({connection: result.value.connection, job})) : []).sort((a,b) => a.job.createdAt - b.job.createdAt).at(-1);
+      if (completed && completed.job.id !== lastCompleted) {
+        lastCompleted = completed.job.id;
+        setSelected(completed.connection.id);
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 2500);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [active, connections]);
   const connection = connections.find((c) => c.id === selected) ?? connections[0];
-  const { data, error, busy, request } = useAccounts(connection?.request, false, active);
+  // CDXC:Settings 2026-09-08 DECISION: Refresh accounts every time the Accounts page opens and show loading on the Refresh accounts button itself.
+  const { data, error, busy, refreshing, request } = useAccounts(connection?.request, false, active, true);
   return (
     <AccountPrivacyContext value={hideEmails}>
     <SettingsSection title='Accounts' sectionRef={sectionRef}>
@@ -62,6 +82,26 @@ export function AccountsSettingsSection({
           <p>Connect to a computer to manage its accounts.</p>
         ) : (
           <>
+            <div className='gx-account-heading gx-account-manager-toolbar'>
+              <p>Accounts refresh automatically when you open this page.</p>
+              {/* CDXC:Settings 2026-09-07 DECISION: Refresh is a labeled, brighter button at the top of Accounts, outside the add-account panel so returning users can find it immediately. */}
+              <Button
+                variant='secondary'
+                size='sm'
+                className='gx-account-refresh'
+                disabled={busy}
+                aria-busy={refreshing}
+                aria-live='polite'
+                onClick={async () => {
+                  if (await request({ operation: 'list', refresh: true })) {
+                    showAccountFlowToast('Accounts refreshed', 'Saved accounts and usage are up to date.');
+                  }
+                }}
+              >
+                <IconRefresh aria-hidden='true' />
+                {refreshing ? 'Refreshing…' : 'Refresh accounts'}
+              </Button>
+            </div>
             {error && (
               <div className='gx-account-error' role='alert'>
                 {error}
@@ -100,30 +140,42 @@ function AccountManager({
   const [guide, setGuide] = useState<AccountProvider>();
   const [adding, setAdding] = useState<AccountProvider>();
   const [editing, setEditing] = useState<string>();
+  const [highlighted, setHighlighted] = useState<string>();
+  const [pendingJob, setPendingJob] = useState<import('@/packages/shared/agent-accounts').AccountSetupJob>();
+  const completedJob = useRef('');
+  useEffect(() => {
+    let closed = false;
+    const poll = async () => {
+      try {
+        const connection = getAccountsConnections().find((c) => c.id === machineId);
+        const jobs = (await connection?.request({ operation: 'setupStatus', owner: accountSetupOwner() }))?.setupJobs ?? [];
+        if (closed) return;
+        setPendingJob(jobs.filter((job) => !['complete','failed'].includes(job.status)).at(-1));
+        const complete = jobs.filter((job) => job.status === 'complete').at(-1);
+        if (complete?.accountId && complete.id !== completedJob.current) {
+          completedJob.current = complete.id;
+          setHighlighted(complete.accountId);
+          setAdding(undefined);
+          setGuide(undefined);
+          setEditing(complete.accountId);
+          await request({ operation: 'list', refresh: true });
+        }
+      } catch { /* Keep the account error and retry controls owned by useAccounts. */ }
+    };
+    void poll(); const timer = setInterval(() => void poll(), 2000);
+    return () => { closed = true; clearInterval(timer); };
+  }, [machineId, request]);
+  useEffect(() => {
+    if (highlighted) document.getElementById(`account-${highlighted}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [highlighted, data]);
   return (
     <div className='gx-account-manager'>
+      {pendingJob && !adding && !editing && <AccountConnectFlow machineId={machineId} provider={pendingJob.provider} initialJob={pendingJob} />}
       <AccountConnectionGuide provider={guide} helpers={data.helpers} machineId={machineId} busy={busy} onClose={() => setGuide(undefined)} />
-      <div className='gx-account-heading gx-account-manager-toolbar'>
-        <p>After signing in, refresh accounts to find your saved login.</p>
-        {/* CDXC:Settings 2026-09-07 DECISION: Refresh is a labeled, brighter button at the top of Accounts, outside the add-account panel so returning users can find it immediately. */}
-        <Button
-          variant='secondary'
-          size='sm'
-          className='gx-account-refresh'
-          disabled={busy}
-          onClick={async () => {
-            if (await request({ operation: 'list', refresh: true })) {
-              showAccountFlowToast('Accounts refreshed', 'Open Add account for Claude or Codex, then choose Add saved login next to your connected account.');
-            }
-          }}
-        >
-          <IconRefresh aria-hidden='true' />
-          {busy ? 'Refreshing…' : 'Refresh accounts'}
-        </Button>
-      </div>
+
       {(['claude', 'codex'] as const).map((provider) => {
         const label = provider === 'claude' ? 'Claude' : 'Codex';
-        const accounts = data.accounts.filter((a) => a.provider === provider && a.registered);
+        const accounts = data.accounts.filter((a) => a.provider === provider && a.registered).sort((a,b) => Number(a.selector) - Number(b.selector));
         const defaultAccount = accounts.find((a) => a.id === data.defaultAccounts[provider]);
         const policy = data.defaults[provider];
         return (
@@ -152,17 +204,21 @@ function AccountManager({
             </div>
             <div className='gx-account-list'>
               {accounts.map((account) => (
-                <div key={account.id} className='gx-account-saved' data-editing={editing === account.id}>
+                <div key={account.id} id={`account-${account.id}`} data-highlighted={highlighted === account.id} className='gx-account-saved' data-editing={editing === account.id}>
                   <div className='gx-account-row'>
                     <AccountIdentity account={account} />
                     <div className='gx-account-row-copy'>
                       <strong><AccountText text={account.name} /></strong>
                       {account.email !== account.name && <small><AccountText text={account.email || 'Saved login unavailable'} /></small>}
+                      {account.usageError && <small>{account.usageError}</small>}
                     </div>
                     <div className='gx-account-row-actions'>
-                      <span className='gx-account-status'>
-                        {account.status === 'ready' ? (account.eligible ? 'Available' : 'Manual only') : 'Reconnect'}
-                      </span>
+                      <AccountTitlebarStar account={account} busy={busy} request={request} machineId={machineId} />
+                      {account.status === 'ready' ? (
+                        <span className='gx-account-status'>{account.eligible ? 'Available' : 'Manual only'}</span>
+                      ) : (
+                        <Button variant='outline' size='sm' onClick={() => setEditing(account.id)}>Reconnect</Button>
+                      )}
                       <Button
                         variant='ghost'
                         size='sm'
@@ -176,7 +232,7 @@ function AccountManager({
                     </div>
                   </div>
                   {editing === account.id && (
-                    <AccountEditor account={account} machineId={machineId} busy={busy} request={request} close={() => setEditing(undefined)} />
+                    <AccountEditor accounts={accounts} account={account} machineId={machineId} busy={busy} request={request} close={() => setEditing(undefined)} />
                   )}
                 </div>
               ))}
@@ -204,7 +260,7 @@ function AccountManager({
                 <span className='gx-account-row-copy'>
                   <strong>New session defaults</strong>
                   <small className='gx-account-default-summary'>
-                    {defaultAccount && <AccountLogo provider={defaultAccount.provider} color={defaultAccount.color} />} <AccountText text={defaultAccount?.name ?? 'Default CLI login'} /> · {policy.enabled ? (policy.atLimit === 'wait' ? 'Wait for reset' : 'Switch at a limit') : 'Auto-continue off'}
+                    {defaultAccount && <AccountLogo provider={defaultAccount.provider} slot={defaultAccount.selector} />} <AccountText text={defaultAccount?.name ?? 'Choose an account'} /> · {policy.enabled ? (policy.atLimit === 'wait' ? 'Wait for reset' : 'Switch at a limit') : 'Auto-continue off'}
                   </small>
                 </span>
               </summary>
@@ -226,13 +282,13 @@ function AccountManager({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value=''>Default CLI login</SelectItem>
+
                       {accounts.map((account) => (
-                        <SelectItem key={account.id} value={account.id}><AccountLogo provider={account.provider} color={account.color} /><AccountText text={account.name} /></SelectItem>
+                        <SelectItem key={account.id} value={account.id} label={account.name}><AccountLogo provider={account.provider} slot={account.selector} /><AccountText text={account.name} /></SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <small>Default uses the CLI’s ordinary login on this computer.</small>
+                  <small>Quick launch uses this saved account.</small>
                 </label>
                 <PolicyControls
                   scope={`${provider} defaults`}
@@ -250,12 +306,14 @@ function AccountManager({
 }
 
 function AccountEditor({
+  accounts,
   account,
   machineId,
   busy,
   request,
   close,
 }: {
+  accounts: AgentAccount[];
   account: AgentAccount;
   machineId: string;
   busy: boolean;
@@ -264,34 +322,27 @@ function AccountEditor({
 }) {
   const hideEmails = useHideAccountEmails();
   const [name, setName] = useState(account.name);
-  const [color, setColor] = useState<AccountIconColor>(account.color);
+  const [indicator, setIndicator] = useState(account.indicator ?? '');
   const [eligible, setEligible] = useState(account.eligible);
   const [remove, setRemove] = useState(false);
-  const [reconnect, setReconnect] = useState(false);
-  const command =
-    account.provider === 'codex'
-      ? `xswap login ${account.selector}`
-      : 'claude auth login && cswap add';
+  const [reconnect, setReconnect] = useState(account.status !== 'ready');
+  const [swapTarget, setSwapTarget] = useState('');
   return (
     <div className='gx-account-editor'>
       <label className='gx-account-field'>
         Account name
         <SettingsInput type={hideEmails && name.includes('@') ? 'password' : 'text'} autoComplete='off' maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
       </label>
-      <AccountColorSelect value={color} onChange={setColor} />
+      <label className='gx-account-field'>
+        Account indicator
+        <SettingsInput aria-label='Account indicator' value={indicator} maxLength={2} placeholder={account.selector} autoComplete='off' onChange={(event) => setIndicator(event.target.value.match(/[\p{L}\p{N}-]/u)?.[0] ?? '')} />
+        <small>One letter or number, such as w for work. Enter - to hide the indicator, or leave blank to use slot {account.selector}.</small>
+      </label>
       <div className='gx-account-preview'>
-        <span className='gx-account-color-preview-label'>Chat bar</span>
+        <span className='gx-account-color-preview-label'>Session icon preview</span>
         <div>
-          <AccountLogo provider={account.provider} color={color} />
-          <span>
-            {account.provider === 'codex' ? 'Codex' : 'Claude'} · <AccountText text={name} />
-          </span>
-        </div>
-        <span className='gx-account-color-preview-label'>Sidebar</span>
-        <div>
-          <AccountLogo provider={account.provider} color={color} />
-          <span>Current task</span>
-          <small><AccountText text={name} /></small>
+          <span className='gx-account-mark'><AccountLogo provider={account.provider} /><AccountIndicator value={indicator || account.selector} /></span>
+          <span>{account.provider === 'codex' ? 'Codex' : 'Claude'} · <AccountText text={name} /></span>
         </div>
       </div>
       <div className='gx-account-field-row'>
@@ -306,7 +357,7 @@ function AccountEditor({
         <Button
           disabled={busy || !name.trim()}
           onClick={async () => {
-            if (await request({ operation: 'update', id: account.id, name, color, eligible })) close();
+            if (await request({ operation: 'update', id: account.id, name, color: account.color, eligible, indicator })) close();
           }}
         >
           Save changes
@@ -321,34 +372,18 @@ function AccountEditor({
           Remove
         </Button>
       </div>
-      {reconnect && (
-        <div className='gx-account-setup'>
-          <p>
-            {account.provider === 'claude'
-              ? 'Click to run login and sign in with this account. Do not log out first.'
-              : 'Finish active launches for this account, then sign in again using xswap.'}
-          </p>
-          <AccountLoginButton command={command} disabled={busy} onRun={() => runAccountSetup(machineId, account.provider, command)} />
-          <Button
-            variant='outline'
-            disabled={busy}
-            onClick={() =>
-              void request({
-                operation: 'register',
-                id: account.id,
-                provider: account.provider,
-                selector: account.selector,
-                shareHistory: true,
-              })
-            }
-          >
-            Check connection
-          </Button>
-        </div>
-      )}
+      {reconnect && <AccountConnectFlow machineId={machineId} provider={account.provider} account={account} />}
+      {accounts.length > 1 && <div className='gx-account-field'>
+        <label>Swap slot {account.selector} with</label>
+        {account.provider === 'claude' && <p>Stop sessions using either account before swapping Claude slots.</p>}
+        <div className='gx-account-row-actions'><Select value={swapTarget} onValueChange={(value) => setSwapTarget(value ?? '')}>
+          <SelectTrigger aria-label='Account to swap slots with'><SelectValue placeholder='Choose an account' /></SelectTrigger>
+          <SelectContent>{accounts.filter((other) => other.id !== account.id).map((other) => <SelectItem key={other.id} value={other.id} label={`Slot ${other.selector} ${other.name}`}>Slot {other.selector} · <AccountText text={other.name} /></SelectItem>)}</SelectContent>
+        </Select><Button variant='outline' disabled={busy || !swapTarget} onClick={() => void request({operation:'swapSlots',firstId:account.id,secondId:swapTarget})}>Swap slots</Button></div>
+      </div>}
       {remove && (
         <div className='gx-account-error'>
-          <strong><AccountLogo provider={account.provider} color={account.color} /> Remove <AccountText text={account.name} /> from Ghostex?</strong>
+          <strong><AccountLogo provider={account.provider} slot={account.selector} /> Remove <AccountText text={account.name} /> from Ghostex?</strong>
           <p>
             The saved helper login and shared conversations remain. Sessions using this account need a different account
             before their next resume.
@@ -368,111 +403,22 @@ function AccountEditor({
   );
 }
 /** CDXC:Settings 2026-09-07 DECISION: A saved account with missing credentials shows the reason and a Click to run login button directly in the account row. Repairing its login is available before consenting to shared conversations; adding it still requires that consent. */
-function AccountSetup({
-  provider,
-  machineId,
-  data,
-  busy,
-  request,
-  close,
-}: {
-  provider: AccountProvider;
-  machineId: string;
-  data: AgentAccountsState;
-  busy: boolean;
-  request: Mutation;
-  close: () => void;
+function AccountSetup({ provider, machineId, data, busy, request, close }: {
+  provider: AccountProvider; machineId: string; data: AgentAccountsState; busy: boolean; request: Mutation; close: () => void;
 }) {
+  const [selected, setSelected] = useState('new');
   const [consent, setConsent] = useState(false);
-  const [signInError, setSignInError] = useState('');
-  const signIn = (command: string) => {
-    setSignInError('');
-    try { runAccountSetup(machineId, provider, command); }
-    catch (cause) { setSignInError(cause instanceof Error ? cause.message : 'Could not open the sign-in terminal.'); }
-  };
-  const consentId = useId();
   const helper = data.helpers.find((h) => h.provider === provider);
   const available = data.accounts.filter((a) => a.provider === provider && !a.registered);
-  return (
-    <div className='gx-account-setup'>
-      <div className='gx-account-heading'>
-        <h3>Add a {provider === 'claude' ? 'Claude' : 'Codex'} account</h3>
-        <AppTooltip content='Close account setup'>
-          <Button variant='outline' size='icon-sm' aria-label='Close account setup' onClick={close}>
-            <IconX aria-hidden='true' />
-          </Button>
-        </AppTooltip>
-      </div>
-      {!helper?.installed && (
-        <>
-          <p>Install {provider === 'claude' ? 'claude-swap with uv' : 'xswap'} on this computer first.</p>
-          {helper && <CopyCommand command={helper.installCommand} />}
-        </>
-      )}
-      {helper?.error && <p>{helper.error}</p>}
-      {signInError && <p role='alert'>{signInError}</p>}
-      {helper?.installed && (
-        <>
-          <label className='gx-account-consent' htmlFor={consentId}>
-            <Checkbox id={consentId} checked={consent} onCheckedChange={setConsent} />
-            <span>
-              Share conversations between my {provider === 'claude' ? 'Claude' : 'Codex'} accounts so sessions can
-              resume with another login.
-            </span>
-          </label>
-          {available.map((a) => (
-            <div className='gx-account-row' key={a.id}>
-              <AccountLogo provider={provider} color={a.color} />
-              <div className='gx-account-row-copy'>
-                <strong><AccountText text={a.name || `Account ${a.selector}`} /></strong>
-                {a.email !== a.name && <small><AccountText text={a.email} /></small>}
-                {a.status !== 'ready' && <small role='status'><AccountText text={savedLoginIssue(a)} /></small>}
-              </div>
-              {a.status === 'ready' ? (
-                <Button
-                  variant='outline'
-                  size='sm'
-                  title={!consent ? 'Allow shared conversations first.' : undefined}
-                  disabled={busy || !consent}
-                  onClick={async () => {
-                    if (await request({ operation: 'register', provider, selector: a.selector, shareHistory: true })) {
-                      showAccountFlowToast('Account added', 'Start a session by choosing your agent and this account in the project’s sidebar launcher.');
-                    }
-                  }}
-                >
-                  Add saved login
-                </Button>
-              ) : (
-                <AccountLoginButton
-                  command={provider === 'codex' ? `xswap login ${a.selector}` : helper.loginCommand}
-                  disabled={busy}
-                  onRun={() => signIn(provider === 'codex' ? `xswap login ${a.selector}` : helper.loginCommand)}
-                />
-              )}
-            </div>
-          ))}
-          <p>
-            Choose Click to run login to open a terminal on this computer. Complete the login, then return here and click Refresh accounts at the top of this section to add your account.
-          </p>
-          {provider === 'claude' && (
-            <p>Sign in without logging out first, so the previous saved login remains usable.</p>
-          )}
-          <AccountLoginButton
-            command={helper.loginCommand}
-            disabled={busy || !consent}
-            onRun={() => runAccountSetup(machineId, provider, helper.loginCommand)}
-          />
-        </>
-      )}
-    </div>
-  );
-}
-
-function savedLoginIssue(account: AgentAccount): string {
-  const nextStep = 'Choose Click to run login and sign in to this account, then click Refresh accounts at the top of this section.';
-  if (account.status === 'identityChanged') return `This saved login belongs to a different account. ${nextStep}`;
-  if (account.status === 'loginRequired') return account.usageError?.includes('no_credentials')
-    ? `This account cannot be added because its saved login credentials are missing. ${nextStep}`
-    : `This account needs to be signed in again before it can be added. ${nextStep}`;
-  return 'This saved login is unavailable. Refresh to check its connection.';
+  const account = available.find((a) => a.id === selected);
+  return <div className='gx-account-setup'>
+    <div className='gx-account-heading'><h3>Add a {provider === 'claude' ? 'Claude' : 'Codex'} account</h3><Button variant='ghost' size='icon-sm' aria-label='Close account setup' onClick={close}><IconX /></Button></div>
+    {!helper?.installed ? helper && <CopyCommand command={helper.installCommand} /> : <>
+      {available.length > 0 && <Select value={selected} onValueChange={(value) => setSelected(value ?? 'new')}><SelectTrigger aria-label='Login to add'><SelectValue /></SelectTrigger><SelectContent><SelectItem value='new'>Sign in to a new account</SelectItem>{available.map((a) => <SelectItem key={a.id} value={a.id} label={a.name || a.email}><AccountLogo provider={provider} slot={a.selector} /><AccountText text={a.name || a.email} /></SelectItem>)}</SelectContent></Select>}
+      {account?.status === 'ready' ? <div className='gx-account-connect-flow'>
+        <label className='gx-account-consent'><Checkbox checked={consent} onCheckedChange={setConsent} /><span>Share conversations between my {provider === 'claude' ? 'Claude' : 'Codex'} accounts.</span></label>
+        <Button variant='secondary' disabled={busy || !consent} onClick={async () => { if (await request({operation:'register',provider,selector:account.selector,shareHistory:true})) close(); }}>Add account</Button>
+      </div> : <AccountConnectFlow key={selected} machineId={machineId} provider={provider} account={account} />}
+    </>}
+  </div>;
 }

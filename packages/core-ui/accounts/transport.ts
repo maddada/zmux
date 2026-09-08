@@ -1,7 +1,7 @@
 import { postAppModalHostMessage } from '../app-modal-host-bridge';
 import { GXSERVER_PROTOCOL_VERSION } from '@/packages/shared/gxserver-protocol';
 import { createAppToastRequest } from '@/packages/shared/app-toast-contract';
-import type { AccountProvider, AccountsTransport, AgentAccountsState } from '@/packages/shared/agent-accounts';
+import type { AccountsTransport, AgentAccountsState } from '@/packages/shared/agent-accounts';
 export interface AccountsConnection {
   id: string;
   label: string;
@@ -57,15 +57,6 @@ export function getAccountsConnections(): AccountsConnection[] {
   ];
 }
 
-export function runAccountSetup(machineId: string, provider: AccountProvider, command: string): void {
-  postAppModalHostMessage({ type: 'accountSetup', machineId, provider, command }, 'Accounts:setup');
-  showAccountFlowToast(
-    'Finish signing in, then refresh accounts',
-    'Complete the login, then return to Settings → Agents → Accounts and click Refresh accounts at the top. Open Add account and choose Add saved login.',
-  );
-}
-
-/** CDXC:Settings 2026-09-07 DECISION: Login and refresh show toasts explaining the next account-connection step, including returning to Settings after browser sign-in. */
 export function showAccountFlowToast(title: string, description: string): void {
   postAppModalHostMessage(createAppToastRequest('info', title, description, {
     durationMs: 12000,

@@ -1,7 +1,5 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { Checkbox } from '@/packages/components/ui/checkbox';
-import { AccountLoginButton } from './login-button';
-import { runAccountSetup } from './transport';
+import { AccountConnectFlow } from './connect-flow';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/packages/components/ui/dialog';
 import type { AccountHelper, AccountProvider } from '@/packages/shared/agent-accounts';
 import { AccountLogo } from './controls';
@@ -23,12 +21,9 @@ export function AccountConnectionGuide({
 }) {
   const anchor = useRef<HTMLSpanElement>(null);
   const [settingsHeight, setSettingsHeight] = useState(0);
-  const [consent, setConsent] = useState(false);
-  const consentId = useId();
   /** CDXC:Settings 2026-09-07 DECISION: The tutorial is at most 90% of its Settings modal's height, including when Settings resizes. */
   useLayoutEffect(() => {
     if (!provider) {
-      setConsent(false);
       return;
     }
     const settings = anchor.current?.closest<HTMLElement>('.settings-modal-dialog');
@@ -63,13 +58,8 @@ export function AccountConnectionGuide({
           <section>
             <h3>1. Save a login</h3>
             <p>
-              Allow shared conversations below, then choose Click to run login for Claude or Codex. Complete the login
-              in the terminal and browser that open.
+              Enter the account email and allow shared conversations, then choose Add account. Finish signing in through your browser; Settings shows the progress automatically.
             </p>
-            <label className='gx-account-consent' htmlFor={consentId}>
-              <Checkbox id={consentId} checked={consent} onCheckedChange={setConsent} />
-              <span>Share conversations between my accounts of the same provider.</span>
-            </label>
             <ul className='gx-account-guide-providers'>
               {(['claude', 'codex'] as const).map((id) => {
                 const helper = helpers.find((item) => item.provider === id);
@@ -86,29 +76,20 @@ export function AccountConnectionGuide({
                     </p>
                     <p>
                       {id === 'claude'
-                        ? 'Sign in without logging out first. Signing in with an existing account updates its saved credentials.'
-                        : 'Each Codex login has a separate account home with shared session history. To reconnect an existing account, use its login button in Accounts.'}
+                        ? 'Enter the new account’s email below and choose it in the browser. Ghostex uses a separate login profile and verifies the account before saving it with cswap. To refresh an existing login, use that account’s Reconnect action.'
+                        : 'Enter the new account’s email below and choose it in the browser. xswap verifies the login before saving a separate account home with shared session history. To refresh an existing login, use that account’s Reconnect action.'}
                     </p>
                     {helper && !helper.installed && <CopyCommand command={helper.installCommand} />}
-                    {helper?.installed && (
-                      <AccountLoginButton
-                        command={helper.loginCommand}
-                        disabled={busy || !consent}
-                        onRun={() => runAccountSetup(machineId, id, helper.loginCommand)}
-                      />
-                    )}
+
                   </li>
                 );
               })}
             </ul>
+            {provider && helpers.find((helper) => helper.provider === provider)?.installed && <AccountConnectFlow machineId={machineId} provider={provider} />}
           </section>
           <section>
-            <h3>2. Add it to Ghostex</h3>
-            <p>
-              Return to Settings → Agents → Accounts and click the highlighted Refresh accounts button at the top. Open
-              Add account, then choose Add saved login. A saved name alone is not enough: the login must be connected.
-              You can then rename it, choose its logo color, and enable it for automatic switching.
-            </p>
+            <h3>2. Your account is ready</h3>
+            <p>Ghostex verifies and adds the connected account automatically, then opens Accounts with it highlighted. Give it a name or swap its slot with another account. A white badge at the top-left of the session’s agent icon identifies the account. Use its slot number or set a custom letter or number in the account’s settings.</p>
           </section>
           <section>
             <h3>3. Start with an account</h3>
@@ -117,10 +98,8 @@ export function AccountConnectionGuide({
               session immediately. Custom agents keep their own settings.
             </p>
             <p>
-              The account marked Default is the one chosen under Account for new sessions in Settings. The main
-              quick-launch button uses it. Choosing another account applies only to that session. If Settings uses
-              Default CLI login, the main button uses the CLI’s current login instead, including when no accounts have
-              been added.
+              Quick launch uses the account chosen under Account for new sessions in Settings. Choosing another
+              account from the launcher applies only to that new session. Add an account before starting Claude or Codex.
             </p>
           </section>
           <section>

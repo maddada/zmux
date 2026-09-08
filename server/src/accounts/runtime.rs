@@ -6,11 +6,15 @@ use std::{
 };
 #[derive(Default)]
 pub(crate) struct AccountRuntime {
+    pub setup_jobs: super::setup::SetupJobs,
     pub mutations: Mutex<()>,
     poll_gate: Mutex<()>,
     snapshot: RwLock<Snapshot>,
 }
 impl AccountRuntime {
+    pub fn invalidate(&self) {
+        self.snapshot.write().unwrap_or_else(|e| e.into_inner()).fetched_at = None;
+    }
     pub fn snapshot(&self) -> Snapshot {
         self.snapshot
             .read()

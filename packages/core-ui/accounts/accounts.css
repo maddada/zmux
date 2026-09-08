@@ -1,4 +1,4 @@
-/* CDXC:AgentProviders 2026-09-05 DECISION: User requested neutral usage bars and brighter selected controls; only the per-account provider logo uses one of nine chosen colors. */
+/* CDXC:AgentProviders 2026-09-08 DECISION: Usage bars remain neutral and selection uses brighter controls. Original provider logos keep their appearance. Only the session icon has a white account indicator at its top-left, replacing the centered slot badges throughout the app. */
 .gx-accounts {
   --ring: #bcbcbc;
   min-width: 0;
@@ -477,9 +477,23 @@ details[open] > .gx-account-policy-summary > svg {
 
 .gx-account-settings .gx-account-refresh {
   flex-shrink: 0;
+  min-width: 145px;
   background: color-mix(in srgb, var(--foreground) 18%, var(--background));
   color: var(--foreground);
   border: 1px solid color-mix(in srgb, var(--foreground) 24%, transparent);
+}
+.gx-account-settings .gx-account-refresh[aria-busy=true] {
+  opacity: 1;
+  cursor: progress;
+}
+.gx-account-refresh[aria-busy=true] svg {
+  animation: gx-account-refresh-spin 1s linear infinite;
+}
+@keyframes gx-account-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gx-account-refresh[aria-busy=true] svg { animation: none; }
 }
 .gx-account-settings .gx-account-refresh:hover:not(:disabled) {
   background: color-mix(in srgb, var(--foreground) 26%, var(--background));
@@ -499,3 +513,16 @@ details[open] > .gx-account-policy-summary > svg {
 .session-context-menu.session-saved-account-submenu { width: 260px; max-width: calc(100vw - 24px); }
 .session-saved-account-submenu .session-tag-menu-item-label { flex: 1; white-space: nowrap; }
 .session-saved-account-submenu .session-context-menu-trailing-icon { flex-shrink: 0; }
+
+/* CDXC:AgentProviders 2026-09-08 DECISION: Slot numbers replace account logo tinting; the centered dot is visual only. */
+.gx-account-logo, .gx-account-mark { position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.gx-account-logo { background: none; mask-image: none; -webkit-mask-image: none; }
+.gx-account-logo-image { width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; background-position: center; }
+.gx-account-indicator.ghostex-chat-stash-count-badge { top: -4px; left: -4px; right: auto; background: #fff; color: #111; }
+.gx-account-saved[data-highlighted='true'] { outline: 2px solid var(--foreground); outline-offset: 3px; background: var(--accent); }
+.gx-account-connect-flow { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin: 12px 0; }
+.gx-account-connect-flow > button { align-self: flex-start; }
+.gx-account-connect-flow .gx-account-consent { margin: 0; }
+.gx-account-code-input { display: flex; gap: 8px; }
+.gx-account-terminal-output { max-height: 240px; overflow: auto; padding: 12px; border-radius: 8px; background: var(--background); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.gx-account-signin-link { text-decoration: underline; font-size: 12px; }

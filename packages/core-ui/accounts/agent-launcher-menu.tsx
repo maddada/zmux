@@ -1,3 +1,4 @@
+import { openAppModal } from '../app-modal-host-bridge';
 import { AccountText, useAccountText } from './account-text';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { IconChevronLeft, IconChevronRight, IconSettings } from '@tabler/icons-react';
@@ -8,7 +9,7 @@ import { AgentMenuChatIndicator } from '../agent-menu-chat-indicator';
 import { AccountLogo } from './controls';
 import { useAccounts } from './use-accounts';
 
-/** CDXC:AgentLauncher 2026-09-07 DECISION: Claude and Codex, including custom agents, offer an account submenu. Mark the actual saved account with Default instead of a separate Default account row. An account choice applies to this launch only; the main quick-launch button follows Settings and can use the CLI login when no accounts are added. Account management stays in Settings. */
+/** CDXC:AgentLauncher 2026-09-08 DECISION: Claude and Codex, including custom agents, offer an account submenu. Mark the actual saved account with Default instead of a separate Default account row. An account choice applies to this launch only; the main quick-launch button uses the saved account in Settings. With no saved accounts, offer Add accounts instead of launching with a CLI login. Account management stays in Settings. */
 export function AgentLauncherMenuItems({
   agents,
   primaryAgentId,
@@ -73,7 +74,7 @@ export function AgentLauncherMenuItems({
                 title={account.status !== 'ready' ? 'Reconnect this account in Settings first.' : accountText(account.name)}
                 onClick={() => onRun(selected, account.id)}
               >
-                <AccountLogo provider={provider} color={account.color} />
+                <AccountLogo provider={provider} slot={account.selector} />
                 <span className='group-agent-menu-label'><AccountText text={account.name} /></span>
                 {account.id === data?.defaultAccounts[provider] && (
                   <span className='gx-account-launcher-default'>· Default</span>
@@ -100,17 +101,8 @@ export function AgentLauncherMenuItems({
               </>
             )}
             {!transport && <p className='gx-account-launcher-hint'>Account connection unavailable.</p>}
-            {data && !accounts.length && (
-              <>
-                <button className={rowClass} role='menuitem' onClick={() => onRun(selected)}>
-                  <ProjectAgentLauncherIcon agent={selected} colorMode='brand' />
-                  <span className='group-agent-menu-label'>Launch {selected.name}</span>
-                </button>
-                <p className='gx-account-launcher-hint'>
-                  Uses the CLI’s current login. Add saved accounts in Settings → Agents → Accounts.
-                </p>
-              </>
-            )}
+            {data && !accounts.length && <button className={rowClass} role='menuitem' onClick={() => openAppModal({ type: 'open', modal: 'settings', initialTab: 'agents', initialAgentsSection: 'accounts' })}>Add accounts</button>}
+
           </div>
         </>
       ) : (

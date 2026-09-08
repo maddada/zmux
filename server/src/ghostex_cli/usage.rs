@@ -52,6 +52,10 @@ fn automation_help_commands() -> Vec<String> {
 pub fn usage() -> String {
     let session_commands = [
         format_help_command(
+            "account-login claude [--account NUMBER]",
+            "Connect a new Claude account, or reconnect a selected cswap account",
+        ),
+        format_help_command(
             "sessions | s | ls [--ungrouped|-u] [--json] [--mobile-summary]",
             "List running terminal sessions",
         ),
@@ -277,7 +281,7 @@ pub fn usage() -> String {
         format_help_command("read-agent-prompt-text --key <key> --json", "Read one prompt's full text by the key a search row reported"),
         format_help_command("toggle-agent-prompt-favorite --key <key> [--favorite true|false] --json", "Star or unstar a prompt; shares gx f's favorites file"),
         format_help_command("resolve-agent-prompt-launch --key <key> [--action resume|fork] [--fork-agent id] --json", "Resolve whether opening a prompt focuses a live session or runs a command"),
-        format_help_command("read-session-chat <selector> [--limit n] [--before-offset n] [--wait-ms n --fingerprint f] --json", "Read a session's chat transcript; --wait-ms long-polls until the chat changes"),
+        format_help_command("read-session-chat <selector> [--subagent name-or-id] [--limit n] [--before-offset n] [--wait-ms n --fingerprint f] --json", "Read a session or subagent transcript; --wait-ms long-polls the main chat"),
         format_help_command("switch-draft-agent <selector> --agent-id <id> --json", "Switch an unprompted draft session to another project agent"),
         format_help_command("send-session-chat-key <selector> --key <key> --json", "Queue Enter or a shifted option key behind this session's pending chat writes"),
         format_help_command("read-session-chat-skills <selector> --json", "List skills available to the session's agent"),

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AccountsTransport, AgentAccountsRequest, AgentAccountsState } from '@/packages/shared/agent-accounts';
-export function useAccounts(transport: AccountsTransport | undefined, session = false, active = true) {
+export function useAccounts(transport: AccountsTransport | undefined, session = false, active = true, refreshOnOpen = false) {
   const [data, setData] = useState<AgentAccountsState>();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const generation = useRef(0);
   const pending = useRef(false);
   const request = useCallback(
@@ -12,6 +13,7 @@ export function useAccounts(transport: AccountsTransport | undefined, session = 
       const id = ++generation.current;
       pending.current = true;
       setBusy(true);
+      setRefreshing('refresh' in params && params.refresh === true);
       setError('');
       try {
         const result = await transport(params);
@@ -23,6 +25,7 @@ export function useAccounts(transport: AccountsTransport | undefined, session = 
       } finally {
         if (generation.current === id) {
           setBusy(false);
+          setRefreshing(false);
           pending.current = false;
         }
       }
@@ -31,16 +34,25 @@ export function useAccounts(transport: AccountsTransport | undefined, session = 
   );
   useEffect(() => {
     setData(undefined);
-    if (!active || !transport) return;
-    void request({ operation: session ? 'session' : 'list' });
-    const timer = setInterval(() => {
+    if (!active || !transport) {
+      setBusy(false);
+      setRefreshing(false);
+      return;
+    }
+    void request({ operation: session ? 'session' : 'list', refresh: refreshOnOpen });
+    const refresh = () => {
       if (!document.hidden && !pending.current) void request({ operation: session ? 'session' : 'list' });
-    }, 30000);
+    };
+    const timer = setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
     return () => {
       clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
       generation.current++;
       pending.current = false;
     };
-  }, [active, transport, session, request]);
-  return { data, error, busy, request };
+  }, [active, transport, session, request, refreshOnOpen]);
+  return { data, error, busy, refreshing, request };
 }

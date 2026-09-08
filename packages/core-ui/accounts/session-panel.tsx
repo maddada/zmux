@@ -31,6 +31,19 @@ export function SessionAccountsPanel({
   const context = resolveSessionChatContextMeterUsage(contextUsage);
   const session = data?.session;
   const current = data?.accounts.find((a) => a.id === session?.accountId);
+  const manageAccounts = () => {
+    openAppModal({
+      type: 'open',
+      modal: 'settings',
+      initialTab: 'agents',
+      initialAgentsSection: 'accounts',
+    });
+    close();
+  };
+  // CDXC:AgentProviders 2026-09-08 DECISION: With no saved accounts, the chat switcher offers only Add accounts. An unassigned CLI login is not an account choice.
+  if (data && session && !data.accounts.some((a) => a.registered && a.provider === session.provider)) {
+    return <div className='gx-accounts gx-account-panel'><Button variant='ghost' onClick={manageAccounts}>Add accounts</Button></div>;
+  }
   return (
     <div className='gx-accounts gx-account-panel'>
       <div className='gx-account-heading'>
@@ -52,15 +65,7 @@ export function SessionAccountsPanel({
               aria-label='Manage accounts in Settings'
               variant='ghost'
               size='icon-sm'
-              onClick={() => {
-                openAppModal({
-                  type: 'open',
-                  modal: 'settings',
-                  initialTab: 'agents',
-                  initialAgentsSection: 'accounts',
-                });
-                close();
-              }}
+              onClick={manageAccounts}
             >
               <IconSettings aria-hidden='true' />
             </Button>
@@ -102,8 +107,8 @@ export function SessionAccountsPanel({
               <div className='gx-account-current'>
                 {current && <AccountIdentity account={current} />}
                 <div>
-                  <strong><AccountText text={current?.name ?? 'Default CLI login'} /></strong>
-                  <p><AccountText text={current?.email ?? 'Uses the CLI’s ordinary login on this computer.'} /></p>
+                  <strong><AccountText text={current?.name ?? 'Choose an account'} /></strong>
+                  <p><AccountText text={current?.email ?? ''} /></p>
                 </div>
               </div>
               {current?.usageError && <p>{current.usageError}</p>}
@@ -140,15 +145,22 @@ export function SessionAccountsPanel({
                   </div>
                 </div>
               )}
-              <h3>Other {session.provider === 'claude' ? 'Claude' : 'Codex'} accounts</h3>
+              <h3>{current ? 'Switch account' : 'Accounts'}</h3>
               {data.accounts
                 .filter((a) => a.registered && a.provider === session.provider && a.id !== session.accountId)
                 .map((a) => (
                   <button
                     key={a.id}
                     className='gx-account-switch'
-                    disabled={busy || a.status !== 'ready'}
-                    onClick={() => void request({ operation: 'select', accountId: a.id })}
+                    disabled={busy}
+                    title={a.status !== 'ready' ? 'Reconnect this account in Settings' : undefined}
+                    onClick={() => {
+                      if (a.status === 'ready') {
+                        void request({ operation: 'select', accountId: a.id });
+                      } else {
+                        manageAccounts();
+                      }
+                    }}
                   >
                     <AccountIdentity account={a} />
                     <span className='gx-account-row-copy'>
@@ -158,16 +170,6 @@ export function SessionAccountsPanel({
                     <span>{a.status === 'ready' ? 'Use account →' : 'Reconnect'}</span>
                   </button>
                 ))}
-              {session.accountId && (
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  disabled={busy}
-                  onClick={() => void request({ operation: 'select', accountId: null })}
-                >
-                  Use default CLI login
-                </Button>
-              )}
               <p>Switching resumes the same conversation. Stop an active turn before switching.</p>
             </section>
             <section>

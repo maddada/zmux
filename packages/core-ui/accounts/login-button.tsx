@@ -8,10 +8,12 @@ export function AccountLoginButton({
   command,
   disabled,
   onRun,
+  label = 'Click to run login',
 }: {
   command: string;
   disabled?: boolean;
   onRun: () => void;
+  label?: string;
 }) {
   const [error, setError] = useState('');
   return (
@@ -31,7 +33,7 @@ export function AccountLoginButton({
           }}
         >
           <IconPlayerPlay aria-hidden='true' />
-          Click to run login
+          {label}
         </Button>
       </AppTooltip>
       {error && <p role='alert'>{error}</p>}

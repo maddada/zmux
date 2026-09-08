@@ -86,7 +86,7 @@ export function SidebarAccountMenu({
               }}
               type='button'
             >
-              <AccountLogo provider={account.provider} color={account.color} />
+              <AccountLogo provider={account.provider} slot={account.selector} />
               <span className='session-tag-menu-item-label'><AccountText text={account.name} /></span>
               {current && <IconCheck aria-hidden='true' className='session-context-menu-trailing-icon' size={16} />}
             </button>

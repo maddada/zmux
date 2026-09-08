@@ -118,8 +118,9 @@ impl GhostexGpuiApp {
                                     .text_color(workspace_terminal_placeholder_message_color())
                                     .flex().items_center().gap(px(8.0))
                                     .when_some(switching, |this, progress| {
-                                        this.child(gpui::svg().path(workspace_tab_agent_icon_path(progress.provider).unwrap())
-                                            .size(px(18.0)).flex_shrink_0().text_color(gpui::rgb(progress.color)))
+                                        this.child(div().relative().size(px(18.0)).flex_shrink_0()
+                                            .child(gpui::svg().path(workspace_tab_agent_icon_path(progress.provider).unwrap()).size(px(18.0)))
+                                            .when(!progress.indicator.is_empty() && progress.indicator != "-", |this| this.child(div().absolute().top(px(-4.0)).left(px(-4.0)).size(px(12.0)).rounded_full().bg(gpui::rgb(0xffffff)).text_color(gpui::rgb(0x111111)).text_size(px(9.0)).line_height(px(12.0)).font_weight(gpui::FontWeight::BOLD).flex().items_center().justify_center().child(progress.indicator.clone()))))
                                     })
                                     .child(message.clone()),
                             )

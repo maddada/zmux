@@ -28,6 +28,7 @@ export interface AccountUsageWindow {
   id: string;
   label: string;
   usedPercent: number;
+  limitWindowSeconds?: number;
   resetsAt?: string;
   model?: string;
 }
@@ -35,6 +36,7 @@ export interface AgentAccount {
   id: string;
   provider: AccountProvider;
   selector: string;
+  indicator?: string;
   name: string;
   email: string;
   color: AccountIconColor;
@@ -43,6 +45,8 @@ export interface AgentAccount {
   sharedHistory: boolean;
   status: 'ready' | 'loginRequired' | 'unavailable' | 'identityChanged';
   usage: AccountUsageWindow[];
+  resetCredits?: number;
+  showInTitlebar?: boolean;
   usageUpdatedAt?: string;
   usageError?: string;
   sessionCount: number;
@@ -63,6 +67,7 @@ export interface AccountRecovery {
   updatedAt: string;
 }
 export interface AgentAccountsState {
+  setupJobs?: AccountSetupJob[];
   accounts: AgentAccount[];
   helpers: AccountHelper[];
   defaults: Record<AccountProvider, AccountPolicy>;
@@ -76,10 +81,16 @@ export interface AgentAccountsState {
   };
 }
 export type AgentAccountsRequest =
+  | { operation: 'setTitlebar'; id: string; shown: boolean }
+  | { operation: 'setupStart'; owner: string; provider: AccountProvider; email: string; shareHistory: true; accountId?: string; selector?: string }
+  | { operation: 'setupStatus'; owner: string }
+  | { operation: 'setupInput'; owner: string; jobId: string; input: string }
+  | { operation: 'setupCancel' | 'setupAcknowledge'; owner: string; jobId: string }
   | { operation: 'list'; refresh?: boolean }
   | { operation: 'register'; provider: AccountProvider; selector: string; shareHistory: true; id?: string }
-  | { operation: 'update'; id: string; name: string; color: AccountIconColor; eligible: boolean }
+  | { operation: 'update'; id: string; name: string; color: AccountIconColor; eligible: boolean; indicator?: string }
   | { operation: 'remove'; id: string }
+  | { operation: 'swapSlots'; firstId: string; secondId: string }
   | { operation: 'defaults'; provider: AccountProvider; policy: AccountPolicy }
   | { operation: 'defaultAccount'; provider: AccountProvider; accountId: string | null }
   | { operation: 'session'; refresh?: boolean }
@@ -87,3 +98,15 @@ export type AgentAccountsRequest =
   | { operation: 'select'; accountId: string | null }
   | { operation: 'stopRecovery' };
 export type AccountsTransport = (request: AgentAccountsRequest) => Promise<AgentAccountsState>;
+export interface AccountSetupJob {
+  createdAt: number;
+  id: string;
+  provider: AccountProvider;
+  email: string;
+  status: 'signingIn' | 'saving' | 'complete' | 'failed';
+  accountId?: string;
+  url?: string;
+  output: string;
+  error?: string;
+  acknowledged: boolean;
+}

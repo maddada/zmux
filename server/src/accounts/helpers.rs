@@ -38,7 +38,7 @@ pub(crate) fn executable(home: &Path, name: &str) -> Option<PathBuf> {
         })
     })
 }
-fn json_command(home: &Path, name: &str, args: &[&str]) -> Result<Value, String> {
+pub(crate) fn json_command(home: &Path, name: &str, args: &[&str]) -> Result<Value, String> {
     let binary =
         executable(home, name).ok_or_else(|| format!("Install {name} on this computer first."))?;
     let mut child = Command::new(binary)
@@ -113,6 +113,7 @@ fn window(
         id: id.into(),
         label: label.into(),
         used_percent: used.clamp(0., 100.),
+        limit_window_seconds: None,
         resets_at: value
             .get("resetsAt")
             .and_then(Value::as_str)
@@ -148,6 +149,7 @@ pub(crate) fn discover(home: &Path, provider: Provider) -> Result<Vec<Discovered
             status: "ready".into(),
             shared_history: false,
             usage: vec![],
+            reset_credits: None,
             usage_updated_at: None,
             usage_error: None,
         };
@@ -215,8 +217,9 @@ pub(crate) fn discover(home: &Path, provider: Provider) -> Result<Vec<Discovered
             account.shared_history = row.get("shareHistory").and_then(Value::as_bool) == Some(true);
             if account.status == "ready" {
                 match codex_usage(row) {
-                    Ok(usage) => {
+                    Ok((usage, reset_credits)) => {
                         account.usage = usage;
+                        account.reset_credits = reset_credits;
                         account.usage_updated_at = Some(chrono::Utc::now().to_rfc3339());
                     }
                     Err(e) => account.usage_error = Some(e),
@@ -227,7 +230,7 @@ pub(crate) fn discover(home: &Path, provider: Provider) -> Result<Vec<Discovered
     }
     Ok(accounts)
 }
-fn codex_usage(row: &Value) -> Result<Vec<UsageWindow>, String> {
+fn codex_usage(row: &Value) -> Result<(Vec<UsageWindow>, Option<u64>), String> {
     let home = PathBuf::from(text(row, "home"));
     if !home.is_absolute() {
         return Err("Invalid Codex account home.".into());
@@ -281,7 +284,10 @@ fn codex_usage(row: &Value) -> Result<Vec<UsageWindow>, String> {
     if windows.is_empty() {
         return Err("No usage windows were returned for this account.".into());
     }
-    Ok(windows)
+    let reset_credits = value
+        .pointer("/rate_limit_reset_credits/available_count")
+        .and_then(Value::as_u64);
+    Ok((windows, reset_credits))
 }
 fn codex_windows(out: &mut Vec<UsageWindow>, model: &str, value: &Value) {
     for key in ["primary_window", "secondary_window"] {
@@ -316,6 +322,7 @@ fn codex_windows(out: &mut Vec<UsageWindow>, model: &str, value: &Value) {
                 format!("{model} · {label}")
             },
             used_percent: used.clamp(0., 100.),
+            limit_window_seconds: Some(seconds),
             resets_at: reset,
             model: (!model.is_empty()).then(|| model.to_string()),
         });

@@ -28,9 +28,14 @@ pub(crate) fn dispatch(
     params: &Map<String, Value>,
 ) -> Result<Value, DomainStateError> {
     let operation = required(params, "operation")?;
+    if operation.starts_with("setup") { return super::setup::dispatch(state, params); }
+    let titlebar_has_accounts = if operation == "titlebar" {
+        let db = crate::storage::open_gxserver_database(&state.paths).map_err(store::error)?;
+        store::read(&db)?.accounts.iter().any(|a| a.show_in_titlebar)
+    } else { true };
     // CDXC:AgentProviders 2026-09-07 WHY:
     // A manual switch already has a selected saved login and validates its identity locally in launch::command. Polling both providers' usage first could delay the restart by an unrelated network timeout.
-    let snapshot = if operation == "select" {
+    let mut snapshot = if matches!(operation, "select" | "setTitlebar") || !titlebar_has_accounts {
         state.accounts.snapshot()
     } else {
         state.accounts.refresh(
@@ -45,7 +50,52 @@ pub(crate) fn dispatch(
     let mut registry = store::read(&db)?;
     let mut changed_sessions = Vec::new();
     match operation {
-        "list" | "session" => {}
+        "list" | "session" | "titlebar" => {}
+        // CDXC:AgentProviders 2026-09-08 DECISION: Starring a saved account pins its own usage button before extensions in the titlebar; multiple Claude and Codex accounts can be pinned independently.
+        "setTitlebar" => {
+            let id = required(params, "id")?;
+            let shown = params.get("shown").and_then(Value::as_bool)
+                .ok_or_else(|| DomainStateError::bad_request("Choose whether to show this account in the titlebar."))?;
+            let account = registry.accounts.iter_mut().find(|a| a.id == id)
+                .ok_or_else(|| DomainStateError::not_found("Account not found."))?;
+            account.show_in_titlebar = shown;
+            store::write(&db, &registry)?;
+        }
+        // CDXC:AgentProviders 2026-09-08 DECISION: Settings can exchange two account slots through cswap or xswap. Defaults and session bindings follow account identity, and cached launch plans must be regenerated for the new slot.
+        "swapSlots" => {
+            let first = registry.accounts.iter().find(|a| a.id == required(params, "firstId").unwrap_or("")).cloned().ok_or_else(|| DomainStateError::bad_request("Choose the first account."))?;
+            let second = registry.accounts.iter().find(|a| a.id == required(params, "secondId").unwrap_or("")).cloned().ok_or_else(|| DomainStateError::bad_request("Choose the second account."))?;
+            if first.provider != second.provider || first.id == second.id { return Err(DomainStateError::bad_request("Choose two different accounts of the same provider.")); }
+            launch::command(&state.paths.home_dir, &first)?;
+            launch::command(&state.paths.home_dir, &second)?;
+            let binary = helpers::executable(&state.paths.home_dir, first.provider.helper()).ok_or_else(|| DomainStateError::bad_request("Install the account helper first."))?;
+            let output = std::process::Command::new(binary).args(["swap", &first.selector, &second.selector]).stdin(std::process::Stdio::null()).output().map_err(store::error)?;
+            if !output.status.success() { return Err(DomainStateError::bad_request("The account helper could not swap these slots. For Claude, stop sessions using either account first, then try again.")); }
+            state.accounts.invalidate();
+            snapshot = state.accounts.refresh(&state.paths.home_dir, true);
+            for saved in &mut registry.accounts {
+                if saved.id == first.id { saved.selector = second.selector.clone(); }
+                else if saved.id == second.id { saved.selector = first.selector.clone(); }
+            }
+            store::write(&db, &registry)?;
+            for session in repository.list_sessions(None)? {
+                if let Some(saved) = registry.accounts.iter().find(|a| session.pointer("/runtimeSettings/accountId").and_then(Value::as_str) == Some(a.id.as_str()) && (a.id == first.id || a.id == second.id)) {
+                    let mut runtime = session["runtimeSettings"].as_object().cloned().unwrap_or_default();
+                    launch::assign(&mut runtime, saved, launch::command(&state.paths.home_dir, saved)?)?;
+                    let mut settings = session["launchSettings"].as_object().cloned().unwrap_or_default();
+                    for key in ["agentLaunchPlan", "agentResumePlan", "agentCommand"] { settings.remove(key); }
+                    if session.pointer("/runtimeSettings/agentSessionId").and_then(Value::as_str).is_none() {
+                        let project = repository.get_project(session["projectId"].as_str().unwrap_or(""))?.ok_or_else(|| DomainStateError::not_found("Project not found."))?;
+                        let params = json!({"agentId":session["agentId"],"runtimeSettings":runtime,"launchSettings":settings});
+                        let fresh = crate::agents::create_agent_session_params_for_project(&db, &project, params.as_object().unwrap())?;
+                        runtime = fresh["runtimeSettings"].as_object().cloned().unwrap_or_default();
+                        settings = fresh["launchSettings"].as_object().cloned().unwrap_or_default();
+                    }
+                    repository.update_session(json!({"projectId":session["projectId"],"sessionId":session["sessionId"],"runtimeSettings":runtime,"launchSettings":settings}).as_object().unwrap())?;
+                    changed_sessions.push(session);
+                }
+            }
+        }
         "register" => {
             let provider = provider_param(params)?;
             let selector = required(params, "selector")?;
@@ -91,10 +141,13 @@ pub(crate) fn dispatch(
                     identity: found.identity.clone(),
                     name: found.name.clone(),
                     color: "neutral".into(),
+                    indicator: String::new(),
+                    show_in_titlebar: false,
                     eligible: true,
                     shared_history: true,
                 });
             }
+            registry.default_accounts.entry(provider).or_insert(id.clone());
             store::write(&db, &registry)?;
             if reconnecting {
                 let account = registry.accounts.iter().find(|a| a.id == id).unwrap();
@@ -165,6 +218,13 @@ pub(crate) fn dispatch(
                 .iter_mut()
                 .find(|a| a.id == id)
                 .ok_or_else(|| DomainStateError::not_found("Account not found."))?;
+            if let Some(indicator) = params.get("indicator") {
+                let indicator = indicator.as_str().ok_or_else(|| DomainStateError::bad_request("Enter one letter or number, or - to hide the account indicator."))?.trim();
+                if !indicator.is_empty() && indicator != "-" && (indicator.chars().count() != 1 || !indicator.chars().all(char::is_alphanumeric)) {
+                    return Err(DomainStateError::bad_request("Enter one letter or number, or - to hide the account indicator."));
+                }
+                account.indicator = indicator.into();
+            }
             account.name = name.into();
             account.color = color.into();
             account.eligible = eligible;
@@ -268,7 +328,7 @@ pub(crate) fn dispatch(
                     &snapshot,
                     &project,
                     &session,
-                    params.get("accountId").and_then(Value::as_str),
+                    Some(required(params, "accountId")?),
                 )?;
             }
             changed_sessions.push(session);
@@ -467,21 +527,25 @@ fn state_value(
     home: &std::path::Path,
     params: &Map<String, Value>,
 ) -> Result<Value, DomainStateError> {
-    let sessions = repository.list_sessions(None)?;
+    let titlebar = params.get("operation").and_then(Value::as_str) == Some("titlebar");
+    let sessions = if titlebar { Vec::new() } else { repository.list_sessions(None)? };
     let mut rows = Vec::new();
     for found in &snapshot.accounts {
         let id = account_id(found);
         let saved = registry.accounts.iter().find(|a| a.id == id);
-        rows.push(json!({"id":id,"provider":found.provider,"selector":found.selector,"name":saved.map(|a|a.name.as_str()).unwrap_or(&found.name),"email":found.email,"color":saved.map(|a|a.color.as_str()).unwrap_or("neutral"),"eligible":saved.is_some_and(|a|a.eligible),"registered":saved.is_some(),"sharedHistory":saved.is_some_and(|a|a.shared_history)||found.shared_history,"status":found.status,"usage":found.usage,"usageUpdatedAt":found.usage_updated_at,"usageError":found.usage_error,"sessionCount":sessions.iter().filter(|s|s.pointer("/runtimeSettings/accountId").and_then(Value::as_str)==Some(&id)).count()}));
+        rows.push(json!({"id":id,"provider":found.provider,"selector":found.selector,"name":saved.map(|a|a.name.as_str()).unwrap_or(&found.name),"email":found.email,"indicator":saved.map(|a|a.indicator.as_str()).unwrap_or(""),"color":saved.map(|a|a.color.as_str()).unwrap_or("neutral"),"eligible":saved.is_some_and(|a|a.eligible),"registered":saved.is_some(),"showInTitlebar":saved.is_some_and(|a|a.show_in_titlebar),"sharedHistory":saved.is_some_and(|a|a.shared_history)||found.shared_history,"status":found.status,"usage":found.usage,"resetCredits":found.reset_credits,"usageUpdatedAt":found.usage_updated_at,"usageError":found.usage_error,"sessionCount":sessions.iter().filter(|s|s.pointer("/runtimeSettings/accountId").and_then(Value::as_str)==Some(&id)).count()}));
     }
     for saved in &registry.accounts {
         if !rows.iter().any(|r| r["id"].as_str() == Some(&saved.id)) {
-            rows.push(json!({"id":saved.id,"provider":saved.provider,"selector":saved.selector,"name":saved.name,"email":"","color":saved.color,"eligible":saved.eligible,"registered":true,"sharedHistory":saved.shared_history,"status":"unavailable","usage":[],"usageError":"The helper could not find this saved login. Refresh or reconnect it.","sessionCount":sessions.iter().filter(|s|s.pointer("/runtimeSettings/accountId").and_then(Value::as_str)==Some(&saved.id)).count()}));
+            rows.push(json!({"id":saved.id,"provider":saved.provider,"selector":saved.selector,"name":saved.name,"email":"","indicator":saved.indicator,"color":saved.color,"eligible":saved.eligible,"registered":true,"showInTitlebar":saved.show_in_titlebar,"sharedHistory":saved.shared_history,"status":"unavailable","usage":[],"usageError":"The helper could not find this saved login. Refresh or reconnect it.","sessionCount":sessions.iter().filter(|s|s.pointer("/runtimeSettings/accountId").and_then(Value::as_str)==Some(&saved.id)).count()}));
         }
+    }
+    if titlebar {
+        rows.retain(|row| row["registered"] == true && row["showInTitlebar"] == true);
     }
     // CDXC:AgentProviders 2026-09-06 DECISION:
     // User: Codex Swap should install through Homebrew on macOS and Linux without requiring Cargo.
-    let helper_rows:Vec<_>=[Provider::Claude,Provider::Codex].into_iter().map(|p|json!({"provider":p,"installed":helpers::executable(home,p.helper()).is_some(),"cliInstalled":helpers::executable(home,p.id()).is_some(),"error":snapshot.errors.get(&p),"installCommand":if p==Provider::Claude{"uv tool install claude-swap"}else{"brew install maddada/tap/codex-swap"},"loginCommand":if p==Provider::Claude{"claude auth login && cswap add"}else{"xswap add --login --share-history"}})).collect();
+    let helper_rows:Vec<_>=[Provider::Claude,Provider::Codex].into_iter().map(|p|json!({"provider":p,"installed":helpers::executable(home,p.helper()).is_some(),"cliInstalled":helpers::executable(home,p.id()).is_some(),"error":snapshot.errors.get(&p),"installCommand":if p==Provider::Claude{"uv tool install claude-swap"}else{"brew install maddada/tap/codex-swap"},"loginCommand":if p==Provider::Claude{"ghostex account-login claude"}else{"xswap add --login --share-history"}})).collect();
     let mut value = json!({"accounts":rows,"helpers":helper_rows,"defaults":{"claude":registry.defaults.get(&Provider::Claude).cloned().unwrap_or_default(),"codex":registry.defaults.get(&Provider::Codex).cloned().unwrap_or_default()},"defaultAccounts":registry.default_accounts});
     if params.contains_key("sessionId") {
         let session = get_session(repository, params)?;

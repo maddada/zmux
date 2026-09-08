@@ -61,6 +61,10 @@ pub(crate) struct SavedAccount {
     pub identity: String,
     pub name: String,
     pub color: String,
+    #[serde(default)]
+    pub indicator: String,
+    #[serde(default)]
+    pub show_in_titlebar: bool,
     pub eligible: bool,
     pub shared_history: bool,
 }
@@ -81,6 +85,8 @@ pub(crate) struct UsageWindow {
     pub label: String,
     pub used_percent: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_window_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -95,6 +101,7 @@ pub(crate) struct DiscoveredAccount {
     pub status: String,
     pub shared_history: bool,
     pub usage: Vec<UsageWindow>,
+    pub reset_credits: Option<u64>,
     pub usage_updated_at: Option<String>,
     pub usage_error: Option<String>,
 }

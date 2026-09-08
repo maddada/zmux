@@ -1,48 +1,53 @@
 import { useId } from 'react';
+import { formatResetCountdown } from '@/packages/shared/reset-countdown';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/packages/components/ui/select';
 import { Switch } from '@/packages/components/ui/switch';
 import { SegmentedControl, SegmentedControlItem } from '@/packages/components/ui/segmented-control';
 import {
-  ACCOUNT_ICON_COLORS,
-  accountIconColor,
-  type AccountIconColor,
   type AccountPolicy,
   type AccountProvider,
   type AccountUsageWindow,
   type AgentAccount,
 } from '@/packages/shared/agent-accounts';
-import { AGENT_LOGOS } from '../agent-logos';
+import { AGENT_LOGOS, getBrandAgentLogoStyle } from '../agent-logos';
 import './accounts.css';
-export function AccountLogo({
-  provider,
-  color,
-  className = '',
-}: {
+export function AccountLogo({ provider, slot, className = '' }: {
   provider: AccountProvider;
-  color?: AccountIconColor;
+  slot?: string;
   className?: string;
 }) {
-  return (
-    <span
-      role='img'
-      aria-label={provider === 'codex' ? 'Codex account' : 'Claude account'}
-      className={`gx-account-logo ${className}`}
-      style={{
-        backgroundColor: accountIconColor(color),
-        maskImage: `url("${AGENT_LOGOS[provider]}")`,
-        WebkitMaskImage: `url("${AGENT_LOGOS[provider]}")`,
-      }}
-    />
-  );
+  return <span role='img' aria-label={`${provider === 'codex' ? 'Codex' : 'Claude'}${slot ? ` account ${slot}` : ''}`} className={`gx-account-logo ${className}`}>
+    <span className='gx-account-logo-image' style={getBrandAgentLogoStyle(provider)} />
+  </span>;
 }
+/**
+ * CDXC:AgentProviders 2026-09-08 DECISION:
+ * User: Codex account badges show the five-hour percentage on the second line when that limit exists; otherwise show available resets as "2 rs" or "0 rs".
+ * Use the main account windows so Spark's separate five-hour limit does not stand in for an absent account limit.
+ */
 export function AccountIdentity({ account }: { account: AgentAccount }) {
+  const mainWindows = account.usage.filter((window) => !window.model);
+  const first = account.provider === 'codex'
+    ? mainWindows.find((window) => (window.limitWindowSeconds ?? 0) >= 604800)
+    : account.usage[0];
+  const second = account.provider === 'codex'
+    ? mainWindows.find((window) => window.limitWindowSeconds === 18000)
+    : account.usage[1];
+  const figures = [
+    { label: first?.label, value: first ? `${Math.round(first.usedPercent)}%` : '·' },
+    second
+      ? { label: second.label, value: `${Math.round(second.usedPercent)}%` }
+      : account.provider === 'codex' && account.resetCredits != null
+        ? { label: 'Available usage resets', value: `${account.resetCredits} rs` }
+        : { label: undefined, value: '·' },
+  ];
   return (
     <span className='gx-account-identity'>
-      <AccountLogo provider={account.provider} color={account.color} />
+      <AccountLogo provider={account.provider} slot={account.selector} />
       <span className='gx-account-figures'>
-        {[0, 1].map((i) => (
-          <span key={i} title={account.usage[i]?.label}>
-            {account.usage[i] ? `${Math.round(account.usage[i].usedPercent)}%` : '·'}
+        {figures.map((figure, i) => (
+          <span key={i} title={figure.label}>
+            {figure.value}
           </span>
         ))}
       </span>
@@ -53,7 +58,8 @@ export function resetLabel(value?: string) {
   if (!value) return 'Reset time unavailable';
   const time = new Date(value);
   if (!Number.isFinite(time.getTime())) return 'Reset time unavailable';
-  return `Resets ${time.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`;
+  const remainingMs = time.getTime() - Date.now();
+  return remainingMs > 0 ? `Resets ${formatResetCountdown(remainingMs)}` : 'Reset due';
 }
 export function UsageBars({ windows }: { windows: AccountUsageWindow[] }) {
   return (
@@ -80,29 +86,6 @@ export function UsageBars({ windows }: { windows: AccountUsageWindow[] }) {
     </div>
   );
 }
-export function AccountColorSelect({
-  value,
-  onChange,
-}: {
-  value: AccountIconColor;
-  onChange: (value: AccountIconColor) => void;
-}) {
-  const id = useId();
-  return (
-    <label className='gx-account-field' htmlFor={id}>
-      Account icon color
-      <Select value={value} onValueChange={(next) => { if (next) onChange(next as AccountIconColor); }}>
-        <SelectTrigger id={id} aria-label='Account icon color' className='w-full'><SelectValue /></SelectTrigger>
-        <SelectContent>
-          {ACCOUNT_ICON_COLORS.map((c) => (
-            <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <small>Identifies this login in the chat bar and sidebar.</small>
-    </label>
-  );
-}
 export function PolicyControls({
   policy,
   onChange,
@@ -127,7 +110,7 @@ export function PolicyControls({
         />
       </div>
       <fieldset disabled={disabled || !policy.enabled}>
-        <legend>When this account runs out</legend>
+        <legend>When the session's account runs out</legend>
         <SegmentedControl
           value={policy.atLimit}
           onValueChange={(value) => {
