@@ -11,7 +11,7 @@
   padding-bottom: 0;
 }
 
-.ghostex-chat-composer[data-scroll-collapsed='true'] :is(.ghostex-chat-composer-input, .ghostex-chat-composer-monaco) {
+.ghostex-chat-composer[data-scroll-collapsed='true'] :is(.ghostex-chat-composer-input, .ghostex-chat-composer-lexical) {
   height: 2rem !important;
   min-height: 2rem;
   max-height: 2rem;
@@ -20,7 +20,7 @@
 
 .ghostex-chat-composer[data-scroll-collapsed='true'] .ghostex-chat-composer-plain-input,
 .ghostex-chat-composer[data-scroll-collapsed='true'] .ghostex-chat-composer-plain-input::before,
-.ghostex-chat-composer[data-scroll-collapsed='true'] .editorPlaceholder {
+.ghostex-chat-composer[data-scroll-collapsed='true'] .ghostex-chat-composer-lexical-content::before {
   white-space: nowrap;
   overflow-wrap: normal;
 }

@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import {
   createSessionChatComposerScrollGesture,
   recordSessionChatComposerScrollGesture,
   resetSessionChatComposerScrollGesture,
   suppressSessionChatComposerScrollGesture,
 } from './session-chat-composer-scroll-gesture';
+import { useSessionChatComposerTransition } from './use-session-chat-composer-transition';
 
 const SCROLL_GESTURE_THRESHOLD_PX = 24;
 const SCROLL_GESTURE_RESET_MS = 120;
-const TRANSITION_DURATION_MS = 280;
 const BOTTOM_THRESHOLD_PX = 10;
 
 /**
@@ -29,23 +29,23 @@ export function useSessionChatComposerCollapse({
   const composerRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
   const collapsedRef = useRef(false);
-  const previousHeightRef = useRef<number | null>(null);
-  const animationRef = useRef<Animation | null>(null);
-  const pinBottomRef = useRef(false);
+  const captureTransition = useSessionChatComposerTransition({
+    collapsed: enabled && collapseEligible && collapsed,
+    composerRef,
+  });
   const gestureRef = useRef(createSessionChatComposerScrollGesture());
   const collapseEligibleRef = useRef(false);
   collapseEligibleRef.current = enabled && collapseEligible && !collapsed;
 
   const changeCollapsed = useCallback(
-    (next: boolean, pinBottom = false) => {
+    (next: boolean) => {
       if (collapsedRef.current === next) return;
-      previousHeightRef.current = composerRef.current?.getBoundingClientRect().height ?? null;
+      captureTransition();
       collapsedRef.current = next;
-      pinBottomRef.current = pinBottom;
       setCollapsed(next);
       onCollapsedChange?.(next);
     },
-    [onCollapsedChange]
+    [onCollapsedChange, captureTransition]
   );
 
   useEffect(() => () => onCollapsedChange?.(false), [onCollapsedChange]);
@@ -74,7 +74,7 @@ export function useSessionChatComposerCollapse({
     };
 
     const restoreAtBottom = () => {
-      changeCollapsed(false, true);
+      changeCollapsed(false);
     };
     /*
      * CDXC:SessionChat 2026-09-05 WHY:
@@ -82,6 +82,7 @@ export function useSessionChatComposerCollapse({
      * Chromium can move the viewport on the compositor thread before delivering even a capture listener's wheel event, so direction checks use the position before that scroll was committed.
      * Reaching the bottom only restores the layout; suppressing the gesture there swallowed immediate upward reversals.
      * Only returning to the editor suppresses the remaining momentum, and the idle timer resets that suppression.
+     * The composer overlays the transcript (use-session-chat-composer-inset.ts), so a collapse never moves the viewport and the bottom check stays true through the whole expansion.
      */
     const onWheel = (event: WheelEvent) => {
       if (event.ctrlKey || !(event.target instanceof Element)) return;
@@ -126,7 +127,7 @@ export function useSessionChatComposerCollapse({
       if (!viewport || event.target !== viewport) return;
       const scrollingDown = viewport.scrollTop > lastScrollTop;
       lastScrollTop = viewport.scrollTop;
-      if (animationRef.current || !collapsedRef.current) return;
+      if (!collapsedRef.current) return;
       if (scrollingDown && atBottom(viewport)) restoreAtBottom();
     };
     const onClick = (event: Event) => {
@@ -148,42 +149,6 @@ export function useSessionChatComposerCollapse({
       finishGesture();
     };
   }, [enabled, transcriptRef, changeCollapsed]);
-
-  useLayoutEffect(() => {
-    const composer = composerRef.current;
-    animationRef.current?.cancel();
-    animationRef.current = null;
-    const previousHeight = previousHeightRef.current;
-    previousHeightRef.current = null;
-    if (!composer || previousHeight === null) return;
-    const viewport = transcriptRef?.current?.querySelector<HTMLDivElement>('[data-slot="message-scroller-viewport"]');
-    const pinBottom = () => {
-      if (viewport && pinBottomRef.current) viewport.scrollTop = viewport.scrollHeight;
-    };
-    const height = composer.getBoundingClientRect().height;
-    pinBottom();
-    if (Math.abs(height - previousHeight) < 1 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const observer = new ResizeObserver(pinBottom);
-    observer.observe(composer);
-    const animation = composer.animate(
-      [
-        { height: `${previousHeight}px`, overflow: 'clip' },
-        { height: `${height}px`, overflow: 'clip' },
-      ],
-      { duration: TRANSITION_DURATION_MS, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' }
-    );
-    animationRef.current = animation;
-    animation.onfinish = () => {
-      animationRef.current = null;
-      observer.disconnect();
-      pinBottom();
-    };
-    return () => {
-      observer.disconnect();
-      animation.cancel();
-      animationRef.current = null;
-    };
-  }, [collapsed, transcriptRef]);
 
   return { collapsed: enabled && collapseEligible && collapsed, composerRef, expand };
 }

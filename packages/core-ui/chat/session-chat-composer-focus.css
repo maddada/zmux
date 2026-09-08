@@ -1,16 +1,27 @@
-/* Reuse Monaco's positioned caret when the pane owns focus but the editor does not. */
-.ghostex-chat-composer[data-pane-focused='true'] .ghostex-chat-composer-monaco:not(:focus-within) .cursors-layer,
-.ghostex-chat-composer[data-pane-focused='true']
-  .ghostex-chat-composer-monaco:not(:focus-within)
-  .cursors-layer
-  > .cursor {
-  animation: none !important;
-  opacity: 1 !important;
+/* CDXC:SessionChat 2026-09-08 DECISION:
+ * User: keep the original white focus outline hidden and its styling available for restoration, and add a subtle border that is always visible.
+ * This replaces the fully transparent border override; remove these overrides to restore the original border and focus ring.
+ */
+.ghostex-chat-composer {
+  --chat-composer-outline: rgb(0 0 0 / 8%);
+  --chat-composer-highlight: transparent;
 }
 
+.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-composer {
+  --chat-composer-outline: rgb(255 255 255 / 5%);
+  --chat-composer-highlight: rgb(255 255 255 / 3%);
+}
+
+.ghostex-chat-composer,
+.ghostex-chat-composer:focus-within,
+.ghostex-chat-composer[data-pane-focused='true'] {
+  border: 1px solid var(--chat-composer-outline);
+  box-shadow: inset 0 1px var(--chat-composer-highlight);
+}
+
+/* Keep the saved insertion point visible when the pane owns focus. */
 .ghostex-chat-composer[data-pane-focused='true']
-  .ghostex-chat-composer-monaco:not(:focus-within)
-  .cursors-layer
-  > .cursor {
-  visibility: visible !important;
+  .ghostex-chat-composer-lexical:not(:focus-within)
+  .ghostex-chat-composer-saved-caret {
+  visibility: visible;
 }
