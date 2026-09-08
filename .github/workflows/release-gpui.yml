@@ -196,8 +196,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
+      # The root typecheck covers packages/core-ui, whose modal-gallery stories
+      # render the web app's Find and Machines surfaces. apps/web became its own
+      # submodule, so the skipped checkout leaves those modules unresolvable.
       - name: Restore release-test prerequisites
-        run: git submodule update --init --depth 1 .dependencies/code-server
+        run: |
+          git submodule update --init --depth 1 .dependencies/code-server
+          git submodule update --init --depth 1 apps/web
       - name: Install and typecheck
         run: |
           bun install --frozen-lockfile
