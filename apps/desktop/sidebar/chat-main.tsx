@@ -315,7 +315,9 @@ function createGpuiSessionChatTransport(
   return {
     accounts: createAccountSwitchTransport(
       (params) => rpc(bootstrap, '/api/agentAccounts', { ...params, projectId, sessionId }),
-      (progress) => { postSessionChatHostAction('accountSwitchProgress', { progress }); }
+      (progress) => {
+        postSessionChatHostAction('accountSwitchProgress', { progress });
+      }
     ),
     async answerPrompt(params) {
       await rpc(bootstrap, '/api/answerSessionChatPrompt', {
@@ -336,6 +338,13 @@ function createGpuiSessionChatTransport(
         sessionId,
         ...(params.limit !== undefined ? { limit: params.limit } : {}),
         ...(params.beforeOffset !== undefined ? { beforeOffset: params.beforeOffset } : {}),
+      });
+    },
+    readSubagent(params) {
+      return rpc<GxserverReadSessionChatResult>(bootstrap, '/api/readSessionChat', {
+        ...params,
+        projectId,
+        sessionId,
       });
     },
     readSkills() {
@@ -376,6 +385,7 @@ function createGpuiSessionChatTransport(
       return rpc<GxserverSelectSessionChatModelResult>(bootstrap, '/api/selectSessionChatModel', {
         effort: params.effort,
         defer: params.defer,
+        options: params.options,
         model: params.model,
         projectId,
         sessionId,
@@ -1126,7 +1136,7 @@ function createGpuiSessionChatHostActions(hotkeysValue: unknown): SessionChatHos
       { id: 'fork', label: 'Fork Session', shortcut: shortcut('forkSession') },
       {
         id: 'fullReload',
-        label: 'Full reload',
+        label: 'Full Reload',
         shortcut: shortcut('reloadSession'),
       },
       /*
@@ -1544,29 +1554,29 @@ function GpuiSessionChatPage({
 
   return (
     <AccountPrivacyContext value={hideAccountEmails}>
-    <div className='native-sidebar-shell gpui-session-chat'>
-      <SessionChatView
-        agentLabel={agentLabel}
-        chatBarExtensions={chatBarExtensions}
-        chatBarPanelState={panelState}
-        className='gpui-session-chat-view'
-        customTranscriptWidthEnabled={chatCustomTranscriptWidthEnabled}
-        diagnosticLog={postSessionChatDiagnosticLog}
-        hostActions={GPUI_SESSION_CHAT_HOST_ACTIONS}
-        hostComposerBridge={composerBridge}
-        hostLinks={GPUI_SESSION_CHAT_HOST_LINKS}
-        monacoVsBaseUrl='./monaco/vs'
-        onChatBarBridgeRequest={handleBridgeRequest}
-        onChatBarPanelStateChange={updatePanelState}
-        onDelayedActions={() => postSessionChatHostAction('delayedActions')}
-        {...(remote ? {} : { onSelectForkBranch: focusForkBranch })}
-        sessionKey={sessionKey}
-        sessionTitle={sessionTitle}
-        theme={theme}
-        transport={transport}
-        verboseMode={chatVerboseMode}
-      />
-    </div>
+      <div className='native-sidebar-shell gpui-session-chat'>
+        <SessionChatView
+          agentLabel={agentLabel}
+          chatBarExtensions={chatBarExtensions}
+          chatBarPanelState={panelState}
+          className='gpui-session-chat-view'
+          customTranscriptWidthEnabled={chatCustomTranscriptWidthEnabled}
+          diagnosticLog={postSessionChatDiagnosticLog}
+          hostActions={GPUI_SESSION_CHAT_HOST_ACTIONS}
+          hostComposerBridge={composerBridge}
+          hostLinks={GPUI_SESSION_CHAT_HOST_LINKS}
+          inputBackend='lexical'
+          onChatBarBridgeRequest={handleBridgeRequest}
+          onChatBarPanelStateChange={updatePanelState}
+          onDelayedActions={() => postSessionChatHostAction('delayedActions')}
+          {...(remote ? {} : { onSelectForkBranch: focusForkBranch })}
+          sessionKey={sessionKey}
+          sessionTitle={sessionTitle}
+          theme={theme}
+          transport={transport}
+          verboseMode={chatVerboseMode}
+        />
+      </div>
     </AccountPrivacyContext>
   );
 }

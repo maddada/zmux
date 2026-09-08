@@ -5,10 +5,10 @@ Collapsed it shows only the first two lines of the message text; expanding shows
 */
 
 import { useLayoutEffect, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
 import { IconChevronRight } from '@tabler/icons-react';
 import { cn } from '@/packages/components/utils';
 import { SessionChatMarkdown } from './session-chat-markdown';
+import { SessionChatSubagentLink } from './session-chat-subagent-link';
 
 /**
  * How gxserver writes a decoded inter-agent message: the sender path on the
@@ -60,12 +60,6 @@ export function SessionChatAgentMessageCard({ body, sender }: SessionChatAgentMe
       setExpanded((value) => !value);
     }
   };
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      toggle();
-    }
-  };
 
   return (
     <div
@@ -77,17 +71,15 @@ export function SessionChatAgentMessageCard({ body, sender }: SessionChatAgentMe
           their pill outline and hover fill, and it is a disclosure on a card
           that already has its own border. */}
       <div
-        aria-expanded={expandable ? expanded : undefined}
         className={cn('flex min-w-0 items-start gap-2 text-left outline-none', expandable && 'cursor-pointer')}
         onClick={toggle}
-        onKeyDown={onKeyDown}
-        role='button'
-        tabIndex={expandable ? 0 : -1}
       >
         <span aria-hidden='true' className='mt-[7px] size-1.5 shrink-0 rounded-full bg-primary' />
         <div className='min-w-0 flex-1'>
           <p className='text-sm leading-5 font-medium text-foreground'>
-            Received a message from &ldquo;{name}&rdquo; subagent
+            Received a message from &ldquo;
+            <SessionChatSubagentLink name={name} selector={sender} />
+            &rdquo; subagent
           </p>
           {!expanded ? (
             <p
@@ -99,13 +91,24 @@ export function SessionChatAgentMessageCard({ body, sender }: SessionChatAgentMe
           ) : null}
         </div>
         {expandable ? (
-          <IconChevronRight
-            aria-hidden='true'
-            className={cn(
-              'ghostex-chat-disclosure-chevron mt-[3px] size-3.5 shrink-0 text-muted-foreground',
-              expanded && 'is-open'
-            )}
-          />
+          <button
+            className='ghostex-chat-agent-message-disclosure'
+            type='button'
+            aria-label={expanded ? 'Collapse agent message' : 'Expand agent message'}
+            aria-expanded={expanded}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggle();
+            }}
+          >
+            <IconChevronRight
+              aria-hidden='true'
+              className={cn(
+                'ghostex-chat-disclosure-chevron mt-[3px] size-3.5 shrink-0 text-muted-foreground',
+                expanded && 'is-open'
+              )}
+            />
+          </button>
         ) : null}
       </div>
       {expanded ? (

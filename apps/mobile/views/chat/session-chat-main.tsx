@@ -792,6 +792,9 @@ function createMobileSessionChatTransport(): SessionChatTransport {
         ...(params.beforeOffset !== undefined ? { beforeOffset: params.beforeOffset } : {}),
       }).then(withQueueReport);
     },
+    readSubagent(params) {
+      return bridgeCall<GxserverReadSessionChatResult>('read', { ...params });
+    },
     readSkills() {
       return bridgeCall<GxserverReadSessionChatSkillsResult>('readSkills');
     },

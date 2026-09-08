@@ -1283,6 +1283,7 @@ fn parse_session_chat_read(rest: &[String], flags: &Flags) -> Value {
         map.insert("waitMs".to_string(), flag_number_value(flags, "waitMs"));
     }
     set_or_remove(&mut map, "fingerprint", flag_json(flags, "fingerprint"));
+    set_or_remove(&mut map, "subagent", flag_json(flags, "subagent"));
     Value::Object(map)
 }
 

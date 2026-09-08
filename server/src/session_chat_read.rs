@@ -348,6 +348,22 @@ pub(crate) async fn handle_read_session_chat_http(
         .map(|value| value.clamp(0, crate::session_chat::SESSION_CHAT_MAX_LIMIT as i64) as usize)
         .unwrap_or(crate::session_chat::SESSION_CHAT_INITIAL_LIMIT);
     let before_offset = params.get("beforeOffset").and_then(Value::as_u64);
+    if params.contains_key("subagent") {
+        return crate::session_chat_subagent::handle_read_subagent(
+            state,
+            endpoint_path,
+            request_id,
+            &project_id,
+            &session_id,
+            params
+                .get("subagent")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            limit,
+            before_offset,
+        )
+        .await;
+    }
     let wait_ms = params
         .get("waitMs")
         .and_then(Value::as_i64)
@@ -676,11 +692,24 @@ pub(crate) async fn handle_read_session_chat_http(
 
     match read_outcome {
         Ok(Ok(crate::session_chat::SessionChatTailPage::Page {
+            codex_stats,
             messages,
             lifecycle,
             has_more,
             before_offset: page_before_offset,
         })) => {
+            if before_offset.is_none() {
+                if let Some(Value::Object(stats)) = codex_stats {
+                    let options = result.entry("selectedOptions").or_insert_with(|| json!({}));
+                    if let Some(options) = options.as_object_mut() {
+                        for (key, value) in stats {
+                            if key != "detectedAt" || !options.contains_key(&key) {
+                                options.insert(key, value);
+                            }
+                        }
+                    }
+                }
+            }
             let mut messages = messages;
             let mut lifecycle = lifecycle;
             if before_offset.is_none() {

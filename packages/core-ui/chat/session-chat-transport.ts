@@ -32,6 +32,11 @@ import type {
 export interface SessionChatTransport {
   accounts?: AccountsTransport;
   read(params: { limit?: number; beforeOffset?: number }): Promise<GxserverReadSessionChatResult>;
+  readSubagent?(params: {
+    subagent: string;
+    limit?: number;
+    beforeOffset?: number;
+  }): Promise<GxserverReadSessionChatResult>;
   /** Lists skills gxserver resolved for this session's stored agent identity. */
   readSkills?(): Promise<GxserverReadSessionChatSkillsResult>;
   /**
@@ -65,6 +70,7 @@ export interface SessionChatTransport {
    * pill keeps its terminal handoff row instead of offering rows it cannot apply.
    */
   selectSessionChatModel?(params: {
+    options?: import('@/packages/shared/session-chat').SessionChatSelectionOptions;
     model: string;
     effort: string;
     defer?: boolean;

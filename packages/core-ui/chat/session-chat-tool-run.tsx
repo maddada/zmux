@@ -8,13 +8,18 @@ import {
   IconTool,
   IconWorldSearch,
 } from '@tabler/icons-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SessionChatToolCallBlock, SessionChatToolResultBlock } from '../../shared/session-chat';
 import { cn } from '@/packages/components/utils';
 import { diffFromSessionChatText, diffFromSessionChatToolCall, type SessionChatDiffLine } from './session-chat-diff';
 import { centerSessionChatExpansion, SessionChatExpansion } from './session-chat-expansion';
 import { answeredSessionChatQuestionExchange, SessionChatQuestionExchangeCard } from './session-chat-question-exchange';
 import { pairSessionChatToolBlocks } from './session-chat-tool-fold';
+import {
+  SessionChatSubagentContext,
+  SessionChatSubagentLink,
+  sessionChatToolSubagent,
+} from './session-chat-subagent-link';
 import {
   formatSessionChatToolInput,
   summarizeSessionChatCommandInput,
@@ -111,6 +116,8 @@ function ToolLine({
   result?: SessionChatToolResultBlock;
 }) {
   const [open, setOpen] = useState(expandSignal);
+  const subagentViewer = useContext(SessionChatSubagentContext);
+  const subagent = subagentViewer ? sessionChatToolSubagent(call, result, subagentViewer.agentPath) : null;
   const triggerRef = useRef<HTMLButtonElement>(null);
   useEffect(() => setOpen(expandSignal), [expandSignal]);
 
@@ -130,28 +137,31 @@ function ToolLine({
 
   return (
     <div className={cn('ghostex-chat-work-row', result?.isError && 'is-error')} data-open={open}>
-      <button
-        aria-expanded={hasDetail ? open : undefined}
-        className='ghostex-chat-work-trigger'
-        disabled={!hasDetail}
-        onClick={() => {
-          if (hasDetail) {
-            if (!open) {
-              centerSessionChatExpansion(triggerRef.current);
+      <div className={cn(subagent && 'ghostex-chat-subagent-tool-heading')}>
+        <button
+          aria-expanded={hasDetail ? open : undefined}
+          className='ghostex-chat-work-trigger'
+          disabled={!hasDetail}
+          onClick={() => {
+            if (hasDetail) {
+              if (!open) {
+                centerSessionChatExpansion(triggerRef.current);
+              }
+              setOpen((current) => !current);
             }
-            setOpen((current) => !current);
-          }
-        }}
-        ref={triggerRef}
-        type='button'
-      >
-        <span className='ghostex-chat-work-icon'>{toolIcon(name)}</span>
-        <span className='ghostex-chat-work-heading'>{name}</span>
-        {preview ? <span className='ghostex-chat-work-preview'>{preview}</span> : null}
-        {hasDetail ? (
-          <IconChevronRight aria-hidden='true' className={cn('ghostex-chat-disclosure-chevron', open && 'is-open')} />
-        ) : null}
-      </button>
+          }}
+          ref={triggerRef}
+          type='button'
+        >
+          <span className='ghostex-chat-work-icon'>{toolIcon(name)}</span>
+          <span className='ghostex-chat-work-heading'>{name}</span>
+          {preview && !subagent ? <span className='ghostex-chat-work-preview'>{preview}</span> : null}
+          {hasDetail ? (
+            <IconChevronRight aria-hidden='true' className={cn('ghostex-chat-disclosure-chevron', open && 'is-open')} />
+          ) : null}
+        </button>
+        {subagent ? <SessionChatSubagentLink {...subagent} /> : null}
+      </div>
       {hasDetail && open ? (
         <SessionChatExpansion
           className='ghostex-chat-work-detail'
