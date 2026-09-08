@@ -920,6 +920,23 @@ export interface SessionChatDetectedOptionInput {
   detectedAt: string;
 }
 
+/**
+ * CDXC:AgentScreenDetection 2026-09-08 SEE-ALSO:
+ * server/src/session_chat_options.rs owns the evidence precedence; use-session-chat.ts must also admit stronger evidence before filtering older replies.
+ */
+export function sessionChatOptionEvidencePriority(source: SessionChatDetectedChoice['source'] | undefined): number {
+  switch (source) {
+    case 'terminal':
+      return 3;
+    case 'statusline':
+      return 2;
+    case 'transcript':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 function applyDetectedChoice(
   state: SessionChatOptionState,
   descriptorId: string,
@@ -934,7 +951,13 @@ function applyDetectedChoice(
   const detectedAtMs = Date.parse(detectedAt);
   const dispatchedAtMs = current?.dispatchedAt ? Date.parse(current.dispatchedAt) : Number.NaN;
   const agrees = current?.value === detected.value;
-  if (current?.detectedAt && detectedAtMs < Date.parse(current.detectedAt)) {
+  const currentPriority = sessionChatOptionEvidencePriority(current?.detectedSource);
+  const incomingPriority = sessionChatOptionEvidencePriority(detected.source);
+  // Reading an old transcript again does not make it stronger evidence than the terminal.
+  if (current?.source === 'detected' && currentPriority > incomingPriority) {
+    return state;
+  }
+  if (current?.detectedAt && currentPriority >= incomingPriority && detectedAtMs < Date.parse(current.detectedAt)) {
     return state;
   }
   if (
@@ -1050,6 +1073,9 @@ export function sessionChatOptionValueLabel(
   const current = state[descriptor.id];
   if (!current) {
     return null;
+  }
+  if (descriptor.id === 'effort') {
+    return agentModelCatalogEffortLabel(currentAgentModelCatalog(), current.value);
   }
   const choice = descriptor.choices?.find((entry) => entry.value === current.value);
   const detectedLabel = current.label?.trim();

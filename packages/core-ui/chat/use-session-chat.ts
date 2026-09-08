@@ -11,6 +11,8 @@ import type { SessionChatPendingModelSelection } from '@/packages/shared/session
 // the pagination cursor cannot reach them again.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { recordDeliveredSessionChatDrafts } from './session-chat-sent-history';
+import { sessionChatOptionEvidencePriority } from './session-chat-session-options';
 import type {
   GxserverAnswerSessionChatPromptParams,
   GxserverReadSessionChatResult,
@@ -409,6 +411,24 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   // Detected model/effort: carried by read results and by
   // snapshot/replaced/state frames. Absent ⇒ unchanged (older daemons omit it).
   const [selectedOptions, setSelectedOptions] = useState<SessionChatDetectedOptions | null>(null);
+  /**
+   * CDXC:AgentScreenDetection 2026-09-08 WHY:
+   * Option captures have their own timestamps; a transcript snapshot winning the seed-read race must not discard terminal evidence.
+   * The option store orders each field by source, then capture time; an older reply carrying stronger evidence must reach that store too.
+   */
+  const applySelectedOptions = useCallback((detected: SessionChatDetectedOptions | undefined): void => {
+    if (!detected) return;
+    setSelectedOptions((current) => {
+      const strongerEvidence = (['model', 'effort', 'mode'] as const).some(
+        (field) =>
+          sessionChatOptionEvidencePriority(detected[field]?.source) >
+          sessionChatOptionEvidencePriority(current?.[field]?.source)
+      );
+      return current && !strongerEvidence && Date.parse(current.detectedAt) > Date.parse(detected.detectedAt)
+        ? current
+        : detected;
+    });
+  }, []);
   const selectedOptionsDetectedAt = selectedOptions?.detectedAt ?? null;
   const selectedOptionsFast = selectedOptions?.fast === true;
   useEffect(() => {
@@ -533,6 +553,9 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   clear arrives as an explicit empty `content`.
   */
   const [syncedDraft, setSyncedDraft] = useState<SessionChatDraft | null>(null);
+  useEffect(() => {
+    recordDeliveredSessionChatDrafts(syncedDraft?.deliveredDrafts);
+  }, [syncedDraft]);
   /*
   Bumping this re-runs the subscribe effect, which is the full recycle: the old
   socket is unsubscribed, a new one is opened, and a fresh seed read starts.
@@ -729,9 +752,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         setAgent(result.agent);
       }
       setAgentSessionId(result.agentSessionId ?? null);
-      if (result.selectedOptions) {
-        setSelectedOptions(result.selectedOptions);
-      }
+      applySelectedOptions(result.selectedOptions);
       setTerminalNotice(result.terminalNotice ?? null);
       applyTerminalActivity(result.terminalActivity);
       setAgentFleet(result.agentFleet ?? null);
@@ -751,7 +772,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       loadEarlierEpochRef.current = null;
       setLoadingEarlier(false);
     },
-    [applyQueueCarriage, applyTerminalActivity]
+    [applyQueueCarriage, applySelectedOptions, applyTerminalActivity]
   );
 
   /*
@@ -1067,9 +1088,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         setLifecycle(event.lifecycle);
       }
       setPrompt(event.prompt ?? null);
-      if (event.selectedOptions) {
-        setSelectedOptions(event.selectedOptions);
-      }
+      applySelectedOptions(event.selectedOptions);
       setTerminalNotice(event.terminalNotice ?? null);
       applyTerminalActivity(event.terminalActivity);
       setAgentFleet(event.agentFleet ?? null);
@@ -1133,6 +1152,10 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
             if (frameState.epoch !== null && result.epoch < frameState.epoch) {
               requestResync();
               return;
+            }
+            applySelectedOptions(result.selectedOptions);
+            if (result.screenProbed) {
+              setScreenProbed(true);
             }
             if (result.agent !== undefined) {
               setAgent(result.agent);
@@ -1234,6 +1257,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     applyAuthoritative,
     applyDraftAgentCarriage,
     applyQueueCarriage,
+    applySelectedOptions,
     applyTerminalActivity,
     initialLimit,
     reconnect,
@@ -1675,6 +1699,16 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   );
 
   const interrupt = useCallback(async (): Promise<void> => {
+    const dialog = terminalNotice?.dialog;
+    /**
+     * CDXC:SessionChat 2026-09-08 DECISION:
+     * User: Escape closing /usage or a similar dialog must not report "Interrupted the agent" when no turn was interrupted.
+     * The dialog's cancel lane verifies the live screen and avoids the stop lane's queue cancellation and activity reset.
+     */
+    if (dialog?.actions.includes('cancel')) {
+      await transport.answerPrompt({ kind: 'terminalDialog', dialogId: dialog.id, dialogAction: 'cancel' });
+      return;
+    }
     if (workingRef.current) {
       // Stop: suppress the spinner and drop optimistic echoes — the delayed
       // server-side Enter may never fire, so the echo would be a ghost bubble.
@@ -1697,7 +1731,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       );
     }
     await transport.interrupt();
-  }, [transport]);
+  }, [terminalNotice, transport]);
 
   return {
     agent,
