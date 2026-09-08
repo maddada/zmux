@@ -29,6 +29,7 @@ import type { SessionChatQueuedPrompt } from '../../shared/session-chat';
 import { Button } from '../../components/ui/button';
 import { cn } from '@/packages/components/utils';
 import { AppTooltip } from '../app-tooltip';
+import { formatSidebarHotkeyLabel } from '../hotkey-label';
 import {
   getSessionChatQueueDragActivationConstraints,
   isSessionChatQueueRowBusy,
@@ -207,6 +208,7 @@ function SessionChatQueueRow({
             disabled={locked}
             icon={<IconPencil aria-hidden='true' size={14} stroke={2} />}
             label='Edit'
+            tooltip={`Press ${formatSidebarHotkeyLabel('alt+up')} to Edit`}
             onClick={() => onEdit(prompt)}
           />
         ) : null}
@@ -235,15 +237,17 @@ function QueueRowButton({
   disabled,
   icon,
   label,
+  tooltip,
   onClick,
 }: {
   disabled: boolean;
   icon: ReactNode;
   label: string;
+  tooltip?: string;
   onClick: () => void;
 }) {
   return (
-    <AppTooltip content={label}>
+    <AppTooltip content={tooltip ?? label}>
       <span className='inline-flex'>
         <Button
           aria-label={label}
