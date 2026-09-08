@@ -224,7 +224,7 @@ fn codex_event_message(
                         item.get("exit_code").and_then(Value::as_i64).unwrap_or_default()
                     )
                 } else {
-                    formatted_output.trim().to_string()
+                    formatted_output.trim_end().to_string()
                 };
                 return Some(SessionChatMessage {
                     id: extract_string(item.get("id")).unwrap_or(id),
