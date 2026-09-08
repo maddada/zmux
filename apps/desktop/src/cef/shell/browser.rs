@@ -560,12 +560,11 @@ pub(crate) fn apply_browser_page_appearance(browser: &cef::Browser) {
         return;
     };
     /*
-    CDXC:Browser 2026-07-10:
-    Public Browser tabs match the production macOS CEF host: the page receives
-    the current system prefers-color-scheme while Chromium's unspecified
-    document canvas stays Chrome-like white. This is renderer state only; it
-    does not persist per-origin appearance, inject page CSS, or add a fallback
-    rendering path.
+    CDXC:Browser 2026-09-08 WHY:
+    macOS system detection must read the OS preference independently of NSApp's appearance, which can be pinned by the host.
+    Apply the preference per Browser renderer because the Default profile shares its request context with app UI.
+    On other platforms, an empty feature list restores Chromium's live system detection instead of overriding it with the old hardcoded light value.
+    The unspecified document canvas stays Chrome-like white.
     */
     let mut media_params = match cef::dictionary_value_create() {
         Some(params) => params,
@@ -576,25 +575,20 @@ pub(crate) fn apply_browser_page_appearance(browser: &cef::Browser) {
         Some(features) => features,
         None => return,
     };
-    let mut feature = match cef::dictionary_value_create() {
-        Some(feature) => feature,
-        None => return,
-    };
-    feature.set_string(
-        Some(&CefString::from("name")),
-        Some(&CefString::from("prefers-color-scheme")),
-    );
-    feature.set_string(
-        Some(&CefString::from("value")),
-        Some(&CefString::from(
-            if platform::system_uses_dark_page_appearance() {
-                "dark"
-            } else {
-                "light"
-            },
-        )),
-    );
-    features.set_dictionary(0, Some(&mut feature));
+    if let Some(value) = browser_page_appearance().media_value() {
+        let Some(mut feature) = cef::dictionary_value_create() else {
+            return;
+        };
+        feature.set_string(
+            Some(&CefString::from("name")),
+            Some(&CefString::from("prefers-color-scheme")),
+        );
+        feature.set_string(
+            Some(&CefString::from("value")),
+            Some(&CefString::from(value)),
+        );
+        features.set_dictionary(0, Some(&mut feature));
+    }
     media_params.set_list(Some(&CefString::from("features")), Some(&mut features));
     host.execute_dev_tools_method(
         next_page_appearance_devtools_message_id(),

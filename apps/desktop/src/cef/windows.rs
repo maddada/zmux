@@ -81,10 +81,6 @@ pub(super) fn prepare_application() {
     // equivalent process-level state to prepare before CEF touches it.
 }
 
-pub(super) fn system_uses_dark_page_appearance() -> bool {
-    false
-}
-
 pub(super) fn install_application_hooks() {
     // The macOS CefAppProtocol/sendEvent swizzle and Edit-menu install have
     // no Windows counterpart: Chromium's Windows message pump needs no host

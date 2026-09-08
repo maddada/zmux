@@ -1,4 +1,5 @@
 #import <AppKit/AppKit.h>
+#import "GpuiNavigationGestures.h"
 #import "GpuiWindowCorners.h"
 #import <Carbon/Carbon.h>
 #import <Foundation/Foundation.h>
@@ -32,6 +33,7 @@ void GhostexGpuiCEFLogNativeMouseDown(void *nativeView, double eventWindowX,
                                       const char *responderClass);
 void GhostexGpuiCEFClearActiveNativeView(void);
 int GhostexGpuiCEFRefreshSystemPageAppearanceForNativeView(void *nativeView);
+void GhostexGpuiCEFRefreshSystemPageAppearances(void);
 void GhostexGpuiFirstResponderDidChange(void *gpuiRootView, void *responder);
 int GhostexGpuiKeyboardRouteNativeEvent(void *gpuiRootView, int action,
                                         uint32_t keyCode, uint64_t modifiers,
@@ -329,6 +331,14 @@ static void GhostexGpuiSidebarPointerTrackingObserveEvent(NSEvent *event) {
 - (instancetype)initWithWindow:(NSWindow *)window
                   gpuiRootView:(NSView *)gpuiRootView;
 @end
+
+NSView *GhostexGpuiNavigationRootForView(NSView *view) {
+  NSWindow *window = view.window;
+  GhostexGpuiFirstResponderObserver *observer =
+      objc_getAssociatedObject(window, GhostexGpuiFirstResponderObserverKey);
+  NSView *root = observer.gpuiRootView;
+  return root && root.window == window ? root : nil;
+}
 
 @implementation GhostexGpuiFirstResponderObserver
 - (instancetype)initWithWindow:(NSWindow *)window
@@ -671,17 +681,30 @@ void GhostexGpuiCEFPrepareApplication(void) {
     argumentDefaults[@"ApplePersistenceIgnoreState"] = @YES;
     argumentDefaults[@"NSQuitAlwaysKeepsWindows"] = @NO;
     [defaults setVolatileDomain:argumentDefaults forName:NSArgumentDomain];
+
+    /*
+     CDXC:Browser 2026-09-08 WHY:
+     A fixed host appearance can suppress viewDidChangeEffectiveAppearance when the OS theme changes.
+     Observe the system theme directly so every Browser tab, including hidden tabs, gets the new media preference.
+     */
+    static dispatch_once_t appearanceObserverOnce;
+    dispatch_once(&appearanceObserverOnce, ^{
+      [[NSDistributedNotificationCenter defaultCenter]
+          addObserverForName:@"AppleInterfaceThemeChangedNotification"
+                      object:nil
+                       queue:NSOperationQueue.mainQueue
+                  usingBlock:^(NSNotification *notification) {
+                    (void)notification;
+                    GhostexGpuiCEFRefreshSystemPageAppearances();
+                  }];
+    });
   }
 }
 
 bool GhostexGpuiCEFSystemUsesDarkPageAppearance(void) {
-  NSAppearance *appearance =
-      NSApp.effectiveAppearance ?: NSAppearance.currentAppearance;
-  NSAppearanceName match = [appearance bestMatchFromAppearancesWithNames:@[
-    NSAppearanceNameAqua,
-    NSAppearanceNameDarkAqua,
-  ]];
-  return [match isEqualToString:NSAppearanceNameDarkAqua];
+  NSDictionary *systemDefaults = [[NSUserDefaults standardUserDefaults]
+      persistentDomainForName:NSGlobalDomain];
+  return [systemDefaults[@"AppleInterfaceStyle"] isEqual:@"Dark"];
 }
 
 void GhostexGpuiCEFInstallMessagePump(void) {
@@ -1233,6 +1256,7 @@ void GhostexGpuiInstallFirstResponderObserverForNativeView(void *nativeView) {
   }
 
   GhostexGpuiInstallRootPointerTrackingArea(view);
+  GhostexGpuiInstallNavigationGestureMethods(object_getClass(view));
 
   NSWindow *window = view.window;
   GhostexGpuiFirstResponderObserver *observer =
@@ -1396,6 +1420,7 @@ static void GhostexGpuiCEFInstallBrowserViewFocusSubclass(NSView *view) {
                     (IMP)GhostexGpuiCEFBrowserViewDidChangeEffectiveAppearance,
                     "v@:");
     objc_registerClassPair(subclass);
+    GhostexGpuiInstallNavigationGestureMethods(subclass);
   }
 
   object_setClass(view, subclass);

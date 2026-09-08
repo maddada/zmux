@@ -515,6 +515,11 @@ pub extern "C" fn GhostexGpuiCEFClearActiveNativeView() {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn GhostexGpuiCEFRefreshSystemPageAppearances() {
+    super::shell::refresh_browser_page_appearances();
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn GhostexGpuiCEFRefreshSystemPageAppearanceForNativeView(
     native_view: *mut c_void,
 ) -> c_int {

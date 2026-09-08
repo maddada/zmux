@@ -634,48 +634,7 @@ impl GhostexGpuiApp {
                     })
                     .child(self.render_browser_tab_new_icon(17.0)),
             )
-            .child(
-                div()
-                    .id(format!(
-                        "ghostex-gpui-browser-tab-action-overflow-{}",
-                        pane_id.0
-                    ))
-                    .flex()
-                    .h_full()
-                    .w(px(BROWSER_TAB_ACTION_BUTTON_SIZE))
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(0.0))
-                    .border_l_1()
-                    .border_color(browser_tab_separator_color())
-                    .bg(browser_tab_action_cluster_color())
-                    .cursor_default()
-                    .hover(|this| this.bg(browser_tab_action_hover_color()))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |_this, _event: &MouseDownEvent, window, cx| {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.show_browser_pane_actions_menu(
-                                pane_id,
-                                event.position,
-                                window,
-                                cx,
-                            );
-                        }),
-                    )
-                    .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
-                        Tooltip::new("Browser pane actions menu").build(window, cx)
-                    })
-                    .child(self.render_browser_tab_overflow_icon()),
-            )
+            .child(self.render_browser_pane_actions_button(pane_id, false, cx))
             .into_any_element()
     }
 
