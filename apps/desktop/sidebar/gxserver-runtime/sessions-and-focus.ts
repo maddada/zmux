@@ -17,7 +17,7 @@ import {
   SESSION_LIFECYCLE_FAILURE_TITLES,
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
-import { rememberGpuiProjectSession } from './project-activation';
+import { rememberGpuiProjectSession, revealGpuiActivatedSession } from './project-activation';
 import { gpuiBrowserSidebarSessionId } from './helpers/browser-tabs';
 import { isGpuiInactiveProjectPresentationSession } from './helpers/close-after-done';
 import {
@@ -260,6 +260,7 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
           })
         );
       }
+      revealGpuiActivatedSession(this, sessionId);
       return;
     }
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
@@ -1247,6 +1248,10 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     this.refreshSidebarHudFromClient();
     this.focusedSessionId = normalizedSessionId;
     rememberGpuiProjectSession(this, normalizedProjectId, normalizedSessionId);
+    revealGpuiActivatedSession(
+      this,
+      createGxserverPresentationProjectSessionId(normalizedProjectId, normalizedSessionId)
+    );
     this.visibleSessionIds = exactVisibleSessionIds
       ? new Set(exactVisibleSessionIds)
       : this.nextVisibleSessionIdsForLocalFocus(normalizedProjectId, normalizedSessionId);
@@ -1320,6 +1325,7 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     this.activeGroupId = scopedGroupId;
     this.focusedSessionId = scopedSessionId;
     rememberGpuiProjectSession(this, projectId, scopedSessionId);
+    revealGpuiActivatedSession(this, scopedSessionId);
     this.visibleSessionIds = new Set([scopedSessionId]);
     this.postGxserverPresentationFocusState();
   },
