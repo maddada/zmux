@@ -28,7 +28,7 @@ Ghostex/
 │   │   ├── src/       # Rust
 │   │   ├── sidebar/   # CEF entry modules (main, chat, find, kanban, manage)
 │   │   └── views/     # embedded pages: modal-host, titlebar-host, manage, kanban, meo
-│   ├── web/           # static browser build of the shared workspace UI
+│   ├── web/           # ghostex-web submodule; static browser build of the shared workspace UI
 │   ├── mobile/
 │   │   ├── app/       # React Native / Expo submodule
 │   │   └── views/     # chat/ + find/ view bundles embedded by the RN app
@@ -88,7 +88,7 @@ Verify: `git -C .dependencies/code-server rev-parse HEAD` prints `390f119a145e�
 Only three Ghostex apps are active development targets:
 
 1. **Desktop app** — `apps/desktop/` (Rust/GPUI shell + CEF React views). This is _the_ desktop app. `bun run start`, `bun run build`, and every `release:*` script in `package.json` target it.
-2. **Web app** — `apps/web/` (static browser build of the shared workspace/Agents UI, talks to gxserver).
+2. **Web app**: `apps/web/` is the `https://github.com/maddada/ghostex-web` submodule (static browser build of the shared workspace/Agents UI, talks to gxserver). Initialize it with `git submodule update --init -- apps/web`. Commit and push web changes inside that repository first, then commit its updated pointer in Ghostex. It still builds against Ghostex's shared packages and root Bun dependencies.
 3. **Mobile app** — `apps/mobile/` (React Native/Expo submodule in `apps/mobile/app`, ships Android).
 
 Deprecated. Never route new features, refactors, parity work, or bug fixes to these:
@@ -380,12 +380,12 @@ The full-repo formatting pass is:
 
 # TS/JS/JSON/MD/YAML — app-owned trees only, never .dependencies/ or generated output
 bunx prettier --write "apps/desktop/{sidebar,views,test,scripts}/**/*.{ts,tsx,mjs,md}" \
-  "apps/web/src/**/*.{ts,tsx}" "apps/mobile/views/**/*.{ts,tsx}" \
+  "apps/mobile/views/**/*.{ts,tsx}" \
   "packages/{shared,core-ui,components}/**/*.{ts,tsx,md}" \
   "server/**/*.mjs" "tooling/**/*.{mjs,ts}" "*.{json,md,ts}" ".github/**/*.yml"
 ```
 
-Never format `.dependencies/**`, `node_modules/**`, `apps/mobile/app/**` (the submodule), generated files (`*.generated.*`, `dist/`, `build/`, `target/`, `apps/desktop/runtime/`), or `bun.lock`. After a repo-wide pass, run the typecheck/test gates before pushing, and review `git status` so you only commit formatting deltas plus your own work — if the pass touched a file with foreign uncommitted hunks, leave that file out of your commit.
+Never format `.dependencies/**`, `node_modules/**`, `apps/web/**` or `apps/mobile/app/**` (the submodules), generated files (`*.generated.*`, `dist/`, `build/`, `target/`, `apps/desktop/runtime/`), or `bun.lock` as part of a parent-repo pass. Format files intentionally changed inside a submodule within its own commit. After a repo-wide pass, run the typecheck/test gates before pushing, and review `git status` so you only commit formatting deltas plus your own work; if the pass touched a file with foreign uncommitted hunks, leave that file out of your commit.
 
 **File-size upkeep pass (same quiet-worktree window only).** A repo-wide split wave finished on 2026-08-24: every app-owned source file is under ~2,000 lines except a handful of deliberate keeps, and the big Rust god-files (`render.rs`, `terminal_sync.rs`, `presentation.rs`, `os_cli.rs`, `remote_conn.rs`, the `helpers/*` monoliths, `gxserver-runtime/git.ts`, …) are per-concern module directories. Do not regress:
 

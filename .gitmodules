@@ -32,3 +32,8 @@
 [submodule ".dependencies/codex-swap"]
 	path = .dependencies/codex-swap
 	url = https://github.com/maddada/codex-swap.git
+# CDXC:Build 2026-09-08 DECISION:
+# User: move apps/web into a separate GitHub repository and submodule so its TypeScript no longer contributes to Ghostex's language statistics.
+[submodule "web"]
+	path = apps/web
+	url = https://github.com/maddada/ghostex-web.git
