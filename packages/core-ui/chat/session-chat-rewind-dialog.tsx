@@ -61,8 +61,8 @@ export function SessionChatRewindDialog({
   onOpenChange: (open: boolean) => void;
   /**
    * The rewind landed: the prompt it rewound to, verbatim, so the surface can
-   * put it back in the composer. Called once the dialog is closing, never on a
-   * refusal.
+   * put it back in the composer, including when terminal cleanup reports a
+   * warning after the rewind succeeded. Never called on a refusal.
    */
   onRewound?: (prompt: string) => void;
   /** The row being rewound to; null closes the dialog. */
@@ -72,6 +72,7 @@ export function SessionChatRewindDialog({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [rewinding, setRewinding] = useState(false);
+  const [completed, setCompleted] = useState(false);
   const open = request !== null;
 
   useEffect(() => {
@@ -80,20 +81,21 @@ export function SessionChatRewindDialog({
     }
     setError(null);
     setRewinding(false);
+    setCompleted(false);
   }, [open, request?.messageId]);
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    if (request === null || rewinding) {
+    if (request === null || rewinding || completed) {
       return;
     }
     setRewinding(true);
     setError(null);
     try {
-      await rewind({ messageId: request.messageId });
+      const result = await rewind({ messageId: request.messageId });
       // The daemon re-snapshots the chat stream itself, so the rewound rows
       // leave the list on their own frame. Nothing is pruned here.
-      onOpenChange(false);
+      if (!result.warning) onOpenChange(false);
       /*
       The prompt that was rewound away is the one the reader is about to
       rewrite, so it goes straight back into the composer. Handing it over
@@ -102,6 +104,11 @@ export function SessionChatRewindDialog({
       way out leaves it there instead of pulling it back to the trigger.
       */
       onRewound?.(request.prompt);
+      if (result.warning) {
+        setError(result.warning);
+        setCompleted(true);
+        setRewinding(false);
+      }
     } catch (failure) {
       // The daemon's own sentence names what it verified on the screen and why
       // it stopped, which is the only useful thing to show for a refusal.
@@ -152,9 +159,9 @@ export function SessionChatRewindDialog({
           </div>
           <DialogFooter>
             <Button disabled={rewinding} onClick={() => onOpenChange(false)} type='button' variant='outline'>
-              Cancel
+              {completed ? 'Close' : 'Cancel'}
             </Button>
-            <Button autoFocus disabled={rewinding} type='submit' variant='outline'>
+            <Button autoFocus disabled={rewinding || completed} type='submit' variant='outline'>
               {rewinding ? <IconLoader2 className='animate-spin' data-icon='inline-start' /> : null}
               {rewinding ? 'Rewinding' : 'Rewind'}
             </Button>

@@ -125,16 +125,6 @@ const REWIND_MOVE_SETTLE_MS: u64 = 1_200;
 /// Escapes written to close whatever is on screen after a failed drive. Two,
 /// because the confirmation stage backs out to the prompt list first.
 const REWIND_CANCEL_ESCAPES: usize = 2;
-/// Full-width rule characters that frame Claude's composer.
-const COMPOSER_RULE: char = '\u{2500}';
-/// Shortest run of rule characters that can be composer chrome rather than an
-/// inline separator inside prose.
-const COMPOSER_MIN_RULE_CHARS: usize = 20;
-/// Tallest input row this reads as a composer. Claude grows the box with the
-/// draft, and past this height a pair of rules is far more likely to be two
-/// unrelated separators with conversation between them.
-const COMPOSER_MAX_DRAFT_LINES: usize = 20;
-
 static SESSION_CHAT_REWIND_LOGGER: OnceLock<GxserverLogger> = OnceLock::new();
 
 fn log_session_chat_rewind(level: LogLevel, event: &str, details: Value, error: Option<String>) {
@@ -323,53 +313,8 @@ fn parse_menu_options(region: &[String]) -> Vec<RewindMenuOption> {
     options
 }
 
-/// The draft sitting in Claude's composer, or `None` when the composer frame is
-/// not on screen at all: a dialog owns the screen, or the CLI is painting
-/// something else. An empty composer answers `Some("")`.
-///
-/// The frame is the rule sandwich session_chat_composer.rs matches for Claude
-/// (`─` rule, `❯` input row, `─` rule), read here rather than there because
-/// this driver needs the CONTENT of the input row, not just its presence. Rows
-/// between the marker row and the closing rule are the wrapped rest of a
-/// multi-line draft and are folded into one line, so `❯ a` over `b` reads as
-/// `a b`.
 fn composer_draft(screen: &str) -> Option<String> {
-    let lines: Vec<String> = screen
-        .split('\n')
-        .map(|line| line.trim_end().to_string())
-        .filter(|line| !line.trim().is_empty())
-        .collect();
-    let rules: Vec<usize> = lines
-        .iter()
-        .enumerate()
-        .filter(|(_, line)| {
-            line.chars().filter(|value| *value == COMPOSER_RULE).count() >= COMPOSER_MIN_RULE_CHARS
-        })
-        .map(|(index, _)| index)
-        .collect();
-    for pair in (1..rules.len()).rev() {
-        let (open, close) = (rules[pair - 1], rules[pair]);
-        let body = &lines[open + 1..close];
-        if body.is_empty() || body.len() > COMPOSER_MAX_DRAFT_LINES {
-            continue;
-        }
-        let Some(first) = body[0].trim_start().strip_prefix(CLAUDE_REWIND_CURSOR) else {
-            continue;
-        };
-        let mut draft = collapse_spaces(first);
-        for line in &body[1..] {
-            let line = collapse_spaces(line);
-            if line.is_empty() {
-                continue;
-            }
-            if !draft.is_empty() {
-                draft.push(' ');
-            }
-            draft.push_str(&line);
-        }
-        return Some(draft);
-    }
-    None
+    crate::session_chat_composer::claude_composer_draft(screen)
 }
 
 // ---------------------------------------------------------------------------
@@ -579,21 +524,9 @@ fn take_rewind_job_outcome(job_id: u64) -> Option<std::result::Result<(), Domain
 }
 
 /*
-CDXC:SessionChat 2026-09-02:
-What Claude Code leaves in the composer after it accepts a rewind. Measured
-live on 2026-09-02 (Claude Code 2.1.258, session `S90-P3lv0-G8fxj`): choosing
-`Restore conversation` closes the dialog and PRE-FILLS the composer with the
-prompt that was rewound away, ready to be edited and re-sent. Escape does not
-clear it.
-
-That is a good thing for a human and a problem for this driver, because the
-next rewind starts by typing `/rewind` into that same composer. Refusing every
-rewind that follows a rewind would make the feature one-shot, and clearing any
-draft we find would delete text the user may have typed themselves. So the
-drive REMEMBERS the exact draft its own rewind left behind: a composer still
-holding precisely that text is Claude's own restored prompt, untouched, and is
-cleared with the standard burst before the next `/rewind`. One keystroke of
-user editing changes the text and the drive refuses instead.
+CDXC:SessionChat 2026-09-08 WHY:
+Claude pre-fills its composer with the rewound prompt. Normal completion now clears it before returning the draft to Chat.
+If that cleanup fails, remember exactly the leftover text so a later rewind can clear it without discarding a draft the user edited in Terminal.
 */
 static RESTORED_DRAFTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
@@ -777,16 +710,38 @@ impl RewindDriver<'_> {
     }
 
     async fn run(&self, plan: &RewindPlan) -> std::result::Result<(), DomainStateError> {
+        crate::session_chat_returned_prompt::cancel_returned_prompt_detection(
+            self.project_id,
+            self.session_id,
+        );
         if let Some(codex) = &plan.codex {
-            return codex::drive(self, plan, codex).await;
+            codex::drive(self, plan, codex).await?;
+        } else if let Err(error) = self.drive(plan).await {
+            self.cancel_dialog().await;
+            return Err(error);
         }
-        match self.drive(plan).await {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                self.cancel_dialog().await;
-                Err(error)
-            }
-        }
+        crate::session_chat_send::clear_session_chat_composer(
+            self.project_id,
+            self.session_id,
+            self.zmx_name,
+            self.source,
+            if plan.codex.is_some() {
+                "codex"
+            } else {
+                "claude"
+            },
+            self.cancelled,
+        )
+        .await
+        .map_err(|error| DomainStateError {
+            code: "rewindCleanupFailed",
+            message: format!(
+                "The conversation was rewound, but its terminal draft could not be cleared. {}",
+                error.message
+            ),
+        })?;
+        remember_restored_draft(self.project_id, self.session_id, "");
+        Ok(())
     }
 
     async fn drive(&self, plan: &RewindPlan) -> std::result::Result<(), DomainStateError> {
@@ -838,9 +793,8 @@ impl RewindDriver<'_> {
         The drive is only done once the dialog is gone AND the composer is back:
         a dialog that is still up means the final Enter did something other than
         accept the option, and the caller must not be told the conversation
-        moved. The draft Claude leaves in that composer is the prompt it just
-        rewound away, and remembering it is what lets the NEXT rewind on this
-        session clear it instead of refusing (see RESTORED_DRAFTS above).
+        moved. Remember its restored draft until the shared cleanup in `run`
+        succeeds, so a failed cleanup remains distinguishable from user edits.
         */
         let restored = self
             .wait_for("close", |screen| {
@@ -1139,7 +1093,11 @@ async fn rewind_session_chat(
     )
     .await;
     let outcome = take_rewind_job_outcome(job_id);
+    let mut warning = None;
     match (send, outcome) {
+        (_, Some(Err(error))) if error.code == "rewindCleanupFailed" => {
+            warning = Some(error.message)
+        }
         (_, Some(Err(error))) => return Err(error),
         (Err(error), _) => {
             return Err(agent_busy(format!(
@@ -1191,6 +1149,7 @@ async fn rewind_session_chat(
     );
     Ok(json!({
         "ok": true,
+        "warning": warning,
         "targetMessageId": rewind_target.message_id,
         "leafId": rewind_target.leaf_id,
     }))

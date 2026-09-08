@@ -130,9 +130,16 @@ pub(super) async fn rewind(
     )
     .await;
     let outcome = take_rewind_job_outcome(job_id);
-    if let Some(Err(error)) = outcome {
-        return Err(error);
-    }
+    let warning = match outcome.as_ref() {
+        Some(Err(error)) if error.code == "rewindCleanupFailed" => Some(error.message.clone()),
+        Some(Err(error)) => {
+            return Err(DomainStateError {
+                code: error.code,
+                message: error.message.clone(),
+            })
+        }
+        _ => None,
+    };
     sent.map_err(|error| agent_busy(error.message))?;
     if outcome.is_none() {
         return Err(agent_busy(
@@ -153,7 +160,7 @@ pub(super) async fn rewind(
         }),
         None,
     );
-    Ok(json!({"ok": true, "targetMessageId": message_id, "leafId": null}))
+    Ok(json!({"ok": true, "targetMessageId": message_id, "leafId": null, "warning": warning}))
 }
 
 fn picker_open(screen: &str) -> bool {
