@@ -157,7 +157,7 @@ export const ToolbarActions: Story = {
         'group-1 section'
       );
       await openContextMenu(group);
-      await userEvent.click(await body.findByRole('menuitem', { name: 'Full reload' }));
+      await userEvent.click(await body.findByRole('menuitem', { name: 'Full Reload' }));
       await expectMessage({ groupId: 'group-1', type: 'fullReloadGroup' });
     });
   },
@@ -731,7 +731,7 @@ export const SessionCardActions: Story = {
 
       const sessionCard = await findSessionCard();
       await openContextMenu(sessionCard);
-      await userEvent.click(await body.findByRole('menuitem', { name: 'Copy details' }));
+      await userEvent.click(await body.findByRole('menuitem', { name: 'Copy Details' }));
 
       await expectMessage({
         sessionId: 'session-3',
@@ -781,7 +781,7 @@ export const SessionCardActions: Story = {
 
       const sessionCard = await findSessionCard();
       await openContextMenu(sessionCard);
-      await userEvent.click(await body.findByRole('menuitem', { name: 'Full reload' }));
+      await userEvent.click(await body.findByRole('menuitem', { name: 'Full Reload' }));
 
       await expectMessage({ sessionId: 'session-3', type: 'fullReloadSession' });
     });

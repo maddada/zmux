@@ -1920,7 +1920,7 @@ export function SortableSessionCard({
     bulkPrimaryActions.push({
       icon: <IconRefresh aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'full-reload-selected',
-      label: 'Full reload selected',
+      label: 'Full Reload selected',
       onClick: requestFullReloadSelectedSessions,
     });
   }
@@ -2044,7 +2044,7 @@ export function SortableSessionCard({
     advancedSessionActions.push({
       icon: <IconRefresh aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'full-reload',
-      label: 'Full reload',
+      label: 'Full Reload',
       onClick: requestFullReloadSession,
     });
   }
@@ -2125,7 +2125,7 @@ export function SortableSessionCard({
     advancedCopyActions.push({
       icon: <IconCopy aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'copy-details',
-      label: 'Copy details',
+      label: 'Copy Details',
       onClick: requestCopySessionDetails,
     });
   }
@@ -2165,7 +2165,7 @@ export function SortableSessionCard({
       belowActions.push({
         icon: <IconMoon aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
         key: 'sleep-below',
-        label: 'Sleep below',
+        label: 'Sleep Below',
         onClick: requestSleepBelow,
       });
     }
@@ -2173,7 +2173,7 @@ export function SortableSessionCard({
       danger: true,
       icon: <IconX aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'close-below',
-      label: 'Close below',
+      label: 'Close Below',
       onClick: requestCloseBelow,
     });
   }
@@ -2700,7 +2700,6 @@ export function SortableSessionCard({
             {isProjectSessionListMoreRow ? null : (
               <SessionFloatingAgentIcon
                 agentIcon={session.agentIcon}
-                accountColor={session.accountColor}
                 closeAfterDone={session.closeAfterDone}
                 closeAfterDoneDeadlineAt={session.closeAfterDoneDeadlineAt}
                 closeAfterDoneRemainingLabel={session.closeAfterDoneRemainingLabel}

@@ -73,13 +73,13 @@ describe('remote presentation sidebar source', () => {
     for (const label of [
       'Rename',
       'Tag as',
-      'Copy details',
+      'Copy Details',
       'Delayed Send',
       'Close After Done',
       'Fork',
-      'Full reload',
-      'Sleep below',
-      'Close below',
+      'Full Reload',
+      'Sleep Below',
+      'Close Below',
     ]) {
       expect(menuActionsSource).toContain(`label: '${label}'`);
     }

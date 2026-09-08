@@ -259,7 +259,7 @@ impl TerminalAgentBarAction {
             Self::Rename => ("Rename", "renameActiveSession"),
             Self::Sleep => ("Sleep", "sleepFocusedSession"),
             Self::Fork => ("Fork Session", "forkSession"),
-            Self::FullReload => ("Full reload", "reloadSession"),
+            Self::FullReload => ("Full Reload", "reloadSession"),
             Self::SwitchAccount => ("Switch Account", ""),
             Self::ExportTranscript => ("Handoff / Export", "exportTranscript"),
         }
