@@ -17,9 +17,10 @@ function previewText(message: SessionChatMessage | null): string {
 }
 
 /**
- * CDXC:SessionChat 2026-09-07 DECISION:
- * User: put T3 Code's message-history minimap in the middle of the chat's left side, matching its implementation.
- * One dash per user prompt, visible-message highlighting, hover previews and keyboard/click navigation follow https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/MessagesTimeline.tsx.
+ * CDXC:SessionChat 2026-09-08 DECISION:
+ * User: place message-history navigation in the middle of the chat's left side, with one dash per user prompt, visible-message highlighting, hover previews and keyboard/click navigation.
+ * Hovering the marks must not paint a button background behind them.
+ * User: enlarge the selector bars and their hover/click area by 30%, keeping the tooltips at their original size.
  */
 export function SessionChatMinimap({
   turns,
@@ -109,7 +110,7 @@ export function SessionChatMinimap({
         onMouseDown={(event) => event.preventDefault()}
         onMouseLeave={() => setActiveId(null)}
         onMouseMove={(event) => move(pointerIndex(event))}
-        style={{ height: `${(turns.length - 1) * 8}px` }}
+        style={{ height: `calc(${(turns.length - 1) * 8}px * var(--ghostex-chat-minimap-scale))` }}
         type='button'
       >
         <span aria-hidden='true' className='ghostex-chat-minimap-line' />
@@ -124,7 +125,7 @@ export function SessionChatMinimap({
               key={turn.user.id}
               style={{
                 top: `${topPercent(index)}%`,
-                width: distance === 0 ? 24 : distance === 1 ? 16 : distance === 2 ? 10 : 8,
+                width: `calc(${distance === 0 ? 24 : distance === 1 ? 16 : distance === 2 ? 10 : 8}px * var(--ghostex-chat-minimap-scale))`,
               }}
             />
           );
