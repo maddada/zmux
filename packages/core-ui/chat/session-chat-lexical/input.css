@@ -1,0 +1,153 @@
+@property --ghostex-composer-scrollbar-opacity {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+.ghostex-chat-composer-lexical {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 72px;
+  margin-right: -0.75rem;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 14px;
+  line-height: 24px;
+}
+
+/* CDXC:SessionChat 2026-09-08 DECISION:
+ * User: the input's right text padding must match its left padding.
+ * The 7px text inset plus 5px native scrollbar balance the wrapper's 12px extension into the right padding.
+ */
+.ghostex-chat-composer-lexical-content {
+  min-height: 72px;
+  max-height: 160px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  outline: none !important;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  padding-right: 7px;
+  --ghostex-composer-scrollbar-opacity: 0;
+  transition: --ghostex-composer-scrollbar-opacity 350ms ease;
+  tab-size: 4;
+}
+
+.ghostex-chat-composer-lexical-content > p {
+  margin: 0;
+  min-height: 1lh;
+}
+.ghostex-chat-composer-lexical-content[data-empty='true']::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  opacity: 0.6;
+  float: left;
+  height: 0;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+.ghostex-chat-composer-lexical[data-fill-height='true'] {
+  height: 100%;
+  min-height: 0;
+}
+.ghostex-chat-composer-lexical[data-fill-height='true'] > .ghostex-chat-composer-lexical-content {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+}
+.ghostex-chat-composer-lexical[data-collapsed='true'],
+.ghostex-chat-composer-lexical[data-collapsed='true'] > .ghostex-chat-composer-lexical-content {
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  line-height: 32px;
+}
+.ghostex-chat-composer-lexical[data-word-wrap='false'] > .ghostex-chat-composer-lexical-content {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.ghostex-chat-composer-lexical-content::-webkit-scrollbar {
+  display: block;
+  width: 5px;
+}
+/* CDXC:SessionChat 2026-09-08 DECISION:
+ * User: a rounded, draggable 5px #606060 scrollbar, inset before the rounded corners, visible only while scrolling and fading afterward.
+ * This replaces the earlier #111 color. A real 5px track avoids the asymmetric transparent border that clipped the thumb's left rounded edge.
+ */
+.ghostex-chat-composer-lexical-content[data-scrolling='true'] {
+  --ghostex-composer-scrollbar-opacity: 1;
+  transition-duration: 0s;
+}
+.ghostex-chat-composer-lexical-content::-webkit-scrollbar-thumb {
+  border-radius: 2.5px;
+  background: rgb(96 96 96 / var(--ghostex-composer-scrollbar-opacity));
+}
+.ghostex-chat-composer-lexical-content::-webkit-scrollbar-thumb:active {
+  background-color: #606060;
+}
+.ghostex-chat-composer-lexical-content::-webkit-scrollbar-track {
+  margin-block: 8px;
+  background: transparent;
+}
+.ghostex-chat-composer-lexical[data-editor-theme] span.ghostex-chat-reference-pill[data-selected='true'] {
+  background: Highlight;
+  color: HighlightText;
+}
+.ghostex-chat-composer-saved-caret {
+  position: absolute;
+  width: 2px;
+  background: currentColor;
+  pointer-events: none;
+  visibility: hidden;
+}
+.ghostex-chat-composer-lexical[data-editor-panel-open='true'] {
+  min-height: 280px;
+}
+.ghostex-chat-editor-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 6px;
+  margin-right: 12px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.ghostex-chat-editor-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ghostex-chat-editor-panel input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  background: var(--background);
+  border: 1px solid var(--border);
+  padding: 2px 5px;
+}
+.ghostex-chat-editor-panel button {
+  padding: 2px 5px;
+  text-align: left;
+}
+.ghostex-chat-editor-panel button:is(:hover, [aria-selected='true'], [aria-pressed='true']) {
+  background: var(--accent);
+}
+.ghostex-chat-editor-command-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 180px;
+  overflow: auto;
+}
+.ghostex-chat-editor-command-list > button {
+  flex-shrink: 0;
+}

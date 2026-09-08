@@ -22,8 +22,7 @@ Everything is local — no gxserver, no transport, no daemon. The queue
 controller below is the same shape useSessionChat hands the composer, with
 every capability on, so the strip renders every control a live session would.
 
-Monaco is deliberately not configured: with no `monacoVsBaseUrl` the composer
-mounts its plain-textarea backend, which is the same path the mobile bundle
+This story keeps the plain input backend, which is the same path the mobile bundle
 takes. The queue and fleet rows are identical either way.
 
 The clocks tick for real: they interpolate from the fleet's `detectedAt`, a

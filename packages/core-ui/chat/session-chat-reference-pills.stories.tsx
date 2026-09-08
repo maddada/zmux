@@ -7,7 +7,7 @@ const SESSION_KEY = 'storybook-reference-pills';
 const DRAFT = [
   '[Image #1](/Users/madda/.local/share/ghostex/i/1787798799853.png)',
   '[Image #2](/Users/madda/.local/share/ghostex/i/1787802689390.png)',
-  '[File #1](/Users/madda/dev/_active/Ghostex/packages/core-ui/chat/session-chat-monaco-input.tsx:491)',
+  '[File #1](/Users/madda/dev/_active/Ghostex/packages/core-ui/chat/session-chat-lexical-input.tsx:1)',
   '[Folder #1](/Users/madda/dev/_active/Ghostex/packages/core-ui/chat)',
   '[$ghostex-browser-use](/Users/madda/.agents/skills/ghostex-browser-use/SKILL.md)',
 ].join(' ');
@@ -34,7 +34,7 @@ function SessionChatReferencePillsStory() {
       <div className='mx-auto' style={{ width: 220 }}>
         <SessionChatComposer
           isWorking={false}
-          monacoVsBaseUrl='/monaco/vs'
+          inputBackend='lexical'
           onInterrupt={() => undefined}
           onSend={(message) => setSentMessages((current) => [...current, message])}
           ref={composerRef}
@@ -57,7 +57,7 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Monaco: Story = {
+export const Lexical: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(() => {
       expect(canvasElement.querySelectorAll('.ghostex-chat-reference-pill')).toHaveLength(5);
@@ -66,13 +66,10 @@ export const Monaco: Story = {
     for (const pill of canvasElement.querySelectorAll<HTMLElement>('.ghostex-chat-reference-pill')) {
       expect(pill.getBoundingClientRect().width).toBeGreaterThan(0);
       expect(pill.getClientRects()).toHaveLength(1);
-      expect(pill.title.startsWith('/Users/madda/')).toBe(true);
+      expect(pill.dataset.ghostexReferencePath?.startsWith('/Users/madda/')).toBe(true);
     }
 
-    for (const token of canvasElement.querySelectorAll<HTMLElement>('.ghostex-chat-composer-reference-source')) {
-      expect(token.getBoundingClientRect().width).toBeLessThan(0.5);
-    }
-    expect(canvasElement.querySelector('.view-lines')?.textContent).not.toMatch(/[\ue000-\uf8ff]/u);
+    expect(canvasElement.querySelector('.ghostex-chat-composer-lexical-content')?.textContent).not.toMatch(/[\ue000-\uf8ff]/u);
 
     const sentDrafts = canvasElement.querySelector<HTMLOutputElement>('[data-testid="sent-reference-drafts"]');
     const sendButton = canvasElement.querySelector<HTMLButtonElement>('[aria-label="Send"]');

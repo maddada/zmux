@@ -19,7 +19,7 @@ import type { SessionChatTheme } from '../../shared/session-chat';
 import { AppTooltip } from '../app-tooltip';
 import { Button } from '../../components/ui/button';
 import type { SessionChatComposerInputApi, SessionChatComposerKeyEvent } from './session-chat-composer';
-import { SessionChatMonacoInput } from './session-chat-monaco-input';
+import { SessionChatLexicalInput } from './session-chat-lexical-input';
 
 export interface SessionChatNotePanelProps {
   /** Closes the panel; the caller keeps the open/closed state. */
@@ -28,13 +28,13 @@ export interface SessionChatNotePanelProps {
   onHasNoteChange: (hasNote: boolean) => void;
   readNote: () => Promise<{ agentSessionId?: string; note?: string }>;
   saveNote: (note: string) => Promise<void>;
-  /** Monaco assets supplied by desktop and web; mobile omits them. */
-  monacoVsBaseUrl?: string;
+  /** Desktop and web use Lexical; mobile keeps its plain note input. */
+  inputBackend?: 'lexical' | 'plain';
   theme: SessionChatTheme;
 }
 
 export function SessionChatNotePanel({
-  monacoVsBaseUrl,
+  inputBackend,
   onClose,
   onHasNoteChange,
   readNote,
@@ -43,7 +43,6 @@ export function SessionChatNotePanel({
 }: SessionChatNotePanelProps) {
   const [value, setValue] = useState('');
   const [copied, setCopied] = useState(false);
-  const [monacoFailed, setMonacoFailed] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const valueRef = useRef('');
   /*
@@ -54,16 +53,16 @@ export function SessionChatNotePanel({
   const savedRef = useRef('');
   const editedRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const monacoApiRef = useRef<SessionChatComposerInputApi | null>(null);
+  const lexicalApiRef = useRef<SessionChatComposerInputApi | null>(null);
   const saveNoteRef = useRef(saveNote);
   saveNoteRef.current = saveNote;
-  const useMonaco = monacoVsBaseUrl !== undefined && !monacoFailed;
+  const useLexical = inputBackend === 'lexical';
 
   useEffect(() => {
-    if (!useMonaco) {
+    if (!useLexical) {
       textareaRef.current?.focus();
     }
-  }, [useMonaco]);
+  }, [useLexical]);
 
   useEffect(() => {
     let active = true;
@@ -79,7 +78,7 @@ export function SessionChatNotePanel({
         }
         valueRef.current = note;
         setValue(note);
-        monacoApiRef.current?.applyValue(note, note.length);
+        lexicalApiRef.current?.applyValue(note, note.length);
       })
       .catch((error: unknown) => {
         console.error('[session-chat] session note read failed', error);
@@ -154,13 +153,13 @@ export function SessionChatNotePanel({
     setValue('');
     onHasNoteChange(false);
     flushNote();
-    if (useMonaco) {
-      monacoApiRef.current?.applyValue('', 0);
-      monacoApiRef.current?.focus();
+    if (useLexical) {
+      lexicalApiRef.current?.applyValue('', 0);
+      lexicalApiRef.current?.focus();
     } else {
       textareaRef.current?.focus();
     }
-  }, [flushNote, onHasNoteChange, useMonaco]);
+  }, [flushNote, onHasNoteChange, useLexical]);
 
   const handleKeyDown = useCallback(
     (event: SessionChatComposerKeyEvent): void => {
@@ -223,9 +222,9 @@ export function SessionChatNotePanel({
           </AppTooltip>
         </div>
       </div>
-      {useMonaco ? (
+      {useLexical ? (
         <div className='ghostex-chat-session-note-editor' onBlur={flushNote}>
-          <SessionChatMonacoInput
+          <SessionChatLexicalInput
             fillHeight={false}
             initialValue={valueRef.current}
             onCaretChange={() => undefined}
@@ -236,21 +235,16 @@ export function SessionChatNotePanel({
               onHasNoteChange(next.trim() !== '');
             }}
             onKeyDown={handleKeyDown}
-            onLoadFailed={(error) => {
-              console.error('[session-chat] Session note Monaco failed to load; using the plain input.', error);
-              setMonacoFailed(true);
-            }}
             onPasteData={() => false}
             placeholder='What’s next in this thread…'
             registerApi={(api) => {
-              monacoApiRef.current = api;
+              lexicalApiRef.current = api;
               if (api) {
                 api.applyValue(valueRef.current, valueRef.current.length);
                 api.focus();
               }
             }}
             theme={theme}
-            vsBaseUrl={monacoVsBaseUrl ?? ''}
           />
         </div>
       ) : (
