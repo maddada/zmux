@@ -317,7 +317,7 @@ export type SidebarSwitchableSessionAgent = {
 export type SidebarSessionItem = {
   accountId?: string;
   accountName?: string;
-  accountColor?: string;
+  accountSlot?: string;
   kind?: 'browser' | 'workspace';
   sessionKind?: 'browser' | 'terminal';
   activity: 'idle' | 'working' | 'attention';
@@ -398,7 +398,7 @@ export type SidebarSessionItem = {
    * prompt yet, copied straight through from
    * `GxserverPresentationSession.isDraft`. PRESENT-ONLY (never `false`), which
    * is also what a daemon that predates drafts publishes, so absence means
-   * "not a draft". Rows render a draft inline in its normal position with a
+   * "not a draft". Rows render drafts first, newest by creation, with a
    * pencil glyph instead of the agent logo and a dimmed title; the drafted text
    * already arrives as `displayTitle`, derived server-side.
    */
@@ -610,6 +610,8 @@ export function getSidebarSessionLifecycleState(
 }
 
 export type SidebarPreviousSessionItem = SidebarSessionItem & {
+  restoreUnavailableReason?: string;
+  externalSession?: boolean;
   closedAt: string;
   groupId?: string;
   historyId: string;
@@ -1277,6 +1279,7 @@ export type SidebarShowSessionRenameModalMessage = {
 };
 
 export type SidebarPreviousSessionsResultMessage = {
+  projects?: Array<{ projectId: string; name: string; path?: string }>;
   cursor?: string;
   previousSessions: SidebarPreviousSessionItem[];
   query?: string;
@@ -1309,6 +1312,7 @@ export type SidebarStashedPromptsResultMessage = {
    */
   tags?: GxserverStashedPromptTag[];
   type: 'stashedPromptsResult';
+  deliveredDrafts?: import('./session-chat-queue').SessionChatDeliveredDraft[];
 };
 
 /**
@@ -2604,6 +2608,8 @@ export type SidebarToExtensionMessage =
       query?: string;
       requestId: string;
       sessionTags?: SidebarSessionTagFilter[];
+      projectId?: string;
+      externalOnly?: boolean;
       type: 'requestPreviousSessions';
     }
   | {

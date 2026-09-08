@@ -28,6 +28,8 @@ export type {
   GxserverAnswerSessionChatPromptResult,
   GxserverHandoffSessionChatDraftParams,
   GxserverHandoffSessionChatDraftResult,
+  GxserverReplaceSessionChatDraftParams,
+  GxserverReplaceSessionChatDraftResult,
   GxserverInterruptSessionChatParams,
   GxserverInterruptSessionChatResult,
   GxserverQueueSessionChatPromptParams,
@@ -97,6 +99,7 @@ export type GxserverRpcErrorCode =
   last thirty lines of the terminal.
   */
   | 'composerNotReady'
+  | 'composerNotCleared'
   | 'corruptState'
   | 'dependencyUnavailable'
   | 'forbidden'
@@ -259,6 +262,7 @@ export type GxserverEndpointPath =
   | '/api/answerSessionChatPrompt'
   | '/api/interruptSessionChat'
   | '/api/handoffSessionChatDraft'
+  | '/api/replaceSessionChatDraft'
   | '/api/claimSessionChatLaunchDraft'
   | '/api/readSessionChatQueue'
   | '/api/queueSessionChatPrompt'
@@ -928,6 +932,7 @@ export interface GxserverListStashedPromptsParams {
 }
 
 export interface GxserverListStashedPromptsResult {
+  deliveredDrafts?: import('./session-chat-queue').SessionChatDeliveredDraft[];
   prompts: readonly GxserverStashedPrompt[];
   /** The tag catalogue, so the modal paints its rail and its rows together. */
   tags?: readonly GxserverStashedPromptTag[];
@@ -2332,6 +2337,7 @@ export interface GxserverSessionLifecycleParams {
  * last synced push, which is what the reconcile compares against.
  */
 export interface GxserverSessionChatDraftListEntry {
+  deliveredDrafts?: import('./session-chat-queue').SessionChatDeliveredDraft[];
   version?: SessionChatDraftVersion;
   consumedDrafts?: SessionChatDraftVersion[];
   originClientId?: string;
@@ -2672,7 +2678,7 @@ export interface GxserverPresentationCapabilities {
 export interface GxserverPresentationSession {
   accountId?: string;
   accountName?: string;
-  accountColor?: string;
+  accountSlot?: string;
   actions: GxserverPresentationSessionActions;
   activity: GxserverPresentationSessionActivity;
   agentIcon?: string;
@@ -2871,8 +2877,8 @@ export interface GxserverSidebarProjectCollectionsState {
 CDXC:Spaces 2026-08-27:
 A Space is a server-owned saved sidebar filter: a name, an icon id, a color, a
 manual position, and the sidebar members it shows. Members are sidebar project
-collections ("groups") and ungrouped projects, and a member may belong to any
-number of Spaces. gxserver owns the document so every client on that daemon
+collections ("groups") and ungrouped projects, and a member belongs to at most
+one Space. gxserver owns the document so every client on that daemon
 shares one Space set, and a remote daemon's Spaces stay that daemon's own.
 
 The wire state is fully normalized by gxserver:
@@ -2881,6 +2887,7 @@ The wire state is fully normalized by gxserver:
     gxserver strips grouped project ids from `memberProjectIds`.
   - Member collection ids that no longer exist are dropped; a collection
     disappears from the collections document as soon as it empties.
+  - Member ids are unique across Spaces; the first Space in sidebar order wins.
   - Member ids are deduped, and ids/names/icon ids are bounded (256 chars,
     512 ids per list, 256 Spaces).
   - `color` is normalized to lowercase `#rrggbb`, falling back to the shared
@@ -3027,6 +3034,7 @@ export interface GxserverPresentationSubscribeMessage {
 }
 
 export interface GxserverPresentationSearchParams {
+  externalOnly?: boolean;
   cursor?: string;
   includeActive?: boolean;
   includePrevious?: boolean;
@@ -3037,6 +3045,9 @@ export interface GxserverPresentationSearchParams {
 }
 
 export interface GxserverPresentationSearchResult {
+  isRestorable?: boolean;
+  restoreUnavailableReason?: string;
+  externalSession?: boolean;
   agentIcon?: string;
   agentId?: string;
   agentName?: string;
@@ -3085,6 +3096,7 @@ export interface GxserverPresentationSearchResult {
 }
 
 export interface GxserverPresentationSearchResponse {
+  projects?: Array<{ projectId: string; name: string; path?: string }>;
   cursor?: string;
   results: readonly GxserverPresentationSearchResult[];
 }
@@ -3143,6 +3155,8 @@ export interface GxserverRewindSessionChatResult {
   targetMessageId: string;
   /** Claude's new active leaf UUID; null before the first prompt or for Codex's new branch. */
   leafId: string | null;
+  /** The rewind succeeded, but the terminal draft cleanup needs attention. */
+  warning?: string | null;
 }
 
 /**
@@ -3154,11 +3168,12 @@ export interface GxserverRewindSessionChatResult {
  * aborts on any mismatch. With `defer`, Codex and Claude choices enter the durable queue and return before delivery.
  */
 export interface GxserverSelectSessionChatModelParams {
+  options?: import('./session-chat').SessionChatSelectionOptions;
   projectId: GxserverProjectId;
   sessionId: GxserverSessionId;
-  /** Store the choice durably and apply at the next idle opportunity (Codex and Claude). */
+  /** Store the choice durably, attempt immediately, and retry when the terminal can accept it (Codex and Claude). */
   defer?: boolean;
-  /** Model id from the published catalog. */
+  /** Model id from the published catalog; empty for an options-only change. */
   model: string;
   /** Effort id the reasoning list must offer for that model (`high`). */
   effort: string;

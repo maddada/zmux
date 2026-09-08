@@ -30,11 +30,17 @@ export type {
 
 import type { SessionChatDraft, SessionChatQueuedPrompt } from './session-chat-queue';
 
+export interface SessionChatSelectionOptions {
+  mode?: string;
+  fastMode?: 'on' | 'off';
+}
+
 export interface SessionChatPendingModelSelection {
   id: string;
   model: string;
   effort: string;
   state: 'queued' | 'applying';
+  options?: SessionChatSelectionOptions;
   errorMessage?: string;
 }
 
@@ -353,6 +359,46 @@ export interface SessionChatClaudeRateLimitWindow {
   resetsAt?: number;
 }
 
+/** Codex-reported values from persisted rollout events. Missing fields remain unavailable. */
+export interface SessionChatCodexTokens {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteInputTokens?: number;
+  outputTokens?: number;
+  reasoningOutputTokens?: number;
+  totalTokens?: number;
+}
+
+export interface SessionChatCodexRateLimitWindow {
+  usedPercentage?: number;
+  windowMinutes?: number;
+  resetsAt?: number;
+}
+
+export interface SessionChatCodexStatus {
+  totalTokens?: SessionChatCodexTokens;
+  turnTokens?: SessionChatCodexTokens;
+  lastRequest?: SessionChatCodexTokens;
+  primary?: SessionChatCodexRateLimitWindow;
+  secondary?: SessionChatCodexRateLimitWindow;
+  credits?: { hasCredits?: boolean; unlimited?: boolean; balance?: string };
+  plan?: string;
+  limitName?: string;
+  model?: string;
+  effort?: string;
+  version?: string;
+  provider?: string;
+  currentDir?: string;
+  sessionId?: string;
+  parentThreadId?: string;
+  forkedFromId?: string;
+  startedAt?: string;
+  approvalPolicy?: string;
+  sandbox?: string;
+  lastTurnDurationMs?: number;
+  timeToFirstTokenMs?: number;
+}
+
 export interface SessionChatDetectedOptions {
   model?: SessionChatDetectedChoice;
   effort?: SessionChatDetectedChoice;
@@ -368,10 +414,11 @@ export interface SessionChatDetectedOptions {
   terminalStatusLine?: string;
   /** Cursor or Codex's terminal-reported Fast mode, or Claude's statusline-reported fast mode. */
   fast?: boolean;
-  /** Claude's statusline-reported context window usage. */
+  /** Context snapshot reported by Claude's statusline or Codex's transcript. */
   contextUsage?: SessionChatContextUsage;
   /** The rest of Claude's statusline payload the chat can show. */
   claudeStatus?: SessionChatClaudeStatus;
+  codexStatus?: SessionChatCodexStatus;
   /** ISO-8601 millis; compared against a pending dispatch's own timestamp. */
   detectedAt: string;
 }
@@ -659,6 +706,8 @@ export interface SessionChatAgentTasks {
 export interface GxserverReadSessionChatParams {
   projectId: string;
   sessionId: string;
+  /** Child id or agent name, resolved within this session's descendants. */
+  subagent?: string;
   /** Max messages in the tail window. Default 300; page by +200. */
   limit?: number;
   /** Byte offset from a prior page's `beforeOffset` for older history. */
@@ -681,6 +730,8 @@ export interface GxserverReadSessionChatParams {
 export const SESSION_CHAT_FORK_BOUNDARY_ID_PREFIX = 'fork-boundary:';
 
 export interface GxserverReadSessionChatResult {
+  /** Present only for a child transcript read, independent of the main chat stream. */
+  subagent?: { id: string; name: string };
   messages: SessionChatMessage[];
   lifecycle?: SessionChatTurnLifecycle;
   hasMore: boolean;
@@ -976,6 +1027,16 @@ export interface GxserverInterruptSessionChatResult {
 export interface GxserverHandoffSessionChatDraftParams {
   projectId: string;
   sessionId: string;
+}
+
+export interface GxserverReplaceSessionChatDraftParams {
+  projectId: string;
+  sessionId: string;
+  content: string;
+}
+
+export interface GxserverReplaceSessionChatDraftResult {
+  replaced: true;
 }
 
 /**

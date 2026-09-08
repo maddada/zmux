@@ -1545,6 +1545,26 @@ pub const GXSERVER_STORAGE_MIGRATIONS: &[Migration] = &[
       PRAGMA user_version = 30;
     "#,
     },
+    Migration {
+        id: "0031_session_chat_selection_options",
+        sql: r#"
+      ALTER TABLE session_chat_model_selections ADD COLUMN options TEXT NOT NULL DEFAULT '{}';
+      PRAGMA user_version = 31;
+    "#,
+    },
+    Migration {
+        id: "0032_session_chat_delivered_drafts",
+        sql: r#"
+      CREATE TABLE session_chat_delivered_drafts (
+        id TEXT PRIMARY KEY,
+        projectId TEXT NOT NULL,
+        sessionId TEXT NOT NULL,
+        content TEXT NOT NULL,
+        deliveredAt TEXT NOT NULL
+      );
+      PRAGMA user_version = 32;
+    "#,
+    },
 ];
 
 #[cfg(unix)]
@@ -1593,10 +1613,10 @@ mod tests {
         let journal_mode: String = db
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal_mode");
-        assert_eq!(user_version, 30);
+        assert_eq!(user_version, 32);
         assert_eq!(foreign_keys, 1);
         assert_eq!(journal_mode, "wal");
-        assert_eq!(schema_migration_count(&db), 30);
+        assert_eq!(schema_migration_count(&db), 32);
         assert_eq!(
             explicit_index_names(&db),
             vec![

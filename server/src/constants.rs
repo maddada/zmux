@@ -120,4 +120,6 @@ pub const GXSERVER_MIGRATION_IDS: &[&str] = &[
     "0028_remote_pairing",
     "0029_session_chat_model_selections",
     "0030_session_chat_draft_versions",
+    "0031_session_chat_selection_options",
+    "0032_session_chat_delivered_drafts",
 ];
