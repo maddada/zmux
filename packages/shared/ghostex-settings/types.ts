@@ -451,6 +451,7 @@ export type ghostexSettings = {
   hideMenuBarSessionStatusIndicators: boolean;
   petOverlayEnabled: boolean;
   selectedPetId: PetId;
+  showQuickModelPickerInTerminal: boolean;
   showSessionIdInTerminalPanes: boolean;
   /** Newly launched supported agents still start a terminal, then show this surface first. */
   preferredAgentInterface: PreferredAgentInterface;
@@ -499,6 +500,11 @@ export type ghostexSettings = {
    * membership submenus.
    */
   sidebarSpacesEnabled: boolean;
+  /**
+   * CDXC:Sessions 2026-09-07 DECISION:
+   * User: "Reveal session when activating" reveals every activated session in the sidebar, including titlebar Back/Forward, CLI activation, Space selection, scrolling, and expanding its project and group.
+   */
+  revealSessionWhenActivating: boolean;
   /**
    * CDXC:Hotkeys 2026-06-15-11:12:
    * Jump to Project shortcuts should reveal the target project row when it was collapsed, because the keyboard action is also a navigation intent in the visible Projects sidebar area.

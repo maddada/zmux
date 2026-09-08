@@ -357,6 +357,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * disabled for default settings so new users do not see top-right provider
    * identifiers unless they explicitly enable the pane overlay.
    */
+  showQuickModelPickerInTerminal: true,
   showSessionIdInTerminalPanes: false,
   preferredAgentInterface: 'chat',
   /**
@@ -386,6 +387,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   projectSessionListCollapsedCount: DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   sidebarProjectGroupStyle: 'branched',
   sidebarSpacesEnabled: false,
+  revealSessionWhenActivating: true,
   expandCollapsedProjectsOnJump: true,
   showLessForExpandedProjectJumps: false,
   /**
@@ -437,9 +439,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * Default app chrome to neutral #808080 at 93 Background Contrast,
    * resolving to #141414.
    *
-   * CDXC:Theming 2026-08-30:
-   * Default app chrome to ice #88d7ff at 98 Background Contrast, resolving
-   * to #040607.
+   * CDXC:Theming 2026-09-08 SEE-ALSO:
+   * titlebar-color.ts owns the default matching the user's saved neutral #808080 tint at 96 contrast (#0b0b0b).
    *
    * Background Contrast and Background Tint are always-active Theming controls.
    * Accent Color is advanced.

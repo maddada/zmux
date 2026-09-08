@@ -303,6 +303,12 @@ export function getSettingsSearchSections(settingsSearchQuery: string, draft: gh
         title: 'Spaces',
       },
       {
+        key: 'revealSessionWhenActivating',
+        subtitle:
+          'Switch Space, expand the project and group, and scroll to sessions activated from navigation, CLI, or elsewhere.',
+        title: 'Reveal session when activating',
+      },
+      {
         key: 'showProjectIcons',
         subtitle: 'Show project artwork or a folder or worktree icon beside project names.',
         title: 'Show project icons',
@@ -662,6 +668,11 @@ export function getSettingsSearchSections(settingsSearchQuery: string, draft: gh
         title: 'Show tabs bar when not split',
       },
       {
+        key: 'showQuickModelPickerInTerminal',
+        subtitle: 'Use the model picker shortcut (Option+P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.',
+        title: 'Show quick model & effort picker for Claude and Codex in terminal view',
+      },
+      {
         key: 'showSessionIdInTerminalPanes',
         subtitle: 'Show the provider session id in the top-right corner of terminal panes.',
         title: 'Show session id in terminal panes',
@@ -807,8 +818,8 @@ export function getSettingsSearchSections(settingsSearchQuery: string, draft: gh
       },
       {
         key: 'showSessionDetailsCopyAction',
-        subtitle: 'Show Copy details in session context menus.',
-        title: 'Show Copy details option',
+        subtitle: 'Show Copy Details in session context menus.',
+        title: 'Show Copy Details option',
       },
     ]),
   };

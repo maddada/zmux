@@ -545,6 +545,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     petOverlayEnabled: readBoolean(source, 'petOverlayEnabled', DEFAULT_ghostex_SETTINGS.petOverlayEnabled),
     selectedPetId: normalizePetId(readString(source, 'selectedPetId', DEFAULT_ghostex_SETTINGS.selectedPetId)),
+    showQuickModelPickerInTerminal: readBoolean(
+      source,
+      'showQuickModelPickerInTerminal',
+      DEFAULT_ghostex_SETTINGS.showQuickModelPickerInTerminal
+    ),
     /**
      * CDXC:Workarea 2026-05-23-00:50:
      * Older settings should normalize the session-id overlay preference from
@@ -594,6 +599,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       readString(source, 'sidebarProjectGroupStyle', DEFAULT_ghostex_SETTINGS.sidebarProjectGroupStyle)
     ),
     sidebarSpacesEnabled: readBoolean(source, 'sidebarSpacesEnabled', DEFAULT_ghostex_SETTINGS.sidebarSpacesEnabled),
+    revealSessionWhenActivating: readBoolean(
+      source,
+      'revealSessionWhenActivating',
+      DEFAULT_ghostex_SETTINGS.revealSessionWhenActivating
+    ),
     expandCollapsedProjectsOnJump: readBoolean(
       source,
       'expandCollapsedProjectsOnJump',

@@ -1139,6 +1139,15 @@ export function SettingsModal({
                                 value={draft.sidebarSpacesEnabled}
                               />
                             ) : null}
+                            {mainSettingVisible(settingsSearch.sidebar, 'revealSessionWhenActivating') ? (
+                              <ToggleField
+                                checked={draft.revealSessionWhenActivating}
+                                description='Switch Space, expand the project and group, and scroll to the activated session.'
+                                label='Reveal session when activating'
+                                {...getSettingModificationProps('revealSessionWhenActivating')}
+                                onChange={(checked) => updateDraft('revealSessionWhenActivating', checked)}
+                              />
+                            ) : null}
                             {/*
                              * CDXC:Settings 2026-06-30-22:22:
                              * Users need every preset-mutated setting directly under the preset selector so applying Recommended, Codex, Minimal, or Detailed has an inspectable effect without hunting through Session Cards, Project rows, or Status Indicators.
@@ -2103,6 +2112,15 @@ export function SettingsModal({
                                 onChange={(checked) => updateDraft('showAgentsPaneTabBarWhenUnsplit', checked)}
                               />
                             ) : null}
+                            {mainSettingVisible(settingsSearch.terminal, 'showQuickModelPickerInTerminal') ? (
+                              <ToggleField
+                                checked={draft.showQuickModelPickerInTerminal}
+                                label='Show quick model & effort picker for Claude and Codex in terminal view'
+                                description='Use the model picker shortcut in terminal view. Turn off to let the terminal handle that shortcut.'
+                                {...getSettingModificationProps('showQuickModelPickerInTerminal')}
+                                onChange={(checked) => updateDraft('showQuickModelPickerInTerminal', checked)}
+                              />
+                            ) : null}
                             {mainSettingVisible(settingsSearch.terminal, 'showSessionIdInTerminalPanes') ? (
                               /*
                                * CDXC:Workarea 2026-05-23-00:50:
@@ -2710,8 +2728,8 @@ export function SettingsModal({
                                  */}
                                 <ToggleField
                                   checked={draft.showSessionDetailsCopyAction}
-                                  description='Show Copy details in session context menus.'
-                                  label='Show Copy details option'
+                                  description='Show Copy Details in session context menus.'
+                                  label='Show Copy Details option'
                                   {...getSettingModificationProps('showSessionDetailsCopyAction')}
                                   onChange={(checked) => updateDraft('showSessionDetailsCopyAction', checked)}
                                 />
