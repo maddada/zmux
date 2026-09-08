@@ -302,7 +302,7 @@ body {
   background-color: #161616 !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 8px !important;
-  padding: 4px !important;
+  padding: 4px;
 }
 
 .settings-select-content [data-slot='select-item'] {
@@ -686,8 +686,7 @@ body[data-session-chat-theme] .ghostex-session-chat-popup {
   ) !important;
 }
 
-/* Keep the Sessions scope-toggle shortcut discoverable inside the segmented
- * control now that the scope control lives outside the search field. */
+/* The scope shortcut sits beside the joined buttons. */
 .quick-access-session-scope-hint {
   color: inherit;
   font: inherit;
@@ -5234,4 +5233,51 @@ body[data-session-chat-theme] .ghostex-session-chat-popup {
   letter-spacing: 0;
   padding: 5px 8px;
   text-transform: none;
+}
+
+/* The project picker is portaled outside the modal's control styles. */
+.quick-access-session-project-filter {
+  max-width: 100%;
+  flex-shrink: 1;
+}
+
+.quick-access-session-project-filter > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-access-session-project-label {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quick-access-session-project-label > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-access-session-project-label small {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.quick-access-session-scope-segmented[data-slot='segmented-control'] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 264px;
+  flex-shrink: 0;
+}
+.quick-access-session-scope-hint { flex-shrink: 0; }
+.quick-access-session-project-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  min-width: 0;
 }

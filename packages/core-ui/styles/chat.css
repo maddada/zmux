@@ -80,19 +80,18 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
   max-width: calc(100% - 60px);
 }
 
-/* Live terminal activity is composer-adjacent status, not a transcript-width
-   message. Keep it centered on the viewport and exactly as wide as the prompt
-   card: the composer's max-w-3xl outer column (48rem), minus its px-4 gutters
-   (2rem), or the viewport minus those same gutters in a narrow pane. */
+/* CDXC:SessionChat 2026-09-07 WHY:
+   Status cards also live inside transcript columns and expanded disclosures, which can be narrower than the page.
+   Viewport sizing plus a centering transform pushed their borders and controls outside those columns and clipped them on narrow panes and phones. */
 .ghostex-chat-activity-row {
   /* CDXC:SessionChatTerminalActivity 2026-09-04 DECISION: User: the card is
      less rounded than before, so its short height reads like the text box's
      corners rather than a pill. */
   border-radius: 0.75rem;
-  left: 50%;
-  position: relative;
-  transform: translateX(-50%);
-  width: min(calc(100vw - 2rem), 46rem);
+  grid-template-columns: minmax(0, 1fr);
+  margin-inline: auto;
+  min-width: 0;
+  width: min(100%, 46rem);
 }
 
 /* CDXC:SessionChat 2026-09-06 DECISION: User: the transcript status cards (goal,
@@ -1093,11 +1092,41 @@ the markdown block) rather than pinned to a tier of its own.
 /* CDXC:SessionChat 2026-09-04 DECISION: User: the scroll-to-bottom button
    sits just above the chat box container and moves with it as the box grows,
    instead of floating 16px up inside the transcript over its text. The
-   transcript is the flex sibling directly above the composer stack, so its
-   bottom edge IS the top of that container; the button sits 4px inside it,
-   over the transcript's bottom padding, which the scroll fade already blanks. */
+   composer band overlays the bottom of the transcript and publishes its live
+   height (use-session-chat-composer-inset.ts), so the button sits 4px above
+   that band and follows it when the box grows, collapses, or expands. */
 .ghostex-chat-scroll-bottom-button[data-direction='end'] {
-  bottom: 0.25rem;
+  bottom: calc(var(--ghostex-chat-composer-overlay, 0px) + 0.25rem);
+  transition-property: translate, scale, opacity, bottom;
+}
+
+/* --- Composer overlay ------------------------------------------------------- */
+
+/* The composer band is absolutely positioned over the transcript's end so a
+   collapse never resizes the scroll viewport (use-session-chat-composer-inset.ts).
+   It is opaque: transcript rows scroll on underneath it, and a wider custom
+   transcript would otherwise show beside the box. */
+.ghostex-chat-composer-overlay {
+  background: var(--background);
+}
+
+/* The transcript reserves the band's height below its last row. While the
+   composer is collapsed the inset holds the expanded height, so the rows the
+   expansion will cover again stay hidden instead of flashing into view. */
+.ghostex-session-chat-scope [data-slot='message-scroller-content'] {
+  padding-bottom: calc(var(--ghostex-chat-composer-inset, 0px) + 1rem);
+}
+
+/* The viewport's bottom scroll fade sits under the opaque band, so lift its
+   fade region to the band's top edge. --scroll-fade-b is what scroll-fade-b
+   animates to 0 as the reader nears the end; keep it in the same role. */
+.ghostex-session-chat-scope [data-slot='message-scroller-viewport'] {
+  --scroll-fade-mask: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - var(--ghostex-chat-composer-overlay, 0px) - var(--scroll-fade-b, 0px)),
+    transparent calc(100% - var(--ghostex-chat-composer-overlay, 0px))
+  );
 }
 
 /* Hidden while the reader's last scroll ended at the bottom (see
@@ -1308,7 +1337,7 @@ the markdown block) rather than pinned to a tier of its own.
 
 /* Maximize: a centered overlay that turns the composer into a full editing
    surface for long prompts. The field keeps its slot in the React tree and
-   only changes its box, so monaco (or the textarea), the caret, the undo
+   only changes its box, so the editor, the caret, the undo
    stack and any pending attachments survive the toggle. The backdrop is a
    sibling rather than a wrapper for the same reason — wrapping would reparent
    the field and remount the editor. Both sit below the z-50 that portalled
@@ -1365,7 +1394,7 @@ the markdown block) rather than pinned to a tier of its own.
   field-sizing: normal;
 }
 
-.ghostex-chat-composer-maximized .ghostex-chat-composer-monaco {
+.ghostex-chat-composer-maximized .ghostex-chat-composer-lexical {
   height: 100%;
 }
 
@@ -1408,20 +1437,21 @@ the markdown block) rather than pinned to a tier of its own.
    pills kept their type colour. They opt out here so the transcript keeps the
    per-kind tint and the dotted-underline hover instead of the neutral fill.
    The status line's copy button opts out too: the user wants it to look
-   exactly like the plain text items beside it, with no hover fill. */
+   exactly like the plain text items beside it, with no hover fill.
+   The minimap rail also owns its transparent appearance; the generic hover fill would paint a gray pill behind its marks. */
 .ghostex-session-chat-scope[data-chat-theme='dark']
   button:not(.ghostex-chat-send-button):not(.ghostex-chat-completed-work-trigger):not(.ghostex-chat-expansion-rail):not(
     .ghostex-chat-scroll-bottom-button
   ):not([data-slot='session-chat-host-action']):not([data-chat-answer-control]):not([data-chat-picker-option]):not(
     .ghostex-chat-reference-pill
-  ):not(.ghostex-chat-markdown-file-chip):not(.ghostex-chat-status-line-copy),
+  ):not(.ghostex-chat-markdown-file-chip):not(.ghostex-chat-status-line-copy, .ghostex-chat-minimap-rail),
 body[data-session-chat-theme='dark']
   .ghostex-session-chat-popup
   button:not(.ghostex-chat-send-button):not(.ghostex-chat-completed-work-trigger):not(.ghostex-chat-expansion-rail):not(
     .ghostex-chat-scroll-bottom-button
   ):not([data-slot='session-chat-host-action']):not([data-chat-answer-control]):not([data-chat-picker-option]):not(
     .ghostex-chat-reference-pill
-  ):not(.ghostex-chat-markdown-file-chip):not(.ghostex-chat-status-line-copy) {
+  ):not(.ghostex-chat-markdown-file-chip):not(.ghostex-chat-status-line-copy, .ghostex-chat-minimap-rail) {
   background-color: transparent;
   color: var(--foreground);
 }
@@ -1431,14 +1461,18 @@ body[data-session-chat-theme='dark']
     .ghostex-chat-scroll-bottom-button
   ):not([data-slot='session-chat-host-action']):not([data-chat-answer-control]):not([data-chat-picker-option]):not(
     .ghostex-chat-reference-pill
-  ):not(.ghostex-chat-markdown-file-chip):not(.ghostex-chat-status-line-copy):not(:disabled):hover,
+  ):not(.ghostex-chat-markdown-file-chip):not(.ghostex-chat-status-line-copy, .ghostex-chat-minimap-rail):not(
+    :disabled
+  ):hover,
 body[data-session-chat-theme='dark']
   .ghostex-session-chat-popup
   button:not(.ghostex-chat-send-button):not(.ghostex-chat-completed-work-trigger):not(.ghostex-chat-expansion-rail):not(
     .ghostex-chat-scroll-bottom-button
   ):not([data-slot='session-chat-host-action']):not([data-chat-answer-control]):not([data-chat-picker-option]):not(
     .ghostex-chat-reference-pill
-  ):not(.ghostex-chat-markdown-file-chip):not(.ghostex-chat-status-line-copy):not(:disabled):hover {
+  ):not(.ghostex-chat-markdown-file-chip):not(.ghostex-chat-status-line-copy, .ghostex-chat-minimap-rail):not(
+    :disabled
+  ):hover {
   background-color: #333333;
 }
 
@@ -1467,6 +1501,10 @@ body[data-session-chat-theme='dark']
 
 .ghostex-chat-footer-control {
   border-radius: 9999px;
+}
+
+.ghostex-chat-footer-control.ghostex-chat-options-pill {
+  font-size: 0.875rem;
 }
 
 .ghostex-chat-footer-control:not(:disabled):hover {
@@ -1803,48 +1841,17 @@ so the swap barely moves the composer row.
   cursor: default;
 }
 
-/* Monaco's stock placeholder is nowrap + ellipsis. The composer copy is two
-   lines of hints, so both backends must wrap instead of truncating. */
+/* The composer placeholder has two lines of hints that wrap with the input. */
 .ghostex-chat-composer-input::placeholder {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.ghostex-chat-composer-monaco {
+.ghostex-chat-composer-lexical {
   min-height: 4.5rem;
 }
 
-/* While a terminal picker blocks the composer, Monaco goes read-only and its
-   own stylesheet paints a 1px --vscode-focusBorder outline on the focused
-   editor internals (`.monaco-editor [tabindex]:focus` / `textarea:focus`).
-   The composer owns its focus visuals (the caret, selection, and the shell's
-   focus ring), so that outline is never wanted anywhere inside the input.
-   !important because Monaco's selectors outrank this scoped one. */
-.ghostex-chat-composer-monaco :is(:focus, :focus-visible),
-.ghostex-chat-composer-monaco:is(:focus, :focus-visible) {
-  outline: none !important;
-}
-
-.ghostex-chat-composer-monaco .editorPlaceholder {
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  text-overflow: clip;
-  text-wrap: wrap;
-  white-space: pre-wrap;
-}
-
-/* Monaco keeps one invisible variation selector in its model for each
-   attachment or skill reference. Its zero metrics are intentional: the
-   injected pill owns the token's horizontal space, while the canonical
-   Markdown stays outside Monaco's presentation model. */
-.ghostex-chat-composer-monaco .ghostex-chat-composer-reference-source {
-  color: transparent !important;
-  font-size: 0 !important;
-  letter-spacing: 0 !important;
-  opacity: 0 !important;
-}
-
-.ghostex-chat-composer-monaco .ghostex-chat-reference-pill,
+.ghostex-chat-composer-lexical .ghostex-chat-reference-pill,
 .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill,
 .ghostex-chat-markdown .ghostex-chat-reference-pill,
 .ghostex-chat-markdown .ghostex-chat-markdown-file-chip {
@@ -1873,17 +1880,14 @@ so the swap barely moves the composer row.
   white-space: nowrap;
 }
 
-.ghostex-chat-composer-monaco .ghostex-chat-reference-pill,
+.ghostex-chat-composer-lexical .ghostex-chat-reference-pill,
 .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill,
 .ghostex-chat-markdown .ghostex-chat-reference-pill {
   gap: 4px;
 }
 
-/* Monaco measures caret positions from the injected characters, not from
-   generated content or horizontal padding. The injected leading spaces own
-   the icon's width, while the absolutely positioned mask adds no unmeasured
-   inline width. This keeps both cursor stops on the pill's outer edges. */
-.ghostex-chat-composer-monaco .ghostex-chat-reference-pill,
+/* Keep the established compact pill typography and icon spacing in both editable inputs. */
+.ghostex-chat-composer-lexical .ghostex-chat-reference-pill,
 .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill {
   background: none;
   border: 0;
@@ -1902,7 +1906,7 @@ so the swap barely moves the composer row.
   transition: none;
 }
 
-.ghostex-chat-composer-monaco .ghostex-chat-reference-pill::before,
+.ghostex-chat-composer-lexical .ghostex-chat-reference-pill::before,
 .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill::before,
 .ghostex-chat-markdown .ghostex-chat-reference-pill::before {
   background: color-mix(in srgb, var(--ghostex-chat-reference-outline) 55%, var(--muted-foreground));
@@ -1914,7 +1918,7 @@ so the swap barely moves the composer row.
   width: 11px;
 }
 
-.ghostex-chat-composer-monaco .ghostex-chat-reference-pill::before,
+.ghostex-chat-composer-lexical .ghostex-chat-reference-pill::before,
 .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill::before {
   background: currentColor;
   height: 1em;
@@ -1925,7 +1929,7 @@ so the swap barely moves the composer row.
   width: 1em;
 }
 
-.ghostex-chat-composer-monaco .ghostex-chat-reference-pill:hover,
+.ghostex-chat-composer-lexical .ghostex-chat-reference-pill:hover,
 .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill:hover {
   background: none;
   text-decoration-line: underline;
@@ -1934,9 +1938,9 @@ so the swap barely moves the composer row.
   text-underline-offset: 0.18em;
 }
 
-.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-composer-monaco .ghostex-chat-reference-pill,
+.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-composer-lexical .ghostex-chat-reference-pill,
 .ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill,
-.ghostex-chat-composer-monaco .monaco-editor.vs-dark .ghostex-chat-reference-pill {
+.ghostex-chat-composer-lexical[data-editor-theme='dark'] .ghostex-chat-reference-pill {
   color: color-mix(in srgb, var(--ghostex-chat-reference-outline) 72%, white 28%);
 }
 
@@ -1953,14 +1957,14 @@ so the swap barely moves the composer row.
   outline: none;
 }
 
-.ghostex-chat-composer-monaco .ghostex-chat-reference-pill--image,
+.ghostex-chat-composer-lexical .ghostex-chat-reference-pill--image,
 .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill--image,
 .ghostex-chat-markdown .ghostex-chat-reference-pill--image {
   --ghostex-chat-reference-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 8h.01'/%3E%3Cpath d='M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z'/%3E%3Cpath d='m3 16 5-5c.928-.893 2.072-.893 3 0l5 5'/%3E%3Cpath d='m14 14 1-1c.928-.893 2.072-.893 3 0l3 3'/%3E%3C/svg%3E");
   --ghostex-chat-reference-outline: #5f9878;
 }
 
-.ghostex-chat-composer-monaco .ghostex-chat-reference-pill--file,
+.ghostex-chat-composer-lexical .ghostex-chat-reference-pill--file,
 .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill--file,
 .ghostex-chat-markdown .ghostex-chat-reference-pill--file,
 .ghostex-chat-markdown .ghostex-chat-markdown-file-chip {
@@ -1968,14 +1972,14 @@ so the swap barely moves the composer row.
   --ghostex-chat-reference-outline: #6c819b;
 }
 
-.ghostex-chat-composer-monaco .ghostex-chat-reference-pill--folder,
+.ghostex-chat-composer-lexical .ghostex-chat-reference-pill--folder,
 .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill--folder,
 .ghostex-chat-markdown .ghostex-chat-reference-pill--folder {
   --ghostex-chat-reference-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/%3E%3C/svg%3E");
   --ghostex-chat-reference-outline: #9a835b;
 }
 
-.ghostex-chat-composer-monaco .ghostex-chat-reference-pill--skill,
+.ghostex-chat-composer-lexical .ghostex-chat-reference-pill--skill,
 .ghostex-chat-composer-plain-input .ghostex-chat-reference-pill--skill,
 .ghostex-chat-markdown .ghostex-chat-reference-pill--skill {
   --ghostex-chat-reference-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m12 3-1.9 5.1L5 10l5.1 1.9L12 18l1.9-5.1L19 11l-5.1-1.9z'/%3E%3Cpath d='M5 3v4'/%3E%3Cpath d='M3 5h4'/%3E%3Cpath d='M19 17v4'/%3E%3Cpath d='M17 19h4'/%3E%3C/svg%3E");
@@ -1984,41 +1988,16 @@ so the swap barely moves the composer row.
 
 /*
 CDXC:SessionChat 2026-09-04 DECISION:
-User: the chat box's input scrollbar is hidden unless the pointer is over the
-chat box, and it sits very close to the box's right edge. The composer pads
-its content by 1rem, so both input backends reach 0.75rem further right than
-the row and hand that strip to the scrollbar: the 3px slider ends up 4px in
-from the border while the text keeps its old wrap width. Monaco draws the
-slider inline-positioned inside a 15px scrollbar track (`verticalScrollbarSize`
-in session-chat-monaco-input.tsx reserves the strip for wrapping,
-`verticalSliderSize` keeps the slider 3px), so the slider is pinned to the
-track's right edge here. Visibility is driven by the composer box, not by
-Monaco's own editor hover, so hovering the pills row shows it too.
+User: the chat box's input scrollbar is hidden unless the pointer is over the chat box, and it sits very close to the box's right edge.
+This remains the plain input's behavior; the user's 2026-09-08 scroll-only Lexical scrollbar decision is in session-chat-lexical/input.css.
+The plain input extends 0.75rem into the composer's padding, keeping its 3px thumb near the border and preserving the text's wrap width.
 */
-.ghostex-chat-composer-monaco {
-  margin-right: -0.75rem;
-}
-
-.ghostex-chat-composer-monaco .monaco-scrollable-element > .scrollbar.vertical > .slider {
-  left: auto !important;
-  right: 0;
-}
-
-.ghostex-chat-composer-monaco .monaco-scrollable-element > .scrollbar.vertical {
-  transition: opacity 0.2s ease;
-}
-
-.ghostex-chat-composer:not(:hover) .ghostex-chat-composer-monaco .monaco-scrollable-element > .scrollbar.vertical {
-  opacity: 0;
-}
-
 .ghostex-chat-composer-plain-input {
   margin-right: -0.75rem;
   padding-right: 0.75rem;
 }
 
-/* 3px scrollbar in the chat input (the Monaco backend gets the same width via
-   verticalSliderSize). */
+/* The plain input retains its 3px thumb. */
 .ghostex-chat-composer-input::-webkit-scrollbar {
   width: 3px;
 }
@@ -2058,6 +2037,7 @@ Monaco's own editor hover, so hovering the pills row shows it too.
    scroll (the message list stamps data-user-scrolling). Autoscroll following
    live output never shows it. */
 [data-slot='message-scroller-viewport'] {
+  scrollbar-gutter: stable both-edges;
   scrollbar-color: transparent transparent;
   transition: scrollbar-color 0.4s ease;
 }
@@ -2747,7 +2727,7 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   width: 1em;
 }
 
-/* File-like references belong to the prose here, not to the compact Monaco
+/* File-like references belong to the prose here, not to the compact composer
    editing model. Keep their type colour and icon, but make the clickable text
    read exactly like the transcript's ordinary links instead of a nested UI
    control with its own surface, border, radius, typeface, and text size. */
@@ -2875,14 +2855,6 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   width: 3rem;
 }
 
-/* CDXC:Sidebar forces `cursor: default !important` on every button so app
-   chrome keeps the arrow. A picture in the transcript is content, not chrome,
-   and its only affordance for "click to see it full size" is the cursor — so
-   the zoomable image opts back out, scoped to the chat. */
-.ghostex-chat-inline-image-button {
-  cursor: zoom-in !important;
-}
-
 .ghostex-chat-inline-image {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -2942,20 +2914,6 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   max-height: 75vh;
   max-width: 90vw;
   object-fit: contain;
-}
-
-/* The picture toggles between that fitted size and 1:1 on click, and the cursor
-   is the whole affordance for it, so it names what the next click will do. An
-   `img` is content rather than chrome, so the app-wide
-   `button { cursor: default !important }` never reaches it and no override is
-   needed. `data-zoom="none"` is a picture already at full size: plain arrow,
-   because clicking it does nothing. */
-.ghostex-chat-image-preview[data-zoom='in'] {
-  cursor: zoom-in;
-}
-
-.ghostex-chat-image-preview[data-zoom='out'] {
-  cursor: zoom-out;
 }
 
 /* Zoomed: the level's width is set inline and the height follows the aspect
@@ -3036,6 +2994,38 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
    every row sizes itself, so the columns stop lining up and the header stops
    describing what is under it. Here the table stays a table and the wrapper
    scrolls. */
+/* CDXC:SessionChat 2026-09-08 DECISION:
+ * User: add a button to view transcript tables in a popup, like Mermaid diagrams.
+ */
+.gx-app-modal.ghostex-chat-table-modal {
+  display: flex;
+  flex-direction: column;
+  height: min(912px, 90dvh);
+  max-height: min(912px, 90dvh);
+  min-width: 0;
+}
+
+.app-modal-host-native-window-body .gx-app-modal.ghostex-chat-table-modal {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.app-modal-host-native-window-body[data-app-modal-fixed-window='true'] .ghostex-chat-table-modal [data-slot='dialog-close'] {
+  display: inline-flex;
+}
+
+.ghostex-chat-table-modal-content {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+.ghostex-chat-table-modal-content .ghostex-chat-markdown-table-actions {
+  opacity: 1;
+}
+
 .ghostex-chat-markdown-table {
   container-type: inline-size;
   max-width: 100%;
@@ -3056,6 +3046,64 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
+}
+
+/* CDXC:SessionChat 2026-09-07 DECISION:
+ * User: hovering a transcript table should reveal its horizontal scrollbar when it overflows, across apps.
+ * Explicit Chromium scrollbar geometry overrides the shared hidden-scrollbar reset and macOS overlay auto-hiding.
+ */
+.ghostex-chat-markdown-table-scroll {
+  scrollbar-color: transparent transparent;
+}
+
+.ghostex-chat-markdown-table:is(:hover, :focus-within) .ghostex-chat-markdown-table-scroll {
+  scrollbar-color: color-mix(in srgb, var(--foreground) 35%, transparent) transparent;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .ghostex-chat-markdown-table-scroll {
+    scrollbar-color: auto;
+    scrollbar-width: auto;
+  }
+
+  .ghostex-chat-markdown-table:is(:hover, :focus-within) .ghostex-chat-markdown-table-scroll {
+    scrollbar-color: auto;
+  }
+
+  .ghostex-chat-markdown-table-scroll::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+    width: 6px;
+  }
+
+  .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 999px;
+  }
+
+  .ghostex-chat-markdown-table:is(:hover, :focus-within) .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--foreground) 35%, transparent);
+  }
+}
+
+@media (hover: none) {
+  .ghostex-chat-markdown-table-scroll {
+    scrollbar-color: color-mix(in srgb, var(--foreground) 35%, transparent) transparent;
+  }
+
+  @supports selector(::-webkit-scrollbar) {
+    .ghostex-chat-markdown-table-scroll {
+      scrollbar-color: auto;
+    }
+
+    .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--foreground) 35%, transparent);
+    }
+  }
 }
 
 /* `min-width: max-content` is what makes the wrapper scroll instead of the
@@ -3162,7 +3210,7 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   flex-direction: column;
   gap: 0.375rem;
   justify-content: center;
-  padding: 1.5rem;
+  padding: 1.5rem 1.5rem calc(1.5rem + var(--ghostex-chat-composer-overlay, 0px));
   text-align: center;
 }
 
@@ -3187,7 +3235,8 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   flex-direction: column;
   gap: 0.875rem;
   justify-content: center;
-  padding: 1.5rem 1.5rem 0;
+  /* Centered within the space above the composer band, not the full pane. */
+  padding: 1.5rem 1.5rem var(--ghostex-chat-composer-overlay, 0px);
   text-align: center;
 }
 
