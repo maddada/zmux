@@ -21,7 +21,7 @@
   - The chat box is a new, much lighter editor. Reference pills, find and replace, go to line, soft wrap, and full keyboard editing all stay, and chats no longer download a large code editor to show you a text box.
   - The model and effort picker is now its own window, so you can call it up from terminal view as well as chat, and your choice is retried automatically when the agent is busy.
   - The Resources panel lists every project on its own instead of bundling them into "Other projects", and you can close a session straight from the panel.
-  - Ghostex reveals the session you activated in the sidebar - switching Space, expanding its project and group, and scrolling to it - however you activated it.
+  - However you activate a session, Ghostex now reveals it in the sidebar: it switches Space, expands the project and group, and scrolls the session into view.
 
 - Minor Improvements
 
