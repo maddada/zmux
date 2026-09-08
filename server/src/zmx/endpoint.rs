@@ -777,6 +777,24 @@ impl ZmxQueuedSessionMessage {
     submitted. The clear burst obeys the same rule for the same reason.
     */
     fn steps(&self) -> Vec<crate::session_chat_send::SessionChatSendStep> {
+        if crate::session_chat_composer::session_chat_composer_agent_id(&self.session).as_deref()
+            == Some("grok")
+        {
+            let mut steps = crate::session_chat_send::build_session_chat_message_steps(
+                Some("grok"),
+                &self.text,
+                &[],
+                false,
+            );
+            let submit = steps.pop();
+            if self.submit {
+                steps.push(crate::session_chat_send::SessionChatSendStep::SleepMs(
+                    self.send_delay_ms,
+                ));
+                steps.extend(submit);
+            }
+            return steps;
+        }
         let mut steps =
             crate::session_chat_send::build_agent_tui_clear_input_steps(None, &self.text);
         steps.push(crate::session_chat_send::SessionChatSendStep::Write(

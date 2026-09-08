@@ -21,7 +21,8 @@ what a signature matches. Three outcomes, and the middle one is the whole point:
   - `NotReady` — the agent HAS a known signature and it is absent, so something
                  else owns the screen. Refuse the send.
   - `Unknown`  — no signature for this agent, or the screen could not be read.
-                 FAIL OPEN: every caller proceeds, because a detector that
+                 FAIL OPEN for unmeasured agents; Grok requires positive evidence.
+                 Other callers proceed, because a detector that
                  cannot see must never be the thing that blocks a message.
 
 Signatures were measured on 2026-08-26 against live CLIs, in three states each
@@ -53,6 +54,10 @@ use crate::paths::GxserverPaths;
 use crate::session_chat_notice::SessionChatTerminalNotice;
 use crate::session_chat_options::{normalize_spaces, strip_ansi_sgr};
 use crate::storage::open_gxserver_database;
+
+#[path = "session_chat_composer_input.rs"]
+mod input;
+pub use input::{claude_composer_draft, session_chat_composer_input, SessionChatComposerInput};
 
 /// Non-blank lines kept from the bottom of a capture. Wide enough to hold
 /// opencode's mid-screen composer plus the banner above it on an 80x24 pane,
@@ -114,6 +119,14 @@ pub struct SessionChatComposerReadiness {
 }
 
 impl SessionChatComposerReadiness {
+    /// CDXC:SessionChat 2026-09-08 DECISION:
+    /// User: do not send while Grok is not ready. Missing capture evidence must hold its message just like a missing input box.
+    pub fn blocks_message_for(&self, agent_id: Option<&str>) -> bool {
+        self.is_not_ready()
+            || (normalize_agent_id(agent_id).as_deref() == Some("grok")
+                && self.state != SessionChatComposerState::Ready)
+    }
+
     pub fn is_not_ready(&self) -> bool {
         self.state == SessionChatComposerState::NotReady
     }
@@ -391,34 +404,15 @@ sandwich. Used by the returned-prompt detector, which compares this against
 the message it just sent.
 */
 pub fn claude_composer_input_text(screen_text: &str) -> Option<String> {
-    const CLAUDE_COMPOSER_MAX_ROWS: usize = 40;
-    let lines = composer_lines(screen_text);
-    let foot = (0..lines.len())
-        .rev()
-        .find(|&index| is_horizontal_rule(&lines[index]))?;
-    let head = (foot.saturating_sub(CLAUDE_COMPOSER_MAX_ROWS)..foot)
-        .rev()
-        .find(|&index| is_titled_horizontal_rule(&lines[index]))?;
-    let inner = &lines[head + 1..foot];
-    let first = inner.first()?;
-    if !is_marker_line(first, '\u{276f}') {
-        return None;
-    }
-    let mut text = first
-        .trim()
-        .trim_start_matches('\u{276f}')
-        .trim()
-        .to_string();
-    for line in &inner[1..] {
-        text.push(' ');
-        text.push_str(line.trim());
-    }
-    let text = text.trim().to_string();
-    (!text.is_empty()).then_some(text)
+    claude_composer_draft(screen_text).filter(|text| !text.is_empty())
 }
 
 /// The text inside Grok Build's boxed `❯` composer, including wrapped rows.
 pub fn grok_composer_input_text(screen_text: &str) -> Option<String> {
+    grok_composer_draft(screen_text).filter(|text| !text.is_empty())
+}
+
+pub(super) fn grok_composer_draft(screen_text: &str) -> Option<String> {
     let lines = composer_lines(screen_text);
     let start = lines
         .iter()
@@ -442,7 +436,7 @@ pub fn grok_composer_input_text(screen_text: &str) -> Option<String> {
             parts.push(text);
         }
     }
-    (!parts.is_empty()).then(|| parts.join(" "))
+    Some(parts.join(" "))
 }
 
 /// Display rows for terminal-preview clients, OLDEST FIRST.
@@ -606,11 +600,7 @@ fn signature_matches(signature: ComposerSignature, lines: &[String]) -> bool {
         // and spans the pane) and only the top rule is allowed to be the
         // titled kind.
         ComposerSignature::RuleSandwich { marker } => {
-            (0..lines.len().saturating_sub(2)).rev().any(|index| {
-                is_horizontal_rule(&lines[index + 2])
-                    && is_marker_line(&lines[index + 1], marker)
-                    && is_titled_horizontal_rule(&lines[index])
-            })
+            input::rule_input_region(lines, marker).is_some()
         }
         ComposerSignature::ProfiledRuleSandwich { marker } => {
             (0..lines.len().saturating_sub(2)).rev().any(|index| {
@@ -795,28 +785,43 @@ pub async fn wait_for_session_chat_composer(
     }
     let started = Instant::now();
     tokio::time::sleep(Duration::from_millis(policy.settle_ms)).await;
-    let mut last_not_ready: Option<SessionChatComposerReadiness> = None;
+    let grok = normalize_agent_id(agent_id).as_deref() == Some("grok");
+    let mut last_not_ready = grok.then(|| {
+        SessionChatComposerReadiness::not_ready(
+            "Waiting for a readable Grok input box before sending.".to_string(),
+            Vec::new(),
+        )
+    });
     loop {
         if cancelled() {
             return SessionChatComposerWait::Cancelled;
         }
         match crate::session_chat_send::capture_session_terminal_text(zmx_name).await {
             Some(screen) => {
-                let readiness = detect_session_chat_composer_ready(agent_id, &screen);
+                let notice = grok
+                    .then(|| {
+                        crate::session_chat_notice::classify_session_chat_terminal_notice(
+                            agent_id, &screen,
+                        )
+                    })
+                    .flatten();
+                let readiness =
+                    detect_session_chat_composer_readiness(agent_id, &screen, notice.as_ref());
                 match readiness.state {
                     SessionChatComposerState::Ready => return SessionChatComposerWait::Ready,
                     SessionChatComposerState::NotReady => last_not_ready = Some(readiness),
                     SessionChatComposerState::Unknown => {
-                        if started.elapsed() >= Duration::from_millis(policy.unknown_hold_ms) {
+                        if !grok
+                            && started.elapsed() >= Duration::from_millis(policy.unknown_hold_ms)
+                        {
                             return SessionChatComposerWait::Unknown;
                         }
                     }
                 }
             }
             None => {
-                // Unreadable screen is an Unknown like any other: it must not
-                // be mistaken for "the composer is absent".
-                if started.elapsed() >= Duration::from_millis(policy.unknown_hold_ms) {
+                // Grok needs positive evidence even when the capture is unavailable.
+                if !grok && started.elapsed() >= Duration::from_millis(policy.unknown_hold_ms) {
                     return SessionChatComposerWait::Unknown;
                 }
             }

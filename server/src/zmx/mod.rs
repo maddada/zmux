@@ -1,5 +1,6 @@
 pub mod endpoint;
 pub mod env;
+mod grok_startup;
 pub mod launch;
 pub mod probe_cache;
 pub mod process_identity;

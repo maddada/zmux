@@ -154,11 +154,19 @@ pub const AGENT_TUI_CLEAR_LINE_SLACK: usize = 8;
 pub const AGENT_TUI_CLEAR_MAX_LINES: usize = 40;
 const SESSION_CHAT_DRAFT_PRESERVE_TIMEOUT: Duration = Duration::from_secs(16);
 const SESSION_CHAT_PROMPT_EDITOR_INPUT: &str = "\u{7}";
-const SESSION_CHAT_GROK_PROMPT_EDITOR_INPUT: &str = "\u{10}editor\r";
+const SESSION_CHAT_GROK_PROMPT_EDITOR_INPUT: &str = "\u{10}";
 const PROMPT_STASH_REQUEST_FRESHNESS: Duration = Duration::from_secs(15);
 const BRACKETED_PASTE_START: &str = "\u{1b}[200~";
 const BRACKETED_PASTE_END: &str = "\u{1b}[201~";
 static SESSION_CHAT_DRAFT_PRESERVE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+#[path = "session_chat_grok_draft.rs"]
+mod grok_draft;
+
+#[path = "session_chat_input_replace.rs"]
+mod input_replace;
+pub use input_replace::clear_session_chat_composer;
+pub(crate) use input_replace::handle_replace_session_chat_draft_http;
 
 // Ask-answer keystrokes (upstream chat spec §8.4/§8.5).
 const ASK_ENTER: &str = "\r";
@@ -817,6 +825,9 @@ pub enum SessionChatSendStep {
         settle_ms: u64,
         timeout_ms: u64,
     },
+    ClearComposer {
+        agent: String,
+    },
     /// Hold the sequence until the session's screen proves `text` reached the
     /// agent's composer (CDXC:Clipboard). Settles `settle_ms`,
     /// then polls captures until the deadline `timeout_ms` sets. Failing this
@@ -847,7 +858,9 @@ pub enum SessionChatSendStep {
     DriveCodexModelPicker {
         job_id: u64,
     },
-    DriveClaudeModelPicker { job_id: u64 },
+    DriveClaudeModelPicker {
+        job_id: u64,
+    },
 }
 
 /// The screen-watch window for a payload: a floor that covers small pastes,
@@ -889,6 +902,19 @@ pub fn build_agent_tui_clear_input_steps(
     ]
 }
 
+pub fn build_session_chat_clear_input_steps(
+    agent: Option<&str>,
+    text: &str,
+) -> Vec<SessionChatSendStep> {
+    if crate::agents::identity::normalize_agent_id(agent).as_deref() == Some("grok") {
+        vec![SessionChatSendStep::ClearComposer {
+            agent: "grok".to_string(),
+        }]
+    } else {
+        build_agent_tui_clear_input_steps(None, text)
+    }
+}
+
 /// composer wait → clear burst → 150ms settle → image pastes back-to-back →
 /// (300ms settle when text follows images) → paste body → screen-verified wait
 /// → SEPARATE Enter.
@@ -910,7 +936,7 @@ pub fn build_session_chat_message_steps(
         settle_ms: SESSION_CHAT_COMPOSER_WAIT_SETTLE_MS,
         timeout_ms: SESSION_CHAT_COMPOSER_WAIT_TIMEOUT_MS,
     });
-    steps.extend(build_agent_tui_clear_input_steps(None, text));
+    steps.extend(build_session_chat_clear_input_steps(agent, text));
     for path in image_paths {
         steps.push(SessionChatSendStep::Write(
             build_session_chat_image_paste_bytes(path),
@@ -1118,6 +1144,7 @@ pub enum SessionChatSendFailure {
     screen instead of "the terminal refused the input".
     */
     ComposerNotReady,
+    ComposerNotCleared,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1340,6 +1367,8 @@ async fn run_session_chat_send_worker(
             continue; // cancelled while queued
         }
         let mut outcome = Ok(());
+        let mut composer_agent: Option<String> = None;
+        let mut clear_pending = false;
         for step in steps {
             if job_generation != generation.load(Ordering::SeqCst) {
                 outcome = Err(SessionChatSendError::not_attempted(
@@ -1347,7 +1376,42 @@ async fn run_session_chat_send_worker(
                 ));
                 break; // cancelled mid-sequence
             }
+            // The existing separate clear write and settle remain one sequence.
+            // Prove their result before any following paste or Enter can run.
+            if clear_pending && !matches!(&step, SessionChatSendStep::SleepMs(_)) {
+                if let Some(agent) = composer_agent.as_deref() {
+                    if let Err(error) = clear_session_chat_composer(
+                        &project_id,
+                        &session_id,
+                        &zmx_name,
+                        &source,
+                        agent,
+                        &|| job_generation != generation.load(Ordering::SeqCst),
+                    )
+                    .await
+                    {
+                        outcome = Err(error);
+                        break;
+                    }
+                }
+                clear_pending = false;
+            }
             match step {
+                SessionChatSendStep::ClearComposer { agent } => {
+                    if let Err(error) = clear_session_chat_composer(
+                        &project_id,
+                        &session_id,
+                        &zmx_name,
+                        &source,
+                        &agent,
+                        &|| job_generation != generation.load(Ordering::SeqCst),
+                    )
+                    .await
+                    {
+                        outcome = Err(error);
+                        break;
+                    }
+                }
                 SessionChatSendStep::GuardCodexInterrupt => {
                     let Some(screen) = capture_session_terminal_text(&zmx_name).await else {
                         outcome = Err(SessionChatSendError::not_attempted(
@@ -1383,15 +1447,14 @@ async fn run_session_chat_send_worker(
                     }
                 }
                 SessionChatSendStep::VerifyTerminalDialog { agent, id } => {
-                    let current =
-                        capture_session_terminal_text(&zmx_name)
-                            .await
-                            .and_then(|screen| {
-                                match agent.as_str() {
-                                    "claude" => crate::session_chat_claude_dialog::detect_claude_dialog(&screen),
-                                    _ => crate::session_chat_codex_dialog::detect_codex_dialog(&screen),
-                                }
-                            });
+                    let current = capture_session_terminal_text(&zmx_name).await.and_then(
+                        |screen| match agent.as_str() {
+                            "claude" => {
+                                crate::session_chat_claude_dialog::detect_claude_dialog(&screen)
+                            }
+                            _ => crate::session_chat_codex_dialog::detect_codex_dialog(&screen),
+                        },
+                    );
                     if current.is_none_or(|dialog| dialog.id != id) {
                         outcome = Err(SessionChatSendError::not_attempted(
                             "The dialog changed before the answer could be sent.".to_string(),
@@ -1460,6 +1523,9 @@ async fn run_session_chat_send_worker(
                         ));
                         break;
                     }
+                    clear_pending = composer_agent.is_some()
+                        && !payload.is_empty()
+                        && payload.chars().all(|ch| matches!(ch, '\u{15}' | '\u{b}'));
                 }
                 SessionChatSendStep::WriteFrom {
                     source: write_source,
@@ -1567,13 +1633,20 @@ async fn run_session_chat_send_worker(
                     settle_ms,
                     timeout_ms,
                 } => {
+                    composer_agent = crate::agents::identity::normalize_agent_id(agent.as_deref())
+                        .as_deref()
+                        .filter(|agent| {
+                            matches!(*agent, "claude" | "openclaude" | "codex" | "grok")
+                        })
+                        .map(str::to_string);
                     let wait = crate::session_chat_composer::wait_for_session_chat_composer(
                         &zmx_name,
                         agent.as_deref(),
                         crate::session_chat_composer::SessionChatComposerWaitPolicy {
                             settle_ms,
                             timeout_ms,
-                            // A screen this worker cannot read, or an agent with
+                            // Grok's wait requires positive readiness. For other agents,
+                            // a screen this worker cannot read, or an agent with
                             // no measured signature, releases the sequence on
                             // the FIRST probe. The send is what matters; the
                             // gate is only allowed to help.
@@ -1624,6 +1697,7 @@ async fn run_session_chat_send_worker(
                 } => {
                     let verification = verify_session_chat_paste_landed(
                         &zmx_name,
+                        composer_agent.as_deref(),
                         &text,
                         settle_ms,
                         timeout_ms,
@@ -1773,6 +1847,16 @@ pub(crate) async fn capture_session_terminal_text(zmx_name: &str) -> Option<Stri
     (!capture.truncated).then_some(capture.text)
 }
 
+pub(crate) async fn capture_session_terminal_text_vt(zmx_name: &str) -> Option<String> {
+    let name = zmx_name.to_string();
+    let capture =
+        tokio::task::spawn_blocking(move || crate::zmx::read_zmx_session_screen_capture_vt(&name))
+            .await
+            .ok()?
+            .ok()?;
+    (!capture.truncated).then_some(capture.text)
+}
+
 /*
 CDXC:Clipboard 2026-08-24:
 The screen watch that stands between a paste body and its Enter. It settles
@@ -1783,13 +1867,13 @@ supported agent collapses large pastes, each with its own spelling) — is on
 screen, the deadline passed, or the send was superseded. "Pasting text…" is the TUI saying ingestion is still running,
 which buys one deadline extension rather than an abort.
 
-Absence is only ever reported from a screen that was actually readable. When
-every capture failed or came back truncated the observation channel is what is
-broken, not the send, and the caller submits with a warn record instead of
-destroying a message on evidence it does not have.
+Claude, Codex and Grok verify only the live composer after its old draft was cleared.
+They require evidence before Enter, including when capture fails. Other agents
+retain their existing whole-screen watch and unreadable-capture behavior.
 */
 async fn verify_session_chat_paste_landed(
     zmx_name: &str,
+    agent: Option<&str>,
     text: &str,
     settle_ms: u64,
     timeout_ms: u64,
@@ -1805,7 +1889,29 @@ async fn verify_session_chat_paste_landed(
         if job_generation != generation.load(Ordering::SeqCst) {
             return SessionChatPasteVerification::Cancelled;
         }
-        if let Some(screen) = capture_session_terminal_text(zmx_name).await {
+        let capture = if let Some(agent) = agent {
+            capture_session_terminal_text_vt(zmx_name)
+                .await
+                .map(|screen| {
+                    let pasting = normalize_session_chat_screen_text(
+                        &crate::session_chat_options::strip_ansi_sgr(&screen),
+                    )
+                    .contains(SESSION_CHAT_PASTING_INDICATOR_NEEDLE);
+                    let body =
+                        crate::session_chat_composer::session_chat_composer_input(agent, &screen)
+                            .filter(|input| !input.is_empty())
+                            .map(|input| input.text)
+                            .unwrap_or_default();
+                    (body, pasting)
+                })
+        } else {
+            capture_session_terminal_text(zmx_name).await.map(|screen| {
+                let pasting = normalize_session_chat_screen_text(&screen)
+                    .contains(SESSION_CHAT_PASTING_INDICATOR_NEEDLE);
+                (screen, pasting)
+            })
+        };
+        if let Some((screen, pasting)) = capture {
             readable = true;
             let normalized = normalize_session_chat_screen_text(&screen);
             if normalized
@@ -1815,7 +1921,7 @@ async fn verify_session_chat_paste_landed(
             {
                 return SessionChatPasteVerification::Landed;
             }
-            if !extended && normalized.contains(SESSION_CHAT_PASTING_INDICATOR_NEEDLE) {
+            if !extended && pasting {
                 extended = true;
                 deadline += Duration::from_millis(SESSION_CHAT_VERIFY_PASTING_EXTENSION_MS);
             }
@@ -1826,6 +1932,9 @@ async fn verify_session_chat_paste_landed(
         tokio::time::sleep(Duration::from_millis(SESSION_CHAT_VERIFY_POLL_MS)).await;
     }
     if readable {
+        SessionChatPasteVerification::Absent
+    } else if agent.is_some() {
+        // A checked replacement cannot submit without evidence of its new body.
         SessionChatPasteVerification::Absent
     } else {
         SessionChatPasteVerification::Unreadable
@@ -2003,6 +2112,15 @@ async fn run_terminal_draft_capture(
     prompt_editor_input: &str,
     cancellation: Option<(&AtomicU64, u64)>,
 ) -> Result<CapturedTerminalDraft, String> {
+    if prompt_editor_input == SESSION_CHAT_GROK_PROMPT_EDITOR_INPUT {
+        let screen = capture_session_terminal_text(zmx_name).await;
+        if !screen
+            .as_deref()
+            .is_some_and(grok_draft::has_capturable_draft)
+        {
+            return Ok(CapturedTerminalDraft::default());
+        }
+    }
     let request_id = format!(
         "chat-{}-{}",
         std::process::id(),
@@ -2049,15 +2167,21 @@ async fn run_terminal_draft_capture(
         "session-chat-preserve-draft",
         prompt_editor_input,
     );
-    let zmx_name_owned = zmx_name.to_string();
-    let prompt_editor_input = prompt_editor_input.to_string();
-    let delivered = tokio::task::spawn_blocking(move || {
-        crate::zmx::session_chat_zmx_write(&zmx_name_owned, &prompt_editor_input)
-    })
-    .await;
-    if !matches!(delivered, Ok(Ok(_))) {
+    let delivered = if prompt_editor_input == SESSION_CHAT_GROK_PROMPT_EDITOR_INPUT {
+        grok_draft::open_editor(project_id, session_id, zmx_name, cancellation).await
+    } else {
+        let zmx_name_owned = zmx_name.to_string();
+        let prompt_editor_input = prompt_editor_input.to_string();
+        tokio::task::spawn_blocking(move || {
+            crate::zmx::session_chat_zmx_write(&zmx_name_owned, &prompt_editor_input)
+        })
+        .await
+        .unwrap_or_else(|_| Err("The terminal draft capture worker stopped.".to_string()))
+        .map(|_| ())
+    };
+    if let Err(message) = delivered {
         let _ = fs::remove_file(&marker_path);
-        return Err("The terminal could not start preserving its current draft.".to_string());
+        return Err(message);
     }
 
     let started = std::time::Instant::now();
@@ -2751,14 +2875,36 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
         .and_then(Value::as_str)
         .unwrap_or_default();
     if kind == "terminalDialog" {
-        let agent = crate::session_chat_options::session_chat_option_agent(session_chat_agent_for_session(&target.session).as_deref());
+        let agent = crate::session_chat_options::session_chat_option_agent(
+            session_chat_agent_for_session(&target.session).as_deref(),
+        );
         let (agent_name, result) = match agent {
-            Some(crate::session_chat_options::SessionChatOptionAgent::Codex) => ("codex", crate::session_chat_codex_dialog::answer_codex_dialog(&target, &params).await),
-            Some(crate::session_chat_options::SessionChatOptionAgent::Claude) => ("claude", crate::session_chat_claude_dialog::answer_claude_dialog(&target, &params).await),
-            _ => return domain_error_response(endpoint_path, request_id, DomainStateError { code: "invalidParams", message: "This agent does not offer terminal dialogs.".to_string() }),
+            Some(crate::session_chat_options::SessionChatOptionAgent::Codex) => (
+                "codex",
+                crate::session_chat_codex_dialog::answer_codex_dialog(&target, &params).await,
+            ),
+            Some(crate::session_chat_options::SessionChatOptionAgent::Claude) => (
+                "claude",
+                crate::session_chat_claude_dialog::answer_claude_dialog(&target, &params).await,
+            ),
+            _ => {
+                return domain_error_response(
+                    endpoint_path,
+                    request_id,
+                    DomainStateError {
+                        code: "invalidParams",
+                        message: "This agent does not offer terminal dialogs.".to_string(),
+                    },
+                )
+            }
         };
         crate::session_chat_options::SessionChatOptionDetector::new(state)
-            .detect(&target.project_id, &target.session_id, Some(agent_name), true)
+            .detect(
+                &target.project_id,
+                &target.session_id,
+                Some(agent_name),
+                true,
+            )
             .await;
         crate::session_chat_options::session_chat_terminal_notice_publisher(
             state,
@@ -2957,26 +3103,27 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
                 );
             };
             let agent = session_chat_agent_for_session(&target.session);
-            let answer_key = crate::session_chat_send::capture_session_terminal_text(&target.zmx_name)
-                .await
-                .as_deref()
-                .and_then(|text| {
-                    if crate::session_chat_options::session_chat_option_agent(agent.as_deref())
-                        == Some(crate::session_chat_options::SessionChatOptionAgent::Pi)
-                    {
-                        crate::session_chat_pi_blocking::pi_trust_answer_key(text, choice_index)
-                    } else {
-                        crate::session_chat_workspace_trust::workspace_trust_answer_key(
-                            agent.as_deref(),
-                            text,
-                            choice_index,
-                        )
-                        .or_else(|| {
-                            crate::session_chat_resume_prompt::detect_session_chat_terminal_picker(text)
-                                .and_then(|picker| picker.answer_key(choice_index))
-                        })
-                    }
-                });
+            let answer_key =
+                crate::session_chat_send::capture_session_terminal_text(&target.zmx_name)
+                    .await
+                    .as_deref()
+                    .and_then(|text| {
+                        if crate::session_chat_options::session_chat_option_agent(agent.as_deref())
+                            == Some(crate::session_chat_options::SessionChatOptionAgent::Pi)
+                        {
+                            crate::session_chat_pi_blocking::pi_trust_answer_key(text, choice_index)
+                        } else {
+                            crate::session_chat_workspace_trust::workspace_trust_answer_key(
+                        agent.as_deref(),
+                        text,
+                        choice_index,
+                    )
+                    .or_else(|| {
+                        crate::session_chat_resume_prompt::detect_session_chat_terminal_picker(text)
+                            .and_then(|picker| picker.answer_key(choice_index))
+                    })
+                        }
+                    });
             let Some(answer_key) = answer_key else {
                 return domain_error_response(
                     endpoint_path,
@@ -3047,8 +3194,8 @@ the agent's prompt-editor handshake, which parks the draft in Saved Prompts;
 this reads that row back and (when this capture created it) removes it again, so
 a transfer leaves no residue in the user's Saved Prompts list.
 
-Grok Build binds Ctrl+G to its Tasks pane, so its capture opens the editor from
-the command palette with Ctrl+P, `editor`, Enter instead.
+Grok Build binds Ctrl+G to its Tasks pane, so its capture opens the editor through
+the verified command-palette handshake in session_chat_grok_draft.rs.
 */
 
 /*
@@ -3278,7 +3425,8 @@ pub(crate) fn handle_interrupt_session_chat_http(
     // concerned: it ends the hook-backed working claim the way the
     // terminal-pane Escape key does (see the escape branch in
     // session_status.rs), because no agent hook reports an interrupted turn.
-    let _ = crate::accounts::recovery::user_action(state, &target.project_id, &target.session_id, true);
+    let _ =
+        crate::accounts::recovery::user_action(state, &target.project_id, &target.session_id, true);
     let mut escape_params = Map::new();
     escape_params.insert("projectId".to_string(), json!(target.project_id));
     escape_params.insert("sessionId".to_string(), json!(target.session_id));

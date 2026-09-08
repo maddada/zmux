@@ -239,6 +239,20 @@ pub(crate) fn start_session_provider_with_observed_state(
         ));
     };
     let command = if should_start_with_startup_text {
+        let startup_text = startup_text.unwrap_or_default();
+        let startup_text =
+            if crate::session_chat_composer::session_chat_composer_agent_id(&probed_session)
+                .as_deref()
+                == Some("grok")
+            {
+                super::grok_startup::restart_after_update(
+                    &startup_text,
+                    &zmx.executable_path,
+                    &zmx_name,
+                )
+            } else {
+                startup_text
+            };
         build_zmx_run_command(ZmxRunCommandInput {
             cwd,
             global_session_ref: string_field(&probed_session, "globalRef"),
@@ -247,7 +261,7 @@ pub(crate) fn start_session_provider_with_observed_state(
             gxserver_protocol_version: Some(GXSERVER_PROTOCOL_VERSION),
             prompt_editor: prompt_editor_mode_from_params(params)?,
             session_name: zmx_name.clone(),
-            startup_text: startup_text.unwrap_or_default(),
+            startup_text,
             zmx_executable_path: zmx.executable_path.clone(),
         })
     } else {

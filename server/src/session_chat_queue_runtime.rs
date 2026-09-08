@@ -358,11 +358,14 @@ impl SessionChatQueueRuntime {
             every queued prompt on a session that was merely restarted, which is
             precisely the moment a queue exists to cover.
 
-            `Unknown` is not a hold. Only positive evidence that the box is
-            absent stops the drain.
+            Grok requires positive readiness; unmeasured agents retain their
+            existing Unknown behavior.
             */
             let composer = (self.composer_reader)(&project_id, &session_id);
-            if composer.is_not_ready() && !composer.should_dismiss_with_escape() {
+            if composer.blocks_message_for(
+                crate::session_chat_composer::session_chat_composer_agent_id(&session).as_deref(),
+            ) && !composer.should_dismiss_with_escape()
+            {
                 self.reset_gate(&key);
                 continue;
             }
@@ -762,7 +765,7 @@ pub(crate) async fn send_session_chat_message_with_draft(
     clients read it from /api/readSessionTerminalTail instead.
     */
     let dismiss_claude_settings = detection.composer.should_dismiss_with_escape();
-    if detection.composer.is_not_ready() && !dismiss_claude_settings {
+    if detection.composer.blocks_message_for(terminal_agent.as_deref()) && !dismiss_claude_settings {
         return Err(DomainStateError {
             code: "composerNotReady",
             message: detection
@@ -786,7 +789,7 @@ pub(crate) async fn send_session_chat_message_with_draft(
     Chat owns the terminal composer when it sends. Discard anything already
     sitting on that hidden input line instead of turning it into a user-facing
     Saved Prompt: `build_session_chat_message_steps` starts with the measured
-    Ctrl+U/Ctrl+K clear burst, settles it, and only then pastes this message.
+    agent-specific clear, verifies it where supported, and only then pastes this message.
     Terminal -> Chat view switching remains the separate, loss-safe draft
     transfer path for text the user actually wants to carry between views.
     */
@@ -869,6 +872,12 @@ pub(crate) async fn send_session_chat_message_with_draft(
         if error.cancelled() {
             return Err(DomainStateError {
                 code: "sendCancelled",
+                message: error.message,
+            });
+        }
+        if error.failure == crate::session_chat_send::SessionChatSendFailure::ComposerNotCleared {
+            return Err(DomainStateError {
+                code: "composerNotCleared",
                 message: error.message,
             });
         }
