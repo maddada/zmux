@@ -1,8 +1,8 @@
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR = '#d8d8d8';
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_DARK_FOREGROUND_COLOR = '#262626';
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR = '#040607';
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR = '#88d7ff';
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 98;
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR = '#0b0b0b';
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR = '#808080';
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 96;
 /*
  * CDXC:Theming 2026-06-28-08:01:
  * The tint scale keeps the original 95 reference so existing saved contrast
@@ -12,12 +12,15 @@ export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 98;
  * New installs used the neutral #808080 tint at 93 Background Contrast,
  * resolving to #141414 while preserving the existing calibrated scale.
  *
- * CDXC:Theming 2026-08-30:
- * New installs use ice #88d7ff at 98 Background Contrast, resolving to
- * #040607. Neutral Gray remains a swatch at #808080; it is no longer the
- * first-run default.
+ * CDXC:Theming 2026-09-08 DECISION:
+ * User: default background contrast and color must match my current settings: 96 contrast and neutral #808080 tint, resolving to #0b0b0b.
+ * This replaces the ice tint at 98 contrast default.
+ * SEE-ALSO: apps/desktop/src/app/helpers/titlebar.rs and packages/core-ui/styles/theme.css.
  */
 const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_SCALE_REFERENCE_DARKNESS_PERCENT = 95;
+// CDXC:Theming 2026-09-08 WHY:
+// Custom tint calibration must stay stable when the first-run background default changes.
+const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_CALIBRATION_COLOR = '#040607';
 export const MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 85;
 export const MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 100;
 const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARK_TINTS: ReadonlyMap<string, string> = new Map([
@@ -141,11 +144,11 @@ function getSidebarTitlebarDefaultDarkTintBackground(tint: string): SidebarTitle
 
   const color = parseSidebarTitlebarHexColor(tint);
   if (isNeutralSidebarTitlebarColor(color)) {
-    return parseSidebarTitlebarHexColor(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR);
+    return parseSidebarTitlebarHexColor(CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_CALIBRATION_COLOR);
   }
 
   const direction = normalizedSidebarTitlebarTintDirection(color);
-  const base = parseSidebarTitlebarHexColor(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR);
+  const base = parseSidebarTitlebarHexColor(CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_CALIBRATION_COLOR);
   return addSidebarTitlebarColors(base, scaleSidebarTitlebarVector(direction, 4));
 }
 
