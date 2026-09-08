@@ -373,9 +373,12 @@ export function FindPromptsView({ acceptAll, hostActions, onReady, transport }: 
         {find.loading ? (
           <IconLoader2 aria-label='Searching' className='size-3.5 animate-spin text-muted-foreground' />
         ) : null}
-        <span className='shrink-0 tabular-nums text-[11px] text-muted-foreground'>
-          {find.matched}/{find.total}
-        </span>
+        {/* CDXC:PromptSearch 2026-09-08 DECISION: Hide both result counters while loading so Search by Prompt does not display provisional 0/0 counts. */}
+        {!find.loading ? (
+          <span className='shrink-0 tabular-nums text-[11px] text-muted-foreground'>
+            {find.matched}/{find.total}
+          </span>
+        ) : null}
         <div className='hidden shrink-0 items-center gap-0.5 text-[11px] md:flex'>
           {FIND_PROMPTS_HINTS.map((hint) => {
             const state = hintState(hint.action);
@@ -430,7 +433,7 @@ export function FindPromptsView({ acceptAll, hostActions, onReady, transport }: 
               ref={viewRow.position === find.selection ? selectedRef : undefined}
             >
               <FindPromptResultRow
-                onActivate={() => void find.resumeSelected()}
+                onActivate={() => void find.resumeRow(viewRow.row)}
                 onSelect={() => find.selectRow(viewRow.position)}
                 row={viewRow.row}
                 selected={viewRow.position === find.selection}
@@ -473,9 +476,11 @@ export function FindPromptsView({ acceptAll, hostActions, onReady, transport }: 
           <>
             <div className='flex shrink-0 items-baseline gap-2 px-3 pb-1 pt-2 text-[11px] text-muted-foreground'>
               <span className='min-w-0 flex-1 truncate'>{selectedRow?.project || 'No project'}</span>
-              <span className='shrink-0 tabular-nums'>
-                {find.matched === 0 ? 0 : find.selection + 1}/{find.matched}
-              </span>
+              {!find.loading ? (
+                <span className='shrink-0 tabular-nums'>
+                  {find.matched === 0 ? 0 : find.selection + 1}/{find.matched}
+                </span>
+              ) : null}
               {find.agents.size > 0 ? <span className='shrink-0'>agents: {[...find.agents].join(',')}</span> : null}
               {find.project ? <span className='shrink-0'>project filter on</span> : null}
             </div>

@@ -56,16 +56,19 @@ export const FindPromptResultRow = memo(function FindPromptResultRow({
       )}
       data-find-row-index={row.index}
       data-selected={selected ? 'true' : undefined}
-      onDoubleClick={(event) => {
-        event.preventDefault();
-        onSelect();
-        onActivate();
-      }}
       onMouseDown={(event) => {
         // Selecting must never steal focus from the query input; the input keeps
         // every hotkey working while the pointer picks a row.
+        if (event.button !== 0) {
+          return;
+        }
         event.preventDefault();
         onSelect();
+        // Selection can scroll the row before mouseup. Handle the second press
+        // while it still targets this result, rather than waiting for dblclick.
+        if (event.detail === 2) {
+          onActivate();
+        }
       }}
       role='option'
     >

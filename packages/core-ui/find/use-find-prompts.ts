@@ -66,6 +66,7 @@ export interface FindPromptsController extends FindPromptsState {
   openOverlay(overlay: Exclude<FindPromptsOverlay, null>): void;
   openExpandedPrompt(): void;
   refresh(): void;
+  resumeRow(row: FindPromptRow): Promise<void>;
   resumeSelected(): Promise<void>;
   selectRow(index: number): void;
   selectedRow: FindPromptRow | undefined;
@@ -373,21 +374,24 @@ export function useFindPrompts({ acceptAll, transport }: UseFindPromptsOptions):
     [transport]
   );
 
-  const resumeSelected = useCallback(async () => {
-    if (!selectedRow) {
-      return;
-    }
+  const resumeRow = useCallback(async (row: FindPromptRow) => {
     try {
       const plan = await transport.resolveLaunch({
         action: 'resume',
-        key: selectedRow.key,
+        key: row.key,
         ...(acceptAll === undefined ? {} : { acceptAll }),
       });
       await applyLaunchPlan(plan);
     } catch (error) {
       setNotice({ detail: errorMessage(error), kind: 'error', message: 'Could not resume.' });
     }
-  }, [acceptAll, applyLaunchPlan, selectedRow, transport]);
+  }, [acceptAll, applyLaunchPlan, transport]);
+
+  const resumeSelected = useCallback(async () => {
+    if (selectedRow) {
+      await resumeRow(selectedRow);
+    }
+  }, [resumeRow, selectedRow]);
 
   const forkSelected = useCallback(
     async (agent: FindPromptAgent) => {
@@ -451,6 +455,7 @@ export function useFindPrompts({ acceptAll, transport }: UseFindPromptsOptions):
     projectFacets,
     query,
     refresh,
+    resumeRow,
     resumeSelected,
     rows,
     selectRow,
