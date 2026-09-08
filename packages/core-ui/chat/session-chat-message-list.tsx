@@ -47,6 +47,7 @@ import {
   useSessionChatImageViewer,
 } from './session-chat-image-viewer';
 import { normalizeSessionChatImageTranscriptMessages } from './session-chat-image-transcript-markers';
+import { normalizeSessionChatLocalCommandMessages } from './session-chat-local-command-transcript';
 import { SessionChatTerminalToolRow } from './session-chat-terminal-tool-row';
 import { isSessionChatTerminalToolMessage, sessionChatTerminalToolActivity } from './session-chat-terminal-status';
 import { Bubble, BubbleContent } from '../../components/ui/bubble';
@@ -1481,7 +1482,11 @@ export function SessionChatMessageList({
   const rendered = useMemo(
     () =>
       foldSessionChatToolMessages(
-        dropSessionChatHiddenMessages(normalizeSessionChatImageTranscriptMessages(orderSessionChatMessages(messages))),
+        dropSessionChatHiddenMessages(
+          normalizeSessionChatImageTranscriptMessages(
+            normalizeSessionChatLocalCommandMessages(orderSessionChatMessages(messages))
+          )
+        ),
         // Collapsed markers must not break a tool-fold run.
         (message) => sessionChatSuppressedTurnLabel(message) !== null
       ),
