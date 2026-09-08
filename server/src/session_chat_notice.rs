@@ -587,6 +587,19 @@ impl NoticeScreen {
                 == crate::session_chat_composer::SessionChatComposerState::Ready
     }
 
+    /// CDXC:AgentScreenDetection 2026-09-08 DECISION:
+    /// User: a later "Login successful" clears Claude's earlier login-expired warning, including a compaction failure, even while that error remains in terminal scrollback.
+    fn has_claude_login_success_after(&self, signature: &NoticeSignature) -> bool {
+        let Some(success_index) = self
+            .folded
+            .iter()
+            .rposition(|line| line.trim_start_matches('⎿').trim() == "Login successful")
+        else {
+            return false;
+        };
+        !matches_parts(&self.folded[success_index + 1..].join(" "), signature.parts)
+    }
+
     /// The newest displayed line carrying `needle`, capped. Absent when the
     /// phrase only matched across a wrap.
     fn evidence(&self, needle: &str) -> Option<String> {
@@ -942,6 +955,11 @@ const CODEX_RULES: &[NoticeRule] = &[
                 ],
                 corroborators: &[],
             },
+            NoticeSignature {
+                scope: NoticeScope::Exit,
+                parts: &[NoticePart::Text("internal error; agent loop died unexpectedly")],
+                corroborators: &[],
+            },
         ],
         actions: &[OPEN_TERMINAL],
         quote_evidence: true,
@@ -1036,6 +1054,23 @@ const CODEX_RULES: &[NoticeRule] = &[
             NoticeSignature {
                 scope: NoticeScope::Banner,
                 parts: &[NoticePart::Text("Selected model is at capacity")],
+                corroborators: &[],
+            },
+            // CDXC:AgentScreenDetection 2026-09-08 WHY:
+            // Codex's protocol/src/error.rs classifies these transport failures as retryable, but they can remain on screen after its own retries finish.
+            NoticeSignature {
+                scope: NoticeScope::Banner,
+                parts: &[NoticePart::Text("stream disconnected before completion:")],
+                corroborators: &[],
+            },
+            NoticeSignature {
+                scope: NoticeScope::Banner,
+                parts: &[NoticePart::Text("rate limit exceeded:")],
+                corroborators: &[],
+            },
+            NoticeSignature {
+                scope: NoticeScope::Banner,
+                parts: &[NoticePart::Text("request timed out")],
                 corroborators: &[],
             },
         ],
@@ -1824,6 +1859,12 @@ pub fn classify_session_chat_terminal_notice(
                 }
             }
             if agent == SessionChatOptionAgent::Claude
+                && rule.kind == SESSION_CHAT_NOTICE_LOGIN_EXPIRED
+                && screen.has_claude_login_success_after(signature)
+            {
+                return false;
+            }
+            if agent == SessionChatOptionAgent::Claude
                 && rule.kind == SESSION_CHAT_NOTICE_USAGE_LIMIT
                 && screen.has_claude_model_switch_after(signature)
             {
@@ -2154,7 +2195,8 @@ pub fn resolve_session_chat_terminal_notice(
     let suppressed = suppressed_account_usage_notices().lock().ok()
         .and_then(|notices| notices.get(&session_chat_notice_key(project_id, session_id)).cloned());
     let visible = |notice: &SessionChatTerminalNotice| {
-        notice.kind != SESSION_CHAT_NOTICE_USAGE_LIMIT || suppressed.as_deref() != Some(notice.identity().as_str())
+        (notice.kind != SESSION_CHAT_NOTICE_USAGE_LIMIT || suppressed.as_deref() != Some(notice.identity().as_str()))
+            && crate::session_chat_notice_progress::visible(project_id, session_id, notice)
     };
     merge_session_chat_terminal_notices(
         session_chat_watchdog_notice(project_id, session_id).filter(visible),

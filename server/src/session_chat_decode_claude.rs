@@ -164,6 +164,7 @@ pub(crate) fn claude_transcript_lineage_record(
             id: fallback_id.to_string(),
             parent_id: None,
             queue: Some(claude_queue_operation(record)?),
+            delivered_queue_keys: Vec::new(),
             leaf_marker: None,
         });
     }
@@ -179,6 +180,7 @@ pub(crate) fn claude_transcript_lineage_record(
             id: fallback_id.to_string(),
             parent_id: None,
             queue: None,
+            delivered_queue_keys: Vec::new(),
             leaf_marker: Some(leaf_marker),
         });
     }
@@ -186,6 +188,7 @@ pub(crate) fn claude_transcript_lineage_record(
         id: extract_string(record.get("uuid"))?,
         parent_id: extract_string(record.get("parentUuid")),
         queue: None,
+        delivered_queue_keys: claude_delivered_queue_keys(record),
         leaf_marker: None,
     })
 }
@@ -211,6 +214,32 @@ fn queued_prompt_key(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// CDXC:SessionChat 2026-09-08 DECISION:
+/// User: agent finished/stopped notifications should not appear twice in a row.
+/// CDXC:SessionChat 2026-09-08 WHY:
+/// Claude can dequeue a newer agent notification ahead of older background-command notifications, so treating its content-free `dequeue` as FIFO removes the wrong entry and leaves a duplicate queued pill.
+/// The delivered `user` row names the actual content; `queued_command` attachments already have a keyed `remove` and must not release a second identical entry.
+/// Match each delivery, not task ids globally, because a resumed agent can finish more than once.
+fn claude_delivered_queue_keys(record: &Map<String, Value>) -> Vec<String> {
+    if record.get("type").and_then(Value::as_str) != Some("user")
+        || (record.get("promptSource").and_then(Value::as_str) != Some("queued")
+            && record.get("queueSkipAttachments") != Some(&Value::Bool(true)))
+    {
+        return Vec::new();
+    }
+    let content = as_record(record.get("message")).and_then(|message| message.get("content"));
+    claude_content_blocks(content)
+        .into_iter()
+        .filter_map(|block| match block {
+            SessionChatBlock::Text { text } => {
+                let key = queued_prompt_key(&text);
+                (!key.is_empty()).then_some(key)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn claude_queue_operation(record: &Map<String, Value>) -> Option<TranscriptQueueOp> {
     let key = extract_string(record.get("content"))
         .map(|content| queued_prompt_key(&content))
@@ -219,7 +248,7 @@ fn claude_queue_operation(record: &Map<String, Value>) -> Option<TranscriptQueue
         "enqueue" => Some(TranscriptQueueOp::Enqueued {
             key: key.unwrap_or_default(),
         }),
-        "dequeue" | "remove" => Some(TranscriptQueueOp::Left { key }),
+        "remove" => Some(TranscriptQueueOp::Left { key }),
         "popAll" => Some(TranscriptQueueOp::Cleared),
         _ => None,
     }

@@ -59,7 +59,7 @@ use crate::{
     },
     session_chat_follower::session_chat_agent_for_session,
     session_chat_send::{
-        build_agent_tui_clear_input_steps, capture_session_terminal_text,
+        build_session_chat_clear_input_steps, capture_session_terminal_text,
         enqueue_session_chat_send, SessionChatSendTarget,
     },
 };
@@ -162,18 +162,50 @@ fn claim_last_chat_send(project_id: &str, session_id: &str) -> Option<LastChatSe
 
 /// A detector that found nothing gives the send back: a later Escape (or the
 /// delivery watchdog's deadline) may still be the one that returns it.
-fn release_last_chat_send(project_id: &str, session_id: &str) {
+fn release_last_chat_send(project_id: &str, session_id: &str, expected: &LastChatSend) {
     if let Ok(mut sends) = last_sends().lock() {
         if let Some(send) = sends.get_mut(&store_key(project_id, session_id)) {
-            send.claimed = false;
+            if send.started_at == expected.started_at {
+                send.claimed = false;
+            }
         }
     }
 }
 
-fn take_last_chat_send(project_id: &str, session_id: &str) {
+fn take_last_chat_send(
+    project_id: &str,
+    session_id: &str,
+    expected: Option<&LastChatSend>,
+) -> bool {
     if let Ok(mut sends) = last_sends().lock() {
-        sends.remove(&store_key(project_id, session_id));
+        let key = store_key(project_id, session_id);
+        if expected.is_some_and(|expected| {
+            !sends
+                .get(&key)
+                .is_some_and(|send| send.started_at == expected.started_at)
+        }) {
+            return false;
+        }
+        return sends.remove(&key).is_some();
     }
+    false
+}
+
+/// Rewind deliberately restores an accepted prompt; it must not look like an interrupted unsent send to an older screen probe.
+pub(crate) fn cancel_returned_prompt_detection(project_id: &str, session_id: &str) {
+    take_last_chat_send(project_id, session_id, None);
+}
+
+fn send_is_current(project_id: &str, session_id: &str, expected: &LastChatSend) -> bool {
+    last_sends()
+        .lock()
+        .ok()
+        .and_then(|sends| {
+            sends
+                .get(&store_key(project_id, session_id))
+                .map(|send| send.started_at == expected.started_at)
+        })
+        .unwrap_or(false)
 }
 
 /*
@@ -419,6 +451,29 @@ fn transcript_row_for_send(
     messages: &[SessionChatMessage],
     send: &LastChatSend,
 ) -> Result<Option<String>, ()> {
+    // A reply after this send proves acceptance even if a rewind later paints
+    // the same prompt in the composer. Inspect the matching user row, not just
+    // the final row, which can be an assistant response or tool result.
+    let sent = normalize_screen_text(&send.text);
+    let matches_send = |message: &SessionChatMessage| {
+        let recorded = normalize_screen_text(&message_text(message));
+        message.role == SessionChatRole::User
+            && message.source == SessionChatSource::Transcript
+            && !recorded.is_empty()
+            && !sent.is_empty()
+            && (recorded.starts_with(&sent) || sent.starts_with(&recorded))
+            && message.timestamp.map_or(true, |timestamp| {
+                timestamp >= send.sent_at_ms - RETURNED_PROMPT_ROW_SLACK_MS
+            })
+    };
+    if let Some(index) = messages.iter().rposition(matches_send) {
+        let message = &messages[index];
+        return if index + 1 < messages.len() || message.queued {
+            Err(())
+        } else {
+            Ok(Some(message.id.clone()))
+        };
+    }
     let Some(last) = messages.last() else {
         return Ok(None);
     };
@@ -435,18 +490,7 @@ fn transcript_row_for_send(
     if last.queued {
         return Err(());
     }
-    let recorded = normalize_screen_text(&message_text(last));
-    let sent = normalize_screen_text(&send.text);
-    let matches_text = !sent.is_empty() && recorded.starts_with(&sent)
-        || (!recorded.is_empty() && sent.starts_with(&recorded));
-    let recent = last.timestamp.map_or(true, |timestamp| {
-        timestamp >= send.sent_at_ms - RETURNED_PROMPT_ROW_SLACK_MS
-    });
-    if matches_text && recent {
-        Ok(Some(last.id.clone()))
-    } else {
-        Ok(None)
-    }
+    Ok(None)
 }
 
 fn runtime_text(session: &Value, key: &str) -> Option<String> {
@@ -497,7 +541,7 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
         return;
     };
     if send.started_at.elapsed() > LAST_CHAT_SEND_MAX_AGE {
-        take_last_chat_send(&target.project_id, &target.session_id);
+        take_last_chat_send(&target.project_id, &target.session_id, Some(&send));
         return;
     }
     let state = state.clone();
@@ -507,6 +551,9 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
     let session = target.session.clone();
     let request_id = request_id.to_string();
     tokio::spawn(async move {
+        if !send_is_current(&project_id, &session_id, &send) {
+            return;
+        }
         if !send.submitted {
             /*
             Escape landed while the send worker was still typing: the cancelled
@@ -519,7 +566,7 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
                 &session_id,
                 &zmx_name,
                 "session-chat-interrupt-clear",
-                build_agent_tui_clear_input_steps(None, &send.text),
+                build_session_chat_clear_input_steps(Some(&agent), &send.text),
             );
             log(
                 &state,
@@ -527,7 +574,7 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
                 "sessionChatInterruptCancelledSendCleared",
                 json!({ "projectId": project_id, "sessionId": session_id, "textBytes": send.text.len() }),
             );
-            take_last_chat_send(&project_id, &session_id);
+            take_last_chat_send(&project_id, &session_id, Some(&send));
             return;
         }
         tokio::time::sleep(RETURNED_PROMPT_DETECT_SETTLE).await;
@@ -535,8 +582,9 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
         let mut returned = false;
         loop {
             if let Some(capture) = capture_session_terminal_text(&zmx_name).await {
-                // Not the readiness signature: that one admits a single input
-                // row only, and a wrapped or multi-line prompt fills several.
+                if !send_is_current(&project_id, &session_id, &send) {
+                    return;
+                }
                 if let Some(composer_text) = returned_prompt_composer_text(&agent, &capture) {
                     if composer_holds_sent_text(&composer_text, &send.text) {
                         returned = true;
@@ -550,7 +598,7 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
             tokio::time::sleep(RETURNED_PROMPT_DETECT_POLL).await;
         }
         if !returned {
-            release_last_chat_send(&project_id, &session_id);
+            release_last_chat_send(&project_id, &session_id, &send);
             return;
         }
         let transcript_path: Option<PathBuf> = {
@@ -590,7 +638,7 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
                                     "sessionChatReturnedPromptRejectedByTranscript",
                                     json!({ "projectId": project_id, "sessionId": session_id }),
                                 );
-                                take_last_chat_send(&project_id, &session_id);
+                                take_last_chat_send(&project_id, &session_id, Some(&send));
                                 return;
                             }
                         }
@@ -599,11 +647,22 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
                 }
             }
         };
+        if !take_last_chat_send(&project_id, &session_id, Some(&send)) {
+            return;
+        }
         // The delivery watchdog would otherwise wake at its deadline to explain
         // a message that is deliberately back in the composer.
         crate::session_chat_watchdog::cancel_session_chat_send_watchdog(&project_id, &session_id);
-        take_last_chat_send(&project_id, &session_id);
         let entry = record_returned_prompt(&project_id, &session_id, &send, message_id.clone());
+        // Queue the clear before yielding for the activity update, so a rewind
+        // or newer send cannot finish before this old cleanup is enqueued.
+        enqueue_session_chat_send(
+            &project_id,
+            &session_id,
+            &zmx_name,
+            "session-chat-returned-prompt-clear",
+            build_session_chat_clear_input_steps(Some(&agent), &send.text),
+        );
         // Claude fires no hook for this, so nothing else ends the working claim.
         let idle_state = state.clone();
         let (idle_project_id, idle_session_id, idle_request_id) =
@@ -628,13 +687,6 @@ pub(crate) fn schedule_session_chat_returned_prompt_detection(
             &project_id,
             &session_id,
         )();
-        enqueue_session_chat_send(
-            &project_id,
-            &session_id,
-            &zmx_name,
-            "session-chat-returned-prompt-clear",
-            build_agent_tui_clear_input_steps(None, &send.text),
-        );
         log(
             &state,
             LogLevel::Info,
