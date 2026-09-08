@@ -154,6 +154,9 @@ impl GhostexGpuiApp {
                 extension_projects: HashMap::new(),
                 extension_session_details: HashMap::new(),
                 extensions_refresh_in_flight: false,
+                titlebar_accounts: Vec::new(),
+                titlebar_accounts_refresh_in_flight: false,
+                titlebar_accounts_revision: 0,
                 titlebar_tips_unread_count: TITLEBAR_TIP_IDS.len() as u64,
                 updater_started: false,
                 update_checking: false,
@@ -560,6 +563,7 @@ impl GhostexGpuiApp {
             this.start_gpui_remote_gxserver_watchdog(cx);
             this.refresh_titlebar_actions_in_background(cx);
             this.refresh_extensions_in_background(cx);
+            this.start_titlebar_account_polling(cx);
             this.refresh_gpui_command_close_after_done_timers(cx);
             let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
             this.sync_gpui_keep_awake_automation_from_settings(&settings_snapshot, cx);

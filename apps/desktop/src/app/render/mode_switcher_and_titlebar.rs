@@ -87,10 +87,15 @@ impl GhostexGpuiApp {
             .sum::<f32>();
         let use_compact_mode_dropdown = show_mode_switcher
             && window.bounds().size.width.as_f32()
-                < TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD + extension_mode_width;
+                < TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD
+                    + extension_mode_width
+                    + (self.titlebar_accounts.len() as f32 * 58.0)
+                        .min(window.bounds().size.width.as_f32() * 0.35);
         let titlebar = div()
             .id("ghostex-gpui-titlebar")
             .relative()
+            .flex()
+            .items_center()
             .flex_shrink_0()
             .w_full()
             .h(px(TITLEBAR_HEIGHT))
@@ -139,6 +144,8 @@ impl GhostexGpuiApp {
                 }))
         };
 
+        // CDXC:AgentProviders 2026-09-08 WHY:
+        // Pinned accounts can grow the right controls by several hundred pixels. Normal sibling layout reserves that width instead of placing interactive buttons over mode tabs or the project name.
         titlebar
             .on_click(|event, window, _cx| {
                 if event.click_count() != 2 {
@@ -154,17 +161,18 @@ impl GhostexGpuiApp {
                     this.show_gpui_titlebar_customize_menu(event.position, window, cx);
                 }),
             )
+            .child(self.render_project_slot(use_compact_mode_dropdown, cx))
             .child(
                 h_flex()
                     .h_full()
-                    .w_full()
+                    .flex_1()
+                    .min_w_0()
                     .items_center()
                     .justify_center()
                     .when(show_mode_switcher && !use_compact_mode_dropdown, |this| {
                         this.child(self.render_mode_switcher(cx))
                     }),
             )
-            .child(self.render_project_slot(use_compact_mode_dropdown, cx))
             .child(self.render_right_titlebar_controls(window, cx))
     }
 
@@ -179,9 +187,9 @@ impl GhostexGpuiApp {
             .and_then(|snapshot| snapshot.project_icon_data_url.as_deref())
             .and_then(gpui_project_icon_image_from_data_url);
         h_flex()
-            .absolute()
-            .left(px(TITLEBAR_PROJECT_LEFT))
-            .top(px(1.0))
+            .ml(px(TITLEBAR_PROJECT_LEFT))
+            .mt(px(1.0))
+            .flex_shrink(1.0)
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .max_w(px(620.0))
             .min_w_0()

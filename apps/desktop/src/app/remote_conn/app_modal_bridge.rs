@@ -34,6 +34,7 @@ impl GhostexGpuiApp {
         };
 
         match message_type {
+            "accountTitlebarChanged" => self.update_titlebar_account_from_ui(&message, window, cx),
             // CDXC:Settings 2026-09-06 DECISION: Account setup runs its displayed sign-in command with one click in an interactive terminal, using the existing terminal launcher.
             "accountSetup" => {
                 if message.get("machineId").and_then(serde_json::Value::as_str) != Some("local") {
@@ -953,7 +954,7 @@ fn gpui_app_modal_open_message_allowed_fields(
     modal: GpuiAppModalKind,
 ) -> Option<&'static [&'static str]> {
     match modal {
-        GpuiAppModalKind::MermaidDiagram => Some(&["source"]),
+        GpuiAppModalKind::MermaidDiagram | GpuiAppModalKind::MarkdownTable => Some(&["source"]),
         GpuiAppModalKind::RecentProjects => Some(&["machineId", "machineName"]),
         GpuiAppModalKind::SidebarSpaceEditor => Some(&[
             "memberCollectionId",

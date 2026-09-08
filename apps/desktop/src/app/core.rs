@@ -57,6 +57,8 @@ use crate::app::model::*;
 use crate::app::terminal_sync::GpuiEngineTerminalAnnouncedVisibility;
 use crate::app::window::*;
 use crate::*;
+use gpui_component::WindowExt as _;
+use gpui_component::notification::Notification;
 
 #[cfg(target_os = "linux")]
 const GPUI_LINUX_CLIENT_FRAME_WIDTH: Pixels = px(4.0);
@@ -335,6 +337,9 @@ pub struct GhostexGpuiApp {
     pub(crate) extension_projects: HashMap<String, GpuiExtensionProjectMetadata>,
     pub(crate) extension_session_details: HashMap<String, serde_json::Value>,
     pub(crate) extensions_refresh_in_flight: bool,
+    pub(crate) titlebar_accounts: Vec<serde_json::Value>,
+    pub(crate) titlebar_accounts_refresh_in_flight: bool,
+    pub(crate) titlebar_accounts_revision: u64,
     pub(crate) titlebar_tips_unread_count: u64,
     // Platform-neutral updater state drives the native titlebar. Sparkle owns
     // macOS delivery and Velopack owns Windows delivery; only the Windows
@@ -1316,6 +1321,8 @@ impl Render for GhostexGpuiApp {
         let _profile = crate::profiling::span(crate::profiling::Metric::AppRender);
         // Only the main workspace window renders this entity, so this keeps
         // the authoritative frame and display every child popup anchors against.
+        #[cfg(target_os = "macos")]
+        self.sync_terminal_model_picker_keyboard_scope();
         self.main_window_bounds = window.bounds();
         self.main_window_display_id = window.display(cx).map(|display| display.id());
         #[cfg(target_os = "windows")]
@@ -1498,6 +1505,12 @@ impl Render for GhostexGpuiApp {
                         action.action_id.as_str(),
                         cx,
                     ) {
+                        return;
+                    }
+                    if action.action_id == "openModelPicker" {
+                        if !this.request_focused_session_model_picker(cx) {
+                            cx.propagate();
+                        }
                         return;
                     }
                     this.handle_gpui_app_modal_sidebar_command(
@@ -2020,6 +2033,17 @@ impl Render for GhostexGpuiApp {
             .on_action(cx.listener(
                 |this, action: &OpenBrowserPaneInExternalBrowser, _window, _cx| {
                     this.open_browser_pane_in_external_browser(BrowserPaneId(action.pane_id));
+                },
+            ))
+            .on_action(cx.listener(
+                |_this, action: &SetBrowserPageAppearance, window, cx| {
+                    if let Err(error) = cef::set_browser_page_appearance(action.appearance) {
+                        window.push_notification(
+                            Notification::error(format!("Could not save browser appearance: {error}")),
+                            cx,
+                        );
+                    }
+                    cx.notify();
                 },
             ))
             .on_action(

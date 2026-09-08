@@ -262,6 +262,7 @@ impl GhostexGpuiApp {
         self.titlebar_dropdown_focus_handle.focus(window, cx);
         self.titlebar_extension_popup = Some(GpuiTitlebarExtensionPopupState {
             id,
+            account: false,
             trigger_bounds,
             size,
             generation,
@@ -492,8 +493,8 @@ impl GhostexGpuiApp {
                     parent_ns_view,
                     id,
                     &url,
-                    bridge_surface,
-                    event_handler,
+                    Some(bridge_surface),
+                    Some(event_handler),
                 );
                 let _ = app.update_in(&mut async_cx, |this, _window, cx| {
                     this.attach_titlebar_extension_panel(generation, id, result, cx);
@@ -502,7 +503,7 @@ impl GhostexGpuiApp {
             .detach();
     }
 
-    fn attach_titlebar_extension_panel(
+    pub(crate) fn attach_titlebar_extension_panel(
         &mut self,
         generation: u64,
         id: ExtensionId,

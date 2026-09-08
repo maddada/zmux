@@ -2,6 +2,7 @@ use crate::*;
 
 pub(crate) struct GpuiTitlebarExtensionPopupState {
     pub(crate) id: ExtensionId,
+    pub(crate) account: bool,
     pub(crate) trigger_bounds: Bounds<Pixels>,
     pub(crate) size: GpuiExtensionPopupSize,
     pub(crate) generation: u64,
@@ -18,8 +19,8 @@ impl GpuiTitlebarExtensionPanel {
         parent_ns_view: *mut std::ffi::c_void,
         extension_id: ExtensionId,
         url: &str,
-        bridge_surface: cef::ExtensionBridgeSurfaceSpec,
-        bridge_event_handler: cef::ExtensionBridgeEventHandler,
+        bridge_surface: Option<cef::ExtensionBridgeSurfaceSpec>,
+        bridge_event_handler: Option<cef::ExtensionBridgeEventHandler>,
     ) -> Result<Rc<CefBrowser>, String> {
         let id = extension_id.as_str();
         let popup_open_handler: cef::BrowserPopupOpenHandler = Rc::new(|requested_url, _| {
@@ -42,8 +43,8 @@ impl GpuiTitlebarExtensionPanel {
             None,
             None,
             None,
-            Some(bridge_surface),
-            Some(bridge_event_handler),
+            bridge_surface,
+            bridge_event_handler,
             None,
         )?);
         browser.set_visible(false);

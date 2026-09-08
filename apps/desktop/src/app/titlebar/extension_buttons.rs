@@ -26,6 +26,15 @@ use crate::*;
 
 use super::popup_menu_builders::titlebar_popup_menu_with_scroll_behavior;
 
+pub(crate) struct TitlebarBadgeButton {
+    pub id: ExtensionId,
+    pub title: String,
+    pub icon_image: std::sync::Arc<gpui::Image>,
+    pub badge_lines: Vec<String>,
+    pub indicator: Option<String>,
+    pub account: bool,
+}
+
 impl GhostexGpuiApp {
     pub(crate) fn build_gpui_titlebar_extensions_popup_menu(
         &self,
@@ -124,12 +133,36 @@ impl GhostexGpuiApp {
         let Some(extension_id) = ExtensionId::new(&extension.id) else {
             return div().size_0().into_any_element();
         };
+        self.render_titlebar_badge_button(
+            TitlebarBadgeButton {
+                id: extension_id,
+                title: extension.title,
+                icon_image: extension.icon_image,
+                badge_lines: extension.badge_lines,
+                indicator: None,
+                account: false,
+            },
+            window,
+            cx,
+        )
+    }
+
+    pub(crate) fn render_titlebar_badge_button(
+        &self,
+        button: TitlebarBadgeButton,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let extension_id = button.id;
         let open = self
             .titlebar_extension_popup
             .as_ref()
-            .is_some_and(|state| state.id == extension_id);
+            .is_some_and(|state| state.id == extension_id && state.account == button.account);
         let anchor_state = window.use_keyed_state(
-            format!("ghostex-gpui-titlebar-extension-{}-anchor", extension.id),
+            format!(
+                "ghostex-gpui-titlebar-extension-{}-anchor",
+                button.id.as_str()
+            ),
             cx,
             |_, _| GpuiTitlebarPopupAnchorState::default(),
         );
@@ -138,7 +171,7 @@ impl GhostexGpuiApp {
             .read(cx)
             .trigger_bounds_captured
             .then_some(anchor_bounds);
-        let badge_lines = extension
+        let badge_lines = button
             .badge_lines
             .iter()
             .filter(|line| !line.trim().is_empty())
@@ -151,13 +184,39 @@ impl GhostexGpuiApp {
         } else {
             TITLEBAR_BUTTON_WIDTH
         };
-        let tooltip = extension.title.clone();
-        let icon_image = extension.icon_image.clone();
+        let tooltip = button.title.clone();
+        let icon_image = button.icon_image.clone();
 
+        let icon = |size| {
+            div()
+                .relative()
+                .size(px(size))
+                .flex_shrink_0()
+                .child(img(icon_image.clone()).size_full())
+                .when_some(button.indicator.clone(), |this, indicator| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .top(px(-4.0))
+                            .left(px(-4.0))
+                            .w(px(12.0))
+                            .h(px(12.0))
+                            .rounded_full()
+                            .bg(rgb(0xffffff))
+                            .text_color(rgb(0x171717))
+                            .text_size(px(9.0))
+                            .line_height(px(12.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_center()
+                            .child(indicator),
+                    )
+                })
+        };
         div()
+            .flex_shrink_0()
             .id(format!(
                 "ghostex-gpui-titlebar-pinned-extension-{}",
-                extension.id
+                button.id.as_str()
             ))
             .relative()
             .flex()
@@ -187,12 +246,16 @@ impl GhostexGpuiApp {
                         return;
                     };
                     this.close_gpui_titlebar_popup(None, window, cx);
-                    this.launch_extension_from_titlebar(
-                        extension_id.as_str(),
-                        trigger_bounds,
-                        window,
-                        cx,
-                    );
+                    if button.account {
+                        this.open_titlebar_account_usage(extension_id, trigger_bounds, window, cx);
+                    } else {
+                        this.launch_extension_from_titlebar(
+                            extension_id.as_str(),
+                            trigger_bounds,
+                            window,
+                            cx,
+                        );
+                    }
                 }),
             )
             .when(!open, |this| {
@@ -219,20 +282,17 @@ impl GhostexGpuiApp {
             .map(|this| {
                 if show_badge {
                     this.child(
-                        h_flex()
-                            .gap(px(4.0))
-                            .child(img(icon_image).size(px(14.0)))
-                            .child(
-                                v_flex()
-                                    .text_size(px(10.5))
-                                    .line_height(px(10.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(0xb9b9b9))
-                                    .children(badge_lines),
-                            ),
+                        h_flex().gap(px(4.0)).child(icon(14.0)).child(
+                            v_flex()
+                                .text_size(px(10.5))
+                                .line_height(px(10.5))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(rgb(0xb9b9b9))
+                                .children(badge_lines),
+                        ),
                     )
                 } else {
-                    this.child(img(icon_image).size(px(18.0)))
+                    this.child(icon(18.0))
                 }
             })
             .into_any_element()

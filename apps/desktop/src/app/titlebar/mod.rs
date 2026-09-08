@@ -8,6 +8,8 @@
 // (inherent methods resolve on the type regardless of which module defines
 // them). See docs/2026-08-22/repo-restructure/SPLITS.md C1.
 pub(crate) mod action_execution;
+pub(crate) mod account_usage;
+pub(crate) mod browser_menu;
 pub(crate) mod browser_toolbar_buttons;
 pub(crate) mod dropdown_panels;
 pub(crate) mod extension_buttons;
@@ -17,6 +19,7 @@ pub(crate) mod open_targets_and_window_controls;
 pub(crate) mod popup_lifecycle;
 pub(crate) mod popup_menu_builders;
 pub(crate) mod resources_clean_ram_prompt;
+pub(crate) mod resources_session_close;
 pub(crate) mod resources_session_inventory;
 pub(crate) mod resources_session_sleep;
 pub(crate) mod resources_snapshot;

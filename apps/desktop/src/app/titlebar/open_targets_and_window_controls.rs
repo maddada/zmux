@@ -185,11 +185,20 @@ impl GhostexGpuiApp {
         let pinned_extension_buttons = self.render_titlebar_pinned_extension_buttons(window, cx);
         let show_extensions_button = !button_hidden(EXTENSIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY);
         let controls = h_flex()
-            .absolute()
-            .right_0()
-            .top(px(1.0))
+            .flex_shrink_0()
+            .mt(px(1.0))
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .items_center()
+            .when(!self.titlebar_accounts.is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .id("ghostex-titlebar-account-scroll")
+                        .max_w(px((window.bounds().size.width.as_f32() * 0.35).max(58.0)))
+                        .h_full()
+                        .overflow_x_scroll()
+                        .children(self.render_titlebar_account_buttons(window, cx)),
+                )
+            })
             .children(pinned_extension_buttons)
             .when(show_extensions_button, |this| {
                 this.child(self.render_titlebar_extensions_button(window, cx))
