@@ -781,7 +781,7 @@ static void GhostexGpuiMenuBarStatusActivateApplication(void) {
 @interface GhostexGpuiMenuBarStatusPanelController : NSObject <NSWindowDelegate>
 @property(nonatomic, copy)
     NSArray<GhostexGpuiMenuBarStatusProjectModel *> *projects;
-- (void)showFromStatusButton:(NSStatusBarButton *)button;
+- (void)toggleFromStatusButton:(NSStatusBarButton *)button;
 - (void)dismissPanel;
 @end
 
@@ -848,7 +848,17 @@ static const CGFloat GhostexGpuiMenuBarStatusProjectCardVerticalPadding = 6.0;
     _panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
                                 NSWindowCollectionBehaviorFullScreenAuxiliary |
                                 NSWindowCollectionBehaviorTransient;
-    _panel.hidesOnDeactivate = YES;
+    /*
+     CDXC:StatusPet 2026-09-08 WHY:
+     The dropdown must be presentable while another app is active; AppKit's automatic inactive-panel hiding conflicts with that lifetime.
+     Dismiss explicitly on deactivation and outside clicks instead.
+     */
+    _panel.hidesOnDeactivate = NO;
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(applicationDidResignActive:)
+               name:NSApplicationDidResignActiveNotification
+             object:NSApp];
     _panel.floatingPanel = YES;
     _panel.opaque = NO;
     _panel.releasedWhenClosed = NO;
@@ -1250,7 +1260,15 @@ static const CGFloat GhostexGpuiMenuBarStatusProjectCardVerticalPadding = 6.0;
   [_hoveredSessionRow setHovered:YES];
 }
 
-- (void)showFromStatusButton:(NSStatusBarButton *)button {
+/**
+ CDXC:StatusPet 2026-09-08 DECISION:
+ User: clicking the menu bar icon while its dropdown is open closes the dropdown.
+ */
+- (void)toggleFromStatusButton:(NSStatusBarButton *)button {
+  if (_panel.visible) {
+    [self dismissPanel];
+    return;
+  }
   _isMouseInsidePanel = NO;
   [self rebuildRows];
   CGFloat panelHeight = [self preferredPanelHeight];
@@ -1291,6 +1309,27 @@ static const CGFloat GhostexGpuiMenuBarStatusProjectCardVerticalPadding = 6.0;
   return NSMakeRect(x, y, size.width, size.height);
 }
 
+- (BOOL)isMouseOverStatusButton {
+  NSStatusBarButton *button = GhostexGpuiMenuBarStatusItem.button;
+  if (button.window == nil) {
+    return NO;
+  }
+  NSRect buttonFrame = [button.window
+      convertRectToScreen:[button convertRect:button.bounds toView:nil]];
+  return NSPointInRect(NSEvent.mouseLocation, buttonFrame);
+}
+
+/**
+ CDXC:StatusPet 2026-09-08 WHY:
+ Outside-click monitors run before the status button action, including the global monitor when macOS delivers menu bar clicks through its separate status-item host.
+ Leave primary clicks inside the actual button bounds to its action so dismissal does not immediately reopen the dropdown.
+ */
+- (BOOL)isStatusButtonToggleEvent:(NSEvent *)event {
+  return event.type == NSEventTypeLeftMouseDown &&
+         (event.modifierFlags & NSEventModifierFlagControl) == 0 &&
+         [self isMouseOverStatusButton];
+}
+
 - (void)installDismissEventMonitors {
   [self removeDismissEventMonitors];
   __weak typeof(self) weakSelf = self;
@@ -1302,7 +1341,8 @@ static const CGFloat GhostexGpuiMenuBarStatusProjectCardVerticalPadding = 6.0;
                                          *strongSelf = weakSelf;
                                      if (strongSelf &&
                                          strongSelf->_panel.visible &&
-                                         event.window != strongSelf->_panel) {
+                                         event.window != strongSelf->_panel &&
+                                         ![strongSelf isStatusButtonToggleEvent:event]) {
                                        [strongSelf dismissPanel];
                                      }
                                      return event;
@@ -1311,7 +1351,11 @@ static const CGFloat GhostexGpuiMenuBarStatusProjectCardVerticalPadding = 6.0;
       [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown |
                                                      NSEventMaskRightMouseDown
                                              handler:^(NSEvent *event) {
-                                               [weakSelf dismissPanel];
+                                               GhostexGpuiMenuBarStatusPanelController
+                                                   *strongSelf = weakSelf;
+                                               if (![strongSelf isStatusButtonToggleEvent:event]) {
+                                                 [strongSelf dismissPanel];
+                                               }
                                              }];
 }
 
@@ -1362,6 +1406,15 @@ static const CGFloat GhostexGpuiMenuBarStatusProjectCardVerticalPadding = 6.0;
 }
 
 - (void)windowDidResignKey:(NSNotification *)notification {
+  if ((NSEvent.pressedMouseButtons & 1) != 0 &&
+      (NSEvent.modifierFlags & NSEventModifierFlagControl) == 0 &&
+      [self isMouseOverStatusButton]) {
+    return;
+  }
+  [self dismissPanel];
+}
+
+- (void)applicationDidResignActive:(NSNotification *)notification {
   [self dismissPanel];
 }
 
@@ -1416,22 +1469,15 @@ static const CGFloat GhostexGpuiMenuBarStatusProjectCardVerticalPadding = 6.0;
 }
 
 - (void)statusItemClicked:(NSStatusBarButton *)sender {
-  NSEvent *event = NSApp.currentEvent;
   /*
-   CDXC:StatusPet 2026-06-26-06:29:
-   The status button is already registered for leftMouseUp, but AppKit may
-   dispatch this action after NSApp.currentEvent is nil or has moved to another
-   event. Match the Swift host by ignoring only explicit secondary-click events
-   and Control-clicks.
+   CDXC:StatusPet 2026-09-08 WHY:
+   AppKit delivers status-item actions while Ghostex is inactive, when NSApp.currentEvent may still describe an unrelated earlier event.
+   Supersedes the old currentEvent filter: the button's action mask selects primary clicks, and live modifier state identifies Control-clicks without rejecting actions because of stale events.
    */
-  if (event != nil && (event.type == NSEventTypeRightMouseDown ||
-                       event.type == NSEventTypeRightMouseUp)) {
+  if ((NSEvent.modifierFlags & NSEventModifierFlagControl) != 0) {
     return;
   }
-  if (event != nil && (event.modifierFlags & NSEventModifierFlagControl) != 0) {
-    return;
-  }
-  [self.panelController showFromStatusButton:sender];
+  [self.panelController toggleFromStatusButton:sender];
 }
 
 - (void)updateProjects:
