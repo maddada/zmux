@@ -1,5 +1,11 @@
 import * as React from 'react';
 
+/** CDXC:DesignSystem 2026-09-08 WHY:
+ * Searchable menus sit above the Quick Access modal, so nested actions such as New tag must inherit that layer before opening their own portaled form.
+ * A fixed lower z-index leaves the form visible behind the menu but prevents clicking its inputs.
+ */
+const OverlayLayerContext = React.createContext(0);
+
 /**
  * CDXC:DesignSystem 2026-05-30-08:58:
  * Expanded React dropdown surfaces should show the same visible border as
@@ -19,4 +25,4 @@ const tooltipSurfaceStyle: React.CSSProperties = {
   font: 'var(--ghostex-tooltip-font, 500 12px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif)',
 };
 
-export { overlayTooltipBorderStyle, tooltipSurfaceStyle };
+export { OverlayLayerContext, overlayTooltipBorderStyle, tooltipSurfaceStyle };

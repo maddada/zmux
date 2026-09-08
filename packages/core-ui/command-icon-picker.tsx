@@ -9,7 +9,8 @@ import {
   CommandItem,
   CommandList,
 } from '@/packages/components/ui/command';
-import { Popover, PopoverContent, PopoverTrigger } from '@/packages/components/ui/popover';
+import { SearchableDropdownContent } from '@/packages/components/ui/searchable-dropdown';
+import { Popover, PopoverTrigger } from '@/packages/components/ui/popover';
 import {
   DEFAULT_SIDEBAR_COMMAND_ICON,
   getSidebarCommandIconLabel,
@@ -79,7 +80,7 @@ export function CommandIconPicker({ icon, onIconChange }: CommandIconPickerProps
               </button>
             }
           />
-          <PopoverContent
+          <SearchableDropdownContent
             align='start'
             className='command-icon-picker-menu'
             onOpenAutoFocus={(event) => event.preventDefault()}
@@ -150,7 +151,7 @@ export function CommandIconPicker({ icon, onIconChange }: CommandIconPickerProps
                 </CommandGroup>
               </CommandList>
             </Command>
-          </PopoverContent>
+          </SearchableDropdownContent>
         </Popover>
       </div>
     </div>

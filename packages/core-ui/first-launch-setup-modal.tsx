@@ -1,3 +1,4 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/packages/components/ui/select';
 import {
   IconArrowRight,
   IconApps,
@@ -1992,8 +1993,8 @@ function FirstLaunchPreferencesPage({
             Choose the defaults that shape Ghostex.
           </h2>
           <p className='first-launch-setup-description'>
-            These are the settings most likely to affect how Ghostex feels day to day. You can change all of them later
-            from Settings.
+            These are the settings most likely to affect how Ghostex feels day to day. You can change all of
+            them later from Settings.
           </p>
         </div>
       </div>
@@ -2041,17 +2042,23 @@ function FirstLaunchPreferencesPage({
                 </span>
               </span>
             </span>
-            <select
-              className='first-launch-setup-preference-select'
-              onChange={(event) => updateSetting('defaultPromptAgentId', event.currentTarget.value)}
+            <Select
+              searchable
+              searchPlaceholder='Search agents...'
+              onValueChange={(value) => updateSetting('defaultPromptAgentId', value)}
               value={selectedDefaultPromptAgentId}
             >
-              {firstLaunchPromptAgentOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger aria-label='Default agent' className='first-launch-setup-preference-select'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {firstLaunchPromptAgentOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
           <div className='first-launch-setup-preference-usage'>
             <span className='first-launch-setup-preference-usage-title'>This agent powers</span>
@@ -2079,7 +2086,10 @@ function FirstLaunchPreferencesPage({
             <select
               className='first-launch-setup-preference-select'
               onChange={(event) =>
-                updateSetting('sessionTitleGenerationAgent', event.currentTarget.value as SessionTitleGenerationAgent)
+                updateSetting(
+                  'sessionTitleGenerationAgent',
+                  event.currentTarget.value as SessionTitleGenerationAgent
+                )
               }
               value={settings.sessionTitleGenerationAgent}
             >
@@ -2113,7 +2123,9 @@ function FirstLaunchPreferencesPage({
               </span>
               <input
                 className='first-launch-setup-preference-input'
-                onChange={(event) => updateSetting('customSessionTitleGenerationCommand', event.currentTarget.value)}
+                onChange={(event) =>
+                  updateSetting('customSessionTitleGenerationCommand', event.currentTarget.value)
+                }
                 placeholder='title-generator'
                 value={settings.customSessionTitleGenerationCommand}
               />

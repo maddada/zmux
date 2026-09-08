@@ -1,0 +1,89 @@
+.searchable-dropdown[data-searchable-dropdown][data-slot] {
+  width: max(320px, var(--anchor-width, 0px));
+  max-width: calc(100vw - 32px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: var(--available-height, calc(100vh - 32px));
+  border-radius: 8px;
+  padding: 0;
+  gap: 0;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='command'] {
+  min-height: 0;
+  background: transparent;
+  border-radius: inherit;
+  padding: 0;
+}
+
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='command-input-wrapper'] {
+  padding: 8px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--ghostex-tooltip-border, rgba(255, 255, 255, 0.12));
+}
+
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='input-group'] {
+  height: 32px;
+  border-radius: 6px;
+}
+
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='command-input'] {
+  padding-left: 10px;
+  font-size: 13px;
+}
+
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='command-list'] {
+  padding: 4px;
+  max-height: min(288px, 50vh);
+}
+
+.searchable-dropdown[data-searchable-dropdown][data-slot]
+  :is([data-slot='command-item'], [data-slot='select-item']) {
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='command-item'][data-selected='true'] {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='select-item'][data-highlighted] {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='select-group'],
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='command-group'] {
+  padding: 0;
+}
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='command-list'] {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+.searchable-dropdown[data-searchable-dropdown][data-slot] .searchable-dropdown-empty:not(:empty) {
+  padding: 24px 10px;
+  text-align: center;
+  font-size: 13px;
+}
+.searchable-dropdown-item-label {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='input-group']:has(input:focus-visible) {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 20%, transparent);
+}
+.searchable-dropdown[data-searchable-dropdown][data-slot] [data-slot='select-content-header'] {
+  flex-shrink: 0;
+  padding: 4px;
+}

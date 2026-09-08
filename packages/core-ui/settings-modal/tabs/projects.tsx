@@ -9,7 +9,8 @@ import {
   CommandItem,
   CommandList,
 } from '@/packages/components/ui/command';
-import { Popover, PopoverContent, PopoverTrigger } from '@/packages/components/ui/popover';
+import { SearchableDropdownContent } from '@/packages/components/ui/searchable-dropdown';
+import { Popover, PopoverTrigger } from '@/packages/components/ui/popover';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/packages/components/ui/empty';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/packages/components/ui/field';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/packages/components/ui/tooltip';
@@ -363,7 +364,7 @@ export function ProjectsSettingsPanel({
                   </span>
                   <IconChevronDown aria-hidden='true' data-icon='inline-end' />
                 </PopoverTrigger>
-                <PopoverContent
+                <SearchableDropdownContent
                   align='start'
                   className='projects-settings-selector-popover'
                   onOpenAutoFocus={(event) => event.preventDefault()}
@@ -400,7 +401,7 @@ export function ProjectsSettingsPanel({
                       </CommandGroup>
                     </CommandList>
                   </Command>
-                </PopoverContent>
+                </SearchableDropdownContent>
               </Popover>
             </div>
             <Card className='settings-project-command-card'>
