@@ -166,7 +166,7 @@ export function ProjectCollectionSection({
    */
   const sortable = useSortable({
     accept: 'project-collection',
-    data: createProjectCollectionDragData(collection.collectionId),
+    data: createProjectCollectionDragData(collection.collectionId, remoteMachineId),
     disabled: draggingDisabled || isEditing,
     feedback: 'none',
     id: sortableId ?? `project-collection:${collection.collectionId}`,
@@ -254,8 +254,8 @@ export function ProjectCollectionSection({
   };
   /*
    * CDXC:Spaces 2026-08-27:
-   * A group may belong to any number of Spaces, and every project inside it
-   * inherits those memberships. Toggling closes the menu, which is the Tags
+   * A group belongs to at most one Space, and every project inside it
+   * inherits that membership. Toggling closes the menu, which is the Tags
    * submenu's own behaviour and what the Spaces decision asks this submenu to
    * match.
    */
@@ -672,7 +672,7 @@ export function ProjectCollectionSection({
                   type='button'
                 >
                   <IconRefresh className='session-context-menu-icon' size={14} />
-                  Full reload sessions
+                  Full Reload sessions
                 </button>
               ) : null}
               <div className='session-context-menu-divider' role='separator' />

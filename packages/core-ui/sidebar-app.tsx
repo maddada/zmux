@@ -1,3 +1,5 @@
+import { ImportSessionsCard, useImportSessionsIntro } from './sidebar-app/import-sessions-card';
+import { monitorAccountSetup } from './accounts/setup-monitor';
 import { Cursor, KeyboardSensor, PointerSensor } from '@dnd-kit/dom';
 import { DragDropProvider } from '@dnd-kit/react';
 import {
@@ -40,7 +42,8 @@ import { postSidebarOrderReproLog } from './sidebar-order-repro-log';
 import { getSidebarReorderActivationConstraints } from './sidebar-reorder-activation';
 import { scrollElementIntoViewIfNeeded } from './scroll-into-view-if-needed';
 import { resetSidebarStore, useSidebarStore } from './sidebar-store';
-import { type SidebarGroupDropTarget, type SidebarSessionDropTarget } from './sidebar-dnd';
+import { OTHER_SIDEBAR_SPACE_ID } from '../shared/sidebar-spaces-other';
+import { type SidebarDropData, type SidebarGroupDropTarget, type SidebarSessionDropTarget } from './sidebar-dnd';
 import { getAutoCollapseGroupIds, getSessionCountsByGroup, reconcileCollapsedGroupsById } from './group-collapse';
 import { SessionGroupSection } from './session-group-section';
 import { ProjectCollectionSection } from './project-collection-section';
@@ -293,6 +296,7 @@ export function SidebarApp({
   vscode,
   windowScopeId: rawWindowScopeId = DEFAULT_SIDEBAR_WINDOW_SCOPE_ID,
 }: SidebarAppProps) {
+  useEffect(monitorAccountSetup, []);
   useDismissSidebarTooltipsOnScroll();
   const [windowScopeId] = useState(() => normalizeSidebarWindowScopeId(rawWindowScopeId));
   const [initialUiCollapseStateRead] = useState(() => readSidebarUiCollapseState(windowScopeId));
@@ -439,6 +443,7 @@ export function SidebarApp({
   const lastCollapseStateHydrateShapeRef = useRef<string | undefined>(undefined);
   const focusedSessionScrollLogSequenceRef = useRef(0);
   const previousFocusedSessionRevealRequestIdRef = useRef(focusedSessionRevealRequestId);
+  const sessionRevealSequenceRef = useRef(0);
   const handledSessionRevealRequestIdRef = useRef<number | undefined>(undefined);
   const pendingSessionRevealScrollRequestIdRef = useRef<number | undefined>(undefined);
 
@@ -499,9 +504,6 @@ export function SidebarApp({
   }, [storedSpacesState, vscode]);
 
   const applyLocalFocus = useSidebarStore((state) => state.applyLocalFocus);
-  const consumeFocusedSessionScrollSuppression = useSidebarStore(
-    (state) => state.consumeFocusedSessionScrollSuppression
-  );
   const applyCommandRunStateClearedMessage = useSidebarStore((state) => state.applyCommandRunStateClearedMessage);
   const applyCommandRunStateMessage = useSidebarStore((state) => state.applyCommandRunStateMessage);
   const applyGroupsChangedMessage = useSidebarStore((state) => state.applyGroupsChangedMessage);
@@ -1649,11 +1651,10 @@ export function SidebarApp({
         collectionIdByProjectId.set(projectId, inheritedCollectionId);
       }
     }
-    /*
-     * CDXC:Projects 2026-07-21:
-     * Collections render first, in their definition order (which collection
-     * drags reorder), and ungrouped projects always stack below the last
-     * group while keeping their own drag order among themselves.
+    /**
+     * CDXC:Spaces 2026-09-08 DECISION:
+     * User: dropping projects or groups onto a Space, including Other, moves them to its top.
+     * Render both kinds in persisted project order so a moved project can precede existing groups.
      */
     const emittedCollectionIds = new Set<string>();
     const items: SidebarProjectCollectionRenderItem[] = sectionGroupIds.flatMap((groupId) =>
@@ -1696,7 +1697,12 @@ export function SidebarApp({
       }
       items.push({ groupId, kind: 'project' });
     }
-    return items;
+    const positionByGroupId = new Map(sectionGroupIds.map((id, index) => [id, index]));
+    const position = (item: SidebarProjectCollectionRenderItem) =>
+      Math.min(
+        ...(item.kind === 'collection' ? item.groupIds : [item.groupId]).map((id) => positionByGroupId.get(id) ?? Infinity)
+      );
+    return items.sort((a, b) => position(a) - position(b));
   };
   const displayedProjectCollectionItems = useMemo<SidebarProjectCollectionRenderItem[]>(
     () => buildProjectCollectionRenderItems(displayedReferenceProjectGroupIds),
@@ -2066,6 +2072,66 @@ export function SidebarApp({
    * project id, and for a remote machine the raw remote project/collection id
    * that machine's own documents use — never a sidebar-composed id.
    */
+  const moveToSpace = useEffectEvent((source: SidebarDropData, spaceId: string, sectionKey: string) => {
+    if (source.kind !== 'group' && source.kind !== 'project-collection') return;
+    const machineId =
+      source.kind === 'group' ? groupsById[source.groupId]?.remoteMachineContext?.machineId : source.remoteMachineId;
+    if (sectionKey !== (machineId ? createRemoteSidebarSpaceSectionKey(machineId) : LOCAL_SIDEBAR_SPACE_SECTION_KEY))
+      return;
+    const sectionSpaces = machineId ? remoteSpacesByMachineId[machineId] : spacesState;
+    if (!sectionSpaces || (spaceId !== OTHER_SIDEBAR_SPACE_ID && !sectionSpaces.spaces[spaceId])) return;
+    const ids = effectiveGroupIds.filter(
+      (id) =>
+        groupsById[id]?.projectContext && (groupsById[id]?.remoteMachineContext?.machineId ?? undefined) === machineId
+    );
+    const projectIdFor = (id: string) =>
+      machineId ? groupsById[id]?.remoteMachineContext?.projectId : groupsById[id]?.projectContext?.editor.projectId;
+    const collections = machineId ? remoteProjectCollectionsByMachineId[machineId] : projectCollections;
+    let memberIds: string[];
+    let movedGroupIds: string[];
+    if (source.kind === 'project-collection') {
+      const collection = collections?.collections.find((item) => item.collectionId === source.collectionId);
+      if (!collection) return;
+      memberIds = [source.collectionId];
+      movedGroupIds = ids.filter(
+        (id) =>
+          collection.projectIds.includes(projectIdFor(id) ?? '') ||
+          collection.projectIds.includes(groupsById[id]?.projectContext?.worktree?.parentProjectId ?? '')
+      );
+    } else {
+      const projectId = projectIdFor(source.groupId);
+      if (!projectId) return;
+      const parentId = groupsById[source.groupId]?.projectContext?.worktree?.parentProjectId ?? projectId;
+      movedGroupIds = ids.filter(
+        (id) => projectIdFor(id) === parentId || groupsById[id]?.projectContext?.worktree?.parentProjectId === parentId
+      );
+      memberIds = movedGroupIds.flatMap((id) => (projectIdFor(id) ? [projectIdFor(id)!] : []));
+      const ungroup = (state: SidebarProjectCollectionsState) =>
+        moveProjectsToSidebarCollection(state, memberIds, undefined);
+      if (machineId) updateRemoteProjectCollections(machineId, ungroup);
+      else setProjectCollections(ungroup);
+    }
+    const field = source.kind === 'project-collection' ? 'memberCollectionIds' : 'memberProjectIds';
+    const update = (state: SidebarSpacesState): SidebarSpacesState => ({
+      ...state,
+      spaces: Object.fromEntries(
+        Object.entries(state.spaces).map(([id, space]) => [
+          id,
+          {
+            ...space,
+            [field]: [
+              ...(id === spaceId ? memberIds : []),
+              ...space[field].filter((member) => !memberIds.includes(member)),
+            ],
+          },
+        ])
+      ),
+    });
+    if (machineId) updateRemoteSpaces(machineId, update);
+    else setSpacesState((previous) => (previous ? update(previous) : previous));
+    const moved = new Set(movedGroupIds);
+    vscode.postMessage({ type: 'syncGroupOrder', groupIds: [...movedGroupIds, ...ids.filter((id) => !moved.has(id))] });
+  });
   const toggleLocalSpaceCollectionMembership = useEffectEvent((spaceId: string, collectionId: string) => {
     setSpacesState((previous) =>
       previous ? toggleSpaceCollectionMembership(previous, spaceId, collectionId) : previous
@@ -2321,6 +2387,21 @@ export function SidebarApp({
     () => Object.values(sessionsById).find((session) => session.isFocused)?.sessionId,
     [sessionsById]
   );
+  /**
+   * CDXC:Sessions 2026-09-07 SEE-ALSO:
+   * revealSessionWhenActivating in shared settings covers every host's focus changes; GPUI also sends revealSidebarSession for repeated activation of the same session.
+   * Local requests use negative ids so host request ids retain their one-shot identity.
+   */
+  useEffect(() => {
+    if (!effectiveSettings.revealSessionWhenActivating || !focusedSessionId) {
+      return;
+    }
+    useSidebarStore.getState().clearFocusedSessionScrollSuppression();
+    setSessionRevealRequest({
+      requestId: --sessionRevealSequenceRef.current,
+      sessionId: focusedSessionId,
+    });
+  }, [effectiveSettings.revealSessionWhenActivating, focusedSessionId]);
   const postMultiSelectSelectionDebugLog = useEffectEvent((event: string, details: Record<string, unknown>) => {
     /*
      * CDXC:Sessions 2026-07-02-07:32:
@@ -2764,16 +2845,13 @@ export function SidebarApp({
       useSidebarStore.getState().clearFocusedSessionScrollSuppression();
     }
 
-    if (!focusedSessionId || !sessionGroupsContentRef.current) {
+    if (!isExplicitFocusedSessionRevealRequest || !focusedSessionId || !sessionGroupsContentRef.current) {
       return;
     }
 
     /*
      * CDXC:Diagnostics 2026-06-16-02:20:
      * Wake-scroll repros need to prove whether the sidebar jumped because focus-following issued scrollIntoView or because the focused row moved in the displayed order. Log only session IDs, row indexes, sort mode, and geometry metrics while the native.sidebar.refresh scenario is enabled.
-     *
-     * CDXC:Sessions 2026-06-21-18:02:
-     * Closing the focused terminal session should retarget native focus without reveal-scrolling the sidebar. Consume the one-shot close marker before scrollIntoViewIfNeeded so the user's list position stays stable after close.
      */
     let afterAnimationFrameId: number | undefined;
     let afterSettledTimeoutId: number | undefined;
@@ -2786,18 +2864,6 @@ export function SidebarApp({
           sequence,
         });
         return;
-      }
-
-      if (!isExplicitFocusedSessionRevealRequest) {
-        const suppression = consumeFocusedSessionScrollSuppression();
-        if (suppression) {
-          postSidebarWakeScrollLog('focusedRowScrollSkipped', focusedSessionId, {
-            reason: 'close-driven-focus-scroll-suppressed',
-            sequence,
-            suppressionReason: suppression.reason,
-          });
-          return;
-        }
       }
 
       const focusedSessionElement = document.querySelector<HTMLElement>(
@@ -2863,11 +2929,11 @@ export function SidebarApp({
         window.clearTimeout(afterSettledTimeoutId);
       }
     };
-  }, [consumeFocusedSessionScrollSuppression, focusedSessionId, focusedSessionRevealRequestId]);
+  }, [focusedSessionId, focusedSessionRevealRequestId]);
 
   /*
-   * CDXC:Browser 2026-08-18:
-   * Opening a Browser tab must leave the user able to SEE it in the sidebar.
+   * CDXC:Sessions 2026-09-07 WHY:
+   * Activation and explicit reveal requests must leave the session visible in the sidebar.
    * Every collapsed container between the sidebar scroller and the row is
    * expanded for real (the same persisted collapse state the chevrons write, so
    * the expansion sticks), including the row's own kind section, and the row
@@ -2890,6 +2956,13 @@ export function SidebarApp({
       if (!groupId) {
         // The row has not been published yet; this effect re-runs when it is.
         return;
+      }
+      if (!(displayedWorkspaceSessionIdsByGroup[groupId] ?? []).includes(sessionId)) {
+        setSessionSearchQuery('');
+        setSelectedSessionTagFilters([]);
+      }
+      if (hiddenGroupIds.includes(groupId) || hiddenCollectionMemberGroupIds.has(groupId)) {
+        setShowHiddenSidebarItems(true);
       }
       const machineId = groupsById[groupId]?.remoteMachineContext?.machineId;
       const sectionGroupIds = effectiveGroupIds.filter(
@@ -2966,7 +3039,8 @@ export function SidebarApp({
         return;
       }
       pendingSessionRevealScrollRequestIdRef.current = undefined;
-      scrollElementIntoViewIfNeeded(revealedRow, scrollViewport);
+      // CDXC:Sessions 2026-09-07 WHY: A row can be inside the main viewport but clipped by its project's own scroller; native scrollIntoView checks every scroll ancestor.
+      revealedRow.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     };
     const animationFrameId = window.requestAnimationFrame(() => {
       if (cancelled) {
@@ -3100,6 +3174,8 @@ export function SidebarApp({
 
   const { handleDragEnd, handleDragMove, handleDragOver, handleDragStart } = useSidebarDragHandlers({
     authoritativeSessionIdsByGroup,
+    moveToSpace,
+    remoteProjectCollectionsByMachineId,
     collapsedGroupsById,
     displayedProjectCollectionItems,
     effectiveSessionIdsByGroup,
@@ -3354,6 +3430,7 @@ export function SidebarApp({
     openAddProjectModal,
     openConfigureAgentsModal,
     openPreviousSessions,
+    openImportSessions: openExternalSessions,
     openReferenceAgentsHub,
     openReferenceAutomations,
     openReferenceRemoteSetup,
@@ -3433,6 +3510,8 @@ export function SidebarApp({
       },
     };
   })();
+
+  const { isVisible: showImportSessionsIntro, openImportSessions } = useImportSessionsIntro(openExternalSessions);
 
   const renderReferenceProjectGroup = (groupId: string) => {
     const projectId = groupsById[groupId]?.projectContext?.editor.projectId;
@@ -3522,6 +3601,7 @@ export function SidebarApp({
             onOpenRemoteSetup={openReferenceRemoteSetup}
             onOpenPowerSettings={openKeepAwakePowerSettings}
             onOpenPreviousSessions={openPreviousSessions}
+            onOpenImportSessions={openImportSessions}
             onOpenSettings={openSidebarSettings}
             onRunKeepAwake={startSidebarKeepAwake}
             onSearchPreviousSessionsByPrompt={searchPreviousSessionsByPrompt}
@@ -3942,7 +4022,7 @@ export function SidebarApp({
                                         containsActiveSession={item.groupIds.some((groupId) =>
                                           groupIdsContainingActiveSession.has(groupId)
                                         )}
-                                        draggingDisabled={true}
+                                        draggingDisabled={isSessionSearchOpen}
                                         index={itemIndex}
                                         isHidden={hiddenCollectionKeys.includes(
                                           `remote:${machine.id}:${item.collection.collectionId}`
@@ -4161,6 +4241,7 @@ export function SidebarApp({
               </AppTooltip>
             ) : null}
           </div>
+          {showImportSessionsIntro ? <ImportSessionsCard onImport={openImportSessions} /> : null}
           <SidebarReferenceFooter
             commandPaletteHotkey={formatSidebarMenuHotkeyLabel(
               normalizeghostexHotkeySettings(effectiveSettings.hotkeys).openCommandPalette

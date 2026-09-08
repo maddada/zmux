@@ -63,15 +63,30 @@ export function isUnassignedSidebarSpaceProject({
   spaces: Iterable<SidebarSpaceMembershipLists>;
 }): boolean {
   for (const space of spaces) {
-    if (collectionId !== undefined && space.memberCollectionIds.includes(collectionId)) {
-      return false;
-    }
-    if (space.memberProjectIds.includes(projectId)) {
-      return false;
-    }
-    if (parentProjectId !== undefined && space.memberProjectIds.includes(parentProjectId)) {
+    if (isSidebarSpaceProject({ collectionId, parentProjectId, projectId, space })) {
       return false;
     }
   }
   return true;
+}
+
+/**
+ * CDXC:Spaces 2026-09-07 WHY:
+ * Group and worktree inheritance selects the sole membership owner, even while an optimistic grouping edit still carries the project's old direct membership.
+ * SEE-ALSO: packages/core-ui/sidebar-app/space-filtering.ts and apps/mobile/app/src/spaces/otherSpace.ts.
+ */
+export function isSidebarSpaceProject({
+  collectionId,
+  parentProjectId,
+  projectId,
+  space,
+}: {
+  collectionId: string | undefined;
+  parentProjectId: string | undefined;
+  projectId: string;
+  space: SidebarSpaceMembershipLists;
+}): boolean {
+  return collectionId !== undefined
+    ? space.memberCollectionIds.includes(collectionId)
+    : space.memberProjectIds.includes(parentProjectId ?? projectId);
 }

@@ -1,8 +1,13 @@
 import { IconCaretRightFilled, IconCloud } from '@tabler/icons-react';
 import type { CSSProperties } from 'react';
+import { DEFAULT_ghostex_SETTINGS } from '../../shared/ghostex-settings';
+import { SidebarProjectIcon, type SidebarProjectIconProps } from '../sidebar-project-icon';
+import { useSidebarStore } from '../sidebar-store';
 
 export type SidebarGroupDragPreview = {
   groupId: string;
+  isActive?: boolean;
+  projectIcon?: Omit<SidebarProjectIconProps, 'title'>;
   isCollapsed: boolean;
   left: number;
   pointerOffsetY: number;
@@ -40,6 +45,9 @@ export type SidebarRemoteMachineDragPreview = {
   width: number;
 };
 export function ProjectGroupDragGhost({ preview }: { preview: SidebarGroupDragPreview }) {
+  const showProjectIcons = useSidebarStore(
+    (state) => state.hud.settings?.showProjectIcons ?? DEFAULT_ghostex_SETTINGS.showProjectIcons
+  );
   const style = {
     left: `${preview.left}px`,
     top: `${preview.top}px`,
@@ -52,7 +60,11 @@ export function ProjectGroupDragGhost({ preview }: { preview: SidebarGroupDragPr
    * The ghost mirrors the real project header DOM (group > group-head >
    * group-title-wrap > group-title-row) so it picks up the exact header
    * padding, font, and theme color instead of a bespoke approximation. It
-   * renders the title only — trailing header action buttons are omitted.
+   * renders the project identity; trailing header action buttons are omitted.
+   *
+   * CDXC:Projects 2026-09-08 DECISION:
+   * User: keep the project icon in the drag ghost with the same icon size, text size, and icon-to-name gap as the settled row.
+   * Reuse SidebarProjectIcon and the same sibling classes so the row and ghost share their identity layout.
    *
    * CDXC:Projects 2026-07-02-21:10:
    * The reference-layout .group-head uses negative scroll-bleed margins to
@@ -65,13 +77,15 @@ export function ProjectGroupDragGhost({ preview }: { preview: SidebarGroupDragPr
     <div
       aria-hidden='true'
       className='project-drag-ghost group'
+      data-active={String(preview.isActive === true)}
       data-project-group='true'
       data-workspace-custom-theme={String(Boolean(preview.themeColor))}
       style={style}
     >
       <div className='group-head' data-collapsible='true' style={{ margin: 0 }}>
         <div className='group-title-wrap'>
-          <div className='group-title-row' data-project-leading-icon='false'>
+          <div className='group-title-row' data-project-leading-icon={String(showProjectIcons)}>
+            {showProjectIcons ? <SidebarProjectIcon {...preview.projectIcon} title={preview.title} /> : null}
             <div className='group-title-handle' data-draggable='true'>
               <button
                 aria-disabled='false'

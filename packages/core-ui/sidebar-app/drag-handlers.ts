@@ -1,10 +1,12 @@
 import { move } from '@dnd-kit/helpers';
 import type { DragDropEventHandlers } from '@dnd-kit/react';
-import { useEffectEvent, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useEffectEvent, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { DiagnosticLoggingScenarioId, RemoteMachineSettings } from '../../shared/ghostex-settings';
 import { setSidebarTooltipsSuppressedForDrag } from '../app-tooltip';
 import {
   getClientPoint,
+  resolveSidebarSpaceDropButton,
+  type SidebarDropData,
   getSidebarDropData,
   moveSessionIdsByDropTarget,
   type SidebarGroupDropTarget,
@@ -77,6 +79,7 @@ export type SidebarDragHandlersOptions = {
   groupIdsRef: RefObject<string[]>;
   groupsById: SidebarGroupsById;
   isManualActiveSessionsSort: boolean;
+  moveToSpace: (source: SidebarDropData, spaceId: string, sectionKey: string) => void;
   moveRemoteMachineSection: (remoteMachineId: string, target: SidebarRemoteMachineDropTarget) => void;
   pinnedSessionDropTargetLogKeyRef: RefObject<string | undefined>;
   pointerDownSessionTargetRef: RefObject<SidebarPointerDownSessionTarget | undefined>;
@@ -84,6 +87,7 @@ export type SidebarDragHandlersOptions = {
   postSidebarDebugLog: (scenarioId: DiagnosticLoggingScenarioId, event: string, details: unknown) => void;
   projectCollectionIdByProjectId: ReadonlyMap<string, string>;
   projectCollections: SidebarProjectCollectionsState;
+  remoteProjectCollectionsByMachineId: Record<string, SidebarProjectCollectionsState>;
   remoteMachines: readonly RemoteMachineSettings[];
   remoteProjectGroupIdsByMachineId: Record<string, string[]>;
   sessionIdsByGroupRef: RefObject<SessionIdsByGroup>;
@@ -120,6 +124,7 @@ export function useSidebarDragHandlers({
   groupsById,
   isManualActiveSessionsSort,
   moveRemoteMachineSection,
+  moveToSpace,
   pinnedSessionDropTargetLogKeyRef,
   pointerDownSessionTargetRef,
   postPinnedSessionReorderLog,
@@ -127,6 +132,7 @@ export function useSidebarDragHandlers({
   projectCollectionIdByProjectId,
   projectCollections,
   remoteMachines,
+  remoteProjectCollectionsByMachineId,
   remoteProjectGroupIdsByMachineId,
   sessionIdsByGroupRef,
   sessionPointerDragStateRef,
@@ -159,9 +165,33 @@ export function useSidebarDragHandlers({
     return groupIdsRef.current;
   };
 
+  const spaceDropButtonRef = useRef<HTMLElement | undefined>(undefined);
+  const clearSpaceDropIndicator = () => {
+    spaceDropButtonRef.current?.removeAttribute('data-space-drop-target');
+    spaceDropButtonRef.current = undefined;
+  };
+  const getSpaceDropButton = (source: SidebarDropData | undefined, nativeEvent: Event | undefined) => {
+    if (source?.kind !== 'group' && source?.kind !== 'project-collection') return undefined;
+    const machineId =
+      source.kind === 'group' ? groupsById[source.groupId]?.remoteMachineContext?.machineId : source.remoteMachineId;
+    const button = resolveSidebarSpaceDropButton(nativeEvent);
+    const section = button?.closest<HTMLElement>('[data-sidebar-space-section]')?.dataset.sidebarSpaceSection;
+    return section === (machineId ? `remote:${machineId}` : 'local') ? button : undefined;
+  };
   const updateSessionDropIndicator = useEffectEvent(
     (event: Parameters<NonNullable<DragDropEventHandlers['onDragOver']>>[0]) => {
       const sourceData = getSidebarDropData(event.operation.source);
+      clearSpaceDropIndicator();
+      const spaceButton = getSpaceDropButton(sourceData, getDragNativeEvent(event));
+      if (spaceButton) {
+        spaceButton.setAttribute('data-space-drop-target', 'true');
+        spaceDropButtonRef.current = spaceButton;
+        setGroupDropIndicator(undefined);
+        setProjectCollectionDropIndicator(undefined);
+        setProjectUngroupDropIndicatorScopeId(undefined);
+        return;
+      }
+
       if (sourceData?.kind === 'remote-machine') {
         setGroupDropIndicator(undefined);
         setPinnedSessionDropIndicator(undefined);
@@ -213,6 +243,10 @@ export function useSidebarDragHandlers({
       setGroupDropIndicator(undefined);
       setProjectUngroupDropIndicatorScopeId(undefined);
       if (sourceData?.kind === 'project-collection') {
+        if (sourceData.remoteMachineId) {
+          setProjectCollectionDropIndicator(undefined);
+          return;
+        }
         setPinnedSessionDropIndicator(undefined);
         setSessionDropIndicator(undefined);
         const resolvedCollectionDropTarget = resolveProjectCollectionDropTargetFromPoint(
@@ -324,6 +358,17 @@ export function useSidebarDragHandlers({
         point && headerMetrics && group?.projectContext
           ? {
               groupId: sourceData.groupId,
+              isActive: group.isActive,
+              projectIcon: {
+                discoveredIconDataUrl: group.projectContext.discoveredIconDataUrl,
+                icon: group.projectContext.icon,
+                iconDataUrl: group.projectContext.iconDataUrl,
+                fallback: group.projectContext.worktree
+                  ? 'worktree'
+                  : collapsedGroupsById[sourceData.groupId] === true
+                    ? 'folder'
+                    : 'folder-open',
+              },
               isCollapsed: collapsedGroupsById[sourceData.groupId] === true,
               left: headerMetrics.left,
               pointerOffsetY: headerMetrics.pointerOffsetY,
@@ -339,9 +384,11 @@ export function useSidebarDragHandlers({
     }
     if (sourceData?.kind === 'project-collection') {
       const point = getClientPoint(nativeEvent);
-      const collection = projectCollections.collections.find(
-        (candidate) => candidate.collectionId === sourceData.collectionId
-      );
+      const collection = (
+        sourceData.remoteMachineId
+          ? (remoteProjectCollectionsByMachineId[sourceData.remoteMachineId]?.collections ?? [])
+          : projectCollections.collections
+      ).find((candidate) => candidate.collectionId === sourceData.collectionId);
       const metrics = point
         ? getProjectCollectionDragMetrics(event.operation.source, sourceData.collectionId)
         : undefined;
@@ -463,6 +510,7 @@ export function useSidebarDragHandlers({
 
   const handleDragEnd = ((event) => {
     setSidebarTooltipsSuppressedForDrag(false);
+    clearSpaceDropIndicator();
     setGroupDropIndicator(undefined);
     setGroupDragPreview(undefined);
     setProjectCollectionDragPreview(undefined);
@@ -480,6 +528,18 @@ export function useSidebarDragHandlers({
     const nativeEvent = getDragNativeEvent(event);
     const sourceData = getSidebarDropData(event.operation.source);
     const targetData = getSidebarDropData(event.operation.target);
+    const spaceButton = getSpaceDropButton(sourceData, nativeEvent);
+    if (spaceButton && sourceData) {
+      if (!event.canceled)
+        moveToSpace(
+          sourceData,
+          spaceButton.dataset.sidebarSpaceId!,
+          spaceButton.closest<HTMLElement>('[data-sidebar-space-section]')!.dataset.sidebarSpaceSection!
+        );
+      return;
+    }
+    if (sourceData?.kind === 'project-collection' && sourceData.remoteMachineId) return;
+
     const sessionPointerDragState = sessionPointerDragStateRef.current;
     updateSessionPointerDragState(sessionPointerDragState, nativeEvent);
     sessionPointerDragStateRef.current = undefined;

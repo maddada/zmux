@@ -24,6 +24,7 @@ type RemoteMachineDragData = {
 };
 
 type ProjectCollectionDragData = {
+  remoteMachineId?: string;
   collectionId: string;
   kind: 'project-collection';
 };
@@ -98,9 +99,13 @@ export function createRemoteMachineDragData(remoteMachineId: string): RemoteMach
   };
 }
 
-export function createProjectCollectionDragData(collectionId: string): ProjectCollectionDragData {
+export function createProjectCollectionDragData(
+  collectionId: string,
+  remoteMachineId?: string
+): ProjectCollectionDragData {
   return {
     collectionId,
+    remoteMachineId,
     kind: 'project-collection',
   };
 }
@@ -176,6 +181,7 @@ export function getSidebarDropData(candidate: unknown): SidebarDropData | undefi
       return typeof data.collectionId === 'string'
         ? {
             collectionId: data.collectionId,
+            remoteMachineId: typeof data.remoteMachineId === 'string' ? data.remoteMachineId : undefined,
             kind: 'project-collection',
           }
         : undefined;
@@ -622,5 +628,16 @@ function isSidebarSessionDropTarget(candidate: unknown): candidate is SidebarSes
     candidate.kind === 'session' &&
     typeof candidate.sessionId === 'string' &&
     (candidate.position === 'before' || candidate.position === 'after')
+  );
+}
+
+export function resolveSidebarSpaceDropButton(event: Event | undefined): HTMLElement | undefined {
+  const point = getClientPoint(event);
+  if (!point) return undefined;
+  return (
+    document
+      .elementsFromPoint(point.x, point.y)
+      .map((element) => element.closest<HTMLElement>('[data-sidebar-space-id]'))
+      .find((element) => element?.closest('[data-sidebar-space-section]')) ?? undefined
   );
 }

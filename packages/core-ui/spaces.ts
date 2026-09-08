@@ -5,8 +5,8 @@ import { SIDEBAR_PROJECT_COLLECTION_COLORS } from './project-collections';
 CDXC:Spaces 2026-08-27:
 A Space is a server-owned saved sidebar filter: a name, an icon id, a color, a
 manual position, and the sidebar members it shows. Members are sidebar project
-collections ("groups") and ungrouped projects, and either may belong to any
-number of Spaces. Unlike project collections there is no localStorage overlay —
+collections ("groups") and ungrouped projects, and each belongs to at most
+one Space. Unlike project collections there is no localStorage overlay —
 gxserver owns the whole document, one Space set per daemon — so this module is
 pure state logic over the wire shape: the sidebar edits a Space state, hands it
 back to the host, and the host write-through-syncs it to
@@ -57,6 +57,12 @@ export const DEFAULT_SIDEBAR_SPACE_ICON = 'stack';
 
 export const EMPTY_SIDEBAR_SPACES_STATE: SidebarSpacesState = { order: [], spaces: {} };
 
+/**
+ * CDXC:Spaces 2026-09-07 DECISION:
+ * User: each project belongs to at most one Space everywhere, including membership inherited from its group.
+ * Existing duplicates keep the first Space in sidebar order; assigning another Space moves the member.
+ * SEE-ALSO: server/src/sidebar_spaces.rs normalizes the same invariant for every client and CLI write.
+ */
 export function sanitizeSidebarSpacesState(state: unknown): SidebarSpacesState {
   if (!state || typeof state !== 'object' || Array.isArray(state)) {
     return { order: [], spaces: {} };
@@ -101,6 +107,8 @@ export function sanitizeSidebarSpacesState(state: unknown): SidebarSpacesState {
 
   const order: string[] = [];
   const spaces: Record<string, SidebarSpace> = {};
+  const assignedCollectionIds = new Set<string>();
+  const assignedProjectIds = new Set<string>();
   for (const spaceId of orderedIds) {
     if (order.length >= MAX_SPACES) {
       break;
@@ -112,8 +120,8 @@ export function sanitizeSidebarSpacesState(state: unknown): SidebarSpacesState {
     spaces[spaceId] = {
       color: sanitizeSpaceColor(candidate.color, order.length),
       icon: boundedText(candidate.icon, MAX_ICON_CHARS) || DEFAULT_SIDEBAR_SPACE_ICON,
-      memberCollectionIds: sanitizeMemberIds(candidate.memberCollectionIds),
-      memberProjectIds: sanitizeMemberIds(candidate.memberProjectIds),
+      memberCollectionIds: sanitizeMemberIds(candidate.memberCollectionIds, assignedCollectionIds),
+      memberProjectIds: sanitizeMemberIds(candidate.memberProjectIds, assignedProjectIds),
       name: boundedText(candidate.name, MAX_NAME_CHARS) || spaceId,
       spaceId,
     };
@@ -359,16 +367,20 @@ function withToggledMember(
     : [...space[field], trimmedMemberId];
   return {
     order: [...state.order],
-    spaces: {
-      ...state.spaces,
-      [spaceId]: { ...space, [field]: memberIds },
-    },
+    spaces: Object.fromEntries(
+      Object.entries(state.spaces).map(([id, candidate]) => [
+        id,
+        {
+          ...candidate,
+          [field]: id === spaceId ? memberIds : candidate[field].filter((member) => member !== trimmedMemberId),
+        },
+      ])
+    ),
   };
 }
 
-function sanitizeMemberIds(value: unknown): string[] {
+function sanitizeMemberIds(value: unknown, seenMemberIds: Set<string>): string[] {
   const memberIds: string[] = [];
-  const seenMemberIds = new Set<string>();
   for (const entry of Array.isArray(value) ? value : []) {
     if (memberIds.length >= MAX_MEMBER_IDS_PER_LIST) {
       break;

@@ -9,13 +9,14 @@ CDXC:Spaces 2026-08-27:
 A Space is a server-owned saved sidebar filter: a name, an icon id, a color, a
 manual position, and the set of sidebar members it shows. Members are sidebar
 project collections ("groups") and ungrouped projects; a collection or an
-ungrouped project may belong to any number of Spaces. gxserver owns the
+ungrouped project belongs to at most one Space. gxserver owns the
 document so desktop, web, and mobile clients connected to the same daemon share
 one Space set, and a remote daemon's Spaces stay that daemon's own.
 
-Two invariants are enforced here rather than in each client:
+Membership invariants are enforced here for every client:
+  - Each member belongs to at most one Space; the first Space in sidebar order wins.
   - A project inside a collection can never hold direct membership. It inherits
-    its collection's Spaces, so any member project id that the collections
+    its collection's Space, so any member project id that the collections
     document currently groups is dropped.
   - Member collection ids that no longer exist are dropped, because a
     collection disappears from the collections document as soon as it empties.
@@ -98,11 +99,14 @@ pub fn prune_sidebar_spaces_for_collections(
     Ok(Some(normalized))
 }
 
+/// CDXC:Spaces 2026-09-07 SEE-ALSO:
+/// packages/core-ui/spaces.ts owns the one-Space-per-project decision and optimistic moves.
+/// Normalize reads and writes in sidebar order so older clients and CLI payloads cannot retain duplicate memberships.
 pub fn normalize_sidebar_spaces_state(state: &Value, collections_state: &Value) -> Value {
     let collections = collections_state
         .get("collections")
         .and_then(Value::as_object);
-    // Projects held by a collection inherit that collection's Spaces and can
+    // Projects held by a collection inherit that collection's Space and can
     // never carry direct membership.
     let mut grouped_project_ids = std::collections::HashSet::new();
     if let Some(entries) = collections {
@@ -163,6 +167,8 @@ pub fn normalize_sidebar_spaces_state(state: &Value, collections_state: &Value) 
 
     let mut order: Vec<String> = Vec::new();
     let mut spaces = Map::new();
+    let mut assigned_collection_ids = std::collections::HashSet::new();
+    let mut assigned_project_ids = std::collections::HashSet::new();
     for space_id in ordered_ids {
         if spaces.len() >= MAX_SPACES {
             break;
@@ -172,13 +178,11 @@ pub fn normalize_sidebar_spaces_state(state: &Value, collections_state: &Value) 
         };
         let member_collection_ids =
             normalized_member_ids(space_state.get("memberCollectionIds"), |collection_id| {
-                match collections {
-                    Some(entries) => entries.contains_key(collection_id),
-                    None => false,
-                }
+                collections.is_some_and(|entries| entries.contains_key(collection_id))
+                    && assigned_collection_ids.insert(collection_id.to_string())
             });
         let member_project_ids = normalized_member_ids(space_state.get("memberProjectIds"), |id| {
-            !grouped_project_ids.contains(id)
+            !grouped_project_ids.contains(id) && assigned_project_ids.insert(id.to_string())
         });
         let name = trimmed_bounded_text(space_state.get("name"), MAX_NAME_CHARS)
             .unwrap_or_else(|| space_id.clone());
@@ -204,7 +208,7 @@ pub fn normalize_sidebar_spaces_state(state: &Value, collections_state: &Value) 
     })
 }
 
-fn normalized_member_ids(value: Option<&Value>, keep: impl Fn(&str) -> bool) -> Vec<String> {
+fn normalized_member_ids(value: Option<&Value>, mut keep: impl FnMut(&str) -> bool) -> Vec<String> {
     let mut member_ids: Vec<String> = Vec::new();
     let mut seen_member_ids = std::collections::HashSet::new();
     let Some(entries) = value.and_then(Value::as_array) else {

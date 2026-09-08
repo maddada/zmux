@@ -1,8 +1,6 @@
 import { IconCheck, IconDots, IconPencil, IconPlus } from '@tabler/icons-react';
 import { PointerSensor } from '@dnd-kit/dom';
-import { move } from '@dnd-kit/helpers';
-import { useDragDropMonitor, type DragDropEventHandlers } from '@dnd-kit/react';
-import { useSortable } from '@dnd-kit/react/sortable';
+import { useDraggable, useDragDropMonitor, type DragDropEventHandlers } from '@dnd-kit/react';
 import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { isSidebarCommandIcon, type SidebarCommandIcon } from '../shared/sidebar-command-icons';
 import {
@@ -14,7 +12,8 @@ import { openAppModal } from './app-modal-host-bridge';
 import { AppTooltip, dismissSidebarTooltips } from './app-tooltip';
 import { SidebarCommandIconGlyph } from './sidebar-command-icon';
 import { SidebarContextMenuPortal } from './sidebar-context-menu-portal';
-import { createSpaceDragData, getSidebarSpaceDragData } from './sidebar-dnd';
+import { createSpaceDragData, getClientPoint, getSidebarSpaceDragData } from './sidebar-dnd';
+import { getDragNativeEvent, hasPointerDragMovedPastThreshold } from './sidebar-app/drag-drop-geometry';
 import { resolveSelectedSidebarSpaceId } from './sidebar-app/space-filtering';
 import { getSidebarReorderActivationConstraints } from './sidebar-reorder-activation';
 import { DEFAULT_SIDEBAR_SPACE_ICON, type SidebarSpace, type SidebarSpacesState } from './spaces';
@@ -667,32 +666,64 @@ export function SpaceFilterRow({
   const orderRef = useRef(spaces.order);
   orderRef.current = spaces.order;
 
-  /*
-   * CDXC:Spaces 2026-08-27:
-   * The drop is committed from the shared sidebar drag manager rather than from
-   * a nested provider, and only for this section's own Space drags. dnd-kit's
-   * `move` resolves the new position from the drop target it reported, which
-   * exists here precisely because Space buttons use the default drag feedback:
-   * the collection/project surfaces use feedback "none", which never yields a
-   * rect-overlap target and is why those paths resolve drops from the pointer.
+  const pointerDownRef = useRef<{ x: number; y: number } | undefined>(undefined);
+  const didMoveRef = useRef(false);
+  const suppressClickRef = useRef(false);
+  /**
+   * CDXC:Spaces 2026-09-08 DECISION:
+   * User: Space icons should move like pinned sessions, with clicks protected from accidental reorders and intentional pointer dragging supported.
    */
+  const handleSpaceDragMove = useEffectEvent(
+    (event: Parameters<NonNullable<DragDropEventHandlers['onDragMove']>>[0]) => {
+      const source = getSidebarSpaceDragData(event.operation.source);
+      if (source?.sectionKey !== sectionKey) return;
+      didMoveRef.current ||= hasPointerDragMovedPastThreshold(
+        pointerDownRef.current,
+        getClientPoint(getDragNativeEvent(event))
+      );
+    }
+  );
   const handleSpaceDragEnd = useEffectEvent((event: Parameters<NonNullable<DragDropEventHandlers['onDragEnd']>>[0]) => {
-    const sourceData = getSidebarSpaceDragData(event.operation.source);
-    if (!sourceData || sourceData.sectionKey !== sectionKey || event.canceled) {
-      return;
-    }
-    const visibleSpaceIds = layoutRef.current.visibleSpaceIds;
-    const sortableIds = visibleSpaceIds.map((spaceId) => createSidebarSpaceSortableId(sectionKey, spaceId));
-    const sortableIdPrefix = createSidebarSpaceSortableId(sectionKey, '');
-    const reorderedVisibleSpaceIds = move(sortableIds, event).map((sortableId) =>
-      sortableId.slice(sortableIdPrefix.length)
+    const source = getSidebarSpaceDragData(event.operation.source);
+    if (source?.sectionKey !== sectionKey) return;
+    didMoveRef.current ||= hasPointerDragMovedPastThreshold(
+      pointerDownRef.current,
+      getClientPoint(getDragNativeEvent(event))
     );
-    const nextOrder = applySidebarSpaceRowReorder(orderRef.current, visibleSpaceIds, reorderedVisibleSpaceIds);
-    if (nextOrder.some((spaceId, index) => spaceId !== orderRef.current[index])) {
-      onReorderSpaces(nextOrder);
-    }
+    suppressClickRef.current = didMoveRef.current;
+    if (event.canceled || !didMoveRef.current) return;
+    const point = getClientPoint(getDragNativeEvent(event));
+    if (!point) return;
+    const track = trackRef.current;
+    const bounds = track?.getBoundingClientRect();
+    if (
+      !track ||
+      !bounds ||
+      point.y < bounds.top ||
+      point.y > bounds.bottom ||
+      point.x < bounds.left ||
+      point.x > bounds.right
+    )
+      return;
+    const visible = layoutRef.current.visibleSpaceIds;
+    const reordered = visible.filter((id) => id !== source.spaceId);
+    const beforeIndex = reordered.findIndex((id) => {
+      const button = Array.from(track.querySelectorAll<HTMLElement>('[data-sidebar-space-id]')).find(
+        (element) => element.dataset.sidebarSpaceId === id
+      );
+      const rect = button?.getBoundingClientRect();
+      return rect ? point.x < rect.left + rect.width / 2 : false;
+    });
+    reordered.splice(beforeIndex < 0 ? reordered.length : beforeIndex, 0, source.spaceId);
+    const next = applySidebarSpaceRowReorder(orderRef.current, visible, reordered);
+    if (next.some((id, index) => id !== orderRef.current[index])) onReorderSpaces(next);
   });
-  useDragDropMonitor(useMemo(() => ({ onDragEnd: handleSpaceDragEnd }), [handleSpaceDragEnd]));
+  useDragDropMonitor(
+    useMemo(
+      () => ({ onDragMove: handleSpaceDragMove, onDragEnd: handleSpaceDragEnd }),
+      [handleSpaceDragMove, handleSpaceDragEnd]
+    )
+  );
 
   const openSpaceEditor = (space?: SidebarSpace) => {
     openAppModal({
@@ -733,11 +764,26 @@ export function SpaceFilterRow({
   const shouldShowMoreButton = isMeasuring || layout.overflowSpaceIds.length > 0 || moreMenuPosition !== undefined;
 
   return (
-    <div className='sidebar-space-filter-row' data-sidebar-space-section={sectionKey} ref={setRowElement}>
+    <div
+      className='sidebar-space-filter-row'
+      data-sidebar-space-section={sectionKey}
+      ref={setRowElement}
+      onPointerDownCapture={(event) => {
+        pointerDownRef.current = { x: event.clientX, y: event.clientY };
+        didMoveRef.current = false;
+        suppressClickRef.current = false;
+      }}
+      onClickCapture={(event) => {
+        if (suppressClickRef.current) {
+          event.preventDefault();
+          event.stopPropagation();
+          suppressClickRef.current = false;
+        }
+      }}
+    >
       <div className='sidebar-space-filter-track' data-measuring={String(isMeasuring)} ref={trackRef}>
-        {visibleSpaces.map((space, index) => (
+        {visibleSpaces.map((space) => (
           <SpaceFilterButton
-            index={index}
             key={space.spaceId}
             onContextMenu={(position) => {
               setMoreMenuPosition(undefined);
@@ -761,6 +807,7 @@ export function SpaceFilterRow({
             aria-pressed={activeSpaceId === OTHER_SIDEBAR_SPACE_ID}
             className='sidebar-space-filter-button sidebar-space-filter-other'
             data-selected={String(activeSpaceId === OTHER_SIDEBAR_SPACE_ID)}
+            data-sidebar-space-id={OTHER_SIDEBAR_SPACE_ID}
             onClick={() => onSelectSpace(OTHER_SIDEBAR_SPACE_ID)}
             ref={otherButtonRef}
             type='button'
@@ -850,7 +897,20 @@ export function SpaceFilterRow({
             type='button'
           >
             <IconPencil aria-hidden='true' className='session-context-menu-icon' size={14} />
-            Edit Space…
+            Edit Space
+          </button>
+          {/* CDXC:Spaces 2026-09-08 DECISION: User: place New Space directly below Edit Space in the Space icon context menu. */}
+          <button
+            className='session-context-menu-item'
+            onClick={() => {
+              dismissMenus();
+              openSpaceEditor();
+            }}
+            role='menuitem'
+            type='button'
+          >
+            <IconPlus aria-hidden='true' className='session-context-menu-icon' size={14} stroke={2} />
+            New Space
           </button>
         </SidebarContextMenuPortal>
       ) : null}
@@ -859,32 +919,25 @@ export function SpaceFilterRow({
 }
 
 function SpaceFilterButton({
-  index,
   onContextMenu,
   onSelect,
   sectionKey,
   selected,
   space,
 }: {
-  index: number;
   onContextMenu: (position: ContextMenuPosition) => void;
   onSelect: () => void;
   sectionKey: string;
   selected: boolean;
   space: SidebarSpace;
 }) {
-  /*
-   * CDXC:Spaces 2026-08-27:
-   * The button is both the drag handle and the sortable element, and the
-   * accepted type is section-scoped so a Space can only ever be dropped among
-   * its own gxserver's Spaces. Other and More render outside this component, so
-   * neither is sortable and neither can be displaced by a drop.
+  /** CDXC:Spaces 2026-09-08 WHY:
+   * Pointer-based insertion keeps small icons from shifting under the pointer through sortable collision feedback.
+   * The draggable supplies the moving icon; the row owns the final insertion boundary.
    */
-  const sortable = useSortable({
-    accept: `space:${sectionKey}`,
+  const sortable = useDraggable({
     data: createSpaceDragData(sectionKey, space.spaceId),
     id: createSidebarSpaceSortableId(sectionKey, space.spaceId),
-    index,
     sensors: spaceSensors,
     type: `space:${sectionKey}`,
   });

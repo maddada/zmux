@@ -74,10 +74,6 @@
    * width and stay horizontally locked to that row. The React drag state owns
    * fixed left/width values, so this shell should look like the native header
    * hover surface instead of a narrow floating card.
-   *
-   * CDXC:Projects 2026-06-29-21:04:
-   * Project and worktree rows no longer show a leading folder or branch glyph,
-   * so the drag ghost must also be title-first instead of reserving an icon slot.
    */
   /*
    * CDXC:Projects 2026-07-02-13:05:
@@ -87,10 +83,11 @@
    * fixed positioning and a backing surface; padding stays at zero so the
    * nested .group-head lands exactly on the measured header rect.
    */
-  background: color-mix(in srgb, var(--workspace-project-theme-color, var(--app-foreground)) 8%, var(--app-background));
+  /* CDXC:Projects 2026-09-08 DECISION: User: the project drag ghost uses the project's hovered background color instead of a dark backing. The header shares the hover fill below, with no extra shell fill or shadow. */
+  background: transparent;
   border: none;
   border-radius: 0;
-  box-shadow: 0 6px 16px color-mix(in srgb, #000000 18%, transparent);
+  box-shadow: none;
   box-sizing: border-box;
   color: var(--app-foreground);
   display: block;
@@ -224,6 +221,7 @@
   background: transparent;
 }
 
+.project-drag-ghost .group-head::before,
 .group-head:hover::before,
 .group-head:has(:focus-visible)::before,
 .group:has(.group-session-connector-button:hover) .group-head::before,
@@ -260,6 +258,7 @@
 /* CDXC:Theming 2026-05-05-02:58: Custom workspace theme colors tint
    Combined-mode project headers only. The synthetic Chats group keeps its
    normal chat styling because it has no project theme color. */
+.group[data-workspace-custom-theme='true'].project-drag-ghost .group-head::before,
 .group[data-workspace-custom-theme='true'] .group-head:hover::before,
 .group[data-workspace-custom-theme='true'] .group-head:has(:focus-visible)::before,
 .group[data-workspace-custom-theme='true']:has(.group-session-connector-button:hover) .group-head::before,
@@ -1962,6 +1961,9 @@ section.project-collection.project-collection-drag-ghost {
   box-shadow: none;
 }
 
+.sidebar-reference-layout[data-reference-sidebar='true']
+  .group[data-project-group='true'].project-drag-ghost
+  .group-head::before,
 .sidebar-reference-layout[data-reference-sidebar='true'] .group[data-project-group='true'] .group-head:hover::before,
 .sidebar-reference-layout[data-reference-sidebar='true']
   .group[data-project-group='true']

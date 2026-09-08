@@ -1,4 +1,8 @@
-import { isUnassignedSidebarSpaceProject, OTHER_SIDEBAR_SPACE_ID } from '../../shared/sidebar-spaces-other';
+import {
+  isSidebarSpaceProject,
+  isUnassignedSidebarSpaceProject,
+  OTHER_SIDEBAR_SPACE_ID,
+} from '../../shared/sidebar-spaces-other';
 import type { SidebarProjectCollectionsState } from '../project-collections';
 import type { SidebarSpace, SidebarSpacesState } from '../spaces';
 import { createProjectCollectionIdByProjectId, type SidebarProjectGroupLookup } from './drag-drop-geometry';
@@ -62,23 +66,18 @@ export function createSidebarSpaceGroupVisibility({
     groupsById,
     resolveProjectId
   );
-  const memberCollectionIds = new Set(space.memberCollectionIds);
-  const memberProjectIds = new Set(space.memberProjectIds);
 
   return (groupId: string) => {
     const projectId = resolveProjectId(groupId);
     if (!projectId) {
       return false;
     }
-    const collectionId = collectionIdByProjectId.get(projectId);
-    if (collectionId && memberCollectionIds.has(collectionId)) {
-      return true;
-    }
-    if (memberProjectIds.has(projectId)) {
-      return true;
-    }
-    const parentProjectId = groupsById[groupId]?.projectContext?.worktree?.parentProjectId;
-    return Boolean(parentProjectId && memberProjectIds.has(parentProjectId));
+    return isSidebarSpaceProject({
+      collectionId: collectionIdByProjectId.get(projectId),
+      parentProjectId: groupsById[groupId]?.projectContext?.worktree?.parentProjectId,
+      projectId,
+      space,
+    });
   };
 }
 

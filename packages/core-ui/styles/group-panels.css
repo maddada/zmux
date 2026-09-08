@@ -2775,3 +2775,8 @@ manual mode visibly selected without adding text to the section row.
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.sidebar-space-filter-button[data-space-drop-target='true'] {
+  background: color-mix(in srgb, var(--app-foreground) 20%, transparent);
+  border-color: var(--app-foreground);
+}
