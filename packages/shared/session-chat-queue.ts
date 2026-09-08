@@ -67,6 +67,7 @@ export interface SessionChatDraftVersion {
 }
 
 export interface SessionChatDraft {
+  deliveredDrafts?: SessionChatDeliveredDraft[];
   version?: SessionChatDraftVersion;
   /** Durable receipts, retained even after a subsequent draft is saved. */
   consumedDrafts?: SessionChatDraftVersion[];
@@ -78,6 +79,14 @@ export interface SessionChatDraft {
    * and so the conflict bar never fires against the device that typed it.
    */
   originClientId: string;
+}
+
+export interface SessionChatDeliveredDraft {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  text: string;
+  deliveredAt: string;
 }
 
 /*

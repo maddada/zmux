@@ -53,10 +53,13 @@ pub fn read(
                 content: row.get(0)?, origin_client_id: row.get(1)?, updated_at: row.get(2)?,
                 version: id.map(|draft_id| Ok::<_, rusqlite::Error>(DraftVersion { draft_id, revision: row.get(4)? })).transpose()?,
                 consumed_drafts: Vec::new(),
+                delivered_drafts: Vec::new(),
             })
         },
     ).optional().map_err(sql_error)?;
     if let Some(draft) = draft.as_mut() {
+        draft.delivered_drafts =
+            crate::session_chat_delivered_drafts::read(db, Some((project, session)))?;
         let mut statement = db.prepare("SELECT draftId, consumed FROM session_chat_draft_versions WHERE projectId=?1 AND sessionId=?2 AND consumed>0 ORDER BY draftId").map_err(sql_error)?;
         draft.consumed_drafts = statement
             .query_map(params![project, session], |row| {

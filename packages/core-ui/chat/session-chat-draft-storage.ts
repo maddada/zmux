@@ -7,6 +7,7 @@ import type { SessionChatDraftVersion, SessionChatDraft } from '@/packages/share
  */
 
 import { sessionChatDraftFingerprint, type SessionChatDraftDiagnosticLog } from './session-chat-draft-diagnostics';
+import { recordDeliveredSessionChatDrafts } from './session-chat-sent-history';
 
 const SESSION_CHAT_DRAFT_STORAGE_PREFIX = 'ghostex.sessionChat.draft.';
 
@@ -217,7 +218,10 @@ export function deleteStoredSessionChatDraft(sessionKey: string): void {
  * receipt for a different draft cannot discard local unsent text.
  */
 export function reconcileSessionChatDraftsFromServer(
-  drafts: readonly (Pick<SessionChatDraft, 'content' | 'updatedAt' | 'version' | 'consumedDrafts'> & {
+  drafts: readonly (Pick<
+    SessionChatDraft,
+    'content' | 'updatedAt' | 'version' | 'consumedDrafts' | 'deliveredDrafts'
+  > & {
     projectId: string;
     sessionId: string;
   })[],
@@ -231,6 +235,7 @@ export function reconcileSessionChatDraftsFromServer(
   }
   const now = Date.now();
   for (const draft of drafts) {
+    recordDeliveredSessionChatDrafts(draft.deliveredDrafts);
     const serverAt = Date.parse(draft.updatedAt);
     if (Number.isNaN(serverAt)) {
       continue;

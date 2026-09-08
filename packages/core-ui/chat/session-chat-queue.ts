@@ -232,10 +232,16 @@ export function mergeSessionChatDraftState(
       ? current
       : incoming;
   const retired = body.version && (consumed.get(body.version.draftId) ?? 0) >= body.version.revision;
+  const delivered = new Map(
+    [...(current?.deliveredDrafts ?? []), ...(incoming.deliveredDrafts ?? [])].map((receipt) => [receipt.id, receipt])
+  );
   return {
     ...body,
     content: retired ? '' : body.content,
     consumedDrafts: [...consumed].map(([draftId, revision]) => ({ draftId, revision })),
+    deliveredDrafts: [...delivered.values()]
+      .sort((left, right) => right.deliveredAt.localeCompare(left.deliveredAt) || right.id.localeCompare(left.id))
+      .slice(0, 50),
   };
 }
 

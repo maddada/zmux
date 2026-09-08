@@ -340,6 +340,7 @@ impl<'a> DomainRepository<'a> {
         Ok(json!({
             "prompts": prompts,
             "tags": read_stashed_prompt_tags(self.db)?,
+            "deliveredDrafts": crate::session_chat_delivered_drafts::read(self.db, None)?,
         }))
     }
 

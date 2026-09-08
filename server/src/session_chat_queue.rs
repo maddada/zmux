@@ -73,6 +73,7 @@ pub struct SessionChatDraft {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<crate::session_chat_draft_versions::DraftVersion>,
     pub consumed_drafts: Vec<crate::session_chat_draft_versions::DraftVersion>,
+    pub delivered_drafts: Vec<crate::session_chat_delivered_drafts::DeliveredDraft>,
 }
 
 /*
@@ -138,6 +139,7 @@ impl SessionChatQueueSnapshot {
             revision.push_str(&draft.origin_client_id);
             revision.push_str(&serde_json::to_string(&draft.version).unwrap_or_default());
             revision.push_str(&serde_json::to_string(&draft.consumed_drafts).unwrap_or_default());
+            revision.push_str(&serde_json::to_string(&draft.delivered_drafts).unwrap_or_default());
         }
         revision
     }
@@ -372,7 +374,7 @@ pub fn handle_session_chat_queue_endpoint(
         _ => {
             return Err(DomainStateError::not_found(format!(
                 "{endpoint_path} is not a gxserver session-chat queue endpoint."
-            )))
+            )));
         }
     };
     Ok(SessionChatQueueEndpointResult {
@@ -787,6 +789,10 @@ fn set_draft(
         updated_at: now_iso(),
         version: None,
         consumed_drafts: Vec::new(),
+        delivered_drafts: crate::session_chat_delivered_drafts::read(
+            db,
+            Some((project_id, session_id)),
+        )?,
     };
     // A new write must have a distinct version even in the same millisecond:
     // a send acknowledgement may be comparing against the previous stamp.
@@ -930,18 +936,30 @@ pub fn clear_session_chat_draft_after_delivery(
     session_id: &str,
     submitted: &SessionChatDraft,
 ) -> Result<(), DomainStateError> {
+    let transaction = db.unchecked_transaction().map_err(sql_error)?;
     if let Some(version) = submitted.version.as_ref() {
-        crate::session_chat_draft_versions::consume(db, project_id, session_id, version)
+        crate::session_chat_draft_versions::consume_in(
+            &transaction,
+            project_id,
+            session_id,
+            version,
+        )?;
     } else {
         clear_session_chat_draft_after_send(
-            db,
+            &transaction,
             project_id,
             session_id,
             &submitted.content,
             Some(submitted),
-        )
-        .map(|_| ())
+        )?;
     }
+    crate::session_chat_delivered_drafts::record(
+        &transaction,
+        project_id,
+        session_id,
+        &submitted.content,
+    )?;
+    transaction.commit().map_err(sql_error)
 }
 
 /// CDXC:Drafts 2026-09-05 WHY:
