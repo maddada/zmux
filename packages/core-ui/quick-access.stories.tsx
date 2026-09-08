@@ -16,22 +16,31 @@ import { StashedPromptsModal } from './stashed-prompts-modal';
 import type { WebviewApi } from './webview-api';
 
 const STORY_PREVIOUS_SESSIONS: SidebarPreviousSessionItem[] = [
-  createStoryPreviousSession({
-    alias: 'Unify Quick Access styling',
-    closedAt: '2026-08-07T08:15:00.000Z',
-    detail: 'OpenAI Codex',
-    historyId: 'quick-access-history-1',
-    sessionId: 'quick-access-session-1',
-    shortcutLabel: '⌘⌥1',
-  }),
-  createStoryPreviousSession({
-    alias: 'Release follow-up',
-    closedAt: '2026-08-07T07:30:00.000Z',
-    detail: 'Claude Code',
-    historyId: 'quick-access-history-2',
-    sessionId: 'quick-access-session-2',
-    shortcutLabel: '⌘⌥2',
-  }),
+  {
+    ...createStoryPreviousSession({
+      alias: 'Unify Quick Access styling',
+      closedAt: '2026-08-07T08:15:00.000Z',
+      detail: 'OpenAI Codex',
+      historyId: 'quick-access-history-1',
+      sessionId: 'quick-access-session-1',
+      shortcutLabel: '⌘⌥1',
+    }),
+    projectId: 'story-ghostex',
+    projectName: 'Ghostex',
+  },
+  {
+    ...createStoryPreviousSession({
+      alias: 'Release follow-up',
+      closedAt: '2026-08-07T07:30:00.000Z',
+      detail: 'Claude Code',
+      historyId: 'quick-access-history-2',
+      sessionId: 'quick-access-session-2',
+      shortcutLabel: '⌘⌥2',
+    }),
+    externalSession: true,
+    projectId: 'story-release',
+    projectName: 'Release Tools',
+  },
   createStoryPreviousSession({
     alias: 'Sidebar interaction audit',
     closedAt: '2026-08-06T18:40:00.000Z',
@@ -214,7 +223,18 @@ function useQuickAccessStoryHost(respondToRequests = true): WebviewApi {
         if (message.type === 'requestPreviousSessions') {
           dispatchStoryMessage({
             cursor: message.cursor ? undefined : 'older',
-            previousSessions: message.cursor ? STORY_OLDER_PREVIOUS_SESSIONS : STORY_PREVIOUS_SESSIONS,
+            previousSessions: (message.cursor
+              ? STORY_OLDER_PREVIOUS_SESSIONS
+              : STORY_PREVIOUS_SESSIONS
+            ).filter(
+              (session) =>
+                (!message.projectId || session.projectId === message.projectId) &&
+                (!message.externalOnly || session.externalSession)
+            ),
+            projects: [
+              { projectId: 'story-ghostex', name: 'Ghostex', path: '/projects/Ghostex' },
+              { projectId: 'story-release', name: 'Release Tools', path: '/projects/release-tools' },
+            ],
             query: message.query,
             requestId: message.requestId,
             type: 'previousSessionsResult',
@@ -274,7 +294,7 @@ function RecentProjectsStory() {
   return <RecentProjectsModal isOpen={true} onClose={() => undefined} vscode={vscode} />;
 }
 
-function RecentSessionsStory() {
+function RecentSessionsStory({ initialScope = 'all' }: { initialScope?: 'all' | 'external' }) {
   const vscode = useQuickAccessStoryHost();
   useEffect(() => {
     useSidebarStore.setState({
@@ -298,7 +318,7 @@ function RecentSessionsStory() {
       useSidebarStore.getState().reset();
     };
   }, []);
-  return <PreviousSessionsModal isOpen={true} onClose={() => undefined} vscode={vscode} />;
+  return <PreviousSessionsModal initialScope={initialScope} isOpen={true} onClose={() => undefined} vscode={vscode} />;
 }
 
 /**
@@ -359,3 +379,7 @@ export const SessionsTagFilterMenu: Story = { render: () => <RecentSessionsTagFi
 export const SavedPrompts: Story = { render: () => <SavedPromptsStory /> };
 export const RecentProjectsLoading: Story = { render: () => <RecentProjectsLoadingStory /> };
 export const RecentSessionsLoading: Story = { render: () => <RecentSessionsLoadingStory /> };
+
+export const ExternalSessions: Story = {
+  render: () => <RecentSessionsStory initialScope='external' />,
+};

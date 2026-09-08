@@ -43,6 +43,7 @@ import { SessionNoteModal } from '@/packages/core-ui/session-note-modal';
 import { SessionRenameModal } from '@/packages/core-ui/session-rename-modal';
 import { SpaceEditorModal } from '@/packages/core-ui/space-editor-modal';
 import { MermaidDiagramModal } from '@/packages/core-ui/mermaid/mermaid-diagram';
+import { SessionChatTableModal } from '@/packages/core-ui/chat/session-chat-markdown';
 import { WatchGhostexVideoModal } from '@/packages/core-ui/watch-ghostex-video-modal';
 import { UpdateAvailableModal, type UpdateAvailableModalState } from '@/packages/core-ui/update-available-modal';
 import { FirstLaunchSetupModal } from '@/packages/core-ui/first-launch-setup-modal';
@@ -105,6 +106,7 @@ type AppModalKind =
   | 'exportTranscriptResult'
   | 'watchGhostexVideo'
   | 'mermaidDiagram'
+  | 'markdownTable'
   | 'hotkeys'
   | 'missingProjectFolder'
   | 'gitCommit'
@@ -225,6 +227,7 @@ type AppModalHostMessage =
       supportsSendWhenAgentStops?: boolean;
       initialTitle?: string;
       initialQuery?: string;
+      initialSessionScope?: 'all' | 'closed' | 'external';
       /** CDXC:SessionNotes 2026-08-24: see SessionNoteModalState. */
       initialNote?: string;
       sessionTitle?: string;
@@ -1165,9 +1168,12 @@ function AppModalHost() {
     gitCommit,
     gitFileDiff,
     mermaidSource,
+    tableSource,
     worktreeDelete,
     worktreeRename,
     missingProjectFolder,
+    previousSessionsInitialScope,
+    previousSessionsOpenRequestSequence,
     commandPaletteInitialQuery,
     commandPaletteOpenRequestSequence,
     isCommandPalettePrewarm,
@@ -1275,6 +1281,7 @@ function AppModalHost() {
     gitCommit,
     gitFileDiff,
     mermaidSource,
+    tableSource,
     worktreeDelete,
     worktreeRename,
     missingProjectFolder,
@@ -1700,6 +1707,8 @@ function AppModalHost() {
   return (
     <>
       <PreviousSessionsModal
+        initialScope={previousSessionsInitialScope}
+        openRequestSequence={previousSessionsOpenRequestSequence}
         isOpen={activeModal === 'previousSessions'}
         onClose={closeModal}
         onInitialLoadReady={handlePreviousSessionsInitialLoadReady}
@@ -2410,6 +2419,9 @@ function AppModalHost() {
         appIconState={appIconState}
       />
       <DiscoverGhostexModal isOpen={activeModal === 'discoverGhostex'} onClose={closeModal} theme={theme} />
+      {activeModal === 'markdownTable' && tableSource !== undefined && (
+        <SessionChatTableModal source={tableSource} onClose={closeModal} />
+      )}
       {activeModal === 'mermaidDiagram' && mermaidSource !== undefined && (
         <MermaidDiagramModal source={mermaidSource} onClose={closeModal} />
       )}
@@ -2741,6 +2753,7 @@ function useModalStateFromNative() {
   const [gitCommit, setGitCommit] = useState<GitCommitModalDraft>();
   const [gitFileDiff, setGitFileDiff] = useState<GitFileDiffModalDraft>();
   const [mermaidSource, setMermaidSource] = useState<string>();
+  const [tableSource, setTableSource] = useState<string>();
   const [worktreeDelete, setWorktreeDelete] = useState<WorktreeDeleteModalDraft>();
   const [worktreeRename, setWorktreeRename] = useState<WorktreeRenameModalDraft>();
   const [missingProjectFolder, setMissingProjectFolder] = useState<MissingProjectFolderModalState>();
@@ -2757,6 +2770,8 @@ function useModalStateFromNative() {
   const [portlessSetup, setPortlessSetup] = useState<PortlessSetupModalState>();
   const [updateAvailable, setUpdateAvailable] = useState<UpdateAvailableModalState>();
   const [agentHookStatus, setAgentHookStatus] = useState<AgentHookStatusMessage>();
+  const [previousSessionsInitialScope, setPreviousSessionsInitialScope] = useState<'all' | 'closed' | 'external'>('all');
+  const [previousSessionsOpenRequestSequence, setPreviousSessionsOpenRequestSequence] = useState(0);
   const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState('');
   const [commandPaletteOpenRequestSequence, setCommandPaletteOpenRequestSequence] = useState(0);
   const [isCommandPalettePrewarm, setIsCommandPalettePrewarm] = useState(false);
@@ -3305,6 +3320,9 @@ function useModalStateFromNative() {
           } else if (message.modal === 'mermaidDiagram') {
             if (typeof message.source !== 'string') throw new Error('Missing Mermaid diagram source.');
             setMermaidSource(message.source);
+          } else if (message.modal === 'markdownTable') {
+            if (typeof message.source !== 'string') throw new Error('Missing table source.');
+            setTableSource(message.source);
           } else if (message.modal === 'agentConfig') {
             if (!message.agentDraft) {
               throw new Error('Agent config modal request is missing agentDraft.');
@@ -3373,6 +3391,14 @@ function useModalStateFromNative() {
             setSettingsInitialAgentsSection(undefined);
             setSettingsInitialSearchQuery(undefined);
             setSettingsInitialTabOverride(undefined);
+          }
+          if (message.modal === 'previousSessions') {
+            setPreviousSessionsInitialScope(
+              message.initialSessionScope === 'external' || message.initialSessionScope === 'closed'
+                ? message.initialSessionScope
+                : 'all'
+            );
+            setPreviousSessionsOpenRequestSequence((sequence) => sequence + 1);
           }
           if (message.modal === 'commandPalette') {
             /*
@@ -3622,9 +3648,12 @@ function useModalStateFromNative() {
     gitCommit,
     gitFileDiff,
     mermaidSource,
+    tableSource,
     worktreeDelete,
     worktreeRename,
     missingProjectFolder,
+    previousSessionsInitialScope,
+    previousSessionsOpenRequestSequence,
     commandPaletteInitialQuery,
     commandPaletteOpenRequestSequence,
     isCommandPalettePrewarm,
@@ -3782,6 +3811,7 @@ function isModalRenderable({
   gitCommit,
   gitFileDiff,
   mermaidSource,
+  tableSource,
   worktreeDelete,
   worktreeRename,
   missingProjectFolder,
@@ -3807,6 +3837,7 @@ function isModalRenderable({
   gitCommit: GitCommitModalDraft | undefined;
   gitFileDiff: GitFileDiffModalDraft | undefined;
   mermaidSource: string | undefined;
+  tableSource: string | undefined;
   worktreeDelete: WorktreeDeleteModalDraft | undefined;
   worktreeRename: WorktreeRenameModalDraft | undefined;
   missingProjectFolder: MissingProjectFolderModalState | undefined;
@@ -3843,6 +3874,8 @@ function isModalRenderable({
       return gitCommit !== undefined;
     case 'gitFileDiff':
       return gitFileDiff !== undefined;
+    case 'markdownTable':
+      return tableSource !== undefined;
     case 'mermaidDiagram':
       return mermaidSource !== undefined;
     case 'missingProjectFolder':

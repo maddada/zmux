@@ -19,6 +19,7 @@ import {
   IconFilter2,
   IconFolders,
   IconHistoryToggle,
+  IconDownload,
   IconKeyboard,
   IconLayoutSidebar,
   IconLoader2,
@@ -103,6 +104,7 @@ export function SidebarReferenceTopChrome({
   onOpenRemoteSetup,
   onOpenPowerSettings,
   onOpenPreviousSessions,
+  onOpenImportSessions,
   onOpenSettings,
   onRunKeepAwake,
   onSearchPreviousSessionsByPrompt,
@@ -130,6 +132,7 @@ export function SidebarReferenceTopChrome({
   onOpenRemoteSetup: () => void;
   onOpenPowerSettings: () => void;
   onOpenPreviousSessions: () => void;
+  onOpenImportSessions: () => void;
   onOpenSettings: () => void;
   onRunKeepAwake: (durationMinutes: KeepAwakeDurationMinutes) => void;
   onSearchPreviousSessionsByPrompt: () => void;
@@ -309,6 +312,7 @@ export function SidebarReferenceTopChrome({
                 }}
                 onOpenRemoteSetup={() => closeMenuAndRun(onOpenRemoteSetup)}
                 onOpenPreviousSessions={() => closeMenuAndRun(onOpenPreviousSessions)}
+                onOpenImportSessions={() => closeMenuAndRun(onOpenImportSessions)}
                 onOpenSettings={() => closeMenuAndRun(onOpenSettings)}
                 onSearchPreviousSessionsByPrompt={() => closeMenuAndRun(onSearchPreviousSessionsByPrompt)}
                 onTogglePetOverlay={() => closeMenuAndRun(onTogglePetOverlay)}
@@ -461,6 +465,7 @@ export function SidebarReferenceSettingsDropdown({
   onOpenRemoteSetup,
   onOpenKeepAwakeMenu,
   onOpenPreviousSessions,
+  onOpenImportSessions,
   onOpenSettings,
   onOpenSortFilterMenu,
   onSearchPreviousSessionsByPrompt,
@@ -480,6 +485,7 @@ export function SidebarReferenceSettingsDropdown({
   onOpenRemoteSetup: () => void;
   onOpenKeepAwakeMenu: () => void;
   onOpenPreviousSessions: () => void;
+  onOpenImportSessions: () => void;
   onOpenSettings: () => void;
   onOpenSortFilterMenu: () => void;
   onSearchPreviousSessionsByPrompt: () => void;
@@ -523,6 +529,7 @@ export function SidebarReferenceSettingsDropdown({
         onSelect={onOpenPreviousSessions}
         shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openSessionSearchPalette)}
       />
+      <SidebarReferencePrimaryMenuItem icon={IconDownload} label='Import Sessions' onSelect={onOpenImportSessions} />
       <SidebarReferencePrimaryMenuItem
         icon={IconFileSearch}
         label='Search by Prompt'

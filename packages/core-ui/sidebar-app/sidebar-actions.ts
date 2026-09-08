@@ -140,13 +140,16 @@ export function useSidebarActions({
     openAppModal({ modal: 'agentsHub', type: 'open' });
   };
 
-  const openPreviousSessions = () => {
+  const openSessions = (sessionScope: 'all' | 'external') => {
     dismissAppModalForSidebarNavigation('SettingsDismissal:previousSessions');
     setIsSessionSearchSelectionVisible(false);
     setIsSessionSearchOpen(false);
     setSessionSearchQuery('');
-    openQuickAccess('recentSessions');
+    openQuickAccess('recentSessions', { sessionScope });
   };
+
+  const openPreviousSessions = () => openSessions('all');
+  const openImportSessions = () => openSessions('external');
 
   const searchPreviousSessionsByPrompt = () => {
     dismissAppModalForSidebarNavigation('SettingsDismissal:previousSessionsPromptSearch');
@@ -162,6 +165,7 @@ export function useSidebarActions({
     openAddProjectModal,
     openConfigureAgentsModal,
     openPreviousSessions,
+    openImportSessions,
     openReferenceAgentsHub,
     openReferenceAutomations,
     openReferenceRemoteSetup,

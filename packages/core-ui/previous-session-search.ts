@@ -275,6 +275,7 @@ function isPreviousSessionWebPage(session: SidebarPreviousSessionItem): boolean 
 }
 
 function createPreviousSessionDedupeKey(session: SidebarPreviousSessionItem): string {
+  if (session.externalSession) return session.historyId;
   const projectKey = normalizeSessionSearchValue(session.projectPath || session.projectId || session.projectName || '');
   const scopedProjectKey = projectKey || `history:${session.historyId}`;
   const titleKey = normalizeSessionSearchValue(getSessionHistoryCardTitle(session));

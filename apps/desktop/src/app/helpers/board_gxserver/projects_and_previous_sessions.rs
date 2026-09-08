@@ -214,10 +214,13 @@ pub(crate) struct GpuiPreviousSessionsRequest {
     pub(crate) query: Option<String>,
     pub(crate) request_id: String,
     pub(crate) session_tags: Option<Vec<String>>,
+    pub(crate) project_id: Option<String>,
+    pub(crate) external_only: bool,
 }
 
 #[derive(Default)]
 pub(crate) struct GpuiPreviousSessionsPage {
+    pub(crate) projects: Vec<serde_json::Value>,
     pub(crate) cursor: Option<String>,
     pub(crate) items: Vec<serde_json::Value>,
 }
@@ -235,6 +238,11 @@ pub(crate) fn gpui_list_previous_sessions_from_gxserver(
         .and_then(serde_json::Value::as_array)
         .ok_or_else(|| "gxserver returned invalid previous-session results.".to_string())?;
     Ok(GpuiPreviousSessionsPage {
+        projects: result
+            .get("projects")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
         cursor: result
             .get("cursor")
             .and_then(serde_json::Value::as_str)
@@ -281,6 +289,13 @@ pub(crate) fn gpui_gxserver_search_result_to_previous_session_item_with_options(
         .or_else(|| json_string_field(result, "zmxName"));
 
     let mut item = serde_json::Map::new();
+    item.insert(
+        "externalSession".to_string(),
+        result
+            .get("externalSession")
+            .cloned()
+            .unwrap_or(serde_json::Value::Bool(false)),
+    );
     item.insert(
         "activity".to_string(),
         serde_json::Value::String("idle".to_string()),
@@ -375,7 +390,15 @@ pub(crate) fn gpui_gxserver_search_result_to_previous_session_item_with_options(
             json_bool_field(result, "isPrimaryTitleTerminalTitle").unwrap_or(false),
         ),
     );
-    item.insert("isRestorable".to_string(), serde_json::Value::Bool(true));
+    item.insert(
+        "isRestorable".to_string(),
+        serde_json::Value::Bool(json_bool_field(result, "isRestorable").unwrap_or(true)),
+    );
+    gpui_insert_optional_string(
+        &mut item,
+        "restoreUnavailableReason",
+        json_string_field(result, "restoreUnavailableReason"),
+    );
     item.insert("isRunning".to_string(), serde_json::Value::Bool(false));
     item.insert("isVisible".to_string(), serde_json::Value::Bool(false));
     gpui_insert_optional_string(
@@ -397,7 +420,12 @@ pub(crate) fn gpui_gxserver_search_result_to_previous_session_item_with_options(
     );
     item.insert(
         "projectId".to_string(),
-        serde_json::Value::String(project_id.to_string()),
+        serde_json::Value::String(
+            history_id_prefix
+                .strip_prefix("remote-gxserver:")
+                .map(|machine| format!("remote:{machine}:project:{project_id}"))
+                .unwrap_or_else(|| project_id.to_string()),
+        ),
     );
     item.insert(
         "projectName".to_string(),

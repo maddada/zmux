@@ -162,6 +162,13 @@ pub(crate) fn search_previous_sessions(
     let mut candidates = sessions
         .into_iter()
         .filter(is_previous_session_history_candidate)
+        .filter(|session| {
+            params.get("externalOnly").and_then(Value::as_bool) != Some(true)
+                || session
+                    .pointer("/runtimeSettings/externalSession")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+        })
         /*
         A closed row that something else continues from is history the family's
         living branch already owns. Both leaves of a deliberate fork survive
@@ -239,6 +246,13 @@ pub(crate) fn is_previous_session_history_candidate(session: &Value) -> bool {
     if string_field(session, "lifecycleState").as_deref() != Some("stopped") {
         return false;
     }
+    if session
+        .pointer("/runtimeSettings/externalSession")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        return true;
+    }
     project_session_title(session)
         .get("trustedResumeTitle")
         .is_some()
@@ -285,6 +299,41 @@ pub(crate) fn search_result(project: Option<&Value>, session: &Value, matched: V
         "agentSessionPath",
         read_runtime_text(session, "agentSessionPath"),
     );
+    output.insert(
+        "externalSession".to_string(),
+        session
+            .pointer("/runtimeSettings/externalSession")
+            .cloned()
+            .unwrap_or(Value::Bool(false)),
+    );
+    if session
+        .pointer("/runtimeSettings/externalSession")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        let cwd_exists = session
+            .get("cwd")
+            .and_then(Value::as_str)
+            .is_some_and(|path| std::path::Path::new(path).is_dir());
+        let transcript_exists = session
+            .pointer("/runtimeSettings/agentSessionPath")
+            .and_then(Value::as_str)
+            .is_some_and(|path| std::path::Path::new(path).is_file());
+        output.insert(
+            "isRestorable".to_string(),
+            Value::Bool(cwd_exists && transcript_exists),
+        );
+        if !cwd_exists || !transcript_exists {
+            output.insert(
+                "restoreUnavailableReason".to_string(),
+                json!(if !cwd_exists {
+                    "The original project folder is missing."
+                } else {
+                    "The agent transcript is missing."
+                }),
+            );
+        }
+    }
     output.insert("createdAt".to_string(), value_field(session, "createdAt"));
     insert_optional_js_truthy_value(&mut output, "cwd", session.get("cwd").cloned());
     merge_object(&mut output, project_session_title(session));

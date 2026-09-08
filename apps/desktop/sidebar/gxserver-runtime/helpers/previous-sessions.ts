@@ -19,6 +19,7 @@ export function gxserverSearchResultToPreviousSessionItem(
   const sessionPersistenceName = result.sessionPersistenceName ?? result.zmxName;
   return {
     activity: 'idle',
+    externalSession: result.externalSession,
     agentIcon: resolveGpuiSidebarAgentIcon(result.agentIcon ?? agentName),
     agentSessionId: result.agentSessionId,
     alias: title,
@@ -33,13 +34,16 @@ export function gxserverSearchResultToPreviousSessionItem(
     isParked: result.isParked,
     isPinned: result.isPinned,
     isPrimaryTitleTerminalTitle: result.isPrimaryTitleTerminalTitle,
-    isRestorable: true,
+    isRestorable: result.isRestorable !== false,
+    restoreUnavailableReason: result.restoreUnavailableReason,
     isRunning: false,
     isVisible: false,
     lastInteractionAt: result.lastActiveAt,
     lifecycleState: 'done',
     primaryTitle: result.primaryTitle ?? title,
-    projectId: result.projectId,
+    projectId: options.historyIdPrefix?.startsWith('remote-gxserver:')
+      ? `remote:${options.historyIdPrefix.slice('remote-gxserver:'.length)}:project:${result.projectId}`
+      : result.projectId,
     projectName: options.projectNamePrefix
       ? `${options.projectNamePrefix} / ${result.projectTitle}`
       : result.projectTitle,

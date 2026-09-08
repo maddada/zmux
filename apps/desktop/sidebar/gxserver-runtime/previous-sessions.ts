@@ -15,7 +15,10 @@ import {
 import { normalizeNonEmptyString } from './helpers/records';
 import type { GpuiGxserverCreatedSessionResult } from './types-and-protocol';
 import type { GxserverPresentationSearchResponse } from '@/packages/shared/gxserver-protocol';
-import type { SidebarPreviousSessionItem, SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
+import type {
+  SidebarPreviousSessionItem,
+  SidebarToExtensionMessage,
+} from '@/packages/shared/session-grid-contract';
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -44,7 +47,8 @@ export interface GpuiSidebarRuntimePreviousSessionMethods {
     requestId: string,
     query: string | undefined,
     previousSessions: SidebarPreviousSessionItem[],
-    cursor?: string
+    cursor?: string,
+    projects?: GxserverPresentationSearchResponse['projects']
   ): void;
   removePreviousSessionFromCurrentResult(historyId: string): void;
 }
@@ -68,6 +72,8 @@ export const gpuiSidebarRuntimePreviousSessionMethods = {
                 limit,
                 query: message.query,
                 sessionTags,
+                projectId: message.projectId,
+                externalOnly: message.externalOnly,
               })
               .catch((): GxserverPresentationSearchResponse => ({ results: [] }))
           : Promise.resolve<GxserverPresentationSearchResponse>({ results: [] }),
@@ -82,6 +88,12 @@ export const gpuiSidebarRuntimePreviousSessionMethods = {
               limit,
               query: message.query,
               sessionTags,
+              projectId: message.projectId
+                ? message.projectId.startsWith(`remote:${machine.machineId}:project:`)
+                  ? message.projectId.slice(`remote:${machine.machineId}:project:`.length)
+                  : `unmatched:${message.projectId}`
+                : undefined,
+              externalOnly: message.externalOnly,
             }
           ).catch((): GxserverPresentationSearchResponse => ({ results: [] }))
         ),
@@ -105,7 +117,17 @@ export const gpuiSidebarRuntimePreviousSessionMethods = {
           ...localResponse.results.map((result) => gxserverSearchResultToPreviousSessionItem(result)),
           ...remoteItems,
         ].sort(comparePreviousSessionItemsByClosedTime),
-        localResponse.cursor ?? remoteResponses.find((response) => response.cursor)?.cursor
+        localResponse.cursor ?? remoteResponses.find((response) => response.cursor)?.cursor,
+        [
+          ...(localResponse.projects ?? []),
+          ...remoteResponses.flatMap((response, index) =>
+            (response.projects ?? []).map((project) => ({
+              ...project,
+              projectId: `remote:${remoteMachines[index]!.machineId}:project:${project.projectId}`,
+              name: `${remoteMachines[index]!.machineName} / ${project.name}`,
+            }))
+          ),
+        ]
       );
     } catch {
       this.postPreviousSessionsResult(message.requestId, message.query, []);
@@ -133,7 +155,9 @@ export const gpuiSidebarRuntimePreviousSessionMethods = {
         projectId: reference.projectId,
         restoredFromSessionId: reference.sessionId,
         ...(previousSession?.sessionTag ? { sessionTag: previousSession.sessionTag } : {}),
-        ...(previousSession?.sidebarOrder !== undefined ? { sidebarOrder: previousSession.sidebarOrder } : {}),
+        ...(previousSession?.sidebarOrder !== undefined
+          ? { sidebarOrder: previousSession.sidebarOrder }
+          : {}),
         surface: 'workspace',
         title: previousSessionTitle(previousSession),
       });
@@ -184,7 +208,9 @@ export const gpuiSidebarRuntimePreviousSessionMethods = {
         projectId: reference.projectId,
         restoredFromSessionId: reference.sessionId,
         ...(previousSession?.sessionTag ? { sessionTag: previousSession.sessionTag } : {}),
-        ...(previousSession?.sidebarOrder !== undefined ? { sidebarOrder: previousSession.sidebarOrder } : {}),
+        ...(previousSession?.sidebarOrder !== undefined
+          ? { sidebarOrder: previousSession.sidebarOrder }
+          : {}),
         surface: 'workspace',
         title: previousSessionTitle(previousSession),
       });
@@ -254,7 +280,8 @@ export const gpuiSidebarRuntimePreviousSessionMethods = {
     requestId: string,
     query: string | undefined,
     previousSessions: SidebarPreviousSessionItem[],
-    cursor?: string
+    cursor?: string,
+    projects?: GxserverPresentationSearchResponse['projects']
   ): void {
     this.previousSessionsResult = {
       cursor,
@@ -270,6 +297,7 @@ export const gpuiSidebarRuntimePreviousSessionMethods = {
       previousSessions,
       query,
       requestId,
+      projects,
       type: 'previousSessionsResult',
     });
   },

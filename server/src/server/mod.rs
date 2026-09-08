@@ -123,6 +123,7 @@ use crate::{
     session_chat_send::{
         handle_answer_session_chat_prompt_http, handle_handoff_session_chat_draft_http,
         handle_interrupt_session_chat_http, handle_send_session_chat_message_http,
+        handle_replace_session_chat_draft_http,
     },
     session_chat_skills::handle_read_session_chat_skills_http,
     session_git_status, session_keep_awake, session_lifecycle,
@@ -661,6 +662,7 @@ pub async fn run_gxserver_foreground(
         telemetry_tasks.flush,
     )
     .await;
+    crate::accounts::setup::cancel_all(&state);
     state.extension_registry.stop_all();
     state.tailcat_runtime.stop();
     serve_result.with_context(|| "run gxserver HTTP listener")?;
@@ -1234,6 +1236,10 @@ async fn route_http(
             |repository, db, params, _| {
                 let created_session = repository.create_session(params, false)?;
                 let session = apply_created_session_identity(repository, &created_session, params)?;
+                if session.pointer("/runtimeSettings/externalSession").and_then(Value::as_bool) == Some(true) {
+                    repository.restore_recent_project(&value_text(&session, "projectId")?)?;
+                    schedule_presentation_project_delta(&state, db, repository, &value_text(&session, "projectId")?, "projectUpdated")?;
+                }
                 let project_id = value_text(&session, "projectId")?;
                 let session_id = value_text(&session, "sessionId")?;
                 schedule_presentation_session_delta(
@@ -2102,13 +2108,21 @@ async fn route_http(
             &body_json,
             |_, db, params, server_id| search_presentation_sessions(db, server_id, params),
         ),
-        "/api/listPreviousSessions" => handle_domain_http(
-            &state,
-            endpoint.path,
-            request_id,
-            &body_json,
-            |_, db, params, server_id| list_previous_sessions(db, server_id, params),
-        ),
+        "/api/listPreviousSessions" => {
+            let worker_state = state.clone();
+            let worker_endpoint = endpoint.path.clone();
+            let worker_request_id = request_id.clone();
+            match tokio::task::spawn_blocking(move || handle_domain_http(
+                &worker_state, worker_endpoint, worker_request_id, &body_json,
+                |_, db, params, server_id| {
+                    crate::external_sessions::discover(db, server_id, &worker_state.paths)?;
+                    list_previous_sessions(db, server_id, params)
+                },
+            )).await {
+                Ok(response) => response,
+                Err(error) => domain_error_response(endpoint.path, request_id, DomainStateError::corrupt_state(format!("Session discovery failed: {error}"))),
+            }
+        },
         /*
         CDXC:SessionFork 2026-08-28:
         Previous Sessions hides a closed row once something continues from it, so
@@ -2288,6 +2302,9 @@ async fn route_http(
         "/api/handoffSessionChatDraft" => {
             handle_handoff_session_chat_draft_http(&state, endpoint.path, request_id, &body_json)
                 .await
+        }
+        "/api/replaceSessionChatDraft" => {
+            handle_replace_session_chat_draft_http(&state, endpoint.path, request_id, &body_json).await
         }
         "/api/claimSessionChatLaunchDraft" => handle_claim_session_chat_launch_draft_http(
             &state,

@@ -117,6 +117,14 @@ pub(crate) fn gpui_previous_sessions_request_from_command(
                 .collect::<Vec<_>>()
         });
     GpuiPreviousSessionsRequest {
+        project_id: command
+            .get("projectId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        external_only: command
+            .get("externalOnly")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
         cursor,
         limit,
         query,
@@ -134,6 +142,7 @@ pub(crate) fn gpui_previous_sessions_result_message(
     GPUI Previous Sessions loads real local gxserver history through `/api/listPreviousSessions` with the same bounded previous-only params as the TypeScript sidebar runtime. The response is a transient `previousSessionsResult` sidebarState payload so the shared modal clears loading without replacing the stored hydrate snapshot, and transport/token/network/parser failures return an empty contract-shaped result without logging private daemon data.
     */
     let local_page = gpui_list_previous_sessions_from_gxserver(&request).unwrap_or_default();
+    let mut projects = local_page.projects;
     let mut next_cursor = local_page.cursor;
     let mut previous_sessions = local_page.items;
     for remote_source in &remote_sources {
@@ -142,15 +151,18 @@ pub(crate) fn gpui_previous_sessions_result_message(
         if next_cursor.is_none() {
             next_cursor = remote_page.cursor;
         }
+        projects.extend(remote_page.projects);
         previous_sessions.extend(remote_page.items);
     }
     gpui_sort_previous_session_items_by_closed_time(&mut previous_sessions);
-    gpui_previous_sessions_result_payload(
+    let mut payload = gpui_previous_sessions_result_payload(
         &request.request_id,
         request.query.as_deref(),
         next_cursor.as_deref(),
         previous_sessions,
-    )
+    );
+    payload["projects"] = serde_json::json!(projects);
+    payload
 }
 
 #[derive(Clone, Debug)]
@@ -364,10 +376,19 @@ pub(crate) fn gpui_list_previous_sessions_from_remote_gxserver(
     request: &GpuiPreviousSessionsRequest,
     remote_source: &GpuiRemotePreviousSessionSource,
 ) -> Result<GpuiPreviousSessionsPage, String> {
+    let mut scoped_request = request.clone();
+    scoped_request.project_id = request.project_id.as_ref().map(|id| {
+        id.strip_prefix(&format!(
+            "remote:{}:project:",
+            remote_source.remote_machine_id
+        ))
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("unmatched:{id}"))
+    });
     let result = gpui_remote_gxserver_rpc_result(
         &remote_source.target,
         "/api/listPreviousSessions",
-        &gpui_previous_sessions_list_params(request),
+        &gpui_previous_sessions_list_params(&scoped_request),
         Duration::from_secs(10),
     )?;
     let results = result
@@ -376,6 +397,13 @@ pub(crate) fn gpui_list_previous_sessions_from_remote_gxserver(
         .ok_or_else(|| "Remote gxserver returned invalid previous-session results.".to_string())?;
     let history_id_prefix = format!("remote-gxserver:{}", remote_source.remote_machine_id);
     Ok(GpuiPreviousSessionsPage {
+        projects: result.get("projects").and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(|project| {
+            Some(serde_json::json!({
+                "projectId": format!("remote:{}:project:{}", remote_source.remote_machine_id, project.get("projectId")?.as_str()?),
+                "name": format!("{} / {}", remote_source.machine_name.as_deref().unwrap_or(&remote_source.remote_machine_id), project.get("name")?.as_str()?),
+                "path": project.get("path"),
+            }))
+        }).collect(),
         cursor: result
             .get("cursor")
             .and_then(serde_json::Value::as_str)
@@ -399,6 +427,13 @@ pub(crate) fn gpui_previous_sessions_list_params(
     let mut params = serde_json::Map::new();
     params.insert("includeActive".to_string(), serde_json::Value::Bool(false));
     params.insert("includePrevious".to_string(), serde_json::Value::Bool(true));
+    if let Some(project_id) = &request.project_id {
+        params.insert("projectId".to_string(), serde_json::json!(project_id));
+    }
+    params.insert(
+        "externalOnly".to_string(),
+        serde_json::json!(request.external_only),
+    );
     params.insert(
         "limit".to_string(),
         serde_json::Value::Number(serde_json::Number::from(request.limit as u64)),
@@ -524,6 +559,7 @@ pub(crate) fn gpui_stashed_prompts_result_message(
         "requestId": request_id,
         "tags": tags,
         "type": "stashedPromptsResult",
+        "deliveredDrafts": result.as_ref().and_then(|result| result.get("deliveredDrafts")),
     })
 }
 

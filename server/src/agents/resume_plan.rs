@@ -8,6 +8,44 @@ pub(crate) fn build_agent_resume_plan(
     settings: &Map<String, Value>,
 ) -> Value {
     let input = to_agent_resume_input(project, session, settings);
+    // CDXC:Sessions 2026-09-08 WHY:
+    // Detected conversations already have an exact transcript and provider home; resolving by title or the current account could open a different conversation.
+    if session
+        .pointer("/runtimeSettings/externalSession")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        if let (Some(agent @ ("claude" | "codex")), Some(id), Some(home), Some(command)) = (
+            input.agent_id.as_deref(),
+            input.agent_session_id.as_deref(),
+            session
+                .pointer("/runtimeSettings/externalAgentHome")
+                .and_then(Value::as_str),
+            input.agent_command.as_deref(),
+        ) {
+            let variable = if agent == "codex" {
+                "CODEX_HOME"
+            } else {
+                "CLAUDE_CONFIG_DIR"
+            };
+            let selector = if agent == "codex" {
+                "resume"
+            } else {
+                "--resume"
+            };
+            let command = format!(
+                "env {variable}={} {command} {selector} {}",
+                quote_shell_arg(home),
+                quote_shell_arg(id)
+            );
+            let startup = wrap_restored_terminal_resume_command(&command, &command, None);
+            return serde_json::json!({
+                "agentId": agent, "primaryCommand": command, "displayCommand": command,
+                "copyCommand": command, "startupText": as_atuin_ignored_shell_input(&startup),
+                "startupTextDisposition": "queueAfterTerminalReady"
+            });
+        }
+    }
     let primary_command =
         build_agent_resume_command(&input, ResumeCommandOptions { display: false });
     let display_command = primary_command

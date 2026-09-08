@@ -65,7 +65,23 @@ pub fn list_previous_sessions(
     let mut previous_params = params.clone();
     previous_params.insert("includeActive".to_string(), Value::Bool(false));
     previous_params.insert("includePrevious".to_string(), Value::Bool(true));
-    search_previous_sessions(projects, sessions, &previous_params)
+    let project_options = projects
+        .iter()
+        .filter(|project| project.get("visibility").and_then(Value::as_str) != Some("hidden"))
+        .filter(|project| {
+            sessions
+                .iter()
+                .any(|session| session["projectId"] == project["projectId"])
+        })
+        .map(|project| {
+            json!({
+                "projectId": project["projectId"], "name": project["name"], "path": project["path"]
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut result = search_previous_sessions(projects, sessions, &previous_params)?;
+    result["projects"] = json!(project_options);
+    Ok(result)
 }
 
 pub fn build_presentation_project_delta(

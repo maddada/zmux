@@ -23,6 +23,7 @@ export type AppModalKind =
   | 'gitCommit'
   | 'gitFileDiff'
   | 'mermaidDiagram'
+  | 'markdownTable'
   | 'deleteWorktree'
   | 'hotkeys'
   | 'missingProjectFolder'
@@ -45,7 +46,9 @@ export type AppModalKind =
   | 'firstLaunchSetup';
 
 export type OpenAppModalMessage =
+  | { modal: 'previousSessions'; initialSessionScope?: 'all' | 'closed' | 'external'; type: 'open' }
   | { modal: 'mermaidDiagram'; source: string; type: 'open' }
+  | { modal: 'markdownTable'; source: string; type: 'open' }
   | {
       modal: Exclude<
         AppModalKind,
@@ -60,9 +63,11 @@ export type OpenAppModalMessage =
         | 'gitCommit'
         | 'gitFileDiff'
         | 'mermaidDiagram'
+        | 'markdownTable'
         | 'deleteWorktree'
         | 'missingProjectFolder'
         | 'portlessSetup'
+        | 'previousSessions'
         | 'recentProjects'
         | 'remoteGxserverInstall'
         | 'renameSession'
@@ -343,6 +348,7 @@ export function openAppModal(message: OpenAppModalMessage): void {
 export type QuickAccessPage = 'commands' | 'recentProjects' | 'recentSessions' | 'savedPrompts';
 
 type QuickAccessOpenOptions = {
+  sessionScope?: 'all' | 'closed' | 'external';
   machineId?: string;
   machineName?: string;
 };
@@ -363,7 +369,7 @@ export function openQuickAccess(page: QuickAccessPage, options: QuickAccessOpenO
     return;
   }
   if (page === 'recentSessions') {
-    openAppModal({ modal: 'previousSessions', type: 'open' });
+    openAppModal({ modal: 'previousSessions', initialSessionScope: options.sessionScope, type: 'open' });
     return;
   }
   if (page === 'savedPrompts') {

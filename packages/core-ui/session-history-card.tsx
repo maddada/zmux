@@ -118,6 +118,7 @@ export function SessionHistoryCard({
          */}
         <article
           aria-disabled={!canActivate}
+          title={isClosedSession ? session.restoreUnavailableReason : undefined}
           aria-pressed='false'
           aria-label={canActivate ? `${isClosedSession ? 'Restore' : 'Focus'} ${displayTitle}` : displayTitle}
           className='session session-history-card'

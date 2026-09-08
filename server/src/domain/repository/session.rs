@@ -22,8 +22,80 @@ impl<'a> DomainRepository<'a> {
         params: &Map<String, Value>,
         create_agent_session: bool,
     ) -> DomainResult<Value> {
+        let mut restored_params;
+        let params = if let (Some(project_id), Some(source_id)) = (
+            params.get("projectId").and_then(Value::as_str),
+            params.get("restoredFromSessionId").and_then(Value::as_str),
+        ) {
+            let source = self.get_session(project_id, source_id)?;
+            if let Some(source) = source.filter(|s| {
+                s.pointer("/runtimeSettings/externalSession")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+            }) {
+                let cwd = source
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !std::path::Path::new(cwd).is_dir() {
+                    return Err(DomainStateError::bad_request("The original project folder no longer exists. Restore it before resuming this conversation."));
+                }
+                if !source
+                    .pointer("/runtimeSettings/agentSessionPath")
+                    .and_then(Value::as_str)
+                    .is_some_and(|p| std::path::Path::new(p).is_file())
+                {
+                    return Err(DomainStateError::bad_request(
+                        "The original agent transcript no longer exists.",
+                    ));
+                }
+                restored_params = params.clone();
+                for key in ["agentId", "cwd", "runtimeSettings", "launchSettings"] {
+                    if let Some(value) = source.get(key) {
+                        restored_params.insert(key.to_string(), value.clone());
+                    }
+                }
+                &restored_params
+            } else {
+                params
+            }
+        } else {
+            params
+        };
         let project = self.resolve_create_session_project(params)?;
-        let project_id = read_string_field(&project, "projectId")?;
+        self.insert_session_for_project(&project, params, create_agent_session)
+    }
+
+    /// CDXC:Sessions 2026-09-08 WHY:
+    /// Discovery records stopped history, including conversations whose old worktree has been removed.
+    /// Running the launch-time directory check here aborted the entire import and hid both external sessions and project facets.
+    /// Normal creation and restore still validate the project directory before reaching the shared insertion path.
+    pub(crate) fn import_external_session(&self, params: &Map<String, Value>) -> DomainResult<Value> {
+        if params.get("lifecycleState").and_then(Value::as_str) != Some("stopped")
+            || params
+                .get("runtimeSettings")
+                .and_then(|settings| settings.get("externalSession"))
+                .and_then(Value::as_bool)
+                != Some(true)
+        {
+            return Err(DomainStateError::bad_request(
+                "External imports must be stopped history records.",
+            ));
+        }
+        let project_id = read_unvalidated_project_lookup_id(params);
+        let project = self.get_project(&project_id)?.ok_or_else(|| {
+            DomainStateError::not_found("External session project does not exist.")
+        })?;
+        self.insert_session_for_project(&project, params, false)
+    }
+
+    fn insert_session_for_project(
+        &self,
+        project: &Value,
+        params: &Map<String, Value>,
+        create_agent_session: bool,
+    ) -> DomainResult<Value> {
+        let project_id = read_string_field(project, "projectId")?;
         let session_id = self.create_unique_session_id(&project_id)?;
         let timestamp = now_iso();
         let mut normalized_params = if create_agent_session {
@@ -85,7 +157,13 @@ impl<'a> DomainRepository<'a> {
         (user-authored) agent ids are resolved by the executable of their base
         command inside the emitter, so the id itself never leaves the machine.
         */
-        if read_optional_text(session.get("agentId")).is_some() {
+        if read_optional_text(session.get("agentId")).is_some()
+            && !(session
+                .pointer("/runtimeSettings/externalSession")
+                .and_then(Value::as_bool)
+                == Some(true)
+                && session.get("lifecycleState").and_then(Value::as_str) == Some("stopped"))
+        {
             crate::telemetry::session_started(&session);
         }
         Ok(session)
