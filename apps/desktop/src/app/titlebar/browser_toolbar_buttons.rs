@@ -22,7 +22,6 @@ use gpui::IntoElement;
 use gpui::KeyDownEvent;
 use gpui::MouseButton;
 use gpui::MouseDownEvent;
-use gpui::MouseUpEvent;
 use gpui::ParentElement as _;
 use gpui::Styled as _;
 use gpui::div;
@@ -84,41 +83,7 @@ impl GhostexGpuiApp {
         pane_id: BrowserPaneId,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        div()
-            .id(format!(
-                "ghostex-gpui-browser-toolbar-overflow-{}",
-                pane_id.0
-            ))
-            .flex()
-            .flex_shrink_0()
-            .h(px(BROWSER_TOOLBAR_HEIGHT - 1.0))
-            .w(px(BROWSER_TOOLBAR_BUTTON_WIDTH - 1.0))
-            .items_center()
-            .justify_center()
-            .border_l_1()
-            .border_color(titlebar_button_border_color())
-            .cursor_default()
-            .hover(|this| this.bg(rgb(0x212121)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |_this, _event: &MouseDownEvent, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.show_browser_pane_actions_menu(pane_id, event.position, window, cx);
-                }),
-            )
-            .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
-                titlebar_tooltip("Browser pane actions menu", window, cx)
-            })
-            .child(self.render_browser_tab_overflow_icon())
-            .into_any_element()
+        self.render_browser_pane_actions_button(pane_id, true, cx)
     }
 
     pub(crate) fn render_browser_address_field(

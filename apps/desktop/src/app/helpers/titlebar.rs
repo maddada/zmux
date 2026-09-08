@@ -63,9 +63,9 @@ pub(crate) fn titlebar_tooltip(
 pub(crate) fn titlebar_popup_menu_width(kind: GpuiTitlebarPopupKind) -> f32 {
     match kind {
         GpuiTitlebarPopupKind::RemoteSites => TITLEBAR_POPUP_RESOURCES_WIDTH,
-        GpuiTitlebarPopupKind::Actions | GpuiTitlebarPopupKind::OpenTargets => {
-            TITLEBAR_POPUP_COMPACT_WIDTH
-        }
+        GpuiTitlebarPopupKind::Actions
+        | GpuiTitlebarPopupKind::BrowserActions(_)
+        | GpuiTitlebarPopupKind::OpenTargets => TITLEBAR_POPUP_COMPACT_WIDTH,
         GpuiTitlebarPopupKind::Extensions => TITLEBAR_POPUP_EXTENSIONS_WIDTH,
         GpuiTitlebarPopupKind::Git => TITLEBAR_POPUP_GIT_WIDTH,
         GpuiTitlebarPopupKind::Resources => TITLEBAR_POPUP_RESOURCES_WIDTH,
@@ -930,15 +930,21 @@ pub(crate) fn titlebar_popup_action_menu_row(action: GpuiTitlebarAction) -> impl
         )
 }
 
-pub(crate) fn titlebar_popup_git_section(mut menu: PopupMenu, label: &'static str) -> PopupMenu {
+pub(crate) fn titlebar_popup_git_section(
+    mut menu: PopupMenu,
+    label: impl Into<gpui::SharedString>,
+) -> PopupMenu {
+    let label = label.into();
     menu =
         menu.menu_element_with_disabled(Box::new(CopyGpuiTitlebarGitBranch), true, move |_, _| {
-            titlebar_popup_git_section_label(label)
+            titlebar_popup_git_section_label(label.clone())
         });
     menu
 }
 
-pub(crate) fn titlebar_popup_git_section_label(label: &'static str) -> impl IntoElement {
+pub(crate) fn titlebar_popup_git_section_label(
+    label: impl Into<gpui::SharedString>,
+) -> impl IntoElement {
     h_flex()
         .w_full()
         .min_h(px(TITLEBAR_POPUP_GIT_SECTION_LABEL_HEIGHT))
@@ -946,7 +952,7 @@ pub(crate) fn titlebar_popup_git_section_label(label: &'static str) -> impl Into
         .text_size(px(11.0))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(titlebar_popup_git_section_label_color())
-        .child(label)
+        .child(label.into())
 }
 
 pub(crate) fn titlebar_popup_git_branch_menu_row(
@@ -1536,12 +1542,15 @@ pub(crate) fn sidebar_titlebar_tint_direction(base: [f32; 3]) -> [f32; 3] {
     direction
 }
 
-pub(crate) const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_RGB: u32 = 0x040607;
-pub(crate) const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_RGB: u32 = 0x88d7ff;
-pub(crate) const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 98.0;
+/// CDXC:Theming 2026-09-08 SEE-ALSO:
+/// packages/shared/ghostex-settings/titlebar-color.ts owns the matching neutral #808080 tint at 96 contrast default.
+pub(crate) const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_RGB: u32 = 0x0b0b0b;
+pub(crate) const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_RGB: u32 = 0x808080;
+pub(crate) const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 96.0;
 pub(crate) const MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 85.0;
 pub(crate) const MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 100.0;
 pub(crate) const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_SCALE_REFERENCE_DARKNESS_PERCENT: f64 = 95.0;
+const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_CALIBRATION_RGB: u32 = 0x040607;
 
 /// Mirror of `CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARK_TINTS` in
 /// packages/shared/ghostex-settings.ts. Keep both tables in sync.
@@ -1598,12 +1607,12 @@ pub(crate) fn sidebar_titlebar_background_for_darkness(darkness_percent: f64, ti
                 - color.iter().fold(255.0f32, |min, value| min.min(*value));
             if spread < 1.0 {
                 return sidebar_titlebar_rgb_channels(
-                    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_RGB,
+                    CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_CALIBRATION_RGB,
                 );
             }
             let direction = sidebar_titlebar_tint_direction(color);
             let base =
-                sidebar_titlebar_rgb_channels(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_RGB);
+                sidebar_titlebar_rgb_channels(CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_CALIBRATION_RGB);
             [
                 base[0] + direction[0] * 4.0,
                 base[1] + direction[1] * 4.0,

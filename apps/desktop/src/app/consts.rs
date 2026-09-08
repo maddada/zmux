@@ -1071,15 +1071,6 @@ Agents tab right-click context menus are separate from the far-right pane overfl
 CDXC:ContextMenus 2026-06-22-11:27:
 Browser tab right-click context menus are NativeMenus scoped to the clicked Browser pane id and Browser tab id. They expose only Select Tab and Close Tab, reuse the existing Browser selection and close semantics, and must not include pane split/layout, toolbar, history, project-editor, overlay, hidden hit-region, or hit-test-routing behavior.
 
-CDXC:Browser 2026-06-22-13:46:
-The far-right Browser pane overflow is a NativeMenu scoped to the clicked Browser pane id. It exposes pane/layout actions only, omits per-tab close/select plus toolbar/history/profile/devtools commands, and creates address-only Browser tabs through the existing Browser sync path so split panes do not load new CEF surfaces.
-
-CDXC:Browser 2026-08-12:
-The Browser pane overflow starts with Open in External Browser, followed by a
-separator before its pane/layout actions. The typed action resolves the clicked
-pane's active tab at dispatch time and sends only a validated HTTP(S) URL to the
-existing OS-default-browser opener.
-
     CDXC:ContextMenus 2026-06-22-11:31:
     Command-pane tab right-click context menus are NativeMenus scoped to the clicked command group and command session. They expose scoped close rows while tab selection and collapsed-strip expansion stay on left-click tab activation.
 

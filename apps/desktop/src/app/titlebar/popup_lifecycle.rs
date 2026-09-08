@@ -99,6 +99,7 @@ impl GhostexGpuiApp {
         let menu_scrollable = matches!(
             kind,
             GpuiTitlebarPopupKind::Actions
+                | GpuiTitlebarPopupKind::BrowserActions(_)
                 | GpuiTitlebarPopupKind::Extensions
                 | GpuiTitlebarPopupKind::Git
                 | GpuiTitlebarPopupKind::OpenTargets
@@ -268,6 +269,17 @@ impl GhostexGpuiApp {
     ) -> GpuiTitlebarPopupContent {
         let _profile = crate::profiling::span(crate::profiling::Metric::PopupBuild);
         match kind {
+            GpuiTitlebarPopupKind::BrowserActions(pane_id) => {
+                GpuiTitlebarPopupContent::Menu(PopupMenu::build(window, cx, |menu, _, _| {
+                    self.build_gpui_browser_actions_popup_menu(
+                        menu,
+                        pane_id,
+                        menu_width,
+                        menu_max_height,
+                        menu_scrollable,
+                    )
+                }))
+            }
             GpuiTitlebarPopupKind::RemoteSites => {
                 GpuiTitlebarPopupContent::RemoteSites(cx.new(|cx| {
                     crate::app::window::remote_sites::RemoteSitesPanel::new(main_app, cx)

@@ -617,42 +617,6 @@ impl GhostexGpuiApp {
         menu.show(position, window, cx);
     }
 
-    pub(crate) fn show_browser_pane_actions_menu(
-        &self,
-        pane_id: BrowserPaneId,
-        position: gpui::Point<Pixels>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        /*
-        CDXC:Browser 2026-06-22-13:46:
-        The Browser pane overflow menu is separate from per-tab context menus and toolbar/history/profile/devtools actions. It is scoped only by BrowserPaneId and dispatches its external-open and pane/layout actions through the root GPUI action tree so menu open uses OS-owned NativeMenu behavior instead of GPUI overlays or hidden hit regions.
-        */
-        if self.browser_tabs.find_leaf(pane_id).is_none() {
-            return;
-        }
-
-        NativeMenu::new()
-            .menu(
-                "Open in External Browser",
-                Box::new(OpenBrowserPaneInExternalBrowser { pane_id: pane_id.0 }),
-            )
-            .separator()
-            .menu(
-                "New Browser Tab in This Pane",
-                Box::new(NewBrowserTabInPane { pane_id: pane_id.0 }),
-            )
-            .menu(
-                "Split Right with Browser Tab",
-                Box::new(SplitBrowserPaneRightWithBrowserTab { pane_id: pane_id.0 }),
-            )
-            .menu(
-                "Split Below with Browser Tab",
-                Box::new(SplitBrowserPaneBelowWithBrowserTab { pane_id: pane_id.0 }),
-            )
-            .show(position, window, cx);
-    }
-
     pub(crate) fn open_browser_pane_in_external_browser(&self, pane_id: BrowserPaneId) {
         let Some(tab) = self.browser_tabs.active_tab_for_pane(pane_id) else {
             return;
