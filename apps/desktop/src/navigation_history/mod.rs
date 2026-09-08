@@ -23,6 +23,9 @@ the same discipline the Actions snapshot and the git menu state follow after a
 per-frame `readSidebarHud` call once cost this titlebar its frame rate.
 */
 
+#[cfg(target_os = "macos")]
+mod native_gestures;
+
 use gpui::{
     AnyElement, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent,
     ParentElement as _, Styled as _, div, prelude::FluentBuilder as _, px,
