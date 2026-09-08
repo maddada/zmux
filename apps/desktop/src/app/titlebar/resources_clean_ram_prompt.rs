@@ -31,16 +31,18 @@ pub(crate) fn gpui_resources_clean_ram_prompt(snapshot: &GpuiNativeResourcesSnap
         format_gpui_resource_cpu_compact(snapshot.total_cpu),
         snapshot.inactive_terminal_sleep_count,
     ));
-    for (label, rows) in [
-        (
-            format!("{} sessions", snapshot.project_label),
-            &snapshot.session_rows,
-        ),
-        ("Other projects".to_string(), &snapshot.other_session_rows),
-        ("Code IDE".to_string(), &snapshot.code_rows),
-        ("Browser".to_string(), &snapshot.browser_rows),
-        ("Orphaned / detached".to_string(), &snapshot.orphan_rows),
-    ] {
+    for (label, rows) in snapshot
+        .session_sections()
+        .map(|(title, rows)| (format!("{title} sessions"), rows))
+        .chain([
+            ("Code IDE".to_string(), snapshot.code_rows.as_slice()),
+            ("Browser".to_string(), snapshot.browser_rows.as_slice()),
+            (
+                "Orphaned / detached".to_string(),
+                snapshot.orphan_rows.as_slice(),
+            ),
+        ])
+    {
         if rows.is_empty() {
             continue;
         }

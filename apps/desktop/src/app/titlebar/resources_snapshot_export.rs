@@ -84,33 +84,41 @@ pub(crate) fn gpui_native_resources_snapshot_json(
 ) -> Value {
     let sections = [
         (
-            "devServers",
+            "devServers".to_string(),
             "DEV SERVERS".to_string(),
             &snapshot.server_rows,
         ),
         (
-            "project",
+            "project".to_string(),
             snapshot.project_label.to_uppercase(),
             &snapshot.session_rows,
         ),
+    ]
+    .into_iter()
+    .chain(snapshot.other_project_groups.iter().map(|group| {
         (
-            "otherProjects",
-            "OTHER PROJECTS".to_string(),
-            &snapshot.other_session_rows,
+            format!("project:{}", group.project_id),
+            group.title.to_uppercase(),
+            &group.rows,
+        )
+    }))
+    .chain([
+        (
+            "codeIde".to_string(),
+            "CODE IDE".to_string(),
+            &snapshot.code_rows,
         ),
-        ("codeIde", "CODE IDE".to_string(), &snapshot.code_rows),
         (
-            "browserTabs",
+            "browserTabs".to_string(),
             "BROWSER TABS".to_string(),
             &snapshot.browser_rows,
         ),
         (
-            "orphaned",
+            "orphaned".to_string(),
             "ORPHANED / DETACHED".to_string(),
             &snapshot.orphan_rows,
         ),
-    ]
-    .into_iter()
+    ])
     .filter(|(_, _, rows)| !rows.is_empty())
     .map(|(key, label, rows)| {
         json!({
@@ -125,14 +133,12 @@ pub(crate) fn gpui_native_resources_snapshot_json(
     .collect::<Vec<_>>();
 
     let mut row_pids = HashSet::new();
-    for rows in [
-        &snapshot.server_rows,
-        &snapshot.session_rows,
-        &snapshot.other_session_rows,
-        &snapshot.code_rows,
-        &snapshot.browser_rows,
-        &snapshot.orphan_rows,
-    ] {
+    for rows in snapshot.session_sections().map(|(_, rows)| rows).chain([
+        snapshot.server_rows.as_slice(),
+        snapshot.code_rows.as_slice(),
+        snapshot.browser_rows.as_slice(),
+        snapshot.orphan_rows.as_slice(),
+    ]) {
         for row in rows.iter() {
             row_pids.extend(row.pids.iter().copied());
         }

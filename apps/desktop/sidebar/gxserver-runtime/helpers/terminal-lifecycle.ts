@@ -115,6 +115,7 @@ export function normalizeGpuiWorkspaceTerminalRuntimeAction(
     return { action: record.action };
   }
   const action =
+    record.action === 'closeSession' ||
     record.action === 'exportTranscript' ||
     record.action === 'forkSession' ||
     record.action === 'fullReloadSession' ||

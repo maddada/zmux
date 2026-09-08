@@ -47,7 +47,7 @@ impl GhostexGpuiApp {
         let children_by_parent = gpui_native_resource_children_by_parent(&processes);
         let mut claimed_pids = HashSet::new();
         let mut session_rows = Vec::new();
-        let mut other_session_rows = Vec::new();
+        let mut other_project_groups: Vec<GpuiNativeResourceProjectGroup> = Vec::new();
         let mut inactive_terminal_sleep_count = 0;
         let mut sleep_all_session_count = 0;
 
@@ -234,7 +234,20 @@ impl GhostexGpuiApp {
             let rows = if is_active_project {
                 &mut session_rows
             } else {
-                &mut other_session_rows
+                // CDXC:Resources 2026-09-08 DECISION:
+                // User: show each project by itself in Resources instead of collecting sessions under "Other projects".
+                let group_index = other_project_groups
+                    .iter()
+                    .position(|group| group.project_id == owner.project_id)
+                    .unwrap_or_else(|| {
+                        other_project_groups.push(GpuiNativeResourceProjectGroup {
+                            project_id: owner.project_id.clone(),
+                            title: owner.project_title.clone(),
+                            rows: Vec::new(),
+                        });
+                        other_project_groups.len() - 1
+                    });
+                &mut other_project_groups[group_index].rows
             };
             rows.push(GpuiNativeResourceRow {
                 action: GpuiNativeResourceAction::Session,
@@ -252,6 +265,8 @@ impl GhostexGpuiApp {
                 url: None,
             });
         }
+        other_project_groups
+            .sort_by_cached_key(|group| (group.title.to_lowercase(), group.project_id.clone()));
 
         let mut browser_rows = Vec::new();
         for tab in &self.browser_tabs.tabs {
@@ -439,7 +454,11 @@ impl GhostexGpuiApp {
             };
             let owning_session = session_rows
                 .iter()
-                .chain(other_session_rows.iter())
+                .chain(
+                    other_project_groups
+                        .iter()
+                        .flat_map(|group| group.rows.iter()),
+                )
                 .find(|row| {
                     matches!(row.action, GpuiNativeResourceAction::Session)
                         && row.pids.contains(&server.pid)
@@ -617,7 +636,7 @@ impl GhostexGpuiApp {
             code_rows,
             inactive_terminal_sleep_count,
             orphan_rows,
-            other_session_rows,
+            other_project_groups,
             project_label: active_project_label,
             server_rows,
             session_rows,

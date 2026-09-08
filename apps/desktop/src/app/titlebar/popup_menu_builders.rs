@@ -359,18 +359,17 @@ impl GhostexGpuiApp {
                 )
             });
 
-        for (label, rows) in [
-            ("Ghostex", snapshot.session_rows),
-            ("Other projects", snapshot.other_session_rows),
-            ("Code IDE", snapshot.code_rows),
-            ("Browser Tabs", snapshot.browser_rows),
-            ("Orphaned / Detached", snapshot.orphan_rows),
-        ] {
+        for (label, rows) in snapshot.session_sections().chain([
+            ("Code IDE", snapshot.code_rows.as_slice()),
+            ("Browser Tabs", snapshot.browser_rows.as_slice()),
+            ("Orphaned / Detached", snapshot.orphan_rows.as_slice()),
+        ]) {
             if rows.is_empty() {
                 continue;
             }
-            menu = titlebar_popup_git_section(menu.separator(), label);
+            menu = titlebar_popup_git_section(menu.separator(), label.to_string());
             for row in rows {
+                let row = row.clone();
                 let action: Box<dyn Action> = if let Some(session_id) = row.session_id.clone() {
                     Box::new(FocusGpuiTitlebarResourceSession { session_id })
                 } else if let Some(url) = row.url.clone() {

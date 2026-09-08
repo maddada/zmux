@@ -26,6 +26,7 @@ impl Default for GpuiTitlebarAnchoredDropdownState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GpuiTitlebarPopupKind {
     Actions,
+    BrowserActions(BrowserPaneId),
     Extensions,
     Git,
     OpenTargets,
@@ -38,6 +39,7 @@ impl GpuiTitlebarPopupKind {
     pub(crate) fn diagnostic_label(self) -> &'static str {
         match self {
             Self::Actions => "actions",
+            Self::BrowserActions(_) => "browserActions",
             Self::Extensions => "extensions",
             Self::Git => "git",
             Self::OpenTargets => "openTargets",
@@ -273,6 +275,20 @@ impl Render for GpuiTitlebarPopupWindow {
             .on_action(cx.listener(|this, _: &TitlebarDropdownCancel, window, cx| {
                 this.close_from_popup_window(window, cx);
             }))
+            .on_action(cx.listener(
+                |this, action: &OpenBrowserPaneInExternalBrowser, _window, cx| {
+                    this.update_main_window(cx, |_, window, cx| {
+                        window.dispatch_action(Box::new(action.clone()), cx);
+                    });
+                },
+            ))
+            .on_action(
+                cx.listener(|this, action: &SetBrowserPageAppearance, _window, cx| {
+                    this.update_main_window(cx, |_, window, cx| {
+                        window.dispatch_action(Box::new(action.clone()), cx);
+                    });
+                }),
+            )
             .on_action(
                 cx.listener(|this, _: &OpenGpuiOpenTargetsModal, _window, cx| {
                     this.update_main_window(cx, |app, window, cx| {
@@ -464,7 +480,7 @@ pub(crate) enum GpuiTitlebarReadingPanelState {
         expanded_keys: HashSet<String>,
         hovered_sections: HashSet<String>,
         info_open: bool,
-        quitting_keys: HashSet<String>,
+        pending_actions: HashMap<String, &'static str>,
         snapshot: GpuiNativeResourcesSnapshot,
     },
 }
@@ -559,7 +575,7 @@ impl GpuiTitlebarReadingPanel {
                 expanded_keys: HashSet::new(),
                 hovered_sections: HashSet::new(),
                 info_open: false,
-                quitting_keys: HashSet::new(),
+                pending_actions: HashMap::new(),
                 snapshot,
             },
         }
@@ -641,8 +657,21 @@ impl GpuiTitlebarReadingPanel {
         if matches!(row.action, GpuiNativeResourceAction::None) {
             return;
         }
-        if let GpuiTitlebarReadingPanelState::Resources { quitting_keys, .. } = &mut self.state {
-            quitting_keys.insert(key);
+        if let GpuiTitlebarReadingPanelState::Resources {
+            pending_actions, ..
+        } = &mut self.state
+        {
+            if pending_actions.contains_key(&key) {
+                return;
+            }
+            pending_actions.insert(
+                key,
+                match row.action {
+                    GpuiNativeResourceAction::Session => "Sleeping...",
+                    GpuiNativeResourceAction::Server => "Stopping...",
+                    _ => "Quitting...",
+                },
+            );
         }
         match row.action {
             GpuiNativeResourceAction::Session => {
@@ -1472,20 +1501,15 @@ impl GpuiTitlebarReadingPanel {
     ) -> Vec<AnyElement> {
         let mut sections = Vec::new();
         let mut base_index = 0;
-        for (label, rows) in [
-            (
-                snapshot.project_label.to_uppercase(),
-                &snapshot.session_rows,
-            ),
-            ("OTHER PROJECTS".to_string(), &snapshot.other_session_rows),
-            ("CODE IDE".to_string(), &snapshot.code_rows),
-            ("BROWSER TABS".to_string(), &snapshot.browser_rows),
-            ("ORPHANED / DETACHED".to_string(), &snapshot.orphan_rows),
-        ] {
+        for (label, rows) in snapshot.session_sections().chain([
+            ("CODE IDE", snapshot.code_rows.as_slice()),
+            ("BROWSER TABS", snapshot.browser_rows.as_slice()),
+            ("ORPHANED / DETACHED", snapshot.orphan_rows.as_slice()),
+        ]) {
             if rows.is_empty() {
                 continue;
             }
-            sections.push(self.render_resource_section(label, rows, base_index, cx));
+            sections.push(self.render_resource_section(label.to_uppercase(), rows, base_index, cx));
             base_index += rows.len();
         }
         if sections.is_empty() {
@@ -1511,7 +1535,7 @@ impl GpuiTitlebarReadingPanel {
     ) -> AnyElement {
         let cpu = rows.iter().map(|row| row.cpu).sum::<f64>();
         let memory = rows.iter().map(|row| row.memory_mb).sum::<f64>();
-        let section_key = label.clone();
+        let section_key = format!("resource-section-{base_index}");
         let hovered = match &self.state {
             GpuiTitlebarReadingPanelState::Resources {
                 hovered_sections, ..
@@ -1522,11 +1546,7 @@ impl GpuiTitlebarReadingPanel {
             .iter()
             .any(|row| matches!(row.action, GpuiNativeResourceAction::Session))
         {
-            Some(if label == "OTHER PROJECTS" {
-                "Sleep Sessions"
-            } else {
-                "Sleep Project"
-            })
+            Some("Sleep Project")
         } else if rows
             .iter()
             .any(|row| matches!(row.action, GpuiNativeResourceAction::Server))
@@ -1589,7 +1609,7 @@ impl GpuiTitlebarReadingPanel {
                                     .collect(),
                                 "INT",
                             );
-                        } else if matches!(action_label, "Sleep Project" | "Sleep Sessions") {
+                        } else if action_label == "Sleep Project" {
                             let session_ids = rows_for_action
                                 .iter()
                                 .filter_map(|row| row.session_id.clone())
@@ -1712,31 +1732,24 @@ impl GpuiTitlebarReadingPanel {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let key = format!("resource-{row_index}");
-        let (collapsed, quitting) = match &self.state {
+        let (collapsed, pending_action) = match &self.state {
             GpuiTitlebarReadingPanelState::Resources {
                 expanded_keys,
-                quitting_keys,
+                pending_actions,
                 ..
-            } => (!expanded_keys.contains(&key), quitting_keys.contains(&key)),
-            _ => (true, false),
+            } => (
+                !expanded_keys.contains(&key),
+                pending_actions.get(&key).copied(),
+            ),
+            _ => (true, None),
         };
+        let quitting = pending_action.is_some();
         let expandable = !row.children.is_empty();
         let session_id = row.session_id.clone();
         let url = row.url.clone();
         let action = row.action.clone();
         let action_row = row.clone();
-        let resource_detail = if quitting {
-            match &action {
-                GpuiNativeResourceAction::Session => "Sleeping...".to_string(),
-                GpuiNativeResourceAction::Server => "Stopping...".to_string(),
-                GpuiNativeResourceAction::Browser(_)
-                | GpuiNativeResourceAction::Code
-                | GpuiNativeResourceAction::Orphan => "Quitting...".to_string(),
-                GpuiNativeResourceAction::None => row.detail.clone(),
-            }
-        } else {
-            row.detail.clone()
-        };
+        let resource_detail = pending_action.unwrap_or(&row.detail).to_string();
         let resource_name = if matches!(action, GpuiNativeResourceAction::Server) {
             if let Some(main_url) = row.url.clone() {
                 resource_name_text()
@@ -1854,6 +1867,54 @@ impl GpuiTitlebarReadingPanel {
             .items_center()
             .justify_center()
             .child(secondary_action);
+        // CDXC:Resources 2026-09-08 DECISION:
+        // User: add a Close session button to the right of the existing Sleep button.
+        let close_action = if matches!(action, GpuiNativeResourceAction::Session) {
+            row.session_id.clone().map(|session_id| {
+                let key = key.clone();
+                self.render_resource_square_action(
+                    format!("gpui-titlebar-resource-close-{row_index}"),
+                    COMMAND_ICON_XMARK,
+                    cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        if let GpuiTitlebarReadingPanelState::Resources {
+                            pending_actions, ..
+                        } = &this.state
+                        {
+                            if pending_actions.contains_key(&key) {
+                                return;
+                            }
+                        }
+                        let closed = this
+                            .main_app
+                            .update_in(cx, |app, _window, cx| {
+                                app.close_gpui_titlebar_resource_session(&session_id, cx)
+                            })
+                            .unwrap_or(false);
+                        if closed {
+                            if let GpuiTitlebarReadingPanelState::Resources {
+                                pending_actions,
+                                ..
+                            } = &mut this.state
+                            {
+                                pending_actions.insert(key.clone(), "Closing...");
+                            }
+                            cx.notify();
+                        }
+                    }),
+                )
+            })
+        } else {
+            None
+        };
+        let close_action = div()
+            .flex_shrink_0()
+            .flex()
+            .w(px(24.0))
+            .items_center()
+            .justify_center()
+            .children(close_action);
         let row_toggle_key = key.clone();
         resource_row_frame()
             .id(format!("gpui-titlebar-resource-{row_index}"))
@@ -1937,6 +1998,7 @@ impl GpuiTitlebarReadingPanel {
                     )
                     .child(primary_action)
                     .child(secondary_action)
+                    .child(close_action)
                     .child(
                         h_flex()
                             .flex_shrink_0()

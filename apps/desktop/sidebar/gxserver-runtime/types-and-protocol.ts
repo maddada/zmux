@@ -763,7 +763,7 @@ export type GpuiWorkspaceTerminalFocusPlacement = 'splitRight';
 
 export type GpuiWorkspaceTerminalRuntimeActionPayload =
   | {
-      action: 'exportTranscript' | 'forkSession' | 'fullReloadSession' | 'openSessionNote' | 'sleepSession';
+      action: 'closeSession' | 'exportTranscript' | 'forkSession' | 'fullReloadSession' | 'openSessionNote' | 'sleepSession';
       projectId: string;
       sessionId: string;
     }

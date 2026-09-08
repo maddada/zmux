@@ -308,6 +308,10 @@ export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
       return;
     }
     const sessionId = createGxserverPresentationProjectSessionId(request.projectId, request.sessionId);
+    if (request.action === 'closeSession') {
+      await this.transitionSession(sessionId, 'close');
+      return;
+    }
     /*
     CDXC:Resources 2026-09-04 WHY:
     The titlebar Resources panel lists the project's live sessions even when no

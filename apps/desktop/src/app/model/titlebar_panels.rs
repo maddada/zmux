@@ -70,12 +70,19 @@ pub(crate) enum GpuiNativeResourceAction {
 }
 
 #[derive(Clone, Debug, Default)]
+pub(crate) struct GpuiNativeResourceProjectGroup {
+    pub(crate) project_id: String,
+    pub(crate) title: String,
+    pub(crate) rows: Vec<GpuiNativeResourceRow>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub(crate) struct GpuiNativeResourcesSnapshot {
     pub(crate) browser_rows: Vec<GpuiNativeResourceRow>,
     pub(crate) code_rows: Vec<GpuiNativeResourceRow>,
     pub(crate) inactive_terminal_sleep_count: usize,
     pub(crate) orphan_rows: Vec<GpuiNativeResourceRow>,
-    pub(crate) other_session_rows: Vec<GpuiNativeResourceRow>,
+    pub(crate) other_project_groups: Vec<GpuiNativeResourceProjectGroup>,
     pub(crate) project_label: String,
     pub(crate) server_rows: Vec<GpuiNativeResourceRow>,
     pub(crate) session_rows: Vec<GpuiNativeResourceRow>,
@@ -83,6 +90,18 @@ pub(crate) struct GpuiNativeResourcesSnapshot {
     pub(crate) sleep_all_session_count: usize,
     pub(crate) total_cpu: f64,
     pub(crate) total_memory_mb: f64,
+}
+
+impl GpuiNativeResourcesSnapshot {
+    pub(crate) fn session_sections(
+        &self,
+    ) -> impl Iterator<Item = (&str, &[GpuiNativeResourceRow])> {
+        std::iter::once((self.project_label.as_str(), self.session_rows.as_slice())).chain(
+            self.other_project_groups
+                .iter()
+                .map(|group| (group.title.as_str(), group.rows.as_slice())),
+        )
+    }
 }
 
 /// Fixed selector set for titlebar Git menu rows. Menu selections dispatch
