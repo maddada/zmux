@@ -8,6 +8,69 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>9.0.0</title>
+            <pubDate>Tue, 08 Sep 2026 06:43:18 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v9.0.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>90000</sparkle:version>
+            <sparkle:shortVersionString>9.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 9.0.0
+
+## 9.0.0 - 2026-09-08
+
+- New Features
+
+  - Sign in to your Claude and Codex accounts from inside Ghostex: start a login, confirm the email, reconnect one that stopped working, and swap which slot an account sits in, without opening a terminal.
+  - Star an account to keep it in the titlebar, where a small badge opens a panel showing how much of each limit you have used, how quickly you are using it, and when it resets.
+  - Ghostex now finds Claude and Codex conversations you started outside the app and offers to import them, so your existing work sits alongside your Ghostex sessions.
+  - Open a subagent's own transcript from the task card that started it, and page back through its history without leaving the chat.
+  - Recall prompts you recently sent straight from the chat box, including ones a delayed send delivered while you were away.
+  - Grok joins the agents you can chat with.
+  - Drag a project or a group onto a Space to move it there, and drag the Spaces themselves to reorder them.
+  - Codex sessions now report their token use, limit windows, credits, and request timing, and you choose which of those rows to show and in what order.
+  - Choose whether web pages in Ghostex's browser follow your system appearance or stay light or dark.
+  - Swipe with two fingers on the trackpad to move Back and Forward through the sessions and views you visited.
+  - Open a table from a chat message full screen.
+
+- Major Improvements
+
+  - The chat box is a new, much lighter editor. Reference pills, find and replace, go to line, soft wrap, and full keyboard editing all stay, and chats no longer download a large code editor to show you a text box.
+  - The model and effort picker is now its own window, so you can call it up from terminal view as well as chat, and your choice is retried automatically when the agent is busy.
+  - The Resources panel lists every project on its own instead of bundling them into "Other projects", and you can close a session straight from the panel.
+  - However you activate a session, Ghostex now reveals it in the sidebar: it switches Space, expands the project and group, and scrolls the session into view.
+
+- Minor Improvements
+
+  - The app's default chrome color is a neutral dark instead of the icy tint; colors you picked yourself are untouched.
+  - Draft sessions sit at the top of the list, newest first, marked with a pencil.
+  - Hand the draft you typed in chat over to the terminal view.
+  - Long dropdown lists can be searched instead of scrolled.
+  - The chat box now glides out of the way as you scroll the conversation and back when you stop.
+  - More keyboard editing in the chat box, including deleting to the start or end of a line.
+  - Queued prompts show the shortcut that edits them.
+  - Agent dialogs such as /usage always offer their exit button, so leaving one never means switching to the terminal.
+  - The message history marks beside a conversation are larger and easier to hit.
+  - The browser pane menu now opens as a titlebar popup like the other menus.
+  - Turn off the terminal model picker shortcut if you would rather the terminal keep that key.
+  - Chat images no longer show a zoom cursor.
+  - Session menu labels are capitalized the same way everywhere.
+  - The web app gets the same new chat box and reveals activated sessions too.
+
+- Stabilization
+
+  - Agent finished and stopped notifications no longer show up twice in a row.
+  - Codex's local commands now show their full output, thanks to banozz.
+  - A rewind that works but cannot tidy the terminal keeps your draft and tells you, instead of dropping it.
+  - Closing the last browser tab takes you back to Agents rather than leaving an empty browser.
+  - The menu bar dropdown stays open when you switch to another app.
+  - The active model is detected more reliably when the terminal and the picker disagree.
+  - Double-clicking a prompt in Find resumes it even when the list scrolls under your cursor.
+  - A project or group belongs to only one Space now, so it no longer appears twice in the sidebar or on your phone.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v9.0.0/ghostex-9.0.0-arm64.dmg" length="126484188" type="application/octet-stream" sparkle:edSignature="jX3U0Yla/B+MVocslljvo1DiLGcCk6PR1jxXAvAPxO+EWfPMBg5QLwJrsdcwPFM/3J3nomrVgOHWtNPwTKn0AQ=="/>
+        </item>
+        <item>
             <title>8.10.0</title>
             <pubDate>Mon, 07 Sep 2026 10:05:39 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v8.10.0</sparkle:fullReleaseNotesLink>
@@ -233,36 +296,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v8.6.0/ghostex-8.6.0-arm64.dmg" length="117916178" type="application/octet-stream" sparkle:edSignature="ogUPkDNzbMuM/EYtLDtTl8NozYod0vTtupcexRqd00QdaNzhwhwcDFmQ7dXsXSg3n6l+Tw9mOD29JgGIFzYxAQ=="/>
         </item>
         <item>
-            <title>8.5.0</title>
-            <pubDate>Tue, 01 Sep 2026 03:03:31 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v8.5.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>80500</sparkle:version>
-            <sparkle:shortVersionString>8.5.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 8.5.0
-
-## 8.5.0 - 2026-09-01
-
-- Major
-  - Cursor is now a full Chat View agent: sessions read their model, context window, reasoning effort and Fast mode live off the terminal, thinking shows as an activity card, Cursor's own questions are answered inline with Space and Enter, and transcripts export like any other agent.
-  - Remote machines can be reached without a Tailscale account: gxserver runs its own tailcat tunnel, owns its key and address, comes back automatically after a restart, and is set up from the Remote tab in Settings.
-- Minor
-  - Cursor, Grok, Hermes, OMP and Pi sessions now name the screen that is blocking the composer — a picker, approval, sign-in or editor — instead of silently swallowing the message.
-  - Codex and Claude always launch with their unattended permission flag, so turning Accept All off no longer leaves them stuck on an approval prompt nobody can answer.
-  - Resuming or forking a Codex or Claude session no longer replays a stale session id from an earlier one-time command.
-  - Session notes are edited in the same Monaco editor as the composer.
-  - File and skill references appear as pills in the mobile and embedded chat composers instead of raw Markdown, and copy back out as plain text.
-  - Opening a file at a specific line in an already-running Code tab works again, and falls back to copying the path with a notice when it cannot.
-  - A single click on the collapsed command pane expands it, and the double-click-for-a-new-terminal gesture now applies only once it is open.
-  - Close After Done and Sleep Inactive only sleep sessions that are actually running, so pinned, tagged and favorited sessions are no longer swept away.
-  - The sidebar has symmetric gutters, separators that run its full width, and a plain gap against the workspace in place of the stacked separator strip.
-  - The mobile chat view can switch an unprompted draft session's agent and send Enter or a shifted option key without typing into the terminal.
-  - The transcript no longer shows a second typing indicator while the agent works, since the pinned working strip already reports it.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v8.5.0/ghostex-8.5.0-arm64.dmg" length="117489990" type="application/octet-stream" sparkle:edSignature="4MprJ0VOiOjQ9K33LkiPSOj8p2b5aZYoADPFEPOByUymtXNmlWqD3zaZIV7f4/XvOjk5GXNRvxJivBIIH42hDg=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -274,6 +307,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: /gpmcW4h6ff3tsUIiq5MrdJGzMMhCpSibEyfQ/KMqLmhm+yRZnL19qIcqE28yyOqku4uLJCLBkekiArELAq2BA==
-length: 35257
+edSignature: BhIoSlPsP1htJcdoNGI+LTqgGXDKY2lr8VoEGvLY7x1pau+hS5wTuUQ1UZMpDrdx6SgQMDdhSq4wVK9aUZBuCg==
+length: 37203
 -->
