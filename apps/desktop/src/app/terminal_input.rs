@@ -960,20 +960,7 @@ impl GhostexGpuiApp {
                         window,
                         cx,
                     );
-                    // Remove-after-success: the pending record is the app's
-                    // only pointer at the draft's durable Saved Prompts row,
-                    // so a paste the terminal did not take must leave it in
-                    // place for the next focus handoff to retry.
-                    if let Some(handoff) = self
-                        .pending_session_terminal_composer_insert
-                        .get(&slot_id.session_id)
-                        .cloned()
-                        && view.update(cx, |view, cx| view.paste_text(&handoff.content, cx))
-                    {
-                        self.pending_session_terminal_composer_insert
-                            .remove(&slot_id.session_id);
-                        self.release_session_chat_draft_handoff_stash(handoff, cx);
-                    }
+                    self.deliver_pending_session_terminal_composer_insert(slot_id.session_id, cx);
                     return;
                 }
             }
@@ -1034,16 +1021,7 @@ impl GhostexGpuiApp {
             window,
             cx,
         );
-        if let Some(handoff) = self
-            .pending_session_terminal_composer_insert
-            .get(&slot_id.session_id)
-            .cloned()
-            && view.update(cx, |view, cx| view.paste_text(&handoff.content, cx))
-        {
-            self.pending_session_terminal_composer_insert
-                .remove(&slot_id.session_id);
-            self.release_session_chat_draft_handoff_stash(handoff, cx);
-        }
+        self.deliver_pending_session_terminal_composer_insert(slot_id.session_id, cx);
     }
 
     /*

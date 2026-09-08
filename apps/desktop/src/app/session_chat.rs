@@ -124,8 +124,7 @@ impl GhostexGpuiApp {
                 title: format!("Switching {provider} account to"),
                 email: email.to_string(),
                 provider: if provider == "Claude" { "claude" } else { "codex" },
-                color: progress["color"].as_str().and_then(|color| color.strip_prefix('#'))
-                    .and_then(|color| u32::from_str_radix(color, 16).ok()).unwrap_or(0xdddddd),
+                indicator: progress["indicator"].as_str().unwrap_or_default().to_string(),
                 page_generation,
             });
         }
@@ -311,7 +310,7 @@ impl GhostexGpuiApp {
         if message.get("type").and_then(serde_json::Value::as_str) == Some("open")
             && matches!(
                 message.get("modal").and_then(serde_json::Value::as_str),
-                Some("settings" | "mermaidDiagram")
+                Some("settings" | "mermaidDiagram" | "markdownTable")
             )
         {
             self.receive_app_modal_host_bridge_event(
@@ -1004,50 +1003,7 @@ impl GhostexGpuiApp {
             self.deliver_session_chat_composer_insert(session_id, handoff.content, cx);
             return true;
         }
-        if let Some(view) = self
-            .agents_gpui_engine_terminals
-            .get(&session_id)
-            .map(|record| record.view.clone())
-        {
-            if view.update(cx, |view, cx| view.paste_text(&handoff.content, cx)) {
-                self.pending_session_terminal_composer_insert
-                    .remove(&session_id);
-                self.release_session_chat_draft_handoff_stash(handoff, cx);
-                return true;
-            }
-            return false;
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let slot_ids = self
-                .agents_terminal_ghostty_surfaces
-                .keys()
-                .copied()
-                .filter(|slot_id| slot_id.session_id == session_id)
-                .collect::<Vec<_>>();
-            for slot_id in slot_ids {
-                if self.send_text_bytes_to_mounted_agents_terminal_surface(
-                    slot_id,
-                    handoff.content.as_bytes(),
-                ) {
-                    self.pending_session_terminal_composer_insert
-                        .remove(&session_id);
-                    self.release_session_chat_draft_handoff_stash(handoff, cx);
-                    return true;
-                }
-            }
-            if self.project_editor_companion_focused_terminal_session_id() == Some(session_id)
-                && self.send_text_bytes_to_focused_project_editor_companion_terminal_surface(
-                    handoff.content.as_bytes(),
-                )
-            {
-                self.pending_session_terminal_composer_insert
-                    .remove(&session_id);
-                self.release_session_chat_draft_handoff_stash(handoff, cx);
-                return true;
-            }
-        }
-        false
+        self.dispatch_session_chat_terminal_draft_handoff(session_id, handoff, cx)
     }
 
     /*

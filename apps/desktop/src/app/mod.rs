@@ -36,6 +36,7 @@ pub(crate) mod project_editor;
 pub(crate) mod remote_conn;
 pub(crate) mod render;
 pub(crate) mod session_chat;
+mod session_chat_draft_handoff;
 pub(crate) mod session_chat_context_menu;
 pub(crate) mod session_chat_diagnostics;
 pub(crate) mod session_chat_eviction;
