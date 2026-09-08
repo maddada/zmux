@@ -2058,6 +2058,7 @@ impl GhostexGpuiApp {
             return false;
         }
         let source_pane_id = find_browser_leaf_id_for_tab(&self.browser_tabs.root, tab_id);
+        let closing_last_browser_tab = self.browser_tabs.tabs.len() == 1;
         self.remove_browser_surface(tab_id, cx);
         self.browser_find_states.remove(&tab_id);
         self.browser_find_inputs.remove(&tab_id);
@@ -2072,6 +2073,13 @@ impl GhostexGpuiApp {
             return false;
         }
         self.reconcile_browser_address_inputs();
+        // CDXC:Browser 2026-09-08 DECISION:
+        // User: closing the last browser session while Browser is active switches back to Agents.
+        // The tab model retains an address-only placeholder, so count tabs before closing.
+        if closing_last_browser_tab && self.active_mode == TitlebarMode::Browser {
+            self.set_active_mode(TitlebarMode::Agents, window, cx);
+            return true;
+        }
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
         self.set_shell_focus(ShellFocusTarget::BrowserPane(
             self.browser_tabs.focused_pane,
