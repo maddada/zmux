@@ -107,9 +107,11 @@ export function SessionChatTerminalDialogCard({
     (dialog.title.startsWith('Tell us more (') ||
       dialog.title === 'Custom review instructions' ||
       dialog.title === 'Submit feedback / bug report');
-  const visibleActions = dialog.actions.filter(
-    (action) => (controlsOnly || action !== 'cancel') && (dialog.input !== 'text' || action !== 'confirm')
-  );
+  /**
+   * CDXC:SessionChat 2026-09-08 DECISION:
+   * User: always show the exit action at the bottom beside the other buttons for /usage and similar agent dialogs, so leaving them never requires switching to the terminal.
+   */
+  const visibleActions = dialog.actions.filter((action) => dialog.input !== 'text' || action !== 'confirm');
   const cancelLabel = dialog.footer.toLowerCase().includes('esc to clear')
     ? 'Clear / Back'
     : dialog.footer.includes('go back')
@@ -224,9 +226,11 @@ export function SessionChatTerminalDialogCard({
               variant='outline'
               onClick={() => void run({ dialogAction: action })}
             >
-              {action === 'confirm' && dialog.footer.includes('set as default')
-                ? 'Set as default'
-                : (ACTION_LABELS[action] ?? action)}
+              {action === 'cancel'
+                ? cancelLabel
+                : action === 'confirm' && dialog.footer.includes('set as default')
+                  ? 'Set as default'
+                  : (ACTION_LABELS[action] ?? action)}
             </Button>
           ))}
       </div> : null}
