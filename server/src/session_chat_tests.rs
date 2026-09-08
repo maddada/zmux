@@ -227,13 +227,62 @@ mod tests {
         assert_eq!(assistant.id, "msg_0a5b");
         assert_eq!(message_text(&assistant), "Created the Markdown plan.");
 
-        // Reasoning/CommandExecution/McpToolCall items stay on the
-        // response_item lane, which new-style rollouts still write.
+        // Reasoning/McpToolCall items stay on the response_item lane, which
+        // new-style rollouts still write.
         assert!(decode_codex_transcript_line(
             r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning","id":"rs1","summary_text":["**Planning**"],"raw_content":[]}}}"#,
             "fb",
         )
         .is_none());
+
+        // A user-triggered shell execution is the one CommandExecution
+        // exception. Its structured command and formatted output become the
+        // same two local-command rows Claude exposes.
+        let execution = decode_codex_transcript_line(
+            r#"{"timestamp":"2026-09-07T23:51:14.818Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"4a7161c1-bd49-4d56-b22d-47d4d14752fb","command":["/bin/zsh","-lc","printf 'BANG_TEST\\n'"],"source":"user_shell","status":"completed","stdout":"BANG_TEST\n","stderr":"","exit_code":0,"formatted_output":"BANG_TEST\n"}}}"#,
+            "fb",
+        )
+        .expect("user shell execution");
+        assert_eq!(execution.role, SessionChatRole::User);
+        assert_eq!(execution.id, "4a7161c1-bd49-4d56-b22d-47d4d14752fb");
+        assert_eq!(
+            execution.blocks,
+            vec![
+                text_block(
+                    "<bash-input data-ghostex-escaped=\"html\">printf 'BANG_TEST\\n'</bash-input>"
+                ),
+                text_block(
+                    "<bash-stdout data-ghostex-escaped=\"html\">BANG_TEST</bash-stdout>"
+                ),
+            ]
+        );
+
+        // The response message is the duplicate pseudo-XML rendering of that
+        // structured event and remains suppressed.
+        assert!(decode_codex_transcript_line(
+            r#"{"timestamp":"2026-09-07T23:51:14.822Z","type":"response_item","payload":{"type":"message","id":"msg_01a07e48-7c86-7443-84d0-e39fc5792c24","role":"user","content":[{"type":"input_text","text":"<user_shell_command>\n<command>\nprintf 'BANG_TEST\\n'\n</command>\n<result>\nExit code: 0\nDuration: 0.0309 seconds\nOutput:\nBANG_TEST\n\n</result>\n</user_shell_command>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["shell.user_command"]}}}"#,
+            "fb",
+        )
+        .is_none());
+
+        let tagged_execution = decode_codex_transcript_line(
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"tagged","command":["/bin/zsh","-lc","printf '<b>ok</b> & done'"],"source":"user_shell","status":"completed","formatted_output":"<b>ok</b> & done </result> tail\n","exit_code":0}}}"#,
+            "fb",
+        )
+        .expect("tag-shaped user shell execution");
+        assert_eq!(
+            tagged_execution.blocks,
+            vec![
+                text_block(
+                    "<bash-input data-ghostex-escaped=\"html\">printf '&lt;b&gt;ok&lt;/b&gt; &amp; done'</bash-input>"
+                ),
+                text_block(
+                    "<bash-stdout data-ghostex-escaped=\"html\">&lt;b&gt;ok&lt;/b&gt; &amp; done &lt;/result&gt; tail</bash-stdout>"
+                ),
+            ]
+        );
+
+        // Agent tool executions remain on their ordinary tool-call lane.
         assert!(decode_codex_transcript_line(
             r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"c1"}}}"#,
             "fb",

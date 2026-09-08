@@ -38,6 +38,10 @@ but replaced it with `event_msg`/`item_completed` (UserMessage/AgentMessage
 items) rather than promoting this `message` lane — see codex_event_message.
 This arm therefore STAYS undecoded: the `message` lane is still the duplicate,
 envelope-carrying twin in both old- and new-style rollouts.
+
+2026-09-08 update: the duplicate `shell.user_command` message also stays
+undecoded. Its structured `item_completed`/`CommandExecution` twin carries both
+the command and formatted output without the pseudo-XML ambiguity of this lane.
 */
 fn codex_response_item(
     payload: &Map<String, Value>,
@@ -196,13 +200,46 @@ fn codex_event_message(
         new-lane-only, 0 both), so decoding both cannot double a turn. Like the
         old event lane, `item_completed` UserMessages carry only the visible
         typed prompt — never the harness-injected AGENTS.md/environment
-        envelopes. Reasoning/CommandExecution/McpToolCall/FileChange items are
-        deliberately NOT decoded here: new-style rollouts still write their
-        `response_item` twins, which remain the sole source for those lanes.
+        envelopes. Reasoning/McpToolCall/FileChange items and ordinary agent
+        CommandExecutions are deliberately NOT decoded here: new-style
+        rollouts still write their `response_item` twins, which remain the sole
+        source for those lanes. A `source=user_shell` CommandExecution is the
+        exception because it is a user-visible local command, not an agent tool.
         */
         Some("item_completed") => {
             let item = as_record(payload.get("item"))?;
             let item_type = item.get("type").and_then(Value::as_str);
+            if item_type == Some("CommandExecution")
+                && item.get("source").and_then(Value::as_str) == Some("user_shell")
+            {
+                let command = item
+                    .get("command")
+                    .and_then(Value::as_array)
+                    .and_then(|parts| parts.last())
+                    .and_then(Value::as_str)?;
+                let formatted_output = item.get("formatted_output").and_then(Value::as_str)?;
+                let output = if formatted_output.trim().is_empty() {
+                    format!(
+                        "Exit code: {}",
+                        item.get("exit_code").and_then(Value::as_i64).unwrap_or_default()
+                    )
+                } else {
+                    formatted_output.trim_end().to_string()
+                };
+                return Some(SessionChatMessage {
+                    id: extract_string(item.get("id")).unwrap_or(id),
+                    role: SessionChatRole::User,
+                    blocks: vec![
+                        text_block(codex_user_shell_marker("bash-input", command)),
+                        text_block(codex_user_shell_marker("bash-stdout", &output)),
+                    ],
+                    timestamp,
+                    source: SessionChatSource::Transcript,
+                    turn_id: None,
+                    byte_offset: None,
+                    queued: false,
+                });
+            }
             /*
             Codex's image generator is an Extension item rather than a tool
             call or an AgentMessage. The TUI renders it as `Generated Image`
@@ -298,6 +335,19 @@ fn codex_event_message(
         }
         _ => None,
     }
+}
+
+fn codex_user_shell_marker(tag: &str, body: &str) -> String {
+    let mut escaped = String::with_capacity(body.len());
+    for character in body.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            _ => escaped.push(character),
+        }
+    }
+    format!("<{tag} data-ghostex-escaped=\"html\">{escaped}</{tag}>")
 }
 
 /*

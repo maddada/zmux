@@ -59,6 +59,40 @@ describe('noise filter (§9.1)', () => {
     expect(stripSessionChatNoiseMessages([marker])).toEqual([marker]);
   });
 
+  test('Codex local-command rows preserve tag-shaped command text and output', () => {
+    expect(
+      sessionChatSuppressedTurnPresentation(
+        textMsg(
+          'command',
+          'user',
+          '<bash-input data-ghostex-escaped="html">printf \'&lt;b&gt;ok&lt;/b&gt; &amp; done\'</bash-input>'
+        )
+      )
+    ).toEqual({ kind: 'inline', label: 'Local command', text: "printf '<b>ok</b> & done'" });
+    expect(
+      sessionChatSuppressedTurnPresentation(
+        textMsg(
+          'output',
+          'user',
+          '<bash-stdout data-ghostex-escaped="html">&lt;b&gt;ok&lt;/b&gt; &amp; done</bash-stdout>'
+        )
+      )
+    ).toEqual({ kind: 'inline', label: 'Local command output', text: '<b>ok</b> & done' });
+
+    const longOutput = `<b>${'x'.repeat(321)}</b> & done`;
+    expect(
+      sessionChatSuppressedTurnPresentation(
+        textMsg(
+          'long-output',
+          'user',
+          `<bash-stdout data-ghostex-escaped="html">&lt;b&gt;${'x'.repeat(
+            321
+          )}&lt;/b&gt; &amp; done</bash-stdout>`
+        )
+      )
+    ).toEqual({ kind: 'collapsed', label: 'Local command output', text: longOutput });
+  });
+
   test('empty text is not noise', () => {
     expect(isSessionChatNoiseMessage(textMsg('1', 'user', '   '))).toBe(false);
   });

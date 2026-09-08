@@ -21,6 +21,7 @@ import { parseSessionChatCommandEnvelope } from './session-chat-command-envelope
 
 const LEADING_TAG_NAME = /^<([a-z][a-z0-9-]*)(?:[\s>]|$)/;
 const MARKUP_TAG = /<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?>/gi;
+const CODEX_ESCAPED_LOCAL_COMMAND = /^<bash-(?:input|stdout) data-ghostex-escaped="html">/i;
 
 /*
  * /compact's local-command stdout is just a dim "Compacted" wrapped in ANSI
@@ -281,7 +282,11 @@ export function sessionChatMessageText(message: SessionChatMessage): string {
 
 /** Text left once the harness markup is removed — "" ⇒ nothing to expand. */
 export function sessionChatSuppressedTurnBody(text: string): string {
-  return text.replace(MARKUP_TAG, '').trim();
+  const body = text.replace(MARKUP_TAG, '').trim();
+  if (!CODEX_ESCAPED_LOCAL_COMMAND.test(text.trimStart())) {
+    return body;
+  }
+  return body.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
 }
 
 export type SessionChatSuppressedTurn =
@@ -428,7 +433,8 @@ export function sessionChatSuppressedTurnPresentation(
 
   const command = parseSessionChatCommandEnvelope(rawText);
   const model = modelSetByCommandOutput(rawText);
-  let text = stripSessionChatAnsi(rawText);
+  const isLocalCommand = suppressed.label === 'Local command' || suppressed.label === 'Local command output';
+  let text = stripSessionChatAnsi(isLocalCommand ? sessionChatSuppressedTurnBody(rawText) : rawText);
   if (command?.name.toLowerCase() === '/model') {
     text = command.name;
   } else if (model) {
