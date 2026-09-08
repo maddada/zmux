@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LABEL = "com.madda.ghostex.build-cache-cleanup"
 STATE = Path.home() / "Library/Application Support/Ghostex/build-cache-cleanup"
 GIB = 1024**3
-BUDGET = 30 * GIB
+BUDGET = 10 * GIB
 STALE_SECONDS = 14 * 86400
 QUIET_SECONDS = 6 * 3600
 

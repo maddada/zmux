@@ -300,7 +300,7 @@ local-variable debug information is omitted. Incremental compilation keeps its e
 On macOS, `python3 tooling/clean-build-caches.py` previews cleanup of a fixed list of generated
 Rust, Zig, Xcode, and Android caches. Add `--apply` to clean, or `--install` to register a user
 LaunchAgent that checks daily at 04:30 local time and at login. It removes trees unchanged for
-14 days, or the oldest eligible trees above a combined 30 GiB cache budget, after at least six
+14 days, or the oldest eligible trees above a combined 10 GiB cache budget, after at least six
 hours without changes. Build locks, detected compiler activity, open files, and Git tracking
 checks protect active work. This is a cache budget, not a hard limit on the entire checkout.
 The latest scheduled result replaces `~/Library/Application Support/Ghostex/build-cache-cleanup/last-run.json`.
