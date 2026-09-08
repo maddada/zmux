@@ -228,7 +228,6 @@ function ImageAttachments({
             {viewer?.canOpen(target) === true ? (
               <AttachmentTrigger
                 aria-label={`View ${label}`}
-                className='cursor-zoom-in'
                 onClick={() => viewer?.open(target)}
               />
             ) : null}
@@ -1391,7 +1390,7 @@ export function SessionChatMessageList({
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const shouldFollowBottomRef = useRef(true);
-  // Collapsing enlarges the viewport; that resize must not resume live-follow while the reader is in history.
+  // A collapsed composer means the reader scrolled into history; streaming growth must not pull them back to the end.
   const composerCollapsedRef = useRef(composerCollapsed);
   composerCollapsedRef.current = composerCollapsed;
   const scrollbarFadeTimeoutRef = useRef<number | undefined>(undefined);
@@ -1531,10 +1530,7 @@ export function SessionChatMessageList({
           preserveScrollOnPrepend
           ref={viewportRef}
         >
-          <MessageScrollerContent
-            className='mx-auto w-full max-w-3xl gap-0 px-4 pt-8 pb-4 [direction:ltr]'
-            ref={contentRef}
-          >
+          <MessageScrollerContent className='mx-auto w-full max-w-3xl gap-0 px-4 pt-8 [direction:ltr]' ref={contentRef}>
             {summaryMode
               ? summaryTurns.map((turn) => (
                   <MessageScrollerItem key={`summary:${turn.user.id}`} messageId={turn.user.id}>

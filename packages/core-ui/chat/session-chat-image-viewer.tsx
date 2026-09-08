@@ -3,13 +3,14 @@
 // centered overlay at full size (max 75% of the window height, original aspect
 // ratio). Clicking
 // the overlay picture steps it through three zoom levels and back to the
-// fitted size, panning by scroll while zoomed; the zoom-in/zoom-out cursor is
-// the affordance for it, and an image with no detail beyond its fitted size
-// never offers the toggle. Right-clicking it offers Copy image (PNG, to the
-// system clipboard), Copy path (the machine path or URL behind the picture),
-// and Save image (Downloads, using the session title as the file name). The
-// full-size viewer also keeps those three actions in
+// fitted size, panning by scroll while zoomed; an image with no detail beyond
+// its fitted size never offers the toggle. Right-clicking it offers Copy image
+// (PNG, to the system clipboard), Copy path (the machine path or URL behind
+// the picture), and Save image (Downloads, using the session title as the file
+// name). The full-size viewer also keeps those three actions in
 // a top-right toolbar beside its close button; thumbnails remain image-only.
+// CDXC:SessionChat 2026-09-08 DECISION:
+// User: no zoom cursor on chat image thumbnails or on the image preview.
 // Machine paths load through the transport's readSessionChatImage RPC — the
 // paths inside "[Image #N](path)" references live on the session's machine, so
 // the page cannot open them directly. http(s)/data URLs render as-is.
@@ -500,9 +501,9 @@ export function SessionChatImageViewerProvider({
 
   /*
   Zoom is only worth offering when 1:1 would actually show more than the fitted
-  box already does — a small picture is already at full size, so it keeps the
-  plain cursor and ignores clicks rather than pretending to zoom. Measured from
-  the fitted render, so it is re-read whenever the window resizes.
+  box already does — a small picture is already at full size, so clicks are
+  ignored rather than pretending to zoom. Measured from the fitted render, so
+  it is re-read whenever the window resizes.
   */
   const measureFit = useCallback((): void => {
     const image = imageRef.current;
@@ -786,7 +787,6 @@ export function SessionChatImageViewerProvider({
                 <img
                   alt={state.alt ?? 'Image preview'}
                   className='ghostex-chat-image-preview rounded-lg shadow-2xl'
-                  data-zoom={zoomWidths.length === 0 ? 'none' : zoomLevel >= zoomWidths.length ? 'out' : 'in'}
                   data-zoomed={zoomLevel > 0 ? 'true' : undefined}
                   // Native image dragging would fight scroll-to-pan.
                   draggable={false}
