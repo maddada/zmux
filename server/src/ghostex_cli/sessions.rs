@@ -970,6 +970,7 @@ fn to_cli_session(
     map.insert("alias".to_string(), json!(index as i64 + 1));
     insert_js(&mut map, "attention", &[p("attention")]);
     insert_js(&mut map, "createdAt", &[p("createdAt"), s("createdAt")]);
+    insert_js(&mut map, "isDraft", &[p("isDraft")]);
     insert_js(&mut map, "globalRef", &[s("globalRef")]);
     insert_js(&mut map, "groupId", &[p("groupId")]);
     insert_js(&mut map, "displayTitle", &[display_title]);
@@ -1869,6 +1870,9 @@ fn to_mobile_sidebar_spaces(spaces_state: Option<&Value>) -> Option<Value> {
 fn to_mobile_session_summary(session: &Value) -> Value {
     let s = |key: &str| session.get(key);
     let mut map = Map::new();
+    // CDXC:Sessions 2026-09-08 SEE-ALSO: packages/shared/active-sessions-sort.ts and apps/mobile/app/src/contract/grouping.ts need the draft marker and creation clock through both CLI projections for newest-draft-first ordering.
+    insert_js(&mut map, "createdAt", &[s("createdAt")]);
+    insert_js(&mut map, "isDraft", &[s("isDraft")]);
     insert_js(&mut map, "activity", &[s("activity")]);
     insert_js(&mut map, "agent", &[s("agent"), s("agentId")]);
     insert_js(&mut map, "agentIcon", &[s("agentIcon")]);

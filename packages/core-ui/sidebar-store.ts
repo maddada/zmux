@@ -1210,6 +1210,7 @@ function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSess
     left.canScheduleDelayedSend === right.canScheduleDelayedSend &&
     left.canToggleCloseAfterDone === right.canToggleCloseAfterDone &&
     left.column === right.column &&
+    left.createdAt === right.createdAt &&
     left.closeAfterDone === right.closeAfterDone &&
     left.closeAfterDoneDeadlineAt === right.closeAfterDoneDeadlineAt &&
     left.closeAfterDoneRemainingLabel === right.closeAfterDoneRemainingLabel &&
@@ -1229,6 +1230,7 @@ function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSess
     left.lifecycleState === right.lifecycleState &&
     left.isFocused === right.isFocused &&
     left.isFavorite === right.isFavorite &&
+    left.isDraft === right.isDraft &&
     left.isParked === right.isParked &&
     left.isPinned === right.isPinned &&
     left.sessionTag === right.sessionTag &&

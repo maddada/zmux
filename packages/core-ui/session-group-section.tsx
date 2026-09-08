@@ -1011,32 +1011,37 @@ export function SessionGroupSection({
     orderedSessionIds.length > projectSessionListCollapsedCount;
   const renderedSessionIds =
     shouldShowProjectSessionListToggle && !isProjectSessionListCollapsed ? orderedSessionIds : visibleSessionIds;
-  const renderedBrowserSessionIds = renderedSessionIds.filter((sessionId) => {
+  const renderedNonDraftSessionIds = renderedSessionIds.filter(
+    (sessionId) => sessionsById[sessionId]?.isDraft !== true
+  );
+  const renderedBrowserSessionIds = renderedNonDraftSessionIds.filter((sessionId) => {
     return getProjectSessionSection(sessionsById[sessionId], enableSessionParking) === 'browser';
   });
-  const renderedPinnedSessionIds = renderedSessionIds.filter((sessionId) => {
+  const renderedPinnedSessionIds = renderedNonDraftSessionIds.filter((sessionId) => {
     return getProjectSessionSection(sessionsById[sessionId], enableSessionParking) === 'pinned';
   });
-  const renderedUnpinnedSessionIds = renderedSessionIds.filter((sessionId) => {
+  const renderedUnpinnedSessionIds = renderedNonDraftSessionIds.filter((sessionId) => {
     return getProjectSessionSection(sessionsById[sessionId], enableSessionParking) === 'sessions';
   });
-  const renderedParkedSessionIds = renderedSessionIds.filter((sessionId) => {
+  const renderedParkedSessionIds = renderedNonDraftSessionIds.filter((sessionId) => {
     return getProjectSessionSection(sessionsById[sessionId], enableSessionParking) === 'parked';
   });
   const projectSessionSectionCounts = orderedSessionIds.reduce<Record<ProjectSessionSection, number>>(
     (counts, sessionId) => {
-      counts[getProjectSessionSection(sessionsById[sessionId], enableSessionParking)] += 1;
+      if (sessionsById[sessionId]?.isDraft !== true) {
+        counts[getProjectSessionSection(sessionsById[sessionId], enableSessionParking)] += 1;
+      }
       return counts;
     },
     { browser: 0, parked: 0, pinned: 0, sessions: 0 }
   );
   const shouldRenderSessionKindLabels =
-    renderedBrowserSessionIds.length > 0 && renderedBrowserSessionIds.length < renderedSessionIds.length;
+    renderedBrowserSessionIds.length > 0 && renderedBrowserSessionIds.length < renderedNonDraftSessionIds.length;
   const firstBrowserSessionId = renderedBrowserSessionIds[0];
   const firstPinnedSessionId = renderedPinnedSessionIds[0];
   const firstUnpinnedSessionId = renderedUnpinnedSessionIds[0];
   const firstParkedSessionId = renderedParkedSessionIds[0];
-  const firstTerminalSessionId = renderedSessionIds.find((sessionId) => {
+  const firstTerminalSessionId = renderedNonDraftSessionIds.find((sessionId) => {
     const session = sessionsById[sessionId];
     return session?.kind !== 'browser' && session?.sessionKind !== 'browser';
   });
@@ -1050,6 +1055,7 @@ export function SessionGroupSection({
   const expandedVisibleSessionIds = projectContext
     ? visibleSessionIds.filter(
         (sessionId) =>
+          sessionsById[sessionId]?.isDraft === true ||
           !collapsedProjectSessionSections[getProjectSessionSection(sessionsById[sessionId], enableSessionParking)]
       )
     : visibleSessionIds;
@@ -2626,6 +2632,7 @@ export function SessionGroupSection({
                     const session = sessionsById[sessionId];
                     const projectSessionSection = getProjectSessionSection(session, enableSessionParking);
                     const isProjectSessionSectionCollapsed =
+                      session?.isDraft !== true &&
                       (Boolean(projectContext) || (isChatCollection && projectSessionSection === 'parked')) &&
                       collapsedProjectSessionSections[projectSessionSection];
                     const isProjectSessionListOverflowRow =
@@ -2742,6 +2749,7 @@ export function SessionGroupSection({
                         ) : null}
                         {!projectContext &&
                         !isProjectSessionSectionCollapsed &&
+                        session?.isDraft !== true &&
                         sessionsById[sessionId]?.isPinned === true &&
                         orderedSessionIds[sessionIndex + 1] !== undefined &&
                         sessionsById[orderedSessionIds[sessionIndex + 1]]?.isPinned !== true ? (
@@ -2918,8 +2926,8 @@ export function SessionGroupSection({
                 {/*
                  * CDXC:Spaces 2026-08-27:
                  * Membership rows for one ungrouped project, in the owning
-                 * gxserver's Space order. Multi-membership is allowed, so these
-                 * are checkboxes rather than radios; toggling closes the menu,
+                 * gxserver's Space order. Selecting another Space moves the project;
+                 * toggling its current Space removes it. Toggling closes the menu,
                  * which is what the Tags submenu this pattern is modeled on does.
                  */}
                 <button
@@ -3323,7 +3331,7 @@ export function SessionGroupSection({
                     type='button'
                   >
                     <IconRefresh aria-hidden='true' className='session-context-menu-icon' size={14} />
-                    Full reload
+                    Full Reload
                   </button>
                 ) : null}
                 <div className='session-context-menu-divider' role='separator' />
@@ -3371,7 +3379,7 @@ export function SessionGroupSection({
                   type='button'
                 >
                   <IconRefresh aria-hidden='true' className='session-context-menu-icon' size={14} />
-                  Full reload
+                  Full Reload
                 </button>
               ) : null}
               <button
