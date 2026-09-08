@@ -1,5 +1,56 @@
 # Changelog
 
+## 9.0.0 - 2026-09-08
+
+- New Features
+
+  - Sign in to your Claude and Codex accounts from inside Ghostex: start a login, confirm the email, reconnect one that stopped working, and swap which slot an account sits in, without opening a terminal.
+  - Star an account to keep it in the titlebar, where a small badge opens a panel showing how much of each limit you have used, how quickly you are using it, and when it resets.
+  - Ghostex now finds Claude and Codex conversations you started outside the app and offers to import them, so your existing work sits alongside your Ghostex sessions.
+  - Open a subagent's own transcript from the task card that started it, and page back through its history without leaving the chat.
+  - Recall prompts you recently sent straight from the chat box, including ones a delayed send delivered while you were away.
+  - Grok joins the agents you can chat with.
+  - Drag a project or a group onto a Space to move it there, and drag the Spaces themselves to reorder them.
+  - Codex sessions now report their token use, limit windows, credits, and request timing, and you choose which of those rows to show and in what order.
+  - Choose whether web pages in Ghostex's browser follow your system appearance or stay light or dark.
+  - Go back and forward in the browser with a two-finger swipe on the trackpad.
+  - Open a table from a chat message full screen.
+
+- Major Improvements
+
+  - The chat box is a new, much lighter editor. Reference pills, find and replace, go to line, soft wrap, and full keyboard editing all stay, and chats no longer download a large code editor to show you a text box.
+  - The model and effort picker is now its own window, so you can call it up from terminal view as well as chat, and your choice is retried automatically when the agent is busy.
+  - The Resources panel lists every project on its own instead of bundling them into "Other projects", and you can close a session straight from the panel.
+  - Ghostex reveals the session you activated in the sidebar - switching Space, expanding its project and group, and scrolling to it - however you activated it.
+
+- Minor Improvements
+
+  - The app's default chrome color is a neutral dark instead of the icy tint; colors you picked yourself are untouched.
+  - Draft sessions sit at the top of the list, newest first, marked with a pencil.
+  - Hand the draft you typed in chat over to the terminal view.
+  - Long dropdown lists can be searched instead of scrolled.
+  - The chat box now glides out of the way as you scroll the conversation and back when you stop.
+  - More keyboard editing in the chat box, including deleting to the start or end of a line.
+  - Queued prompts show the shortcut that edits them.
+  - Agent dialogs such as /usage always offer their exit button, so leaving one never means switching to the terminal.
+  - The message history marks beside a conversation are larger and easier to hit.
+  - The browser pane menu now opens as a titlebar popup like the other menus.
+  - Turn off the terminal model picker shortcut if you would rather the terminal keep that key.
+  - Chat images no longer show a zoom cursor.
+  - Session menu labels are capitalized the same way everywhere.
+  - The web app gets the same new chat box and reveals activated sessions too.
+
+- Stabilization
+
+  - Agent finished and stopped notifications no longer show up twice in a row.
+  - Codex's local commands now show their full output, thanks to banozz.
+  - A rewind that works but cannot tidy the terminal keeps your draft and tells you, instead of dropping it.
+  - Closing the last browser tab takes you back to Agents rather than leaving an empty browser.
+  - The menu bar dropdown stays open when you switch to another app.
+  - The active model is detected more reliably when the terminal and the picker disagree.
+  - Double-clicking a prompt in Find resumes it even when the list scrolls under your cursor.
+  - A project or group belongs to only one Space now, so it no longer appears twice in the sidebar or on your phone.
+
 ## 8.10.0 - 2026-09-07
 
 - New Features
