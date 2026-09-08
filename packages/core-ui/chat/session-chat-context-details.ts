@@ -12,7 +12,17 @@ status line only render what `resolveSessionChatContextDetailGroups` returns.
 */
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import type { SessionChatClaudeStatus } from '../../shared/session-chat';
+import { formatResetCountdown } from '@/packages/shared/reset-countdown';
+import { formatSessionChatDuration } from './session-chat-duration';
+export { formatSessionChatDuration } from './session-chat-duration';
+
+import {
+  CODEX_CONTEXT_DETAIL_ROWS,
+  SHARED_CONTEXT_DETAIL_ROWS,
+  type AdditionalContextDetailRowId,
+  type ContextDetailStatus,
+  type ContextDetailsAgent,
+} from './session-chat-context-details-agents';
 import { formatSessionChatContextTokens } from './session-chat-context-meter';
 
 export type SessionChatContextDetailGroupId = 'usage' | 'context' | 'session';
@@ -25,6 +35,7 @@ export const SESSION_CHAT_CONTEXT_DETAIL_GROUPS: ReadonlyArray<{ id: SessionChat
   ];
 
 export type SessionChatContextDetailRowId =
+  | AdditionalContextDetailRowId
   | 'cost'
   | 'rateLimits'
   | 'lines'
@@ -56,7 +67,7 @@ export interface SessionChatContextDetailSession {
 }
 
 export interface SessionChatContextDetailRowInput {
-  status: SessionChatClaudeStatus;
+  status: ContextDetailStatus;
   /** Milliseconds since the epoch, for the reset and expiry countdowns. */
   now: number;
   /** Null when the host did not describe the session; the session row is skipped. */
@@ -89,28 +100,13 @@ function formatUsd(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-/** `1h 05m`, `22m`, `45s`. */
-export function formatSessionChatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) {
-    return `${hours}h ${String(minutes).padStart(2, '0')}m`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m`;
-  }
-  return `${seconds}s`;
-}
-
 /** Time left until an epoch-seconds instant, or null once it has passed. */
 function formatCountdown(epochSeconds: number, now: number): string | null {
   const remainingMs = epochSeconds * 1000 - now;
   if (remainingMs <= 0) {
     return null;
   }
-  return formatSessionChatDuration(remainingMs);
+  return formatResetCountdown(remainingMs);
 }
 
 function formatPercentage(value: number): string {
@@ -311,12 +307,62 @@ export const SESSION_CHAT_CONTEXT_DETAIL_ROWS: readonly SessionChatContextDetail
         : null;
     },
   },
+  ...SHARED_CONTEXT_DETAIL_ROWS,
 ];
 
-const ROW_BY_ID = new Map(SESSION_CHAT_CONTEXT_DETAIL_ROWS.map((row) => [row.id, row]));
+const CODEX_SHARED_ROWS = new Set<SessionChatContextDetailRowId>([
+  'lastRequest',
+  'totalOutputTokens',
+  'remaining',
+  'version',
+  'sessionName',
+  'folder',
+  'thinking',
+  'rateLimits',
+  ...SHARED_CONTEXT_DETAIL_ROWS.map((row) => row.id),
+]);
+const CODEX_ROWS: readonly SessionChatContextDetailRowDefinition[] = [
+  ...SESSION_CHAT_CONTEXT_DETAIL_ROWS.filter((row) => CODEX_SHARED_ROWS.has(row.id)).map(
+    (row): SessionChatContextDetailRowDefinition => {
+      if (row.id === 'thinking')
+        return {
+          ...row,
+          label: 'Reasoning effort',
+          description: 'The session’s reasoning effort',
+          value: ({ status }) => status.effortName ?? null,
+        };
+      if (row.id === 'version') return { ...row, label: 'Codex version' };
+      if (row.id === 'folder') return { ...row, description: "Codex's current working folder" };
+      if (row.id === 'totalOutputTokens')
+        return { ...row, description: 'Cumulative Codex output, including reasoning tokens' };
+      if (row.id === 'rateLimits')
+        return {
+          ...row,
+          description: 'Usage windows last reported by Codex',
+          value: ({ status, now, session }) =>
+            joinParts(
+              CODEX_CONTEXT_DETAIL_ROWS.filter((row) => row.id === 'primaryLimit' || row.id === 'secondaryLimit').map(
+                (row) => row.value({ status, now, session })
+              )
+            ),
+        };
+      return row;
+    }
+  ),
+  ...CODEX_CONTEXT_DETAIL_ROWS,
+];
 
-function isRowId(value: unknown): value is SessionChatContextDetailRowId {
-  return typeof value === 'string' && ROW_BY_ID.has(value as SessionChatContextDetailRowId);
+export function sessionChatContextDetailRows(
+  agent: ContextDetailsAgent = 'claude'
+): readonly SessionChatContextDetailRowDefinition[] {
+  return agent === 'codex' ? CODEX_ROWS : SESSION_CHAT_CONTEXT_DETAIL_ROWS;
+}
+const ROWS_BY_AGENT = {
+  claude: new Map(SESSION_CHAT_CONTEXT_DETAIL_ROWS.map((row) => [row.id, row])),
+  codex: new Map(CODEX_ROWS.map((row) => [row.id, row])),
+};
+function isRowId(value: unknown, agent: ContextDetailsAgent = 'claude'): value is SessionChatContextDetailRowId {
+  return typeof value === 'string' && ROWS_BY_AGENT[agent].has(value as SessionChatContextDetailRowId);
 }
 
 // ---------------------------------------------------------------------------
@@ -347,11 +393,14 @@ export const DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES: SessionChatContex
   starredOrder: [],
 };
 
-function normalizeFlags(candidate: unknown): Partial<Record<SessionChatContextDetailRowId, boolean>> {
+function normalizeFlags(
+  candidate: unknown,
+  agent: ContextDetailsAgent
+): Partial<Record<SessionChatContextDetailRowId, boolean>> {
   const flags: Partial<Record<SessionChatContextDetailRowId, boolean>> = {};
   if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
     for (const [id, flag] of Object.entries(candidate)) {
-      if (isRowId(id) && typeof flag === 'boolean') {
+      if (isRowId(id, agent) && typeof flag === 'boolean') {
         flags[id] = flag;
       }
     }
@@ -360,7 +409,8 @@ function normalizeFlags(candidate: unknown): Partial<Record<SessionChatContextDe
 }
 
 function normalizeOrder(
-  candidate: unknown
+  candidate: unknown,
+  agent: ContextDetailsAgent
 ): Partial<Record<SessionChatContextDetailGroupId, SessionChatContextDetailRowId[]>> {
   const order: Partial<Record<SessionChatContextDetailGroupId, SessionChatContextDetailRowId[]>> = {};
   if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
@@ -368,7 +418,8 @@ function normalizeOrder(
       const ids = (candidate as Record<string, unknown>)[group.id];
       if (Array.isArray(ids)) {
         const kept = ids.filter(
-          (id): id is SessionChatContextDetailRowId => isRowId(id) && ROW_BY_ID.get(id)?.group === group.id
+          (id): id is SessionChatContextDetailRowId =>
+            isRowId(id, agent) && ROWS_BY_AGENT[agent].get(id)?.group === group.id
         );
         order[group.id] = [...new Set(kept)];
       }
@@ -378,45 +429,56 @@ function normalizeOrder(
 }
 
 export function normalizeSessionChatContextDetailsPreferences(
-  candidate: unknown
+  candidate: unknown,
+  agent: ContextDetailsAgent = 'claude'
 ): SessionChatContextDetailsPreferences {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
     return DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES;
   }
   const record = candidate as Record<string, unknown>;
   return {
-    shown: normalizeFlags(record.shown),
-    starred: normalizeFlags(record.starred),
-    order: normalizeOrder(record.order),
+    shown: normalizeFlags(record.shown, agent),
+    starred: normalizeFlags(record.starred, agent),
+    order: normalizeOrder(record.order, agent),
     starredOrder: Array.isArray(record.starredOrder)
-      ? [...new Set(record.starredOrder.filter((id): id is SessionChatContextDetailRowId => isRowId(id)))]
+      ? [...new Set(record.starredOrder.filter((id): id is SessionChatContextDetailRowId => isRowId(id, agent)))]
       : [],
   };
 }
 
-let cachedPreferences: SessionChatContextDetailsPreferences | null = null;
-const listeners = new Set<() => void>();
+/** CDXC:AgentProviders 2026-09-08 DECISION:
+ * User: keep the same Claude UI and status line, but save popover and status-line settings independently for Claude and Codex.
+ * Claude keeps its existing storage key and configuration; copying to the other agent is a one-time action.
+ */
+const preferenceKeys = {
+  claude: SESSION_CHAT_CONTEXT_DETAILS_STORAGE_KEY,
+  codex: 'ghostex.chat.context-details.codex.v1',
+};
+const cachedPreferences: Partial<Record<ContextDetailsAgent, SessionChatContextDetailsPreferences>> = {};
 
-function readStoredPreferences(): SessionChatContextDetailsPreferences {
-  try {
-    return normalizeSessionChatContextDetailsPreferences(
-      JSON.parse(window.localStorage.getItem(SESSION_CHAT_CONTEXT_DETAILS_STORAGE_KEY) ?? 'null')
-    );
-  } catch {
-    return DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES;
+export function readSessionChatContextDetailsPreferences(
+  agent: ContextDetailsAgent = 'claude'
+): SessionChatContextDetailsPreferences {
+  if (!cachedPreferences[agent]) {
+    try {
+      cachedPreferences[agent] = normalizeSessionChatContextDetailsPreferences(
+        JSON.parse(window.localStorage.getItem(preferenceKeys[agent]) ?? 'null'),
+        agent
+      );
+    } catch {
+      cachedPreferences[agent] = DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES;
+    }
   }
+  return cachedPreferences[agent];
 }
 
-export function readSessionChatContextDetailsPreferences(): SessionChatContextDetailsPreferences {
-  if (cachedPreferences === null) {
-    cachedPreferences = readStoredPreferences();
-  }
-  return cachedPreferences;
-}
-
-export function writeSessionChatContextDetailsPreferences(next: SessionChatContextDetailsPreferences): void {
-  cachedPreferences = normalizeSessionChatContextDetailsPreferences(next);
-  window.localStorage.setItem(SESSION_CHAT_CONTEXT_DETAILS_STORAGE_KEY, JSON.stringify(cachedPreferences));
+export function writeSessionChatContextDetailsPreferences(
+  next: SessionChatContextDetailsPreferences,
+  agent: ContextDetailsAgent = 'claude'
+): void {
+  const normalized = normalizeSessionChatContextDetailsPreferences(next, agent);
+  window.localStorage.setItem(preferenceKeys[agent], JSON.stringify(normalized));
+  cachedPreferences[agent] = normalized;
   window.dispatchEvent(new Event(CHANGED_EVENT));
 }
 
@@ -429,33 +491,77 @@ carries a save to the other views and a focus re-read covers a view that
 missed it, so the next time it is looked at it shows the latest picks.
 */
 function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
   const reread = () => {
-    cachedPreferences = null;
+    delete cachedPreferences.claude;
+    delete cachedPreferences.codex;
     listener();
   };
   const onStorage = (event: StorageEvent) => {
-    if (event.key === null || event.key === SESSION_CHAT_CONTEXT_DETAILS_STORAGE_KEY) {
-      reread();
-    }
+    if (event.key === null || Object.values(preferenceKeys).includes(event.key)) reread();
   };
-  window.addEventListener(CHANGED_EVENT, listener);
+  window.addEventListener(CHANGED_EVENT, reread);
   window.addEventListener('storage', onStorage);
   window.addEventListener('focus', reread);
   return () => {
-    listeners.delete(listener);
-    window.removeEventListener(CHANGED_EVENT, listener);
+    window.removeEventListener(CHANGED_EVENT, reread);
     window.removeEventListener('storage', onStorage);
     window.removeEventListener('focus', reread);
   };
 }
 
-export function useSessionChatContextDetailsPreferences(): SessionChatContextDetailsPreferences {
+export function useSessionChatContextDetailsPreferences(
+  agent: ContextDetailsAgent = 'claude'
+): SessionChatContextDetailsPreferences {
   return useSyncExternalStore(
     subscribe,
-    readSessionChatContextDetailsPreferences,
-    readSessionChatContextDetailsPreferences
+    () => readSessionChatContextDetailsPreferences(agent),
+    () => readSessionChatContextDetailsPreferences(agent)
   );
+}
+
+/** CDXC:AgentProviders 2026-09-08 DECISION:
+ * User: an export icon copies current settings to the other agent, matching fields as closely as possible.
+ * Matching rows copy visibility, stars, and order; unmatched destination fields retain their settings.
+ */
+export function copySessionChatContextDetailsPreferences(
+  source: SessionChatContextDetailsPreferences,
+  from: ContextDetailsAgent
+): { matched: number; skipped: number } {
+  const to = from === 'claude' ? 'codex' : 'claude';
+  const destination = normalizeSessionChatContextDetailsPreferences(readSessionChatContextDetailsPreferences(to), to);
+  const sourceRows = sessionChatContextDetailRows(from);
+  const matched = sourceRows.filter((row) => ROWS_BY_AGENT[to].has(row.id));
+  const matchingIds = new Set(matched.map((row) => row.id));
+  const previousStarredOrder = orderedSessionChatStarredRows(destination, to).map((row) => row.id);
+  for (const row of matched) {
+    destination.shown[row.id] = isSessionChatContextDetailShown(source, row);
+    destination.starred[row.id] = isSessionChatContextDetailStarred(source, row);
+  }
+  // Replace matching slots in their existing group, preserving the relative order of unrelated fields.
+  const mergeOrder = (existing: SessionChatContextDetailRowId[], incoming: SessionChatContextDetailRowId[]) => {
+    let index = 0;
+    const merged = existing.flatMap((id) =>
+      matchingIds.has(id) ? (incoming[index] ? [incoming[index++]] : []) : [id]
+    );
+    return [...merged, ...incoming.slice(index)];
+  };
+  for (const group of SESSION_CHAT_CONTEXT_DETAIL_GROUPS) {
+    const incoming = orderedSessionChatContextDetailRows(source, group.id, from)
+      .filter((row) => matchingIds.has(row.id))
+      .map((row) => row.id);
+    destination.order[group.id] = mergeOrder(
+      orderedSessionChatContextDetailRows(destination, group.id, to).map((row) => row.id),
+      incoming
+    );
+  }
+  destination.starredOrder = mergeOrder(
+    previousStarredOrder,
+    orderedSessionChatStarredRows(source, from)
+      .filter((row) => matchingIds.has(row.id))
+      .map((row) => row.id)
+  );
+  writeSessionChatContextDetailsPreferences(destination, to);
+  return { matched: matched.length, skipped: sourceRows.length - matched.length };
 }
 
 /** Wall clock that re-renders the countdowns every half minute. */
@@ -488,11 +594,12 @@ export function isSessionChatContextDetailStarred(
 /** The group's rows in the user's order, missing rows appended in catalog order. */
 export function orderedSessionChatContextDetailRows(
   preferences: SessionChatContextDetailsPreferences,
-  group: SessionChatContextDetailGroupId
+  group: SessionChatContextDetailGroupId,
+  agent: ContextDetailsAgent = 'claude'
 ): SessionChatContextDetailRowDefinition[] {
-  const catalog = SESSION_CHAT_CONTEXT_DETAIL_ROWS.filter((row) => row.group === group);
+  const catalog = sessionChatContextDetailRows(agent).filter((row) => row.group === group);
   const ordered = (preferences.order[group] ?? [])
-    .map((id) => ROW_BY_ID.get(id))
+    .map((id) => ROWS_BY_AGENT[agent].get(id))
     .filter((row): row is SessionChatContextDetailRowDefinition => row !== undefined && row.group === group);
   const seen = new Set(ordered.map((row) => row.id));
   return [...ordered, ...catalog.filter((row) => !seen.has(row.id))];
@@ -517,11 +624,12 @@ export interface SessionChatContextDetailGroup {
  * nothing under it is dropped so its label never renders alone.
  */
 export function resolveSessionChatContextDetailGroups(
-  status: SessionChatClaudeStatus | undefined,
+  status: ContextDetailStatus | undefined,
   preferences: SessionChatContextDetailsPreferences,
   now: number,
   select: 'shown' | 'starred',
-  session: SessionChatContextDetailSession | null
+  session: SessionChatContextDetailSession | null,
+  agent: ContextDetailsAgent = 'claude'
 ): SessionChatContextDetailGroup[] {
   if (!status) {
     return [];
@@ -530,7 +638,7 @@ export function resolveSessionChatContextDetailGroups(
   const groups: SessionChatContextDetailGroup[] = [];
   for (const group of SESSION_CHAT_CONTEXT_DETAIL_GROUPS) {
     const items: SessionChatContextDetailItem[] = [];
-    for (const row of orderedSessionChatContextDetailRows(preferences, group.id)) {
+    for (const row of orderedSessionChatContextDetailRows(preferences, group.id, agent)) {
       if (!selected(preferences, row)) {
         continue;
       }
@@ -548,10 +656,11 @@ export function resolveSessionChatContextDetailGroups(
 
 /** The starred rows in the status line's own order, then any others in group order. */
 export function orderedSessionChatStarredRows(
-  preferences: SessionChatContextDetailsPreferences
+  preferences: SessionChatContextDetailsPreferences,
+  agent: ContextDetailsAgent = 'claude'
 ): SessionChatContextDetailRowDefinition[] {
   const starred = SESSION_CHAT_CONTEXT_DETAIL_GROUPS.flatMap((group) =>
-    orderedSessionChatContextDetailRows(preferences, group.id).filter((row) =>
+    orderedSessionChatContextDetailRows(preferences, group.id, agent).filter((row) =>
       isSessionChatContextDetailStarred(preferences, row)
     )
   );
@@ -565,16 +674,17 @@ export function orderedSessionChatStarredRows(
 
 /** The starred rows with a value, in the status line's order. */
 export function resolveSessionChatStarredContextDetails(
-  status: SessionChatClaudeStatus | undefined,
+  status: ContextDetailStatus | undefined,
   preferences: SessionChatContextDetailsPreferences,
   now: number,
-  session: SessionChatContextDetailSession | null
+  session: SessionChatContextDetailSession | null,
+  agent: ContextDetailsAgent = 'claude'
 ): SessionChatContextDetailItem[] {
   if (!status) {
     return [];
   }
   const items: SessionChatContextDetailItem[] = [];
-  for (const row of orderedSessionChatStarredRows(preferences)) {
+  for (const row of orderedSessionChatStarredRows(preferences, agent)) {
     const value = row.value({ status, now, session });
     if (value === null) {
       continue;

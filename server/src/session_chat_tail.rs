@@ -18,6 +18,7 @@ use crate::session_chat_decode_pi::decode_pi_transcript_line;
 
 #[derive(Debug, Default)]
 pub struct SessionChatTailFileResult {
+    pub(crate) codex_stats: crate::session_chat_codex_stats::CodexSessionStats,
     pub messages: Vec<SessionChatMessage>,
     pub lifecycle: Option<SessionChatTurnLifecycle>,
     pub consumed_to: u64,
@@ -167,6 +168,14 @@ pub fn read_session_chat_transcript_tail_file(
         session_chat_branch_boundary(file_path, version.as_ref(), end_offset.map(|_| end), decode);
     let mut branch = ActiveBranchScan::new(file_path, branch_enabled, boundary);
 
+    let mut header = String::new();
+    BufReader::new(File::open(file_path)?.take(MAX_SESSION_CHAT_TRANSCRIPT_RECORD_BYTES as u64))
+        .read_line(&mut header)?;
+    let mut codex_stats = crate::session_chat_codex_stats::CodexSessionStats::default();
+    let codex = serde_json::from_str::<Value>(&header)
+        .ok()
+        .is_some_and(|record| record["type"] == "session_meta");
+    let found_usage = std::cell::Cell::new(false);
     let mut accumulator = TailLineAccumulator::new();
     let mut newest_first: Vec<(SessionChatMessage, u64)> = Vec::new();
     // Queue enqueue rows decode to temporary bubbles, but replay below removes
@@ -182,15 +191,15 @@ pub fn read_session_chat_transcript_tail_file(
     // Newest-first; replayed in file order once the window is complete.
     let mut queue_ops: Vec<(u64, TranscriptQueueOp)> = Vec::new();
 
-    let decode_line = |accumulator: &mut TailLineAccumulator,
-                       line_offset: u64,
-                       newest_first: &mut Vec<(SessionChatMessage, u64)>,
-                       lifecycle: &mut Option<SessionChatTurnLifecycle>,
-                       ignore_next_malformed_record: &mut bool,
-                       malformed_record_count: &mut usize,
-                       branch: &mut ActiveBranchScan,
-                       queue_ops: &mut Vec<(u64, TranscriptQueueOp)>,
-                       stable_message_count: &mut usize| {
+    let mut decode_line = |accumulator: &mut TailLineAccumulator,
+                           line_offset: u64,
+                           newest_first: &mut Vec<(SessionChatMessage, u64)>,
+                           lifecycle: &mut Option<SessionChatTurnLifecycle>,
+                           ignore_next_malformed_record: &mut bool,
+                           malformed_record_count: &mut usize,
+                           branch: &mut ActiveBranchScan,
+                           queue_ops: &mut Vec<(u64, TranscriptQueueOp)>,
+                           stable_message_count: &mut usize| {
         let Some(line) = accumulator.take_line() else {
             return;
         };
@@ -203,6 +212,13 @@ pub fn read_session_chat_transcript_tail_file(
             return;
         }
         *ignore_next_malformed_record = false;
+        codex_stats.observe(&line, true);
+        found_usage.set(codex_stats.context.is_some());
+        // A long tool burst can put the latest usage before the message page.
+        // Continue looking for stats without retaining another page of messages.
+        if *stable_message_count > limit && !branch.keep_scanning(line_offset) {
+            return;
+        }
         let fallback_id = transcript_fallback_id(file_path, line_offset);
         if lifecycle.is_none() {
             if let Some(decode_lifecycle) = decode_lifecycle {
@@ -213,6 +229,9 @@ pub fn read_session_chat_transcript_tail_file(
         let row_lineage = lineage.and_then(|extract| extract(&line, &fallback_id));
         if let Some(row_lineage) = row_lineage {
             let verdict = branch.observe(line_offset, &row_lineage, decoded.as_ref());
+            for key in row_lineage.delivered_queue_keys {
+                queue_ops.push((line_offset, TranscriptQueueOp::Left { key: Some(key) }));
+            }
             if row_lineage.queue.is_some() {
                 if let Some(queue_op) = row_lineage.queue {
                     queue_ops.push((line_offset, queue_op));
@@ -289,7 +308,9 @@ pub fn read_session_chat_transcript_tail_file(
                     &mut stable_message_count,
                 );
             }
-            scanning = stable_message_count <= limit || branch.keep_scanning(line_offset);
+            scanning = stable_message_count <= limit
+                || branch.keep_scanning(line_offset)
+                || (codex && end_offset.is_none() && !found_usage.get());
             segment_end = index;
         }
         if segment_end > 0 {
@@ -311,6 +332,10 @@ pub fn read_session_chat_transcript_tail_file(
         );
     }
 
+    drop(decode_line);
+    if codex {
+        codex_stats.observe(&header, true);
+    }
     newest_first.reverse();
     queue_ops.reverse();
     let outstanding = replay_transcript_queue(&queue_ops);
@@ -341,6 +366,7 @@ pub fn read_session_chat_transcript_tail_file(
         );
     }
     Ok(SessionChatTailFileResult {
+        codex_stats,
         messages: selected.into_iter().map(|(message, _)| message).collect(),
         lifecycle,
         consumed_to,
@@ -493,6 +519,7 @@ pub(crate) fn read_pi_session_chat_transcript_tail_file(
         .map(|(_, offset)| *offset)
         .unwrap_or(selection_end);
     Ok(SessionChatTailFileResult {
+        codex_stats: Default::default(),
         messages: selected.into_iter().map(|(message, _)| message).collect(),
         lifecycle: None,
         consumed_to,
@@ -542,6 +569,7 @@ fn read_session_chat_transcript_tail_file_for_agent(
 pub enum SessionChatTailPage {
     NotFound,
     Page {
+        codex_stats: Option<Value>,
         messages: Vec<SessionChatMessage>,
         /// Omitted on older pagination pages — they must never rewind the live lifecycle.
         lifecycle: Option<SessionChatTurnLifecycle>,
@@ -568,6 +596,13 @@ pub fn read_session_chat_tail_page(
         decode_lifecycle,
     ) {
         Ok(result) => Ok(SessionChatTailPage::Page {
+            codex_stats: if before_offset.is_none() {
+                let mut options = None;
+                result.codex_stats.apply(&mut options);
+                options.map(|options| options.to_value())
+            } else {
+                None
+            },
             messages: result.messages,
             lifecycle: if before_offset.is_none() {
                 result.lifecycle

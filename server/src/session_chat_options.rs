@@ -204,6 +204,7 @@ pub struct SessionChatDetectedSelection {
     /// The rest of Claude's statusline payload the chat surface can show
     /// (`claude_statusline_status_value`), camelCase and absent-when-absent.
     pub claude_status: Option<Value>,
+    pub codex_status: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -276,6 +277,9 @@ impl SessionChatDetectedOptions {
         }
         if let Some(claude_status) = self.selection.claude_status.as_ref() {
             map.insert("claudeStatus".to_string(), claude_status.clone());
+        }
+        if let Some(status) = self.selection.codex_status.as_ref() {
+            map.insert("codexStatus".to_string(), status.clone());
         }
         map.insert("detectedAt".to_string(), json!(self.detected_at));
         Value::Object(map)
@@ -601,15 +605,23 @@ fn is_model_version_suffix(rest: &str) -> bool {
 }
 
 fn match_claude_model(segment: &str) -> Option<SessionChatDetectedChoice> {
+    let variant_model = segment
+        .strip_suffix(" (1M)")
+        .or_else(|| segment.strip_suffix(" (1M context)"));
+    let model = variant_model.unwrap_or(segment);
     CLAUDE_MODEL_FAMILIES
         .iter()
         .find(|(family, _)| {
-            segment
+            model
                 .strip_prefix(*family)
                 .is_some_and(is_model_version_suffix)
         })
         .map(|(_, value)| SessionChatDetectedChoice {
-            value: (*value).to_string(),
+            value: if variant_model.is_some() {
+                format!("{value}[1m]")
+            } else {
+                (*value).to_string()
+            },
             label: segment.to_string(),
             source: SessionChatOptionEvidence::Terminal,
         })
@@ -906,6 +918,7 @@ fn match_cursor_statusline(line: &str) -> Option<SessionChatDetectedSelection> {
         fast,
         context_usage: None,
         claude_status: None,
+        codex_status: None,
         ..SessionChatDetectedSelection::default()
     })
 }
@@ -979,6 +992,7 @@ fn match_grok_segment(segment: &str) -> Option<SessionChatDetectedSelection> {
         fast: None,
         context_usage: None,
         claude_status: None,
+        codex_status: None,
     })
 }
 
@@ -1081,6 +1095,7 @@ fn match_antigravity_statusline(line: &str) -> Option<SessionChatDetectedSelecti
         fast: None,
         context_usage: None,
         claude_status: None,
+        codex_status: None,
     })
 }
 
@@ -1152,6 +1167,7 @@ fn match_pi_statusline(line: &str) -> Option<SessionChatDetectedSelection> {
         fast: None,
         context_usage: None,
         claude_status: None,
+        codex_status: None,
     })
 }
 
@@ -1199,6 +1215,7 @@ fn match_omp_statusline(line: &str) -> Option<SessionChatDetectedSelection> {
         fast: None,
         context_usage: None,
         claude_status: None,
+        codex_status: None,
     })
 }
 
@@ -1248,6 +1265,7 @@ fn match_hermes_statusline(line: &str) -> Option<SessionChatDetectedSelection> {
         fast: None,
         context_usage: None,
         claude_status: None,
+        codex_status: None,
     })
 }
 
@@ -1415,7 +1433,7 @@ pub fn detect_session_chat_selection(
     Some(found)
 }
 
-fn transcript_tail_text(path: &Path) -> std::io::Result<String> {
+pub(crate) fn transcript_tail_text(path: &Path) -> std::io::Result<String> {
     let mut file = File::open(path)?;
     let length = file.metadata()?.len();
     let start = length.saturating_sub(SESSION_CHAT_OPTION_TRANSCRIPT_SCAN_BYTES);
@@ -1444,7 +1462,7 @@ fn transcript_text(value: Option<&Value>) -> Option<&str> {
 /// ("Opus (1M context)" and "Opus"), so the context-window suffix is carried
 /// into the detected value as `opus[1m]`, matching the published catalog. It
 /// is still not a version token, so it is stripped before the version scan.
-/// SEE-ALSO: `claude_model_choice_keeps_variant`, agent-model-catalog.json.
+/// SEE-ALSO: `match_claude_model`, agent-model-catalog.json.
 pub(crate) fn claude_transcript_model_choice(model: &str) -> Option<SessionChatDetectedChoice> {
     let normalized = model.trim().to_ascii_lowercase();
     let variant = normalized
@@ -1515,19 +1533,6 @@ pub(crate) fn claude_transcript_model_choice(model: &str) -> Option<SessionChatD
         label,
         source: SessionChatOptionEvidence::Transcript,
     })
-}
-
-/// CDXC:AgentProviders 2026-09-05 WHY:
-/// Claude's footer prints "Opus 5" whether the session runs Opus 5 or Opus 5
-/// (1M) — the statusline has no way to say which. Letting it overlay the
-/// transcript would flip the model pill back to plain Opus a moment after the
-/// user picked the 1M row, so a live value that is the same family without the
-/// variant does not replace a variant the transcript proved.
-fn claude_model_choice_keeps_variant(existing: &SessionChatDetectedChoice, incoming: &str) -> bool {
-    existing
-        .value
-        .split_once('[')
-        .is_some_and(|(family, _)| family == incoming)
 }
 
 fn transcript_effort_choice(effort: &str) -> Option<SessionChatDetectedChoice> {
@@ -1603,6 +1608,7 @@ fn detect_session_chat_transcript_selection(
                     fast: None,
                     context_usage: None,
                     claude_status: None,
+                    codex_status: None,
                 }
             }
             _ => continue,
@@ -1704,6 +1710,7 @@ fn read_session_chat_statusline_selection(
         fast,
         context_usage: (!context_usage.is_empty()).then_some(context_usage),
         claude_status: claude_statusline_status_value(payload),
+        codex_status: None,
     };
     (selection.model.is_some() || selection.effort.is_some()).then_some(selection)
 }
@@ -1971,13 +1978,7 @@ fn overlay_session_chat_option_selection(
     layer: SessionChatDetectedSelection,
 ) {
     if let Some(model) = layer.model {
-        let keeps_variant = merged
-            .model
-            .as_ref()
-            .is_some_and(|existing| claude_model_choice_keeps_variant(existing, &model.value));
-        if !keeps_variant {
-            merged.model = Some(model);
-        }
+        merged.model = Some(model);
     }
     if layer.effort.is_some() {
         merged.effort = layer.effort;
@@ -2005,6 +2006,11 @@ fn overlay_session_chat_option_selection(
 /// Precedence, lowest first: transcript (a turn behind), statusline payload
 /// (live, but only what Claude puts in it), terminal screen (live, and the
 /// only source for the permission mode footer).
+///
+/// CDXC:AgentScreenDetection 2026-09-08 DECISION:
+/// User: terminal evidence always has the highest priority, including for Claude.
+/// This supersedes preserving an older Claude model variant over the model visible in the terminal; a visible (1M) suffix is parsed from the terminal itself.
+/// SEE-ALSO: packages/core-ui/chat/session-chat-session-options.ts preserves source priority when reads arrive separately.
 fn merge_session_chat_option_selections(
     transcript: Option<SessionChatDetectedSelection>,
     statusline: Option<SessionChatDetectedSelection>,
@@ -2113,11 +2119,11 @@ pub fn detect_session_chat_terminal_state(
             }
             capture
         });
-    let terminal = agent
-        .zip(capture.as_ref())
-        .and_then(|(agent, capture)| detect_session_chat_selection(agent, &capture.text));
     // A capped capture lost its tail, so the live screen is not in it.
     let screen = capture.as_ref().filter(|capture| !capture.truncated);
+    let terminal = agent
+        .zip(screen)
+        .and_then(|(agent, capture)| detect_session_chat_selection(agent, &capture.text));
     if agent == Some(SessionChatOptionAgent::Codex) {
         if let Some(capture) = screen {
             crate::session_chat_codex_pager::close_codex_transcript_pager_if_unwatched(
@@ -2126,7 +2132,11 @@ pub fn detect_session_chat_terminal_state(
                 session_id,
                 &capture.text,
             );
-            crate::session_chat_app_command::refresh_codex_command_output(project_id, session_id, &capture.text);
+            crate::session_chat_app_command::refresh_codex_command_output(
+                project_id,
+                session_id,
+                &capture.text,
+            );
         }
     }
     let notice = screen.and_then(|capture| {
@@ -2179,7 +2189,10 @@ pub fn detect_session_chat_terminal_state(
     } else {
         (
             screen.and_then(|capture| {
-                crate::session_chat_agent_fleet::detect_session_chat_agent_fleet(agent_id, &capture.text)
+                crate::session_chat_agent_fleet::detect_session_chat_agent_fleet(
+                    agent_id,
+                    &capture.text,
+                )
             }),
             screen.is_some(),
         )
@@ -2635,6 +2648,7 @@ mod tests {
             fast: None,
             context_usage: None,
             claude_status: None,
+            codex_status: None,
         };
         let terminal = claude("Ctx Used: 1% | Opus 4.8").unwrap();
         let merged = merge_session_chat_option_selections(Some(transcript), None, Some(terminal))
@@ -2687,6 +2701,7 @@ mod tests {
                 fast: Some(true),
                 context_usage: None,
                 claude_status: None,
+                codex_status: None,
             },
             detected_at: "2026-08-01T12:00:00.000Z".to_string(),
         };
@@ -2815,11 +2830,16 @@ impl SessionChatOptionDetector {
         session_id: &str,
     ) -> crate::session_chat_options::SessionChatTerminalDetection {
         let key = session_observer_key(project_id, session_id);
-        self.cache
+        let mut detected = self
+            .cache
             .lock()
             .ok()
             .and_then(|cache| cache.get(&key).map(|entry| entry.value.clone()))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        detected.notice = detected.notice.filter(|notice| {
+            crate::session_chat_notice_progress::visible(project_id, session_id, notice)
+        });
+        detected
     }
 
     /// BLOCKING: refreshes through the TTL (`force` bypasses it).
@@ -2845,7 +2865,11 @@ impl SessionChatOptionDetector {
                     if entry.fetched_at.elapsed()
                         < crate::session_chat_options::SESSION_CHAT_OPTION_CACHE_TTL
                     {
-                        return entry.value.clone();
+                        let mut detected = entry.value.clone();
+                        detected.notice = detected.notice.filter(|notice| {
+                            crate::session_chat_notice_progress::visible(project_id, session_id, notice)
+                        });
+                        return detected;
                     }
                 }
             }
@@ -2903,9 +2927,11 @@ impl SessionChatOptionDetector {
             let previous_fleet = cache.get(&key).and_then(|entry| entry.projected_fleet);
             let previous_monitor = cache.get(&key).and_then(|entry| entry.projected_monitor);
             let detected_monitor = if detected.captured {
-                Some(crate::session_chat_terminal_activity::is_session_chat_monitor_activity(
-                    detected.activity.as_ref(),
-                ))
+                Some(
+                    crate::session_chat_terminal_activity::is_session_chat_monitor_activity(
+                        detected.activity.as_ref(),
+                    ),
+                )
             } else {
                 previous_monitor
             };
@@ -2924,9 +2950,8 @@ impl SessionChatOptionDetector {
             };
             if detected_fleet != previous_fleet {
                 if let Some(active) = detected_fleet {
-                    fleet_transition = Some(
-                        active.then(|| detected.fleet.as_ref().unwrap().detected_at.clone()),
-                    );
+                    fleet_transition =
+                        Some(active.then(|| detected.fleet.as_ref().unwrap().detected_at.clone()));
                 }
             }
             // A notice that left the screen recently still counts as the
@@ -3064,9 +3089,27 @@ impl SessionChatOptionDetector {
                 .publish_fleet(project_id, session_id, detected_at.as_deref());
         }
         if let Some(detected_at) = monitor_transition {
-            self.compacting_publisher
-                .publish_monitor(project_id, session_id, detected_at.as_deref());
+            self.compacting_publisher.publish_monitor(
+                project_id,
+                session_id,
+                detected_at.as_deref(),
+            );
         }
+        if let Some(notice) = detected
+            .notice
+            .as_ref()
+            .filter(|notice| crate::accounts::recovery::retryable(notice))
+        {
+            if let Ok(db) = open_gxserver_database(&self.paths) {
+                let repository = DomainRepository::new(&db, self.server_id.as_str());
+                crate::session_chat_notice_progress::refresh(
+                    &repository, project_id, session_id, agent, notice,
+                );
+            }
+        }
+        detected.notice = detected.notice.filter(|notice| {
+            crate::session_chat_notice_progress::visible(project_id, session_id, notice)
+        });
         detected
     }
 

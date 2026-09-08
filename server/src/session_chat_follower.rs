@@ -13,7 +13,9 @@ use crate::server::{
     session_observer_key, AppState, SessionChatFollowerEntry,
 };
 use crate::session_chat::*;
-use crate::session_chat_options::{forget_session_chat_options, SessionChatOptionDetector};
+use crate::session_chat_options::{
+    forget_session_chat_options, SessionChatOptionDetector, SessionChatOptionEvidence,
+};
 use crate::session_chat_paths::resolve_session_chat_transcript_path;
 use crate::session_chat_successor::{
     codex_rollout_session_id, find_claude_successor_transcript, find_codex_successor_transcript,
@@ -74,7 +76,7 @@ fn follower_snapshot_drain(
 ) -> Option<FollowerDrainOutcome> {
     let mut retried = false;
     loop {
-        let tail = read_session_chat_transcript_tail_file(
+        let mut tail = read_session_chat_transcript_tail_file(
             file_path,
             limit,
             decode,
@@ -85,6 +87,7 @@ fn follower_snapshot_drain(
         )
         .ok()?;
         state.incremental.rebase(tail.consumed_to);
+        state.incremental.codex_stats = tail.codex_stats.clone();
         state
             .incremental
             .seed_queued_prompts(tail.outstanding_queued_prompts.clone());
@@ -106,10 +109,12 @@ fn follower_snapshot_drain(
             lineage,
         )
         .unwrap_or_default();
-        // The window itself is already filtered, so anything the
-        // trailing read retracts can only be inside `appended`.
+        // A delivery can land after the tail captured its queued copy.
+        // Apply those retractions to both halves of the snapshot.
         let superseded = state.incremental.take_superseded_prompt_ids();
         if !superseded.is_empty() {
+            tail.messages
+                .retain(|message| !superseded.contains(&message.id));
             appended.retain(|message| !superseded.contains(&message.id));
         }
         /*
@@ -1044,7 +1049,8 @@ pub async fn run_session_chat_follower(
         heartbeat.stamp();
         if want_snapshot {
             let live = read_live_state();
-            if live.agent_session_id.is_some() && live.agent_session_id != identity.agent_session_id {
+            if live.agent_session_id.is_some() && live.agent_session_id != identity.agent_session_id
+            {
                 // CDXC:SessionChat 2026-09-07 WHY:
                 // Codex rewind adopts a new conversation before requesting this snapshot. Re-resolve now instead of re-sending the abandoned file until the idle successor scan.
                 identity.adopt(live);
@@ -1294,7 +1300,11 @@ pub async fn run_session_chat_follower(
                 // A subscribing client gets the detected pills value and any
                 // terminal-state notice with its snapshot, so it needs no
                 // separate read.
-                let snapshot_detection = read_cached_detection();
+                let mut snapshot_detection = read_cached_detection();
+                file_state
+                    .incremental
+                    .codex_stats
+                    .apply(&mut snapshot_detection.options);
                 // The seed capture is the FIRST look a chat opened mid-compaction
                 // gets at the screen; the compacting row it finds is live
                 // whatever the hooks last said (CDXC:AgentScreenDetection).
@@ -1476,6 +1486,14 @@ pub async fn run_session_chat_follower(
         */
         let effective_prompt = resolve_session_chat_prompt(live.prompt.clone(), &transcript_prompt)
             .or_else(|| read_cached_detection().prompt);
+        let previous_options = published_options.clone();
+        file_state
+            .incremental
+            .codex_stats
+            .apply(&mut published_options);
+        let stats_changed = published_options
+            .as_ref()
+            .is_some_and(|next| !next.same_selection(previous_options.as_ref()));
         let became_ready = published_state_valid && published_working && !live.working;
         // A `⏺` row remains on Claude's primary screen after it stops. Clear
         // that stale status on the ready transition, but retain the
@@ -1491,6 +1509,7 @@ pub async fn run_session_chat_follower(
             published_activity = None;
         }
         if !published_state_valid
+            || stats_changed
             || effective_prompt != published_prompt
             || live.working != published_working
         {
@@ -1551,7 +1570,15 @@ pub async fn run_session_chat_follower(
             && startup_option_reconcile_ticks
                 < crate::session_chat_options::SESSION_CHAT_OPTION_STARTUP_RECONCILE_TICKS
             && published_options.as_ref().map_or(true, |options| {
-                options.selection.model.is_none() || options.selection.effort.is_none()
+                // CDXC:AgentScreenDetection 2026-09-08 WHY:
+                // A restored Codex can show Ultra while its last turn still records High; transcript-only values must not end the startup footer probes before the live setting is read.
+                [&options.selection.model, &options.selection.effort]
+                    .into_iter()
+                    .any(|choice| {
+                        choice.as_ref().map_or(true, |choice| {
+                            choice.source == SessionChatOptionEvidence::Transcript
+                        })
+                    })
             });
         if startup_probe_due {
             startup_option_reconcile_ticks += 1;
@@ -1632,6 +1659,10 @@ pub async fn run_session_chat_follower(
             )
             .await;
             if let Ok(Ok(mut detection)) = probe {
+                file_state
+                    .incremental
+                    .codex_stats
+                    .apply(&mut detection.options);
                 // Detection can project a fleet/compaction transition into the shared status.
                 // Read it before emitting this fleet so the same frame carries its working truth.
                 let detected_working = read_live_state().working;
@@ -1853,8 +1884,8 @@ pub(crate) struct SessionChatFollowerIdentity {
 
 impl SessionChatFollowerIdentity {
     fn adopt(&mut self, live: SessionChatLiveState) {
-        let session_changed = live.agent_session_id.is_some()
-            && live.agent_session_id != self.agent_session_id;
+        let session_changed =
+            live.agent_session_id.is_some() && live.agent_session_id != self.agent_session_id;
         if live.agent_session_id.is_some() {
             self.agent_session_id = live.agent_session_id;
         }

@@ -313,24 +313,16 @@ pub fn session_chat_lifecycle_decoder(
     }
 }
 
-/*
-CDXC:SessionChat 2026-08-19:
-Agent-side prompt queue. Typing while the model is mid-turn does NOT write a
-prompt row — the harness parks the text in its own queue and writes bookkeeping
-rows instead, then delivers it later (Claude: `queue-operation`
-enqueue/dequeue/remove/popAll). The queue is a FIFO, and only the removal rows
-name WHICH entry left, so the readers replay these ops in file order rather
-than pairing them by position.
-*/
+/// Agent-side prompt queue, replayed in file order.
+/// Enqueue rows provide temporary messages until a keyed removal or delivered
+/// user row identifies which entry left; priority deliveries need not be FIFO.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TranscriptQueueOp {
     /// A prompt entered the queue. `key` is its normalized text, empty when
-    /// the row does not carry the text (still tracked, so the FIFO stays
-    /// aligned).
+    /// the row does not carry the text (still tracked for queue bookkeeping).
     Enqueued { key: String },
-    /// One entry left the queue — delivered to the model, or dropped by the
-    /// user. `None` means the row does not name it, which for a FIFO is the
-    /// oldest entry.
+    /// One entry left the queue, delivered to the model or dropped by the user.
+    /// `None` is an unnamed removal of the oldest entry, not a dequeue notice.
     Left { key: Option<String> },
     /// The whole queue was discarded at once.
     Cleared,
@@ -374,6 +366,9 @@ pub struct TranscriptLineage {
     pub parent_id: Option<String>,
     #[allow(clippy::struct_field_names)]
     pub queue: Option<TranscriptQueueOp>,
+    /// Content delivered by a tree row, separate from queue bookkeeping so
+    /// the row still participates in active-branch selection.
+    pub delivered_queue_keys: Vec<String>,
     /// Set only on an explicit `last-prompt` row, which carries no `uuid` and
     /// is never part of the tree itself.
     pub leaf_marker: Option<TranscriptLeafMarker>,
@@ -668,6 +663,7 @@ pub(crate) fn image_ref_block(record: &Map<String, Value>) -> Option<SessionChat
 
 #[derive(Debug)]
 pub struct SessionChatIncrementalState {
+    pub(crate) codex_stats: crate::session_chat_codex_stats::CodexSessionStats,
     pub offset: u64,
     pending_chunks: Vec<Vec<u8>>,
     pending_start: u64,
@@ -709,6 +705,7 @@ pub struct SessionChatIncrementalState {
 impl SessionChatIncrementalState {
     pub fn new() -> Self {
         Self {
+            codex_stats: Default::default(),
             offset: 0,
             pending_chunks: Vec::new(),
             pending_start: 0,
@@ -724,6 +721,7 @@ impl SessionChatIncrementalState {
     }
 
     pub fn reset(&mut self) {
+        self.codex_stats = Default::default();
         self.offset = 0;
         self.pending_chunks.clear();
         self.pending_start = 0;
@@ -763,6 +761,14 @@ impl SessionChatIncrementalState {
     }
 
     fn observe_lineage(&mut self, row: &TranscriptLineage, message: Option<&SessionChatMessage>) {
+        for key in &row.delivered_queue_keys {
+            self.observe_queue_operation(
+                &TranscriptQueueOp::Left {
+                    key: Some(key.clone()),
+                },
+                &row.id,
+            );
+        }
         if let Some(queue_op) = row.queue.as_ref() {
             self.observe_queue_operation(queue_op, &row.id);
             return;
@@ -922,6 +928,7 @@ pub fn read_incremental_transcript_messages(
             state.retain_part(&buffer[segment_start..index]);
             if !state.dropping_oversized_record {
                 if let Some(line) = state.take_pending_line() {
+                    state.codex_stats.observe(&line, false);
                     let fallback_id = transcript_fallback_id(file_path, state.pending_start);
                     if let Some(decode_lifecycle) = decode_lifecycle {
                         if let Some(next) = decode_lifecycle(&line, &fallback_id) {

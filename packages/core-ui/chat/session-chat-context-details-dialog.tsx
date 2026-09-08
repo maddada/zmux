@@ -4,7 +4,7 @@
 // dialogs: the chat runs inside CEF on desktop and in a browser tab on web, so
 // no native child window is involved. Edits are a draft until Save.
 
-import { IconGripVertical, IconStar, IconStarFilled, IconX } from '@tabler/icons-react';
+import { IconFileExport, IconGripVertical, IconStar, IconStarFilled, IconX } from '@tabler/icons-react';
 import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { DragDropProvider, type DragDropEventHandlers } from '@dnd-kit/react';
 import { isSortableOperation, useSortable } from '@dnd-kit/react/sortable';
@@ -20,9 +20,13 @@ import {
 } from '@/packages/components/ui/dialog';
 import { Switch } from '@/packages/components/ui/switch';
 import { cn } from '@/packages/components/utils';
-import type { SessionChatClaudeStatus, SessionChatTheme } from '@/packages/shared/session-chat';
+import type { SessionChatTheme } from '@/packages/shared/session-chat';
 import { AppTooltip } from '../app-tooltip';
+import { postAppModalHostMessage } from '../app-modal-host-bridge';
+import { createAppToastRequest } from '@/packages/shared/app-toast-contract';
+import type { ContextDetailStatus, ContextDetailsAgent } from './session-chat-context-details-agents';
 import {
+  copySessionChatContextDetailsPreferences,
   DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES,
   SESSION_CHAT_CONTEXT_DETAIL_GROUPS,
   isSessionChatContextDetailShown,
@@ -54,28 +58,32 @@ function moveRow<T>(rows: readonly T[], from: number, to: number): T[] {
 }
 
 export function SessionChatContextDetailsDialog({
+  agent = 'claude',
   onOpenChange,
   open,
   session,
   status,
   theme,
 }: {
+  agent?: ContextDetailsAgent;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   /** Ghostex's own title, id and draft state for the session row. */
   session: SessionChatContextDetailSession | null;
   /** Live sample values next to each row; absent rows show a dash. */
-  status: SessionChatClaudeStatus | undefined;
+  status: ContextDetailStatus | undefined;
   theme: SessionChatTheme;
 }) {
-  const [draft, setDraft] = useState<SessionChatContextDetailsPreferences>(readSessionChatContextDetailsPreferences);
+  const [draft, setDraft] = useState<SessionChatContextDetailsPreferences>(() =>
+    readSessionChatContextDetailsPreferences(agent)
+  );
   const now = useSessionChatContextDetailsClock();
 
   useEffect(() => {
     if (open) {
-      setDraft(readSessionChatContextDetailsPreferences());
+      setDraft(readSessionChatContextDetailsPreferences(agent));
     }
-  }, [open]);
+  }, [open, agent]);
 
   const toggleShown = (row: SessionChatContextDetailRowDefinition, shown: boolean) => {
     setDraft((current) => ({ ...current, shown: { ...current.shown, [row.id]: shown } }));
@@ -83,7 +91,7 @@ export function SessionChatContextDetailsDialog({
   const toggleStarred = (row: SessionChatContextDetailRowDefinition) => {
     setDraft((current) => {
       const starred = !isSessionChatContextDetailStarred(current, row);
-      const withoutRow = orderedSessionChatStarredRows(current)
+      const withoutRow = orderedSessionChatStarredRows(current, agent)
         .map((starredRow) => starredRow.id)
         .filter((id) => id !== row.id);
       return {
@@ -97,10 +105,10 @@ export function SessionChatContextDetailsDialog({
   const reorderStarred = (from: number, to: number) => {
     setDraft((current) => ({
       ...current,
-      starredOrder: moveRow(orderedSessionChatStarredRows(current), from, to).map((row) => row.id),
+      starredOrder: moveRow(orderedSessionChatStarredRows(current, agent), from, to).map((row) => row.id),
     }));
   };
-  const starredRows = orderedSessionChatStarredRows(draft);
+  const starredRows = orderedSessionChatStarredRows(draft, agent);
   const handleStarredDragEnd = ((event) => {
     if (event.canceled || !isSortableOperation(event.operation)) {
       return;
@@ -120,7 +128,7 @@ export function SessionChatContextDetailsDialog({
       ...current,
       order: {
         ...current.order,
-        [group]: moveRow(orderedSessionChatContextDetailRows(current, group), from, to).map((row) => row.id),
+        [group]: moveRow(orderedSessionChatContextDetailRows(current, group, agent), from, to).map((row) => row.id),
       },
     }));
   };
@@ -134,15 +142,45 @@ export function SessionChatContextDetailsDialog({
         )}
       >
         <DialogHeader>
-          <DialogTitle>Context details</DialogTitle>
+          <div className='flex items-center justify-between gap-2 pr-7'>
+            <DialogTitle>Context details</DialogTitle>
+            <AppTooltip content={`Copy settings to ${agent === 'claude' ? 'Codex' : 'Claude Code'}`}>
+              <Button
+                aria-label={`Copy settings to ${agent === 'claude' ? 'Codex' : 'Claude Code'}`}
+                size='icon-xs'
+                variant='ghost'
+                type='button'
+                onClick={() => {
+                  let message;
+                  try {
+                    const result = copySessionChatContextDetailsPreferences(draft, agent);
+                    message = createAppToastRequest(
+                      'success',
+                      `Settings copied to ${agent === 'claude' ? 'Codex' : 'Claude Code'}`,
+                      `${result.matched} matching fields copied. ${result.skipped} fields have no counterpart.`
+                    );
+                  } catch {
+                    message = createAppToastRequest(
+                      'error',
+                      'Could not copy settings',
+                      'The browser could not save the settings.'
+                    );
+                  }
+                  postAppModalHostMessage(message, 'SessionChatContextDetails:copy');
+                }}
+              >
+                <IconFileExport className='size-3.5' />
+              </Button>
+            </AppTooltip>
+          </div>
           <DialogDescription>
-            Pick the rows shown under the context meter in Claude Code sessions. Drag to reorder within a group. Star a
-            row to show its value under the chat box.
+            Pick the rows shown under the context meter in {agent === 'claude' ? 'Claude Code' : 'Codex'} sessions. Drag
+            to reorder within a group. Star a row to show its value under the chat box.
           </DialogDescription>
         </DialogHeader>
         <div className='ghostex-chat-context-details-dialog-body -mx-1 flex max-h-[60vh] flex-col gap-1 overflow-x-hidden overflow-y-auto px-1'>
           {SESSION_CHAT_CONTEXT_DETAIL_GROUPS.map((group) => {
-            const rows = orderedSessionChatContextDetailRows(draft, group.id);
+            const rows = orderedSessionChatContextDetailRows(draft, group.id, agent);
             const handleDragEnd = ((event) => {
               if (event.canceled || !isSortableOperation(event.operation)) {
                 return;
@@ -228,7 +266,7 @@ export function SessionChatContextDetailsDialog({
             </Button>
             <Button
               onClick={() => {
-                writeSessionChatContextDetailsPreferences(draft);
+                writeSessionChatContextDetailsPreferences(draft, agent);
                 onOpenChange(false);
               }}
               size='sm'

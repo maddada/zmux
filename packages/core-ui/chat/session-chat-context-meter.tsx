@@ -1,6 +1,6 @@
 /*
-CDXC:AgentScreenDetection 2026-09-05 DECISION:
-User requested compact percentage text instead of a filling usage ring, with neutral usage bars. Keep the existing context details and Compact action behind the percentage control.
+CDXC:AgentScreenDetection 2026-09-07 DECISION:
+User: restore the ring that fills with context usage; changing it to a number was a mistake. This supersedes the percentage-text choice; keep neutral usage colors and the existing context details and Compact action.
 */
 
 import { IconPencil } from '@tabler/icons-react';
@@ -11,18 +11,19 @@ import { AppTooltip } from '../app-tooltip';
 import type { SessionChatContextDetailGroup } from './session-chat-context-details';
 
 export interface SessionChatContextMeterUsage {
-  /** 0–100, or null when Claude reported neither a percentage nor tokens over a window. */
+  /** 0–100, or null while the agent has not reported context usage. */
   usedPercentage: number | null;
   usedTokens: number | null;
   windowSize: number | null;
 }
 
 /**
- * Tokens over window size when Claude reported both (exact), else the
- * rounded percentage it reported. Null when there is nothing to draw.
+ * Claude uses tokens over window size; Codex uses its baseline-adjusted reported percentage.
+ * Null means the agent has not reported enough data to draw usage.
  */
 export function resolveSessionChatContextMeterUsage(
-  usage: SessionChatContextUsage | undefined
+  usage: SessionChatContextUsage | undefined,
+  preferReportedPercentage = false
 ): SessionChatContextMeterUsage | null {
   if (!usage) {
     return null;
@@ -30,11 +31,13 @@ export function resolveSessionChatContextMeterUsage(
   const usedTokens = isFiniteNonNegative(usage.usedTokens) ? usage.usedTokens : null;
   const windowSize = isFiniteNonNegative(usage.windowSize) && usage.windowSize > 0 ? usage.windowSize : null;
   const usedPercentage =
-    usedTokens !== null && windowSize !== null
-      ? Math.min(100, (usedTokens / windowSize) * 100)
-      : isFiniteNonNegative(usage.usedPercentage)
-        ? Math.min(100, usage.usedPercentage)
-        : null;
+    preferReportedPercentage && isFiniteNonNegative(usage.usedPercentage)
+      ? Math.min(100, usage.usedPercentage)
+      : usedTokens !== null && windowSize !== null
+        ? Math.min(100, (usedTokens / windowSize) * 100)
+        : isFiniteNonNegative(usage.usedPercentage)
+          ? Math.min(100, usage.usedPercentage)
+          : null;
   if (usedPercentage === null && usedTokens === null) {
     return null;
   }
@@ -71,6 +74,9 @@ export function formatSessionChatContextPercentage(value: number | null): string
   return `${Math.round(value)}%`;
 }
 
+const RING_RADIUS = 9.75;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
 export function SessionChatContextMeter({
   usage,
   onCompact,
@@ -93,13 +99,16 @@ export function SessionChatContextMeter({
 }) {
   const percentageLabel = formatSessionChatContextPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
+  const dashOffset = RING_CIRCUMFERENCE * (1 - normalizedPercentage / 100);
   const usageColor = '#b9b9b9';
   const ariaLabel =
     usage.windowSize !== null && percentageLabel
       ? `Context window ${percentageLabel} used`
       : percentageLabel
         ? `Context window ${percentageLabel} used`
-        : `Context window ${formatSessionChatContextTokens(usage.usedTokens)} tokens used`;
+        : usage.usedTokens === null
+          ? 'Context usage not yet reported'
+          : `Context window ${formatSessionChatContextTokens(usage.usedTokens)} tokens used`;
 
   return (
     <Popover>
@@ -110,13 +119,36 @@ export function SessionChatContextMeter({
         render={
           <Button
             aria-label={ariaLabel}
-            className='ghostex-chat-footer-control ghostex-chat-context-meter ml-[6px] w-auto px-1 text-muted-foreground hover:text-muted-foreground'
+            className='ghostex-chat-footer-control ghostex-chat-context-meter ml-[6px] rounded-full text-muted-foreground hover:text-muted-foreground'
             size='icon-xs'
             variant='ghost'
           />
         }
       >
-        <span className='text-[10px] tabular-nums'>{percentageLabel ?? formatSessionChatContextTokens(usage.usedTokens)}</span>
+        <span className='relative flex size-4 items-center justify-center'>
+          <svg aria-hidden='true' className='absolute inset-0 size-full -rotate-90 transform-gpu' viewBox='0 0 24 24'>
+            <circle
+              cx='12'
+              cy='12'
+              fill='none'
+              r={RING_RADIUS}
+              stroke='color-mix(in oklab, var(--muted-foreground) 24%, transparent)'
+              strokeWidth='3'
+            />
+            <circle
+              className='transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none'
+              cx='12'
+              cy='12'
+              fill='none'
+              r={RING_RADIUS}
+              stroke={usageColor}
+              strokeDasharray={RING_CIRCUMFERENCE}
+              strokeDashoffset={dashOffset}
+              strokeLinecap='round'
+              strokeWidth='3'
+            />
+          </svg>
+        </span>
       </PopoverTrigger>
       <PopoverContent
         align='end'
@@ -140,7 +172,8 @@ export function SessionChatContextMeter({
             </div>
           ) : (
             <div className='text-[11px] text-muted-foreground tabular-nums'>
-              {percentageLabel ?? formatSessionChatContextTokens(usage.usedTokens)}
+              {percentageLabel ??
+                (usage.usedTokens === null ? 'Not yet reported' : formatSessionChatContextTokens(usage.usedTokens))}
             </div>
           )}
         </div>

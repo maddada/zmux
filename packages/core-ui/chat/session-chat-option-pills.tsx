@@ -1,3 +1,4 @@
+import { resolveContextDetailStatus, type ContextDetailStatus } from './session-chat-context-details-agents';
 import type { AccountIconColor } from '@/packages/shared/agent-accounts';
 import type { SessionChatPendingModelSelection } from '@/packages/shared/session-chat';
 // Composer footer session-option pills (upstream chat spec §1.2-§1.4 port).
@@ -214,7 +215,7 @@ export function useSessionChatSessionOptions({
 }
 
 export interface SessionChatSessionOptionPillsProps {
-  accountColor?: AccountIconColor;
+  accountIndicator?: string;
   controller: SessionChatSessionOptionsController;
   /** Terminal-only metadata that does not belong in persisted option state. */
   detectedOptions?: SessionChatDetectedOptions | null;
@@ -238,12 +239,17 @@ export interface SessionChatSessionOptionPillsProps {
    * to it. Hosts with `onQueueModel` use the durable selection route instead.
    */
   onPickModel?: (params: { model: string; effort: string }) => Promise<void>;
-  onQueueModel?: (params: { model: string; effort: string }) => Promise<SessionChatPendingModelSelection>;
+  onQueueModel?: (params: {
+    model: string;
+    effort: string;
+    options?: SessionChatPendingModelSelection['options'];
+  }) => Promise<SessionChatPendingModelSelection>;
   pendingModelSelection?: SessionChatPendingModelSelection | null;
   /** Opens the context details picker (the pen in the context meter popover). */
   onEditContextDetails?: () => void;
   /** Ghostex's own title, id and draft state for the popover's session row. */
   contextDetailsSession?: SessionChatContextDetailSession;
+  contextDetailsStatus?: ContextDetailStatus;
   /*
   CDXC:Drafts 2026-08-28:
   The composer's draft agent switcher. It exists ONLY while the session is a
@@ -495,10 +501,11 @@ function optionMenuSections(descriptors: readonly SessionChatOptionDescriptor[])
 }
 
 export function SessionChatSessionOptionPills({
-  accountColor,
+  accountIndicator,
   canSend,
   canSendKey,
   contextDetailsSession,
+  contextDetailsStatus,
   controller,
   detectedOptions,
   draftAgentId,
@@ -518,7 +525,8 @@ export function SessionChatSessionOptionPills({
   const modelPickerActions = useRef<ModelPickerActions | null>(null);
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const dispatchingRef = useRef<object | null>(null);
-  const contextDetailsPreferences = useSessionChatContextDetailsPreferences();
+  const contextDetailsAgent = controller.catalog?.modelIcon === 'codex' ? 'codex' : 'claude';
+  const contextDetailsPreferences = useSessionChatContextDetailsPreferences(contextDetailsAgent);
   const contextDetailsNow = useSessionChatContextDetailsClock();
   const [switchingAgent, setSwitchingAgent] = useState(false);
   const mountedRef = useRef(true);
@@ -531,6 +539,7 @@ export function SessionChatSessionOptionPills({
   }, []);
 
   const { catalog, optionDescriptors, beginDispatch, state } = controller;
+  const queuedControls = catalog?.modelIcon === 'codex' || catalog?.modelIcon === 'claude';
   // CDXC:SessionChat 2026-09-06 WHY: The queued selection route replaced direct picking on desktop; checking only onPickModel hid choices even while the quick picker could apply them.
   const canPickModel =
     onPickModel !== undefined ||
@@ -542,20 +551,35 @@ export function SessionChatSessionOptionPills({
           ((descriptor.dispatch.kind !== 'key' &&
             descriptor.dispatch.kind !== 'bounded-key-steps' &&
             descriptor.dispatch.kind !== 'cyclic-key-steps') ||
-            canSendKey) &&
+            canSendKey ||
+            (queuedControls && descriptor.id === 'mode')) &&
           (descriptor.dispatch.kind !== 'model-picker' || canPickModel)
       ),
-    [canSendKey, canPickModel, optionDescriptors]
+    [canSendKey, canPickModel, optionDescriptors, queuedControls]
   );
 
   const dispatch = useCallback(
     (descriptor: SessionChatOptionDescriptor, value?: string): void => {
-      if (value !== undefined && (catalog?.modelIcon === 'codex' || catalog?.modelIcon === 'claude') && (descriptor.id === catalog.model.id || descriptor.id === 'effort')) {
+      if (queuedControls && value !== undefined && (descriptor.id === 'mode' || descriptor.id === 'fastMode')) {
+        modelPickerActions.current?.selectOptions(
+          descriptor.id === 'mode' ? { mode: value } : { fastMode: value === 'on' ? 'on' : 'off' }
+        );
+        return;
+      }
+      if (
+        value !== undefined &&
+        (catalog?.modelIcon === 'codex' || catalog?.modelIcon === 'claude') &&
+        (descriptor.id === catalog.model.id || descriptor.id === 'effort')
+      ) {
         const model = descriptor.id === catalog.model.id ? value : state[catalog.model.id]?.value;
         if (!model) return;
         const effortOption = catalog.optionsForModel(model).find((entry) => entry.id === 'effort');
         const preferred = descriptor.id === 'effort' ? value : state.effort?.value;
-        const effort = effortOption?.choices?.find((entry) => entry.value === preferred)?.value ?? effortOption?.defaultValue ?? effortOption?.choices?.[0]?.value ?? '';
+        const effort =
+          effortOption?.choices?.find((entry) => entry.value === preferred)?.value ??
+          effortOption?.defaultValue ??
+          effortOption?.choices?.[0]?.value ??
+          '';
         modelPickerActions.current?.select({ model, effort });
         return;
       }
@@ -662,6 +686,7 @@ export function SessionChatSessionOptionPills({
     },
     [
       catalog,
+      queuedControls,
       canSend,
       isWorking,
       beginDispatch,
@@ -715,6 +740,8 @@ export function SessionChatSessionOptionPills({
   };
 
   const disabled = isWorking || !canSend || dispatchingId !== null || switchingAgent;
+  /** CDXC:SessionChat 2026-09-08 DECISION: User: effort, Plan mode, Fast mode and Claude permissions stay available while working, just like model selection; undeliverable choices remain queued. */
+  const optionsDisabled = queuedControls ? switchingAgent : disabled;
 
   const agentsSubmenu = agentRows ? (
     <DropdownMenuSub>
@@ -826,7 +853,7 @@ export function SessionChatSessionOptionPills({
           checked={planMode}
           closeOnClick
           className='rounded-md'
-          disabled={planMode && !canSendKey}
+          disabled={!queuedControls && planMode && !canSendKey}
           onCheckedChange={(checked) =>
             dispatch(
               checked ? descriptor : { ...descriptor, dispatch: { kind: 'key', key: 'shift-tab', marker: '' } },
@@ -909,7 +936,11 @@ export function SessionChatSessionOptionPills({
   const modelAgent = getDefaultSidebarAgentByIcon(catalog.modelIcon);
   const modelIcon = (
     <span className='contents' data-icon='inline-start'>
-      <ProjectAgentLauncherIcon accountColor={accountColor} agent={modelAgent ? { ...modelAgent, isDefault: true } : undefined} colorMode='brand' />
+      <ProjectAgentLauncherIcon
+        accountIndicator={accountIndicator}
+        agent={modelAgent ? { ...modelAgent, isDefault: true } : undefined}
+        colorMode='brand'
+      />
     </span>
   );
   const modelLabel = sessionChatOptionValueLabel(catalog.model, state);
@@ -922,22 +953,25 @@ export function SessionChatSessionOptionPills({
   const fastMode = state.fastMode?.value === 'on';
   const planMode = isCodex && state.mode?.value === 'plan';
   const terminalStatusLine = detectedOptions?.terminalStatusLine?.trim();
-  // CDXC:AgentScreenDetection 2026-09-03 WHY: Claude's statusline payload carries the
-  // context window fill; the ring exists only once it has been read.
-  const contextMeterUsage = resolveSessionChatContextMeterUsage(detectedOptions?.contextUsage);
-  const claudeStatus = detectedOptions?.claudeStatus;
+  const contextMeterUsage = resolveSessionChatContextMeterUsage(detectedOptions?.contextUsage, isCodex);
+  const hasContextDetails = isCodex || catalog.modelIcon === 'claude';
+  const detailStatus = useMemo(
+    () => contextDetailsStatus ?? resolveContextDetailStatus(contextDetailsAgent, detectedOptions),
+    [contextDetailsStatus, contextDetailsAgent, detectedOptions]
+  );
   const contextDetails = useMemo(
     () =>
-      claudeStatus
+      detailStatus
         ? resolveSessionChatContextDetailGroups(
-            claudeStatus,
+            detailStatus,
             contextDetailsPreferences,
             contextDetailsNow,
             'shown',
-            contextDetailsSession ?? null
+            contextDetailsSession ?? null,
+            contextDetailsAgent
           )
         : undefined,
-    [claudeStatus, contextDetailsNow, contextDetailsPreferences, contextDetailsSession]
+    [detailStatus, contextDetailsAgent, contextDetailsNow, contextDetailsPreferences, contextDetailsSession]
   );
   const modeButton = visibleOptions.find(isShiftTabModeCycler);
   const menuOptions = modeButton ? visibleOptions.filter((descriptor) => descriptor !== modeButton) : visibleOptions;
@@ -1136,7 +1170,7 @@ export function SessionChatSessionOptionPills({
         <PillTrigger
           ariaLabel={modelTitle}
           className='ghostex-chat-model-pill'
-          disabled={(catalog.modelIcon === 'codex' || catalog.modelIcon === 'claude') ? switchingAgent : disabled}
+          disabled={catalog.modelIcon === 'codex' || catalog.modelIcon === 'claude' ? switchingAgent : disabled}
           icon={modelIcon}
           label={modelPillLabel ?? catalog.model.label}
           skeleton={skeletonFor('model', modelLabel)}
@@ -1167,9 +1201,9 @@ export function SessionChatSessionOptionPills({
           <PillTrigger
             ariaLabel={optionsTitle}
             className='ghostex-chat-options-pill'
-            disabled={disabled}
+            disabled={optionsDisabled}
             label={optionsLabel ?? 'Options'}
-            skeleton={skeletonFor('options', optionsLabel)}
+            skeleton={queuedControls ? undefined : skeletonFor('options', optionsLabel)}
             title={optionsTitle}
             trailingIcon={optionsTrailingIcon}
           />
@@ -1215,11 +1249,11 @@ export function SessionChatSessionOptionPills({
           <PillTrigger
             ariaLabel={modeTitle}
             className='ghostex-chat-mode-pill ghostex-chat-mode-pill-icon-only'
-            disabled={disabled || modeValue === undefined}
+            disabled={optionsDisabled || (!queuedControls && modeValue === undefined)}
             icon={modeIcon}
             iconOnly
             label={modeLabel ?? modeButton.label}
-            skeleton={skeletonFor('mode', modeLabel)}
+            skeleton={queuedControls ? undefined : skeletonFor('mode', modeLabel)}
             title={modeTitle}
           />
           <DropdownMenuContent align='end' className='ghostex-session-chat-popup w-60 rounded-xl [--radius:0.625rem]'>
@@ -1233,14 +1267,14 @@ export function SessionChatSessionOptionPills({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      {contextMeterUsage ? (
+      {contextMeterUsage || hasContextDetails ? (
         <SessionChatContextMeter
           compactDisabled={disabled}
           compactDisabledReason={isWorking ? 'Available once the agent is idle.' : null}
           onCompact={() => {
             void onDispatchCommand('/compact');
           }}
-          usage={contextMeterUsage}
+          usage={contextMeterUsage ?? { usedPercentage: null, usedTokens: null, windowSize: null }}
           {...(contextDetails ? { details: contextDetails } : {})}
           {...(contextDetails && onEditContextDetails ? { onEditDetails: onEditContextDetails } : {})}
         />

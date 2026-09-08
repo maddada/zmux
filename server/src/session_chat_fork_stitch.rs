@@ -538,6 +538,7 @@ pub fn read_session_chat_tail_page_stitched(
     let mut messages: Vec<SessionChatMessage> = Vec::new();
     let mut row_count = 0usize;
     let mut lifecycle = None;
+    let mut codex_stats = None;
     let mut result_cursor = before_offset.unwrap_or(0);
     let mut has_more = false;
     let mut first_read = true;
@@ -570,11 +571,17 @@ pub fn read_session_chat_tail_page_stitched(
                 break;
             }
             SessionChatTailPage::Page {
+                codex_stats: page_stats,
                 messages,
                 lifecycle,
                 has_more,
                 before_offset,
-            } => (messages, lifecycle, has_more, before_offset),
+            } => {
+                if first_read && hop == 0 && window_end.is_none() {
+                    codex_stats = page_stats;
+                }
+                (messages, lifecycle, has_more, before_offset)
+            }
         };
         if first_read {
             // Only a live tail read of the current file may carry lifecycle;
@@ -630,6 +637,7 @@ pub fn read_session_chat_tail_page_stitched(
 
     Ok(SessionChatStitchedPage {
         page: SessionChatTailPage::Page {
+            codex_stats,
             messages,
             lifecycle,
             has_more,
