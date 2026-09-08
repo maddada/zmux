@@ -1,14 +1,14 @@
 {
   "_readme": "Do not edit blind. docs/important/agent-model-catalog.md explains the schema, how every Ghostex client loads this file from GitHub (with the bundled copy as the offline source), how to publish a change, and how to re-collect models, efforts and fast mode from the agent CLIs' own /model pickers.",
   "schemaVersion": 1,
-  "updatedAt": "2026-09-05",
+  "updatedAt": "2026-09-08",
   "effortLabels": {
     "none": "None",
     "minimal": "Minimal",
     "low": "Low",
     "medium": "Medium",
     "high": "High",
-    "xhigh": "Extra high",
+    "xhigh": "Extra High",
     "max": "Max",
     "ultra": "Ultra",
     "ultracode": "Ultracode"

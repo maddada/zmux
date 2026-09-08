@@ -10,6 +10,7 @@ pub(crate) enum GpuiAppModalKind {
     AddProject,
     AgentHooksRequired,
     Settings,
+    ModelPicker,
     Hotkeys,
     MissingProjectFolder,
     CommandPalette,
@@ -37,6 +38,7 @@ pub(crate) enum GpuiAppModalKind {
     GitCommit,
     GitFileDiff,
     MermaidDiagram,
+    MarkdownTable,
     PortlessSetup,
     DiscoverGhostex,
     Extension(ExtensionId),
@@ -49,6 +51,7 @@ impl GpuiAppModalKind {
             "addProject" => Some(Self::AddProject),
             "agentHooksRequired" => Some(Self::AgentHooksRequired),
             "settings" => Some(Self::Settings),
+            "modelPicker" => Some(Self::ModelPicker),
             "hotkeys" => Some(Self::Hotkeys),
             "missingProjectFolder" => Some(Self::MissingProjectFolder),
             "commandPalette" => Some(Self::CommandPalette),
@@ -76,6 +79,7 @@ impl GpuiAppModalKind {
             "gitCommit" => Some(Self::GitCommit),
             "gitFileDiff" => Some(Self::GitFileDiff),
             "mermaidDiagram" => Some(Self::MermaidDiagram),
+            "markdownTable" => Some(Self::MarkdownTable),
             "portlessSetup" => Some(Self::PortlessSetup),
             "discoverGhostex" => Some(Self::DiscoverGhostex),
             value if value.starts_with("extension:") => {
@@ -91,6 +95,7 @@ impl GpuiAppModalKind {
             Self::AddProject => "addProject",
             Self::AgentHooksRequired => "agentHooksRequired",
             Self::Settings => "settings",
+            Self::ModelPicker => "modelPicker",
             Self::Hotkeys => "hotkeys",
             Self::MissingProjectFolder => "missingProjectFolder",
             Self::CommandPalette => "commandPalette",
@@ -118,6 +123,7 @@ impl GpuiAppModalKind {
             Self::GitCommit => "gitCommit",
             Self::GitFileDiff => "gitFileDiff",
             Self::MermaidDiagram => "mermaidDiagram",
+            Self::MarkdownTable => "markdownTable",
             Self::PortlessSetup => "portlessSetup",
             Self::DiscoverGhostex => "discoverGhostex",
             Self::Extension(id) => extension_modal_id(id),
@@ -130,6 +136,7 @@ impl GpuiAppModalKind {
             Self::AddProject => "Ghostex Add Project",
             Self::AgentHooksRequired => "Ghostex Install Required Hooks",
             Self::Settings => "Ghostex Settings",
+            Self::ModelPicker => "",
             Self::Hotkeys => "Ghostex Hotkeys",
             Self::MissingProjectFolder => "Ghostex Project Folder Missing",
             Self::CommandPalette
@@ -156,7 +163,7 @@ impl GpuiAppModalKind {
             Self::SidebarSpaceEditor => "Ghostex Space",
             Self::GitCommit => "Ghostex Commit Changes",
             Self::GitFileDiff => "Ghostex File Diff",
-            Self::MermaidDiagram => "Ghostex Diagram",
+            Self::MermaidDiagram | Self::MarkdownTable => "",
             Self::PortlessSetup => "Ghostex Portless Setup",
             Self::DiscoverGhostex => "Discover Ghostex",
             Self::Extension(_) => "Ghostex Extension",
@@ -166,6 +173,7 @@ impl GpuiAppModalKind {
 
     pub(crate) fn window_size(self) -> Size<Pixels> {
         match self {
+            Self::ModelPicker => size(px(1260.0), px(1050.0)),
             /* All four Quick Access tabs share one stable child-window frame. */
             Self::CommandPalette
             | Self::PreviousSessions
@@ -280,7 +288,28 @@ impl GpuiAppModalKind {
             // User: start only the diagram dialog 20% wider and taller (1248x912, previously 1040x760).
             // SEE-ALSO: packages/core-ui/mermaid/mermaid-diagram.tsx and mermaid.css own the shared React dialog dimensions.
             Self::MermaidDiagram => size(px(1248.0), px(912.0)),
+            Self::MarkdownTable => size(px(1248.0), px(912.0)),
         }
+    }
+
+    /// CDXC:AppModal 2026-09-08 DECISION:
+    /// User: increase both terminal picker dimensions by 40%, to 1260x910 for Codex and 1260x1050 for Claude, centered on the main window with no window title or titlebar.
+    /// This supersedes the previous 900x650 Codex and 900x750 Claude sizes.
+    pub(crate) fn window_size_for_open(self, message: &serde_json::Value) -> Size<Pixels> {
+        if self == Self::ModelPicker
+            && message.get("provider").and_then(serde_json::Value::as_str) == Some("codex")
+        {
+            size(px(1260.0), px(910.0))
+        } else {
+            self.window_size()
+        }
+    }
+
+    /// CDXC:AppModal 2026-09-08 DECISION:
+    /// User: use the terminal quick picker's borderless style for all app modals, including Settings, Quick Access, Add Project, Search by Prompt, Rename Session, and Delayed Send.
+    /// This extends the earlier table and Mermaid popup decision; Settings and Quick Access need no close button because clicking outside dismisses them.
+    pub(crate) fn has_titlebar(self) -> bool {
+        false
     }
 
     pub(crate) fn is_resizable(self) -> bool {
@@ -298,8 +327,8 @@ impl GpuiAppModalKind {
         false
     }
 
-    pub(crate) fn window_min_size(self) -> Size<Pixels> {
-        self.window_size()
+    pub(crate) fn window_min_size(self, open_message: &serde_json::Value) -> Size<Pixels> {
+        self.window_size_for_open(open_message)
     }
 
     pub(crate) fn uses_react_modal_host(self) -> bool {
@@ -359,7 +388,8 @@ impl GpuiAppModalKind {
                 "modal": self.modal_id(),
                 "type": "open",
             }),
-            Self::Settings
+            Self::ModelPicker
+            | Self::Settings
             | Self::Hotkeys
             | Self::FindPrompts
             | Self::ConfigureAgents
@@ -378,7 +408,7 @@ impl GpuiAppModalKind {
                 "modal": self.modal_id(),
                 "type": "open",
             }),
-            Self::MermaidDiagram => serde_json::json!({
+            Self::MermaidDiagram | Self::MarkdownTable => serde_json::json!({
                 "modal": self.modal_id(), "source": "", "type": "open",
             }),
             Self::Extension(_) => serde_json::Value::Null,

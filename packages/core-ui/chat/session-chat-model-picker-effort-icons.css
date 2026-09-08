@@ -4,9 +4,22 @@
   height: 38px;
   overflow: visible;
   color: #b9bdcd;
+  transform-box: view-box;
+  transform-origin: center;
+  animation: effort-orbit var(--effort-icon-rotation-duration, 12s) linear infinite var(--effort-icon-play-state, paused);
   transition:
     color 180ms,
     filter 180ms;
+}
+/* CDXC:SessionChat 2026-09-08 DECISION: Rotate focused effort icons in both Claude and Codex quick pickers, with Max calmer than Ultra. All icon animations pause in place when focus moves away and resume from that exact frame. */
+.model-picker-effort:is([data-selected], :focus-visible):not(:disabled) {
+  --effort-icon-play-state: running;
+}
+.model-picker-effort[data-effort='max'] {
+  --effort-icon-rotation-duration: 16s;
+}
+.model-picker-effort:is([data-effort='ultra'], [data-effort='ultracode']) {
+  --effort-icon-rotation-duration: 6s;
 }
 .model-picker-effort[data-selected] .model-picker-effort-icon {
   color: color-mix(in srgb, var(--picker-accent) 40%, white);
@@ -17,20 +30,20 @@
 .effort-icon-core {
   transform-origin: 28px 28px;
 }
-.model-picker-effort[data-selected][data-effort='max'] .effort-icon-orbit {
-  animation: effort-orbit 14s linear infinite;
+.model-picker-effort[data-effort='max'] .effort-icon-orbit {
+  animation: effort-orbit 14s linear infinite var(--effort-icon-play-state, paused);
 }
-.model-picker-effort[data-selected][data-effort='max'] .effort-icon-core {
-  animation: effort-breathe 4.8s ease-in-out infinite;
+.model-picker-effort[data-effort='max'] .effort-icon-core {
+  animation: effort-breathe 4.8s ease-in-out infinite var(--effort-icon-play-state, paused);
 }
-.model-picker-effort[data-selected]:is([data-effort='ultra'], [data-effort='ultracode']) .effort-icon-orbit {
-  animation: effort-orbit 4s linear infinite;
+.model-picker-effort:is([data-effort='ultra'], [data-effort='ultracode']) .effort-icon-orbit {
+  animation: effort-orbit 4s linear infinite var(--effort-icon-play-state, paused);
 }
-.model-picker-effort[data-selected]:is([data-effort='ultra'], [data-effort='ultracode']) .effort-icon-counter-orbit {
-  animation: effort-orbit 6s linear infinite reverse;
+.model-picker-effort:is([data-effort='ultra'], [data-effort='ultracode']) .effort-icon-counter-orbit {
+  animation: effort-orbit 6s linear infinite reverse var(--effort-icon-play-state, paused);
 }
-.model-picker-effort[data-selected]:is([data-effort='ultra'], [data-effort='ultracode']) .effort-icon-core {
-  animation: effort-breathe 1.8s ease-in-out infinite;
+.model-picker-effort:is([data-effort='ultra'], [data-effort='ultracode']) .effort-icon-core {
+  animation: effort-breathe 1.8s ease-in-out infinite var(--effort-icon-play-state, paused);
 }
 @keyframes effort-orbit {
   to {

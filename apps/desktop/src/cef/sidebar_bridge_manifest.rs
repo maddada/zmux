@@ -570,10 +570,18 @@ pub(crate) const PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS: [ProjectWorkareaBridgeF
     },
 ];
 
-pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_SPECS: [AppModalHostBridgeSurfaceSpec; 5] = [
+pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_SPECS: [AppModalHostBridgeSurfaceSpec; 6] = [
     AppModalHostBridgeSurfaceSpec {
         surface: AppModalHostBridgeSurface::NativeWindow,
         entry_file_name: "modal-host.html",
+        extra_info_value: APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW,
+        exposes_native_window_identity: true,
+    },
+    // CDXC:AppModal 2026-09-08 SEE-ALSO:
+    // model-picker.html uses the same native-window bridge as Settings; keep the renderer helper and main process on this shared manifest.
+    AppModalHostBridgeSurfaceSpec {
+        surface: AppModalHostBridgeSurface::NativeWindow,
+        entry_file_name: "model-picker.html",
         extra_info_value: APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW,
         exposes_native_window_identity: true,
     },

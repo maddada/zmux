@@ -16,6 +16,7 @@ pub(crate) fn register_gpui_keyboard_router_target(
                 app,
                 async_app,
                 owner: GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::None),
+                terminal_model_picker_session: None,
                 owner_generation: 0,
                 window_keyboard_id: GPUI_KEYBOARD_ROUTER_NEXT_WINDOW_ID
                     .fetch_add(1, Ordering::Relaxed),
@@ -342,6 +343,27 @@ pub(crate) fn route_gpui_native_keyboard_event(
         let owner = target.owner;
         let native_hotkey_text =
             gpui_native_hotkey_text(keycode, modifiers, characters_ignoring_modifiers);
+        // CDXC:Sessions 2026-09-08 SEE-ALSO:
+        // previous-sessions-modal.tsx owns Option+C scope cycling; reserve the native chord before configured app shortcuts can consume it.
+        let sessions_scope_shortcut = native_hotkey_text.as_deref() == Some("alt+c")
+            && matches!(
+                owner,
+                GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
+                    FirstResponderCefSurface::AppModal
+                ))
+            )
+            && target
+                .app
+                .read_with(&target.async_app, |app, cx| {
+                    app.app_modal_window
+                        .as_ref()
+                        .and_then(|handle| handle.read(cx).ok())
+                        .is_some_and(|modal| modal.current_modal == GpuiAppModalKind::PreviousSessions)
+                })
+                .unwrap_or(false);
+        if sessions_scope_shortcut {
+            return None;
+        }
         let renderer_passthrough_route = if matches!(
             owner,
             GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
@@ -393,7 +415,11 @@ pub(crate) fn route_gpui_native_keyboard_event(
         let configured_action_id = native_hotkey_text
             .and_then(|text| gpui_configured_hotkey_action_id_for_native_text(&text));
         if let Some(action_id) = configured_action_id {
-            if !gpui_keyboard_owner_allows_hotkey(owner, &action_id) {
+            if !gpui_keyboard_owner_allows_hotkey(
+                owner,
+                &action_id,
+                target.terminal_model_picker_session,
+            ) {
                 log_gpui_keyboard_native_route(
                     target,
                     "press",

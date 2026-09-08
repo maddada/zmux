@@ -158,6 +158,21 @@
 .model-picker-artwork {
   animation: model-picker-artwork-float 6s ease-in-out var(--idle-delay, 0s) infinite;
 }
+.ghostex-model-picker .model-picker-model[data-compact-model] {
+  animation: none;
+}
+.model-picker-model[data-compact-model] .model-picker-artwork,
+.model-picker-model[data-compact-model] .model-picker-model-name {
+  animation: model-picker-content-change 140ms ease-out;
+}
+@keyframes model-picker-content-change {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
 .model-picker-tile::after {
   content: '';
   position: absolute;
@@ -198,7 +213,7 @@
 }
 .model-picker-current-effort {
   color: color-mix(in srgb, var(--picker-accent) 60%, white);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 500;
   animation: model-picker-effort-in 180ms ease-out;
 }

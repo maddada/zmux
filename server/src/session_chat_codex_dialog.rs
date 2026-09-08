@@ -119,7 +119,7 @@ fn directory_trust_dialog(content: &[&str]) -> Option<TerminalDialog> {
 /// CDXC:AgentScreenDetection 2026-09-05 DECISION:
 /// User: expose the "Implement this plan?" picker in chat so switching to the terminal is unnecessary.
 /// User: audit every Codex command and make its messages and interactions usable in chat, using the existing UX and improving it where needed.
-/// Numbered selectors, searchable menus, checkbox settings, and text forms have different key semantics, so only numbered rows use digit shortcuts; the other views retain their own navigation, toggle, save, and cancel actions.
+/// Numbered selectors, searchable menus, checkbox settings, and text forms retain their own selection, navigation, toggle, save, and cancel actions.
 /// SEE-ALSO: packages/core-ui/chat/session-chat-terminal-dialog.tsx and Codex tui/src/bottom_pane/list_selection_view.rs.
 pub fn detect_codex_dialog(text: &str) -> Option<TerminalDialog> {
     if let Some(pager) = crate::session_chat_codex_pager::detect_codex_transcript_pager(text) {
@@ -414,9 +414,9 @@ impl TerminalDialog {
                 }
                 .to_string());
             }
-            if row.number <= 9 {
-                return Ok(row.number.to_string());
-            }
+            // CDXC:AgentScreenDetection 2026-09-07 WHY:
+            // Codex's sensitive rows (including hook trust) only highlight on a digit, while ordinary rows commit immediately and searchable lists insert digits into the query.
+            // Navigate from the freshly captured highlight and confirm once so all three select the clicked row without submitting into the next dialog.
             let selected = self
                 .rows
                 .iter()

@@ -2,14 +2,60 @@
 //! User: model selection is always available, including during a turn; if delivery cannot succeed, queue it for the next opportunity.
 //! User: try the change immediately, even while working; only retain it when the terminal cannot accept it. This supersedes waiting for an idle turn boundary.
 //! One durable desired selection per session coalesces repeated choices, survives disconnects and restarts, and remains pending until the terminal confirms it.
+//! CDXC:SessionChat 2026-09-08 DECISION:
+//! User: effort, Plan mode, Fast mode and Claude permissions are always changeable from chat too; attempt immediately and retain the desired state for retry if delivery cannot succeed.
 
 use crate::{domain::DomainStateError, server::AppState, storage::open_gxserver_database};
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{future::Future, pin::Pin, sync::Arc};
 
 static SELECTION_REQUESTED: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SelectionOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_mode: Option<String>,
+}
+
+impl SelectionOptions {
+    pub fn is_empty(&self) -> bool {
+        self.mode.is_none() && self.fast_mode.is_none()
+    }
+}
+
+pub(crate) fn read_options(
+    provider: &str,
+    params: &Map<String, Value>,
+) -> Result<SelectionOptions, DomainStateError> {
+    let options: SelectionOptions =
+        serde_json::from_value(params.get("options").cloned().unwrap_or_else(|| json!({})))
+            .map_err(|_| DomainStateError {
+                code: "invalidParams",
+                message: "Invalid chat option selection.".into(),
+            })?;
+    let valid_mode = options.mode.as_deref().is_none_or(|mode| match provider {
+        "codex" => matches!(mode, "plan" | "default"),
+        "claude" => matches!(mode, "bypass" | "auto" | "manual" | "accept-edits" | "plan"),
+        _ => false,
+    });
+    if !valid_mode
+        || !options
+            .fast_mode
+            .as_deref()
+            .is_none_or(|value| matches!(value, "on" | "off"))
+    {
+        return Err(DomainStateError {
+            code: "invalidParams",
+            message: "That option is not available for this agent.".into(),
+        });
+    }
+    Ok(options)
+}
 
 pub(crate) async fn selection_requested() {
     SELECTION_REQUESTED.notified().await;
@@ -21,6 +67,7 @@ pub struct PendingModelSelection {
     pub id: String,
     pub model: String,
     pub effort: String,
+    pub options: SelectionOptions,
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
@@ -47,9 +94,9 @@ pub fn read_pending(
     session: &str,
 ) -> Option<PendingModelSelection> {
     db.query_row(
-        "SELECT selectionId, model, effort, state, errorMessage, retryAt FROM session_chat_model_selections WHERE projectId = ?1 AND sessionId = ?2",
+        "SELECT selectionId, model, effort, state, errorMessage, retryAt, options FROM session_chat_model_selections WHERE projectId = ?1 AND sessionId = ?2",
         params![project, session],
-        |row| Ok(PendingModelSelection { id: row.get(0)?, model: row.get(1)?, effort: row.get(2)?, state: row.get(3)?, error_message: row.get(4)?, retry_at: row.get(5)? }),
+        |row| Ok(PendingModelSelection { id: row.get(0)?, model: row.get(1)?, effort: row.get(2)?, state: row.get(3)?, error_message: row.get(4)?, retry_at: row.get(5)?, options: serde_json::from_str(&row.get::<_, String>(6)?).map_err(|error| rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(error)))? }),
     ).optional().ok().flatten()
 }
 
@@ -116,12 +163,55 @@ pub(crate) fn enqueue(
         .get("effort")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    validate_selection(&provider, model, effort)?;
+    let incoming_options = read_options(&provider, params)?;
+    if !model.is_empty() || incoming_options.is_empty() {
+        validate_selection(&provider, model, effort)?;
+    } else if !matches!(provider.as_str(), "codex" | "claude") || !effort.is_empty() {
+        return Err(DomainStateError {
+            code: "invalidParams",
+            message: "An effort change requires its model.".into(),
+        });
+    }
+    // Merge under the write lock so independent controls cannot overwrite each other's pending choice.
+    let transaction =
+        rusqlite::Transaction::new_unchecked(&db, rusqlite::TransactionBehavior::Immediate)
+            .map_err(storage_error)?;
+    let previous = read_pending(&transaction, project, session_id);
+    let model = if model.is_empty() {
+        previous
+            .as_ref()
+            .map_or("", |pending| pending.model.as_str())
+    } else {
+        model
+    };
+    let effort = if params
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .is_empty()
+    {
+        previous
+            .as_ref()
+            .map_or("", |pending| pending.effort.as_str())
+    } else {
+        effort
+    };
+    let mut options = previous
+        .as_ref()
+        .map(|pending| pending.options.clone())
+        .unwrap_or_default();
+    if incoming_options.mode.is_some() {
+        options.mode = incoming_options.mode;
+    }
+    if incoming_options.fast_mode.is_some() {
+        options.fast_mode = incoming_options.fast_mode;
+    }
     let id = uuid::Uuid::new_v4().to_string();
-    db.execute(
-        "INSERT INTO session_chat_model_selections (projectId, sessionId, selectionId, model, effort, state, retryAt) VALUES (?1, ?2, ?3, ?4, ?5, 'queued', 0) ON CONFLICT(projectId, sessionId) DO UPDATE SET selectionId = excluded.selectionId, model = excluded.model, effort = excluded.effort, state = 'queued', errorMessage = NULL, retryAt = 0",
-        params![project, session_id, id, model, effort],
+    transaction.execute(
+        "INSERT INTO session_chat_model_selections (projectId, sessionId, selectionId, model, effort, state, retryAt, options) VALUES (?1, ?2, ?3, ?4, ?5, 'queued', 0, ?6) ON CONFLICT(projectId, sessionId) DO UPDATE SET selectionId = excluded.selectionId, model = excluded.model, effort = excluded.effort, options = excluded.options, state = 'queued', errorMessage = NULL, retryAt = 0",
+        params![project, session_id, id, model, effort, serde_json::to_string(&options).map_err(storage_error)?],
     ).map_err(storage_error)?;
+    transaction.commit().map_err(storage_error)?;
     let pending = read_pending(&db, &project, &session_id);
     crate::session_chat_queue_runtime::broadcast_session_chat_queue_state(
         state,
@@ -149,7 +239,7 @@ pub(crate) fn sender(state: &Arc<AppState>) -> ModelSelectionSender {
             crate::session_chat_queue_runtime::broadcast_session_chat_queue_state(
                 &state, &project, &session,
             );
-            let params = json!({ "projectId": project, "sessionId": session, "model": pending.model, "effort": pending.effort });
+            let params = json!({ "projectId": project, "sessionId": session, "model": pending.model, "effort": pending.effort, "options": pending.options });
             let result = crate::session_chat_codex_picker::select_session_chat_model(
                 &state,
                 params.as_object().unwrap(),

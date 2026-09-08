@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { ModelPickerEffortIcon } from './session-chat-model-picker-effort-icons';
 import { ModelPickerIcon } from './session-chat-model-picker-icons';
@@ -32,27 +32,35 @@ export interface ModelPickerSelection {
 
 /**
  * CDXC:SessionChat 2026-09-05 DECISION:
- * User: match the floating Electric Axis concept inside the actual chat pane, never a separate native modal window.
- * This supersedes the original native child-window hosting for this picker only.
+ * User: match the floating Electric Axis concept inside the actual chat pane.
+ * CDXC:SessionChat 2026-09-08 DECISION:
+ * User: terminal view also offers this picker in a titlebar-free native window centered on the main window, 1260x910 for Codex and 1260x1050 for Claude, using the Settings hosting pattern.
+ * This supersedes the prohibition on native picker windows for terminal view; chat keeps its in-pane hosting.
  * Models run vertically in catalog order (Astra, Sol, Terra, Luna; Fable, Opus (1m), Opus, Sonnet, Haiku), with the selected model at the axis intersection.
  * Keep the concept's rounded tiles, individual model artwork, connecting axes, arrow cues and animated glow, using OpenAI #0069cb and Claude #e85c35.
  * Option+P opens even during a turn and pressing the opening hotkey again cancels; arrows or H/J/K/L preview model and effort, Enter saves, and Escape cancels.
- * Model navigation stops at both ends; axis words are omitted, Sol is a sun, Luna is a fine crescent, and Sonnet's old quill artwork is replaced.
+ * Model navigation stops at both ends; axis words are omitted, Sol is a sun, Luna uses the supplied crescent-and-stars artwork, and Sonnet's old quill artwork is replaced.
  * User: hide the effort below the model on wide panes; at 700px or less, show it there and hide the horizontal effort cards.
  * Narrow panes retain clickable effort arrows beside the selected model; trackpad gestures navigate both axes.
- * Short panes clip the model rail with at least three cards visible; controls stay at the bottom, and idle cards and background stay subtly animated.
+ * User: when height is limited, hide the models above and below the selection, just as narrow panes hide the effort rail.
+ * The selected model stays centered with clickable up/down arrows; controls stay at the bottom, and idle cards and background stay subtly animated.
+ * User: constrained-height model changes use a subtle content fade inside a stationary card.
  * Unsupported efforts stay visible but disabled in the horizontal rail; Max animates gently, Ultra more energetically, with a short glow beneath the effort.
  */
 export function SessionChatModelPicker({
   request,
   container,
   onSave,
+  onCommit,
+  notice,
   onClose,
   cancelRequested = false,
 }: {
   request: ModelPickerRequest;
   container: HTMLElement;
   onSave: (selection: ModelPickerSelection) => void;
+  onCommit?: (selection: ModelPickerSelection) => Promise<void>;
+  notice?: ReactNode;
   onClose: () => void;
   cancelRequested?: boolean;
 }) {
@@ -66,6 +74,7 @@ export function SessionChatModelPicker({
   const [pointerRailStart, setPointerRailStart] = useState<number | null>(null);
   const pointerRailTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closingRef = useRef(false);
+  const mounted = useRef(true);
   const selectedTile = useRef<HTMLButtonElement>(null);
   const [controls, setControls] = useState<HTMLElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -74,27 +83,29 @@ export function SessionChatModelPicker({
   const effortIndex = request.efforts.findIndex((effort) => effort.value === selection.effort);
   const narrow = paneSize.width <= 700;
   const viewportHeight = Math.max(1, paneSize.height - controlsHeight - 24);
-  // Keep at least three substantial cards in view instead of shrinking the entire rail to fit.
-  const scale = Math.max(
-    0.01,
-    Math.min(1, (paneSize.width - 28) / (narrow ? 240 : 1060), (viewportHeight - 24) / (3 * 142))
-  );
-  const visibleModels = Math.min(request.models.length, Math.max(3, Math.floor((viewportHeight - 24) / (142 * scale))));
-  const firstVisible =
-    pointerRailStart ??
-    Math.max(0, Math.min(request.models.length - visibleModels, modelIndex - Math.floor(visibleModels / 2)));
+  const widthScale = Math.max(0.01, Math.min(1, (paneSize.width - 28) / (narrow ? 240 : 1060)));
+  const short = viewportHeight - 24 < 3 * 142 * widthScale;
+  const scale = Math.max(0.01, Math.min(widthScale, (viewportHeight - 24) / (short ? 200 : 3 * 142)));
+  const visibleModels = short
+    ? 1
+    : Math.min(request.models.length, Math.max(3, Math.floor((viewportHeight - 24) / (142 * scale))));
+  const firstVisible = short
+    ? modelIndex
+    : (pointerRailStart ??
+      Math.max(0, Math.min(request.models.length - visibleModels, modelIndex - Math.floor(visibleModels / 2))));
   const stageHeight = viewportHeight / scale;
   const railOffset = (stageHeight - visibleModels * 142) / 2 - firstVisible * 142;
   const centerY = 71 + modelIndex * 142 + railOffset;
   const effortSplit = Math.ceil(request.efforts.length / 2);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       clearTimeout(timer.current);
       clearTimeout(pointerRailTimer.current);
-    },
-    []
-  );
+    };
+  }, []);
   useLayoutEffect(() => {
     const size = () => {
       setPaneSize({ width: container.clientWidth, height: container.clientHeight });
@@ -107,18 +118,31 @@ export function SessionChatModelPicker({
     return () => observer.disconnect();
   }, [container, controls]);
   useEffect(() => {
-    selectedTile.current?.focus({ preventScroll: true });
-  }, [selection.model, selection.effort]);
+    if (!committing) selectedTile.current?.focus({ preventScroll: true });
+  }, [selection.model, selection.effort, committing]);
 
   const finish = (save: boolean, choice = selection) => {
     if (closingRef.current) return;
     closingRef.current = true;
     setCommitting(save);
-    setClosing(true);
-    timer.current = setTimeout(
-      () => (save ? onSave(choice) : onClose()),
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 190
-    );
+    const animateClose = () => {
+      if (!mounted.current) return;
+      setClosing(true);
+      timer.current = setTimeout(
+        () => (save ? onSave(choice) : onClose()),
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 190
+      );
+    };
+    // The terminal host must receive durable acceptance before its native window can close.
+    if (save && onCommit) {
+      void onCommit(choice).then(animateClose, () => {
+        if (!mounted.current) return;
+        closingRef.current = false;
+        setCommitting(false);
+      });
+    } else {
+      animateClose();
+    }
   };
   useEffect(() => {
     if (cancelRequested) finish(false);
@@ -209,6 +233,7 @@ export function SessionChatModelPicker({
           <Dialog.Description className='model-picker-sr-only'>
             Up and down choose a model. Left and right choose effort. Enter saves. Escape cancels.
           </Dialog.Description>
+          {notice}
           <div className='model-picker-atmosphere' aria-hidden='true'>
             <div className='model-picker-nebula' />
             <div className='model-picker-nebula model-picker-nebula-secondary' />
@@ -236,18 +261,20 @@ export function SessionChatModelPicker({
                 } as CSSProperties
               }
             >
-              <div
-                className='model-picker-line model-picker-line-vertical'
-                aria-hidden='true'
-                style={{ top: 71 + railOffset, height: (request.models.length - 1) * 142 }}
-              />
+              {!short && (
+                <div
+                  className='model-picker-line model-picker-line-vertical'
+                  aria-hidden='true'
+                  style={{ top: 71 + railOffset, height: (request.models.length - 1) * 142 }}
+                />
+              )}
               {narrow && (
                 <>
                   <button
                     className='model-picker-inline-effort'
                     type='button'
                     aria-label='Decrease effort'
-                    disabled={closing || !canMoveEffort(-1)}
+                    disabled={closing || committing || !canMoveEffort(-1)}
                     onClick={() => navigate('ArrowLeft')}
                   >
                     <svg viewBox='0 0 20 20'>
@@ -258,7 +285,7 @@ export function SessionChatModelPicker({
                     className='model-picker-inline-effort model-picker-inline-effort-next'
                     type='button'
                     aria-label='Increase effort'
-                    disabled={closing || !canMoveEffort(1)}
+                    disabled={closing || committing || !canMoveEffort(1)}
                     onClick={() => navigate('ArrowRight')}
                   >
                     <svg viewBox='0 0 20 20'>
@@ -270,34 +297,38 @@ export function SessionChatModelPicker({
               {!narrow && request.efforts.length > 0 && (
                 <div className='model-picker-line model-picker-line-horizontal' aria-hidden='true' />
               )}
-              <button
-                className='model-picker-axis-label model-picker-axis-top'
-                style={{ top: Math.max(4, 71 + railOffset - 78) }}
-                type='button'
-                onClick={() => chooseModel(modelIndex - 1)}
-                disabled={modelIndex === 0}
-                aria-label='Previous model'
-              >
-                <i className='model-picker-triangle model-picker-triangle-up' />
-              </button>
-              <button
-                className='model-picker-axis-label model-picker-axis-bottom'
-                style={{
-                  top: Math.min(stageHeight - 10, 71 + railOffset + (request.models.length - 1) * 142 + 76),
-                  bottom: 'auto',
-                }}
-                type='button'
-                onClick={() => chooseModel(modelIndex + 1)}
-                disabled={modelIndex === request.models.length - 1}
-                aria-label='Next model'
-              >
-                <i className='model-picker-triangle model-picker-triangle-down' />
-              </button>
+              {!short && (
+                <button
+                  className='model-picker-axis-label model-picker-axis-top'
+                  style={{ top: Math.max(4, 71 + railOffset - 78) }}
+                  type='button'
+                  onClick={() => chooseModel(modelIndex - 1)}
+                  disabled={closing || committing || modelIndex === 0}
+                  aria-label='Previous model'
+                >
+                  <i className='model-picker-triangle model-picker-triangle-up' />
+                </button>
+              )}
+              {!short && (
+                <button
+                  className='model-picker-axis-label model-picker-axis-bottom'
+                  style={{
+                    top: Math.min(stageHeight - 10, 71 + railOffset + (request.models.length - 1) * 142 + 76),
+                    bottom: 'auto',
+                  }}
+                  type='button'
+                  onClick={() => chooseModel(modelIndex + 1)}
+                  disabled={closing || committing || modelIndex === request.models.length - 1}
+                  aria-label='Next model'
+                >
+                  <i className='model-picker-triangle model-picker-triangle-down' />
+                </button>
+              )}
               <button
                 className='model-picker-chevron model-picker-chevron-up'
                 type='button'
                 onClick={() => chooseModel(modelIndex - 1)}
-                disabled={modelIndex === 0}
+                disabled={closing || committing || modelIndex === 0}
                 aria-label='Move up one model'
               >
                 <svg viewBox='0 0 20 12'>
@@ -308,7 +339,7 @@ export function SessionChatModelPicker({
                 className='model-picker-chevron model-picker-chevron-down'
                 type='button'
                 onClick={() => chooseModel(modelIndex + 1)}
-                disabled={modelIndex === request.models.length - 1}
+                disabled={closing || committing || modelIndex === request.models.length - 1}
                 aria-label='Move down one model'
               >
                 <svg viewBox='0 0 20 12'>
@@ -317,32 +348,34 @@ export function SessionChatModelPicker({
               </button>
               {request.models.map((entry, index) => {
                 const offset = index - modelIndex;
+                if (short && offset !== 0) return null;
                 return (
                   <button
-                    key={entry.value}
+                    key={short ? 'compact-selected-model' : entry.value}
                     ref={offset === 0 ? selectedTile : undefined}
                     type='button'
                     className='model-picker-tile model-picker-model'
                     data-selected={offset === 0 ? '' : undefined}
+                    data-compact-model={short ? '' : undefined}
                     aria-pressed={offset === 0}
                     aria-label={`Model ${entry.label}`}
-                    disabled={closing}
+                    disabled={closing || committing}
                     style={
                       {
-                        top: 71 + railOffset,
+                        top: short ? centerY : 71 + railOffset,
                         '--tile-x': '0px',
-                        '--tile-y': `${index * 142}px`,
-                        '--idle-delay': `${index * -1.3}s`,
+                        '--tile-y': short ? '0px' : `${index * 142}px`,
+                        '--idle-delay': short ? '0s' : `${index * -1.3}s`,
                       } as CSSProperties
                     }
                     tabIndex={index >= firstVisible && index < firstVisible + visibleModels ? 0 : -1}
                     onClick={(event) => chooseModel(index, false, event.detail > 0)}
                     onDoubleClick={() => chooseModel(index, true)}
                   >
-                    <span className='model-picker-artwork'>
+                    <span className='model-picker-artwork' key={`${entry.value}-artwork`}>
                       <ModelPickerIcon model={entry.value} />
                     </span>
-                    <span className='model-picker-model-name'>
+                    <span className='model-picker-model-name' key={`${entry.value}-name`}>
                       {entry.version && <span className='model-picker-model-version'>{entry.version}</span>}
                       {entry.label}
                     </span>
@@ -360,7 +393,7 @@ export function SessionChatModelPicker({
                     className='model-picker-axis-label model-picker-axis-left'
                     type='button'
                     onClick={() => moveEffort(-1)}
-                    disabled={!canMoveEffort(-1)}
+                    disabled={closing || committing || !canMoveEffort(-1)}
                     aria-label='Decrease effort'
                   >
                     <i className='model-picker-triangle model-picker-triangle-left' />
@@ -369,7 +402,7 @@ export function SessionChatModelPicker({
                     className='model-picker-axis-label model-picker-axis-right'
                     type='button'
                     onClick={() => moveEffort(1)}
-                    disabled={!canMoveEffort(1)}
+                    disabled={closing || committing || !canMoveEffort(1)}
                     aria-label='Increase effort'
                   >
                     <i className='model-picker-triangle model-picker-triangle-right' />
@@ -390,7 +423,7 @@ export function SessionChatModelPicker({
                       data-selected={index === effortIndex ? '' : undefined}
                       aria-pressed={index === effortIndex}
                       aria-label={`Effort ${entry.label}`}
-                      disabled={closing || !model.efforts.some((effort) => effort.value === entry.value)}
+                      disabled={closing || committing || !model.efforts.some((effort) => effort.value === entry.value)}
                       title={
                         !model.efforts.some((effort) => effort.value === entry.value)
                           ? `${entry.label} is unavailable for ${model.label}`
@@ -427,7 +460,7 @@ export function SessionChatModelPicker({
               <button
                 type='button'
                 aria-label='Previous model'
-                disabled={closing || modelIndex === 0}
+                disabled={closing || committing || modelIndex === 0}
                 data-key-pressed={pressed.has('ArrowUp') ? '' : undefined}
                 onClick={() => chooseModel(modelIndex - 1)}
               >
@@ -436,7 +469,7 @@ export function SessionChatModelPicker({
               <button
                 type='button'
                 aria-label='Next model'
-                disabled={closing || modelIndex === request.models.length - 1}
+                disabled={closing || committing || modelIndex === request.models.length - 1}
                 data-key-pressed={pressed.has('ArrowDown') ? '' : undefined}
                 onClick={() => chooseModel(modelIndex + 1)}
               >
@@ -448,7 +481,7 @@ export function SessionChatModelPicker({
               <button
                 type='button'
                 aria-label='Decrease effort'
-                disabled={closing || !canMoveEffort(-1)}
+                disabled={closing || committing || !canMoveEffort(-1)}
                 data-key-pressed={pressed.has('ArrowLeft') ? '' : undefined}
                 onClick={() => moveEffort(-1)}
               >
@@ -457,7 +490,7 @@ export function SessionChatModelPicker({
               <button
                 type='button'
                 aria-label='Increase effort'
-                disabled={closing || !canMoveEffort(1)}
+                disabled={closing || committing || !canMoveEffort(1)}
                 data-key-pressed={pressed.has('ArrowRight') ? '' : undefined}
                 onClick={() => moveEffort(1)}
               >
@@ -468,7 +501,7 @@ export function SessionChatModelPicker({
             <button
               type='button'
               data-key-pressed={pressed.has('Enter') ? '' : undefined}
-              disabled={closing}
+              disabled={closing || committing}
               onClick={() => finish(true)}
             >
               <kbd>↵</kbd>
@@ -477,7 +510,7 @@ export function SessionChatModelPicker({
             <button
               type='button'
               data-key-pressed={pressed.has('Escape') ? '' : undefined}
-              disabled={closing}
+              disabled={closing || committing}
               onClick={() => finish(false)}
             >
               <kbd>Esc</kbd>

@@ -7,6 +7,7 @@ use crate::*;
 
 pub(crate) struct GpuiAppModalHostWindow {
     pub(crate) current_modal: GpuiAppModalKind,
+    pub(crate) initial_window_size: Size<Pixels>,
     is_ready: bool,
     latest_sidebar_state_message: serde_json::Value,
     pending_messages: Vec<serde_json::Value>,
@@ -134,6 +135,7 @@ impl GpuiAppModalHostWindow {
             );
         })
         .ok();
+        let initial_window_size = modal.window_size_for_open(&open_message);
         let pending_messages = if uses_react_modal_host {
             vec![open_message]
         } else {
@@ -141,6 +143,7 @@ impl GpuiAppModalHostWindow {
         };
         cx.new(move |_cx| Self {
             current_modal: modal,
+            initial_window_size,
             is_ready: !uses_react_modal_host,
             latest_sidebar_state_message: sidebar_state_message,
             pending_messages,

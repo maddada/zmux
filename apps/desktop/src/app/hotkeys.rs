@@ -481,7 +481,11 @@ pub(crate) fn gpui_workarea_switch_hotkey_action_id(action_id: &str) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn gpui_keyboard_owner_allows_hotkey(owner: GpuiKeyboardOwner, action_id: &str) -> bool {
+pub(crate) fn gpui_keyboard_owner_allows_hotkey(
+    owner: GpuiKeyboardOwner,
+    action_id: &str,
+    terminal_model_picker_session: Option<TerminalSessionId>,
+) -> bool {
     /*
     CDXC:Hotkeys 2026-08-23:
     Workarea switching is shell chrome, so it is owner-independent. Only the
@@ -494,6 +498,23 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(owner: GpuiKeyboardOwner, action
     */
     if gpui_workarea_switch_hotkey_action_id(action_id) {
         return true;
+    }
+    // SEE-ALSO: session_chat_model_picker.rs owns the opt-out and supported-session scope.
+    if action_id == "openModelPicker" {
+        match owner {
+            GpuiKeyboardOwner::CompositedTerminal(GpuiEngineTerminalEventTarget::Agents(
+                session,
+            ))
+            | GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::TerminalSurface(
+                FirstResponderTerminalSurface::Agents(session)
+                | FirstResponderTerminalSurface::ProjectEditorCompanion(session),
+            )) => return terminal_model_picker_session == Some(session),
+            GpuiKeyboardOwner::CompositedTerminal(_)
+            | GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::TerminalSurface(_)) => {
+                return false;
+            }
+            _ => {}
+        }
     }
     // CDXC:Hotkeys 2026-09-05 DECISION:
     // User: Option+P must always open the focused chat's model picker, including when input focus has left the composer.

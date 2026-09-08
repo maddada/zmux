@@ -1338,7 +1338,7 @@ impl GhostexGpuiApp {
             "gpui.appModal.lifecycle",
             serde_json::json!({ "action": "open", "modal": modal.modal_id() }),
         );
-        let window_size = modal.window_size();
+        let window_size = modal.window_size_for_open(&open_message);
         let window_title = self.gpui_app_modal_window_title(modal);
         let return_focus_target = gpui_app_modal_command_return_focus_target(
             modal,
@@ -1350,10 +1350,12 @@ impl GhostexGpuiApp {
             let window_configuration_matches = handle
                 .update(cx, |host, _modal_window, _cx| {
                     host.current_modal.uses_react_modal_host() == modal.uses_react_modal_host()
+                        && (host.current_modal == GpuiAppModalKind::ModelPicker)
+                            == (modal == GpuiAppModalKind::ModelPicker)
+                        && host.current_modal.has_titlebar() == modal.has_titlebar()
                         && host.current_modal.is_resizable() == modal.is_resizable()
                         && (modal.uses_react_modal_host() || host.current_modal == modal)
-                        && (modal.is_resizable()
-                            || host.current_modal.window_size() == modal.window_size())
+                        && (modal.is_resizable() || host.initial_window_size == window_size)
                 })
                 .unwrap_or(false);
             if !window_configuration_matches {
@@ -1379,7 +1381,11 @@ impl GhostexGpuiApp {
                         cx,
                     );
                     modal_window.resize(window_size);
-                    modal_window.set_window_title(&window_title);
+                    modal_window.set_window_title(if modal.has_titlebar() {
+                        &window_title
+                    } else {
+                        ""
+                    });
                     modal_window.activate_window();
                     modal_window.refresh();
                 });
@@ -1397,7 +1403,14 @@ impl GhostexGpuiApp {
         }
 
         let mut extension_bridge_surface = None;
-        let url = if modal.uses_react_modal_host() {
+        let url = if modal == GpuiAppModalKind::ModelPicker {
+            let Ok(url) =
+                gpui_cef_html_entry_url("GHOSTEX_GPUI_MODEL_PICKER_URL", "model-picker.html")
+            else {
+                return;
+            };
+            url
+        } else if modal.uses_react_modal_host() {
             let Some(url) = app_modal_host_url().ok() else {
                 if let Some(window) = source_window {
                     window.push_notification(
@@ -1445,9 +1458,9 @@ impl GhostexGpuiApp {
             icon: gpui_platform_window_icon(),
             show: true,
             is_resizable: modal.is_resizable(),
-            window_min_size: Some(modal.window_min_size()),
+            window_min_size: Some(modal.window_min_size(&open_message)),
             display_id: self.main_window_display_id,
-            titlebar: Some(gpui::TitlebarOptions {
+            titlebar: modal.has_titlebar().then(|| gpui::TitlebarOptions {
                 title: Some(window_title.into()),
                 appears_transparent: false,
                 traffic_light_position: None,
@@ -1484,6 +1497,9 @@ impl GhostexGpuiApp {
             .is_some_and(|projects| !projects.is_empty());
         self.app_modal_window = cx
             .open_window(options, |modal_window, cx| {
+                if !modal.has_titlebar() {
+                    modal_window.set_window_title("");
+                }
                 modal_window.activate_window();
                 if modal == GpuiAppModalKind::FirstLaunchSetup && !sidebar_has_projects {
                     /*

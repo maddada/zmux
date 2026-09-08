@@ -2115,7 +2115,7 @@ impl GhostexGpuiApp {
                     return;
                 }
                 if action_id == "openModelPicker" {
-                    self.request_focused_session_chat_model_picker(cx);
+                    self.request_focused_session_model_picker(cx);
                     return;
                 }
                 if action_id == "toggleChatView" {

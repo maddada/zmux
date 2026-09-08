@@ -1,0 +1,38 @@
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #0e0e0e;
+  color: #f4f4f7;
+  font-family: system-ui, sans-serif;
+}
+#root {
+  position: relative;
+}
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+button {
+  font: inherit;
+}
+.model-picker-host-status {
+  position: absolute;
+  top: 12px;
+  left: 24px;
+  right: 24px;
+  z-index: 102;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #24242b;
+  text-align: center;
+  font-size: 13px;
+}
+.model-picker-host-status[role='alert'] {
+  color: #fda4af;
+}

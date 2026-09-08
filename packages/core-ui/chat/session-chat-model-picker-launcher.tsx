@@ -6,9 +6,10 @@ import {
   getghostexHotkeyActionIdForKey,
 } from '@/packages/shared/ghostex-hotkeys';
 import { useAgentModelCatalog } from '@/packages/shared/agent-model-catalog-store';
-import { agentModelCatalogEffortLabel } from '@/packages/shared/agent-model-catalog';
+import { createModelPickerRequest } from './session-chat-model-picker-request';
 import type { SessionChatSessionOptionPillsProps } from './session-chat-option-pills';
 import type { SessionChatOptionDispatchReceipt } from './session-chat-option-state';
+import type { SessionChatSelectionOptions } from '@/packages/shared/session-chat';
 import {
   SessionChatModelPicker,
   type ModelPickerRequest,
@@ -17,23 +18,14 @@ import {
 
 const deliveries = new Map<string, Promise<unknown>>();
 
-const SHORT_MODEL_LABELS: Record<string, string> = {
-  'gpt-6-astra': 'Astra',
-  'gpt-5.6-sol': 'Sol',
-  'gpt-5.6-terra': 'Terra',
-  'gpt-5.6-luna': 'Luna',
-  fable: 'Fable',
-  'opus[1m]': 'Opus (1m)',
-  opus: 'Opus',
-  sonnet: 'Sonnet',
-  haiku: 'Haiku',
-};
 export interface ModelPickerActions {
   open: () => void;
   select: (selection: ModelPickerSelection) => void;
+  selectOptions: (options: SessionChatSelectionOptions) => void;
 }
 interface OutboxSelection extends ModelPickerSelection {
   id: string;
+  options?: SessionChatSelectionOptions;
 }
 
 function readOutbox(key: string): OutboxSelection | null {
@@ -85,11 +77,14 @@ export function SessionChatModelPickerLauncher(
   useEffect(() => {
     if (desired) {
       if (receipt.current?.id !== desired.id) {
+        // The next intent can cover different controls; release fields it no longer owns.
+        receipt.current?.value.complete();
         receipt.current = {
           id: desired.id,
           value: props.controller.beginDispatch({
-            model: desired.model,
+            ...(desired.model ? { model: desired.model } : {}),
             ...(desired.effort ? { effort: desired.effort } : {}),
+            ...desired.options,
           }),
         };
       }
@@ -141,39 +136,14 @@ export function SessionChatModelPickerLauncher(
       if (requestRef.current || (provider !== 'codex' && provider !== 'claude')) return;
       const pane = anchor.current?.closest<HTMLElement>('.ghostex-session-chat-scope');
       if (!pane) return;
-      const agent = catalog.agents[provider];
-      const models = agent.models
-        .filter((model) => !model.group)
-        .map((model) => ({
-          value: model.value,
-          label: SHORT_MODEL_LABELS[model.value] ?? model.label,
-          version: provider === 'codex' ? model.label.replace(/\s+(Astra|Sol|Terra|Luna)$/, '') : undefined,
-          efforts: model.efforts.map((value) => ({ value, label: agentModelCatalogEffortLabel(catalog, value) })),
-          defaultEffort: model.defaultEffort ?? agent.defaultEffort,
-        }));
       const desired = latestOutbox.current ?? current.pendingModelSelection;
-      const selectedModel = desired?.model ?? current.controller.state.model?.value;
-      // Detection may not have arrived yet. The catalog default is a starting cursor, not a claim about the running agent.
-      const model =
-        models.find((entry) => entry.value === selectedModel) ??
-        models.find((entry) => entry.value === agent.models.find((model) => model.default)?.value) ??
-        models[0];
-      if (!model) return;
-      const selectedEffort = desired?.effort ?? current.controller.state.effort?.value;
-      const effort =
-        model.efforts.find((entry) => entry.value === selectedEffort)?.value ??
-        model.efforts.find((entry) => entry.value === model.defaultEffort)?.value ??
-        model.efforts[0]?.value ??
-        '';
-      const efforts = agent.efforts.map((value) => ({ value, label: agentModelCatalogEffortLabel(catalog, value) }));
-      const next: ModelPickerRequest = {
-        requestId: crypto.randomUUID(),
+      const next = createModelPickerRequest(
+        catalog,
         provider,
-        models,
-        efforts,
-        model: model.value,
-        effort,
-      };
+        desired?.model || current.controller.state.model?.value,
+        desired?.effort || current.controller.state.effort?.value
+      );
+      if (!next) return;
       delete document.documentElement.dataset.ghostexModelPickerRequested;
       openedSession.current = current.controller.sessionKey;
       requestRef.current = next;
@@ -206,18 +176,22 @@ export function SessionChatModelPickerLauncher(
       event.stopImmediatePropagation();
       toggle();
     };
+    const persist = (selection: ModelPickerSelection, options?: SessionChatSelectionOptions) => {
+      const key = `ghostex.model-selection-outbox.${latest.current.controller.sessionKey ?? ''}`;
+      const next = { ...selection, options: { ...latestOutbox.current?.options, ...options }, id: crypto.randomUUID() };
+      try {
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        // Keep the in-memory intent until the connection accepts it.
+      }
+      latestOutbox.current = next;
+      setOutbox(next);
+    };
     props.actionsRef.current = {
       open,
-      select: (selection) => {
-        const key = `ghostex.model-selection-outbox.${latest.current.controller.sessionKey ?? ''}`;
-        const next = { ...selection, id: crypto.randomUUID() };
-        try {
-          localStorage.setItem(key, JSON.stringify(next));
-        } catch {
-          // Keep the in-memory intent until the connection accepts it.
-        }
-        setOutbox(next);
-      },
+      select: (selection) => persist(selection),
+      selectOptions: (options) =>
+        persist({ model: latestOutbox.current?.model ?? '', effort: latestOutbox.current?.effort ?? '' }, options),
     };
     window.addEventListener('keydown', keydown, true);
     window.addEventListener('ghostex-open-model-picker', toggle);
@@ -241,12 +215,13 @@ export function SessionChatModelPickerLauncher(
         request?.models.find((entry) => entry.value === selection.model)?.efforts.length === 0)
     )
       return;
-    const next = { ...selection, id: crypto.randomUUID() };
+    const next = { ...selection, options: latestOutbox.current?.options, id: crypto.randomUUID() };
     try {
       localStorage.setItem(storageKey, JSON.stringify(next));
     } catch {
       // Keep the in-memory intent until the connection accepts it.
     }
+    latestOutbox.current = next;
     setOutbox(next);
   };
   return (

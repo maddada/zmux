@@ -545,6 +545,7 @@ pub(crate) struct GpuiKeyboardRouterCallbackTarget {
     pub(crate) app: gpui::WeakEntity<GhostexGpuiApp>,
     pub(crate) async_app: gpui::AsyncApp,
     pub(crate) owner: GpuiKeyboardOwner,
+    pub(crate) terminal_model_picker_session: Option<TerminalSessionId>,
     pub(crate) owner_generation: u64,
     pub(crate) window_keyboard_id: u64,
     pub(crate) pressed_keys: HashMap<u32, GpuiCapturedKeyRoute>,

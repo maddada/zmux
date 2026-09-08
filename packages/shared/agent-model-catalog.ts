@@ -268,8 +268,13 @@ function sentenceCase(text: string): string {
   return first === '' ? text : first.toUpperCase() + text.slice(1);
 }
 
+/**
+ * CDXC:SessionChat 2026-09-08 DECISION:
+ * User: every chat effort label reads Low, Medium, High, Extra High, Max, Ultracode (Claude Code), or Ultra (Codex), with capitalized words and normal-sized text.
+ * Apply the same casing to bundled, cached, and remotely refreshed catalog labels.
+ */
 export function agentModelCatalogEffortLabel(catalog: AgentModelCatalog, effort: string): string {
-  return catalog.effortLabels[effort] ?? sentenceCase(effort);
+  return (catalog.effortLabels[effort] ?? effort).split(' ').map(sentenceCase).join(' ');
 }
 
 /**

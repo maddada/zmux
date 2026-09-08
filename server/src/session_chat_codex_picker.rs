@@ -12,6 +12,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+#[path = "session_chat_selection_options.rs"]
+mod selection_options;
+
 use axum::http::StatusCode;
 use serde_json::{json, Map, Value};
 
@@ -240,10 +243,12 @@ fn changed_line_present(screen: &str, model: &str, effort: &str) -> bool {
 // Job registry the send worker's step reads
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct CodexPickerPlan {
     model: String,
     effort: String,
+    options: crate::session_chat_model_selection::SelectionOptions,
+    claude_statusline: Option<(std::path::PathBuf, String)>,
 }
 
 struct CodexPickerJob {
@@ -760,7 +765,15 @@ pub(crate) async fn run_codex_model_picker_job(
         source,
         cancelled,
     };
-    let outcome = driver.run(&plan).await;
+    let outcome = async {
+        if !plan.model.is_empty() {
+            driver.run(&plan).await?;
+        }
+        driver
+            .drive_options(&plan, SessionChatOptionAgent::Codex)
+            .await
+    }
+    .await;
     if let Err(error) = outcome.as_ref() {
         log_picker(
             LogLevel::Error,
@@ -805,7 +818,15 @@ pub(crate) async fn run_claude_model_picker_job(
         source,
         cancelled,
     };
-    let outcome = driver.drive_claude(&plan).await;
+    let outcome = async {
+        if !plan.model.is_empty() {
+            driver.drive_claude(&plan).await?;
+        }
+        driver
+            .drive_options(&plan, SessionChatOptionAgent::Claude)
+            .await
+    }
+    .await;
     if let Err(error) = outcome.as_ref() {
         log_picker(
             LogLevel::Error,
@@ -872,10 +893,8 @@ pub(crate) async fn select_session_chat_model(
 ) -> Result<Value, DomainStateError> {
     let model = read_trimmed(params, "model");
     let effort = read_trimmed(params, "effort");
-    if model.is_empty() {
-        return Err(invalid_params(
-            "selectSessionChatModel requires model and effort.",
-        ));
+    if model.is_empty() && !effort.is_empty() {
+        return Err(invalid_params("An effort change requires its model."));
     }
     let target = resolve_session_chat_send_target(state, params, "selectSessionChatModel")?;
     let agent = crate::session_chat_follower::session_chat_agent_for_session(&target.session);
@@ -886,12 +905,19 @@ pub(crate) async fn select_session_chat_model(
                 .to_string(),
         });
     }
-    crate::session_chat_model_selection::validate_selection(
+    let options = crate::session_chat_model_selection::read_options(
         agent.as_deref().unwrap_or_default(),
-        &model,
-        &effort,
+        params,
     )?;
-    if agent.as_deref() == Some("codex") && effort_row_label(&effort).is_none() {
+    if !model.is_empty() || options.is_empty() {
+        crate::session_chat_model_selection::validate_selection(
+            agent.as_deref().unwrap_or_default(),
+            &model,
+            &effort,
+        )?;
+    }
+    if !model.is_empty() && agent.as_deref() == Some("codex") && effort_row_label(&effort).is_none()
+    {
         return Err(invalid_params(format!("Unknown Codex effort {effort}.")));
     }
     if crate::presentation::effective_lifecycle_state(&target.session) != "running" {
@@ -907,6 +933,9 @@ pub(crate) async fn select_session_chat_model(
     let job_id = register_job(CodexPickerPlan {
         model: model.clone(),
         effort: effort.clone(),
+        options,
+        claude_statusline: crate::server::read_runtime_text(&target.session, "agentSessionId")
+            .map(|id| (state.paths.app_state_dir.join("agent-hooks"), id)),
     });
     let send = execute_session_chat_send(
         &target.project_id,
@@ -1014,6 +1043,7 @@ mod tests {
             let job_id = register_job(CodexPickerPlan {
                 model: model.clone(),
                 effort: effort.to_string(),
+                ..Default::default()
             });
             let send = execute_session_chat_send(
                 "effort-check",
