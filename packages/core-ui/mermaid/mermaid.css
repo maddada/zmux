@@ -98,6 +98,10 @@
   display: flex;
   flex-direction: column;
 }
+
+.app-modal-host-native-window-body[data-app-modal-fixed-window='true'] .ghostex-mermaid-modal [data-slot='dialog-close'] {
+  display: inline-flex;
+}
 .ghostex-mermaid[data-expanded='true'] > .ghostex-mermaid-toolbar {
   padding-right: 34px;
   flex-shrink: 0;

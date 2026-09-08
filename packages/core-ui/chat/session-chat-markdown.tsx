@@ -51,6 +51,8 @@ import {
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MermaidDiagram } from '../mermaid/mermaid-diagram';
+import { AppModalShell, AppModalTitle } from '../app-modal-shell';
+import { openAppModal } from '../app-modal-host-bridge';
 import { Button } from '../../components/ui/button';
 import {
   DropdownMenu,
@@ -579,7 +581,24 @@ function pinMarkdownTableColumnWidths(table: HTMLTableElement): void {
  * the source, so what lands on the clipboard is what is on screen — chips
  * included (session-chat-table-clipboard.ts).
  */
+const TablePreviewContext = createContext(false);
+
+export function SessionChatTableModal({ source, onClose }: { source: string; onClose: () => void }) {
+  return (
+    <AppModalShell isOpen onClose={onClose} width={1248} showCloseButton className='ghostex-chat-table-modal'>
+      <AppModalTitle>Table</AppModalTitle>
+      <TablePreviewContext value={true}>
+        <div className='ghostex-chat-table-modal-content'>
+          <SessionChatMarkdown markdown={source} />
+        </div>
+      </TablePreviewContext>
+    </AppModalShell>
+  );
+}
+
 function MarkdownTable({ children, node: _node, ...props }: ComponentProps<'table'> & ExtraProps) {
+  const inPreview = useContext(TablePreviewContext);
+  const [previewSource, setPreviewSource] = useState<string>();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
   const userCollapsedRef = useRef(false);
@@ -654,6 +673,23 @@ function MarkdownTable({ children, node: _node, ...props }: ComponentProps<'tabl
         </table>
       </div>
       <span aria-label='Table actions' className='ghostex-chat-markdown-table-actions' role='toolbar'>
+        {!inPreview && (
+          <AppTooltip content='Open table'>
+            <Button
+              aria-label='Open table'
+              size='icon-xs'
+              variant='ghost'
+              onClick={() => {
+                if (!tableRef.current) return;
+                const source = sessionChatTableToMarkdown(tableRef.current);
+                if ('ghostexGpui' in window) openAppModal({ modal: 'markdownTable', source, type: 'open' });
+                else setPreviewSource(source);
+              }}
+            >
+              <IconExternalLink aria-hidden='true' stroke={1.9} />
+            </Button>
+          </AppTooltip>
+        )}
         {expandable || expanded ? (
           <AppTooltip content={expandLabel}>
             <Button
@@ -683,6 +719,9 @@ function MarkdownTable({ children, node: _node, ...props }: ComponentProps<'tabl
           </DropdownMenuContent>
         </DropdownMenu>
       </span>
+      {previewSource !== undefined && (
+        <SessionChatTableModal source={previewSource} onClose={() => setPreviewSource(undefined)} />
+      )}
     </div>
   );
 }
