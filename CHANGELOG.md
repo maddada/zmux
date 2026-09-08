@@ -13,7 +13,7 @@
   - Drag a project or a group onto a Space to move it there, and drag the Spaces themselves to reorder them.
   - Codex sessions now report their token use, limit windows, credits, and request timing, and you choose which of those rows to show and in what order.
   - Choose whether web pages in Ghostex's browser follow your system appearance or stay light or dark.
-  - Go back and forward in the browser with a two-finger swipe on the trackpad.
+  - Swipe with two fingers on the trackpad to move Back and Forward through the sessions and views you visited.
   - Open a table from a chat message full screen.
 
 - Major Improvements
