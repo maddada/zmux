@@ -1,3 +1,10 @@
+import { SearchableDropdownContent } from '../components/ui/searchable-dropdown';
+import {
+  deleteSentSessionChatMessage,
+  listSentSessionChatMessages,
+  recordDeliveredSessionChatDrafts,
+  subscribeSentSessionChatMessages,
+} from './chat/session-chat-sent-history';
 import {
   IconArrowUpRight,
   IconCheck,
@@ -239,7 +246,7 @@ function groupStashedPromptsByDay(prompts: readonly GxserverStashedPrompt[]): St
  * carry this prefix, which no gxserver prompt id can collide with because the
  * daemon mints UUIDs.
  */
-type StashedPromptsView = 'recovered' | 'saved';
+type StashedPromptsView = 'recovered' | 'saved' | 'sent';
 
 const RECOVERED_PROMPT_ID_PREFIX = 'recovered:';
 
@@ -277,6 +284,7 @@ export function StashedPromptsModal({
   const [prompts, setPrompts] = useState<GxserverStashedPrompt[]>();
   const [tags, setTags] = useState<GxserverStashedPromptTag[]>([]);
   const [view, setView] = useState<StashedPromptsView>('saved');
+  const [sentMessages, setSentMessages] = useState<GxserverStashedPrompt[]>([]);
   const [recoveredDrafts, setRecoveredDrafts] = useState<RecoveredSessionChatDraft[]>([]);
   const [scope, setScope] = useState<StashedPromptsScope>(initialScope ?? 'all');
   const [scopeProjectId, setScopeProjectId] = useState<string>();
@@ -407,6 +415,13 @@ export function StashedPromptsModal({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const refresh = (): void => setSentMessages(listSentSessionChatMessages());
+    refresh();
+    return subscribeSentSessionChatMessages(refresh);
+  }, [isOpen]);
+
   /*
    * CDXC:Drafts 2026-08-28:
    * Enumerating localStorage is synchronous and also runs the retention pass
@@ -506,6 +521,7 @@ export function StashedPromptsModal({
         return;
       }
       setPrompts(event.data.prompts);
+      recordDeliveredSessionChatDrafts(event.data.deliveredDrafts ?? []);
       setTags(event.data.tags ?? []);
     };
     window.addEventListener('message', handleMessage);
@@ -533,6 +549,12 @@ export function StashedPromptsModal({
     }, 0);
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') {
+        return;
+      }
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[data-slot=popover-content], [data-slot=select-content]')
+      ) {
         return;
       }
       event.preventDefault();
@@ -616,8 +638,16 @@ export function StashedPromptsModal({
     () => recoveredDrafts.map((draft) => recoveredDraftAsPrompt(draft, projectNamesById)),
     [projectNamesById, recoveredDrafts]
   );
-  const activePrompts = view === 'recovered' ? recoveredPrompts : prompts;
-  const isListReady = view === 'recovered' || prompts !== undefined;
+  const sentPrompts = useMemo(
+    () =>
+      sentMessages.map((message) => ({
+        ...message,
+        projectName: (message.projectId && projectNamesById.get(message.projectId)) || null,
+      })),
+    [projectNamesById, sentMessages]
+  );
+  const activePrompts = view === 'sent' ? sentPrompts : view === 'recovered' ? recoveredPrompts : prompts;
+  const isListReady = view !== 'saved' || prompts !== undefined;
 
   const searchedPrompts = useMemo(() => {
     if (!activePrompts) {
@@ -647,8 +677,8 @@ export function StashedPromptsModal({
   }, [effectiveScope, scopeProjectId, searchedPrompts, sessionContext]);
 
   const visiblePrompts = useMemo(() => {
-    // Recovered drafts carry no tags, so the tag filter only narrows Saved.
-    if (view === 'recovered' || tagFilter.kind === 'all') {
+    // Only saved prompts carry tags.
+    if (view !== 'saved' || tagFilter.kind === 'all') {
       return scopedPrompts;
     }
     if (tagFilter.kind === 'untagged') {
@@ -950,7 +980,12 @@ export function StashedPromptsModal({
                 {!editingPromptId ? (
                   <Field>
                     <FieldLabel className='sr-only'>Project</FieldLabel>
-                    <Select value={draftProjectId} onValueChange={setDraftProjectId}>
+                    <Select
+                      searchable
+                      searchPlaceholder='Filter projects...'
+                      value={draftProjectId}
+                      onValueChange={setDraftProjectId}
+                    >
                       <SelectTrigger aria-label='Project for saved prompt' size='sm'>
                         <SelectValue />
                       </SelectTrigger>
@@ -1039,7 +1074,13 @@ export function StashedPromptsModal({
                   event.stopPropagation();
                   onClose();
                 }}
-                placeholder={view === 'recovered' ? 'Search recovered drafts...' : 'Search saved prompts...'}
+                placeholder={
+                  view === 'sent'
+                    ? 'Search sent messages...'
+                    : view === 'recovered'
+                      ? 'Search recovered drafts...'
+                      : 'Search saved prompts...'
+                }
                 value={searchQuery}
                 onValueChange={setSearchQuery}
               />
@@ -1047,6 +1088,11 @@ export function StashedPromptsModal({
                 view={view}
                 onViewChange={(nextView) => {
                   setView(nextView);
+                  if (nextView === 'sent') {
+                    hasResolvedDefaultScopeRef.current = true;
+                    setScope('all');
+                    setSentMessages(listSentSessionChatMessages());
+                  }
                   if (nextView === 'recovered') {
                     setRecoveredDrafts(listRecoveredSessionChatDrafts());
                   }
@@ -1097,21 +1143,23 @@ export function StashedPromptsModal({
               <CommandList className='ghostex-command-palette-list ghostex-stashed-prompts-list' ref={promptListRef}>
                 {isListReady && visiblePrompts.length === 0 ? (
                   <CommandEmpty>
-                    {view === 'recovered'
-                      ? effectiveScope === 'session'
-                        ? 'No recovered drafts came from this session.'
-                        : effectiveScope === 'project'
-                          ? 'No recovered drafts came from this project.'
-                          : 'No recovered drafts. Unsent composer text from the last 5 days shows up here.'
-                      : tagFilter.kind === 'tag'
-                        ? 'No saved prompts carry this tag yet.'
-                        : tagFilter.kind === 'untagged'
-                          ? 'Every saved prompt here already carries a tag.'
-                          : effectiveScope === 'session'
-                            ? 'No saved prompts came from this session.'
-                            : effectiveScope === 'project'
-                              ? 'No saved prompts came from this project.'
-                              : 'No saved prompts match this search.'}
+                    {view === 'sent'
+                      ? 'No sent messages match. The last 50 messages you send appear here.'
+                      : view === 'recovered'
+                        ? effectiveScope === 'session'
+                          ? 'No recovered drafts came from this session.'
+                          : effectiveScope === 'project'
+                            ? 'No recovered drafts came from this project.'
+                            : 'No recovered drafts. Unsent composer text from the last 5 days shows up here.'
+                        : tagFilter.kind === 'tag'
+                          ? 'No saved prompts carry this tag yet.'
+                          : tagFilter.kind === 'untagged'
+                            ? 'Every saved prompt here already carries a tag.'
+                            : effectiveScope === 'session'
+                              ? 'No saved prompts came from this session.'
+                              : effectiveScope === 'project'
+                                ? 'No saved prompts came from this project.'
+                                : 'No saved prompts match this search.'}
                   </CommandEmpty>
                 ) : null}
                 {!isListReady || visiblePrompts.length > 0 ? (
@@ -1124,11 +1172,13 @@ export function StashedPromptsModal({
                           <div className='previous-sessions-day-label'>{group.dayLabel}</div>
                           <div className='ghostex-stashed-prompt-day-list'>
                             {group.prompts.map((prompt) =>
-                              view === 'recovered' ? (
+                              view !== 'saved' ? (
                                 <RecoveredDraftRow
+                                  kind={view === 'sent' ? 'message' : 'draft'}
                                   key={prompt.promptId}
                                   onDelete={() => {
-                                    deleteRecoveredDraft(prompt);
+                                    if (view === 'sent') deleteSentSessionChatMessage(prompt.promptId);
+                                    else deleteRecoveredDraft(prompt);
                                   }}
                                   onJumpToSession={() => {
                                     jumpToPromptSession(prompt);
@@ -1285,7 +1335,7 @@ function StashedPromptFiltersToolbar({
         the tag vocabulary and Add Prompt do not apply there and step aside.
       */}
       <SegmentedControl
-        aria-label='Switch between saved prompts and recovered drafts'
+        aria-label='Switch between saved prompts, recovered drafts, and sent messages'
         size='sm'
         value={view}
         onValueChange={(nextValue) => {
@@ -1294,8 +1344,15 @@ function StashedPromptFiltersToolbar({
       >
         <SegmentedControlItem value='saved'>Saved</SegmentedControlItem>
         <SegmentedControlItem value='recovered'>Recovered</SegmentedControlItem>
+        {/* CDXC:SavedPrompts 2026-09-08 DECISION: User: Sent is the third tab after Saved and Recovered; shorten Add Prompt to Add and keep its plus icon. */}
+        <SegmentedControlItem value='sent'>Sent</SegmentedControlItem>
       </SegmentedControl>
-      <Select value={selectedProjectFilter} onValueChange={onProjectFilterChange}>
+      <Select
+        searchable
+        searchPlaceholder='Filter projects...'
+        value={selectedProjectFilter}
+        onValueChange={onProjectFilterChange}
+      >
         <SelectTrigger
           aria-label='Filter saved prompts by project'
           className='ghostex-stashed-prompt-project-filter'
@@ -1318,6 +1375,8 @@ function StashedPromptFiltersToolbar({
       {view === 'saved' ? (
         <>
           <Select
+            searchable
+            searchPlaceholder='Filter tags...'
             value={tagFilterValue(tagFilter)}
             onValueChange={(value) => {
               if (value === ALL_TAGS_VALUE) {
@@ -1407,7 +1466,7 @@ function StashedPromptFiltersToolbar({
             variant='outline'
           >
             <IconPlus aria-hidden='true' data-icon='inline-start' />
-            Add Prompt
+            Add
           </Button>
         </>
       ) : null}
@@ -1673,40 +1732,38 @@ function StashedPromptRow({
                   </button>
                 }
               />
-              <PopoverContent
+              <SearchableDropdownContent
                 align='end'
                 className='ghostex-stashed-prompt-tag-popover'
                 onKeyDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
                 sideOffset={6}
               >
-                <div className='ghostex-stashed-prompt-tag-popover-title'>Tags</div>
-                <div className='ghostex-stashed-prompt-tag-menu-list'>
-                  {tags
-                    .filter((tag) => tag.tagId !== GXSERVER_FAVORITE_PROMPT_TAG_ID)
-                    .map((tag) => (
-                      <button
-                        className='ghostex-stashed-prompt-tag-menu-item'
-                        data-active={String(tagIds.includes(tag.tagId))}
-                        key={tag.tagId}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onToggleTag(tag.tagId);
-                        }}
-                        style={{ '--ghostex-tag-color': tag.color } as React.CSSProperties}
-                        type='button'
-                      >
-                        <span aria-hidden='true' className='ghostex-stashed-prompt-tag-dot' />
-                        <span className='ghostex-stashed-prompt-tag-menu-name'>{tag.name}</span>
-                        <IconCheck
-                          aria-hidden='true'
-                          className='ghostex-stashed-prompt-tag-menu-check'
-                          size={13}
-                          stroke={2.4}
-                        />
-                      </button>
-                    ))}
-                </div>
+                <Command>
+                  <CommandInput autoFocus placeholder='Filter tags...' aria-label='Filter tags' clearOnEscape={false} />
+                  <CommandList aria-multiselectable>
+                    <CommandEmpty>No tags found.</CommandEmpty>
+                    {tags
+                      .filter((tag) => tag.tagId !== GXSERVER_FAVORITE_PROMPT_TAG_ID)
+                      .map((tag) => (
+                        <CommandItem
+                          className='ghostex-stashed-prompt-tag-menu-item'
+                          data-checked={tagIds.includes(tag.tagId)}
+                          aria-selected={tagIds.includes(tag.tagId)}
+                          value={tag.tagId}
+                          keywords={[tag.name]}
+                          key={tag.tagId}
+                          onSelect={() => {
+                            onToggleTag(tag.tagId);
+                          }}
+                          style={{ '--ghostex-tag-color': tag.color } as React.CSSProperties}
+                        >
+                          <span aria-hidden='true' className='ghostex-stashed-prompt-tag-dot' />
+                          <span className='ghostex-stashed-prompt-tag-menu-name'>{tag.name}</span>
+                        </CommandItem>
+                      ))}
+                  </CommandList>
+                </Command>
                 <Popover open={isCreatingTag} onOpenChange={onCreateTagOpenChange}>
                   <PopoverTrigger
                     render={
@@ -1725,7 +1782,7 @@ function StashedPromptRow({
                     onNameChange={onCreateTagNameChange}
                   />
                 </Popover>
-              </PopoverContent>
+              </SearchableDropdownContent>
             </Popover>
             <button
               aria-label='Copy prompt'
@@ -1809,6 +1866,7 @@ function StashedPromptRow({
 }
 
 type RecoveredDraftRowProps = {
+  kind: 'draft' | 'message';
   onDelete: () => void;
   onJumpToSession: () => void;
   onSaveToLibrary: () => void;
@@ -1823,7 +1881,14 @@ type RecoveredDraftRowProps = {
  * recovery vocabulary instead: insert (row select), jump to the origin
  * session, promote into the saved library, copy, or discard the draft.
  */
-function RecoveredDraftRow({ onDelete, onJumpToSession, onSaveToLibrary, onSelect, prompt }: RecoveredDraftRowProps) {
+function RecoveredDraftRow({
+  kind,
+  onDelete,
+  onJumpToSession,
+  onSaveToLibrary,
+  onSelect,
+  prompt,
+}: RecoveredDraftRowProps) {
   const lines = prompt.content.trim().split('\n');
   const tooltipLines = lines.slice(0, TOOLTIP_LINE_COUNT);
   const tooltipTruncated = lines.length > TOOLTIP_LINE_COUNT;
@@ -1881,7 +1946,7 @@ function RecoveredDraftRow({ onDelete, onJumpToSession, onSaveToLibrary, onSelec
               </button>
             </AppTooltip>
             <button
-              aria-label='Copy draft'
+              aria-label={`Copy ${kind}`}
               className='ghostex-stashed-prompt-action copy-cursor'
               onClick={(event) => {
                 event.preventDefault();
@@ -1893,7 +1958,7 @@ function RecoveredDraftRow({ onDelete, onJumpToSession, onSaveToLibrary, onSelec
               <IconCopy aria-hidden='true' size={14} stroke={1.9} />
             </button>
             <button
-              aria-label='Delete draft'
+              aria-label={`Delete ${kind}`}
               className='ghostex-stashed-prompt-action'
               onClick={(event) => {
                 event.preventDefault();

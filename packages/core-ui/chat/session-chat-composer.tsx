@@ -25,7 +25,7 @@ import './session-chat-composer-focus.css';
 // `.ghostex-chat-composer-maximized` in packages/core-ui/styles/chat.css) so long
 // prompts can be edited without scrolling a 160px-tall input. The field keeps
 // its place in the React tree while maximized — only its box changes — so the
-// monaco instance, caret, undo stack and pending attachments all survive the
+// editor instance, caret, undo stack and pending attachments all survive the
 // toggle.
 
 import {
@@ -72,11 +72,12 @@ import { SessionChatSendBlockedToaster, showSessionChatSendBlockedToast } from '
 import { AppTooltip } from '../app-tooltip';
 import {
   EMPTY_SESSION_CHAT_COMPOSER_HISTORY,
-  pushSessionChatComposerHistory,
+  type SessionChatComposerHistory,
   recallNextSessionChatDraft,
   recallPreviousSessionChatDraft,
   resetSessionChatComposerHistoryIndex,
 } from './session-chat-composer-state';
+import { listSentSessionChatMessages, recordSentSessionChatMessage } from './session-chat-sent-history';
 import {
   clearStoredSessionChatDraftIfUnchanged,
   nextSessionChatDraftVersion,
@@ -100,7 +101,7 @@ import {
   sessionChatFileDirectory,
   sessionChatFileMention,
 } from './session-chat-composer-trigger';
-import { SessionChatMonacoInput } from './session-chat-monaco-input';
+import { SessionChatLexicalInput } from './session-chat-lexical-input';
 import { SessionChatPlainInput } from './session-chat-plain-input';
 import { sessionChatImageTargetForHref, useSessionChatImageViewer } from './session-chat-image-viewer';
 import { SessionChatAgentFleetStrip } from './session-chat-agent-fleet-strip';
@@ -172,8 +173,7 @@ export interface SessionChatComposerHandle {
 
 /**
  * Backend-neutral key event: the textarea path adapts React's KeyboardEvent,
- * the Monaco path adapts monaco's IKeyboardEvent (whose preventDefault also
- * stops monaco's own handling of the key).
+ * the Lexical path adapts the native key event before the editor handles it.
  */
 export interface SessionChatComposerKeyEvent {
   altKey: boolean;
@@ -369,14 +369,9 @@ export interface SessionChatComposerProps {
    * option catalog pass nothing.
    */
   optionPills?: ReactNode;
-  /**
-   * Base URL of monaco-editor's min/vs directory on this surface. When set,
-   * the input is a Monaco editor (editing hotkeys work); when omitted (the
-   * mobile single-file bundle, where Monaco's sibling assets are
-   * unreachable), the plain textarea renders instead.
-   */
-  monacoVsBaseUrl?: string;
-  /** Palette used by the chat-owned Monaco prompt input. */
+  /** Desktop and web use the bundled Lexical input; mobile keeps its plain input. */
+  inputBackend?: 'lexical' | 'plain';
+  /** Palette used by the chat-owned prompt input. */
   theme?: SessionChatTheme;
   /*
   CDXC:SessionChat 2026-08-21:
@@ -569,7 +564,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       hostActions,
       renderAccountMenu,
       isWorking,
-      monacoVsBaseUrl,
+      inputBackend,
       nativeContextMenu = false,
       onAttachFile,
       onDelayedActions,
@@ -622,7 +617,12 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       draftVersionRef.current = version;
       return writeStoredSessionChatDraft(sessionKey, text, undefined, version, submitted);
     };
-    const [history, setHistory] = useState(EMPTY_SESSION_CHAT_COMPOSER_HISTORY);
+    const historyRef = useRef(EMPTY_SESSION_CHAT_COMPOSER_HISTORY);
+    const setHistory = (
+      next: SessionChatComposerHistory | ((current: SessionChatComposerHistory) => SessionChatComposerHistory)
+    ): void => {
+      historyRef.current = typeof next === 'function' ? next(historyRef.current) : next;
+    };
     const [slashDismissed, setSlashDismissed] = useState(false);
     const [slashIndex, setSlashIndex] = useState(0);
     const [skillDismissed, setSkillDismissed] = useState(false);
@@ -643,7 +643,6 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       pendingImagePastesRef.current += delta;
       setPendingImagePastes(pendingImagePastesRef.current);
     };
-    const [monacoFailed, setMonacoFailed] = useState(false);
     const [maximized, setMaximized] = useState(false);
     const [sendError, setSendError] = useState<string | null>(null);
     /**
@@ -671,7 +670,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const previewLoadsRef = useRef(new Set<string>());
     const draftRef = useRef(draft);
     draftRef.current = draft;
-    const monacoApiRef = useRef<SessionChatComposerInputApi | null>(null);
+    const lexicalApiRef = useRef<SessionChatComposerInputApi | null>(null);
     const plainApiRef = useRef<SessionChatComposerInputApi | null>(null);
     const pendingFocusRef = useRef(false);
     const pendingInsertTextRef = useRef('');
@@ -684,7 +683,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const longPressFiredRef = useRef(false);
     const stopButtonCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const useMonaco = monacoVsBaseUrl !== undefined && !monacoFailed;
+    const useLexical = inputBackend === 'lexical';
     const diagnosticLogRef = useRef(diagnosticLog);
     diagnosticLogRef.current = diagnosticLog;
     const draftTracePageId = useRef(`draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -849,15 +848,13 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       setFileIndex(0);
     };
 
-    // Resolved lazily: the Monaco backend registers its api into a ref after
-    // an async load, without a re-render, so a render-scoped const would go
-    // stale between load and the next state change.
+    // Read the ref at use time: the child registers its API after rendering.
     const getInputApi = (): SessionChatComposerInputApi | null =>
-      useMonaco ? monacoApiRef.current : plainApiRef.current;
+      useLexical ? lexicalApiRef.current : plainApiRef.current;
 
     useEffect(() => {
       const plainApi = plainApiRef.current;
-      if (!useMonaco && plainApi) {
+      if (!useLexical && plainApi) {
         if (pendingInsertTextRef.current) {
           const pending = pendingInsertTextRef.current;
           pendingInsertTextRef.current = '';
@@ -873,7 +870,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           plainApi.focus();
         }
       }
-    }, [useMonaco]);
+    }, [useLexical]);
 
     /**
      * CDXC:SessionChat 2026-09-05 WHY:
@@ -970,7 +967,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         expandComposer();
         const input = getInputApi();
         if (!input) {
-          // Monaco loads asynchronously. Preserve the host's one-shot focus
+          // The child input may not have mounted yet. Preserve the host's one-shot focus
           // handoff until the real editor API exists instead of dropping it.
           pendingFocusRef.current = true;
           return;
@@ -1157,7 +1154,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           });
           clearStoredSessionChatDraftIfUnchanged(sessionKey, submittedDraft);
           traceDraft('localClearSettled');
-          setHistory((value) => pushSessionChatComposerHistory(value, text));
+          recordSentSessionChatMessage(text, sessionKey);
         })
         .catch((error: unknown) => {
           traceDraft('deliveryRejected', {
@@ -1185,7 +1182,9 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           const code = gxserverRpcErrorCode(error);
           setSendErrorCode(code);
           setSendError(
-            code === 'composerNotReady' && error instanceof Error && error.message !== ''
+            (code === 'composerNotReady' || code === 'composerNotCleared') &&
+              error instanceof Error &&
+              error.message !== ''
               ? error.message
               : 'Message could not be sent. Your draft was restored.'
           );
@@ -1254,6 +1253,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
             await draftSync.push(stored, submittedDraft.version);
           }
           await controller.queuePrompt(text, submittedDraft.version);
+          recordSentSessionChatMessage(text, sessionKey);
           clearStoredSessionChatDraftIfUnchanged(sessionKey, submittedDraft);
         } catch {
           restoreComposerText(text);
@@ -1489,19 +1489,25 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         syncedDraft.version?.draftId === stored.version.draftId &&
         (syncedDraft.version.revision > stored.version.revision ||
           (syncedDraft.version.revision === stored.version.revision && syncedDraft.content !== composerText));
-      if ((retired || staleBase) && composerTouchedRef.current) {
+      if (!retired && staleBase && composerTouchedRef.current) {
         // An edit made before recovery finished must survive under a new
-        // identity when its old base has already advanced or been consumed.
+        // identity when its old base has already advanced.
         draftVersionRef.current = undefined;
         persistComposerDraft(composerText);
         pushDraftRef.current();
         return;
       }
       const recovered =
-        !composerTouchedRef.current && (retired || syncedDraft.originClientId === draftClientId)
+        retired || (!composerTouchedRef.current && syncedDraft.originClientId === draftClientId)
           ? recoverSessionChatDraft(stored, syncedDraft)
           : null;
       if (recovered) {
+        // CDXC:DelayedSend 2026-09-08 WHY:
+        // A server delivery retires the exact revision even in a touched composer; rebasing it would resurrect the sent message.
+        // A newer local revision is not retired and remains editable.
+        composerTouchedRef.current = false;
+        setIncomingDraft(null);
+        setHistory((value) => resetSessionChatComposerHistoryIndex(value));
         traceDraft('versionRecovery', { localVersion: stored?.version, incomingVersion: syncedDraft.version, retired });
         lastHandledDraftAtRef.current = syncedDraft.updatedAt;
         lastPushedDraftRef.current = recovered.text;
@@ -1885,7 +1891,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const pasteFromContextMenu = (): void => {
       if (hostActions?.onPasteIntoComposer) {
         // Radix restores focus to the context-menu trigger as it closes. Wait
-        // until that completes, then put Monaco's textarea back in charge
+        // until that completes, then focus the editor
         // before the native CEF paste command delivers the real paste event.
         pendingComposerOperationsRef.current += 1;
         window.setTimeout(() => {
@@ -2046,10 +2052,25 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       getInputApi()?.focus();
     };
 
+    /**
+     * CDXC:SessionChat 2026-09-08 DECISION:
+     * User: Up from an empty composer walks all sessions' sent messages one at a time until the user moves the caret; returning to the first line must not resume history navigation.
+     */
+    const handleCaretChange = (nextCaret: number): void => {
+      setCaret(nextCaret);
+      const selection = getInputApi()?.getSelection();
+      if (
+        historyRef.current.index !== null &&
+        (nextCaret !== draftRef.current.length || (selection && selection.start !== selection.end))
+      ) {
+        setHistory(resetSessionChatComposerHistoryIndex);
+      }
+    };
+
     const handleKeyDown = (event: SessionChatComposerKeyEvent): void => {
       // IME guard: composition Enter confirms the composition; letting it fall
       // through would submit a partial draft. (The textarea wrapper additionally
-      // preventDefaults composition Enter; Monaco manages its own IME.)
+      // preventDefaults composition Enter; Lexical manages its own IME.)
       if (event.isComposing) {
         return;
       }
@@ -2061,7 +2082,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     handlers above have declined it, so completing a slash command, a $skill or
     an @file still wins — that is the whole reason this sits below them and not
     in its own branch further up. Modified Tab (Shift/Cmd/Ctrl/Alt) is left to
-    the platform so focus traversal and Monaco's own bindings survive; the
+    the platform so focus traversal and the editor's own bindings survive; the
     accepted cost of taking plain Tab is losing tab-indent in the composer.
     */
       if (
@@ -2112,11 +2133,26 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           return;
         }
       }
-      if (event.key === 'ArrowUp' && (draft === '' || history.index !== null)) {
-        const recalled = recallPreviousSessionChatDraft(history);
+      const history = historyRef.current;
+      const canRecall =
+        !event.metaKey && !event.ctrlKey && !event.shiftKey && (!event.altKey || draftRef.current.trim() === '');
+      if (canRecall && event.key === 'ArrowUp' && (draftRef.current.trim() === '' || history.index !== null)) {
+        const recalled = recallPreviousSessionChatDraft(
+          history.index === null
+            ? {
+                entries: listSentSessionChatMessages()
+                  .map((message) => message.content)
+                  .reverse(),
+                index: null,
+              }
+            : history
+        );
         if (recalled) {
           event.preventDefault();
           setHistory(recalled.history);
+          setSlashDismissed(true);
+          setSkillDismissed(true);
+          setFileDismissed(true);
           composerTouchedRef.current = true;
           persistComposerDraft(recalled.draft);
           draftRef.current = recalled.draft;
@@ -2126,11 +2162,14 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         }
         return;
       }
-      if (event.key === 'ArrowDown' && history.index !== null) {
+      if (canRecall && event.key === 'ArrowDown' && history.index !== null) {
         const recalled = recallNextSessionChatDraft(history);
         if (recalled) {
           event.preventDefault();
           setHistory(recalled.history);
+          setSlashDismissed(true);
+          setSkillDismissed(true);
+          setFileDismissed(true);
           composerTouchedRef.current = true;
           persistComposerDraft(recalled.draft);
           draftRef.current = recalled.draft;
@@ -2152,22 +2191,18 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const inputPlaceholder =
       placeholder ?? (sendOnEnter ? DESKTOP_SESSION_CHAT_PLACEHOLDER : MOBILE_SESSION_CHAT_PLACEHOLDER);
     const visiblePlaceholder = collapsed ? inputPlaceholder.replace(/\s*\n\s*/g, ' ') : inputPlaceholder;
-    const composerInput = useMonaco ? (
-      <SessionChatMonacoInput
+    const composerInput = useLexical ? (
+      <SessionChatLexicalInput
         collapsed={collapsed}
         fillHeight={maximized}
         initialValue={draft}
-        onCaretChange={setCaret}
+        onCaretChange={handleCaretChange}
         onChange={updateDraft}
         onKeyDown={handleKeyDown}
-        onLoadFailed={(error) => {
-          console.error('[session-chat] Monaco failed to load; using the plain input.', error);
-          setMonacoFailed(true);
-        }}
         onPasteData={processClipboardData}
         placeholder={visiblePlaceholder}
         registerApi={(api) => {
-          monacoApiRef.current = api;
+          lexicalApiRef.current = api;
           if (api && pendingInsertTextRef.current) {
             const pending = pendingInsertTextRef.current;
             pendingInsertTextRef.current = '';
@@ -2184,13 +2219,12 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           }
         }}
         theme={theme}
-        vsBaseUrl={monacoVsBaseUrl ?? ''}
       />
     ) : (
       <SessionChatPlainInput
         initialValue={draft}
         invalid={sendError !== null}
-        onCaretChange={setCaret}
+        onCaretChange={handleCaretChange}
         onChange={updateDraft}
         onKeyDown={(event) => {
           const adapted = reactKeyEventAdapter(event);
@@ -2454,7 +2488,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                   <div className='relative' key={image.id}>
                     <button
                       aria-label='View pasted image'
-                      className='block cursor-zoom-in rounded-lg'
+                      className='block rounded-lg'
                       disabled={!imageViewer}
                       onClick={() =>
                         imageViewer?.open({
