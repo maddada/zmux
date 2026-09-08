@@ -94,7 +94,14 @@ function SearchableSelectStory() {
         onFavoriteChange={setFavorite}
         selectedTagId={tag}
         onTagChange={setTag}
-        tags={projects.map((name, i) => ({ tagId: `tag-${i}`, name, color: '#8ba7e8', isBuiltin: false }))}
+        tags={projects.map((name, i) => ({
+          tagId: `tag-${i}`,
+          name,
+          color: '#8ba7e8',
+          isBuiltin: false,
+          createdAt: '2026-09-08T00:00:00.000Z',
+          updatedAt: '2026-09-08T00:00:00.000Z',
+        }))}
       />
     </div>
   );
