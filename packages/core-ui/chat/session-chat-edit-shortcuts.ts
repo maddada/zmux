@@ -2,7 +2,44 @@ import { detectghostexHotkeyPlatform } from '@/packages/shared/ghostex-hotkeys';
 import type { SessionChatComposerKeyEvent } from './session-chat-composer';
 
 export type SessionChatTextEditCommand =
-  'undo' | 'redo' | 'deleteAllLeft' | 'deleteAllRight' | 'deleteWordLeft' | 'deleteWordRight';
+  | 'undo'
+  | 'redo'
+  | 'deleteAllLeft'
+  | 'deleteAllRight'
+  | 'deleteWordLeft'
+  | 'deleteWordRight'
+  | 'killLineLeft'
+  | 'killLineRight'
+  | 'yank'
+  | 'lineStart'
+  | 'lineEnd';
+
+/**
+ * CDXC:SessionChat 2026-09-08 DECISION:
+ * User: Ctrl+U, Ctrl+K, Ctrl+Y, Ctrl+E, and Ctrl+A behave like the terminal in the chat input.
+ * Use logical line boundaries, retain killed text for yank, and keep Cmd+A as select-all.
+ */
+export function sessionChatTerminalShortcut(event: SessionChatComposerKeyEvent): SessionChatTextEditCommand | null {
+  if (event.isComposing || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null;
+  switch (event.key.toLowerCase()) {
+    case 'u':
+      return 'killLineLeft';
+    case 'k':
+      return 'killLineRight';
+    case 'y':
+      return 'yank';
+    case 'a':
+      return 'lineStart';
+    case 'e':
+      return 'lineEnd';
+    default:
+      return null;
+  }
+}
+
+export function sessionChatBreaksKillSequence(event: SessionChatComposerKeyEvent): boolean {
+  return !['Control', 'Shift', 'Alt', 'Meta', 'CapsLock'].includes(event.key) && !sessionChatTerminalShortcut(event);
+}
 
 type SessionChatEditingShortcut = SessionChatTextEditCommand | 'selectAll' | 'copy' | 'cut' | 'paste';
 
@@ -13,6 +50,8 @@ type SessionChatEditingShortcut = SessionChatTextEditCommand | 'selectAll' | 'co
  */
 export function sessionChatEditingShortcut(event: SessionChatComposerKeyEvent): SessionChatEditingShortcut | null {
   if (event.isComposing) return null;
+  const terminal = sessionChatTerminalShortcut(event);
+  if (terminal) return terminal;
   const mac = detectghostexHotkeyPlatform() === 'mac';
   const primary = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
   if ((event.key === 'Backspace' || event.key === 'Delete') && !event.shiftKey) {

@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ClipboardEvent, type FormEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import type { SessionChatComposerInputApi } from './session-chat-composer';
+import { sessionChatBreaksKillSequence, sessionChatTerminalShortcut } from './session-chat-edit-shortcuts';
+import { createSessionChatTerminalEditing } from './session-chat-terminal-editing';
 import {
   SESSION_CHAT_REFERENCE_REVEAL_MARKER,
   sessionChatComposerReferences,
@@ -158,6 +160,7 @@ export function SessionChatPlainInput({
   const valueRef = useRef(initialValue);
   const selectionRef = useRef({ end: initialValue.length, focus: initialValue.length, start: initialValue.length });
   const composingRef = useRef(false);
+  const terminalEditingRef = useRef<ReturnType<typeof createSessionChatTerminalEditing> | null>(null);
   const registerApiRef = useRef(registerApi);
   registerApiRef.current = registerApi;
   const callbacksRef = useRef({ onCaretChange, onChange, onPasteData });
@@ -181,6 +184,7 @@ export function SessionChatPlainInput({
   };
 
   const applyValue = (next: string, caret: number): void => {
+    terminalEditingRef.current?.breakSequence();
     const editor = editorRef.current;
     valueRef.current = next;
     if (!editor) {
@@ -198,6 +202,7 @@ export function SessionChatPlainInput({
   };
 
   const insertText = (text: string): boolean => {
+    terminalEditingRef.current?.breakSequence();
     const editor = editorRef.current;
     if (!editor) {
       return false;
@@ -253,6 +258,8 @@ export function SessionChatPlainInput({
       insertSavedPrompt: insertText,
       insertText,
       editText: (command) => {
+        focus();
+        if (terminalEditingRef.current?.run(command)) return;
         if (command === 'undo' || command === 'redo') {
           document.execCommand(command);
           return;
@@ -270,6 +277,7 @@ export function SessionChatPlainInput({
         document.execCommand(backward ? 'delete' : 'forwardDelete');
       },
       navigateCaret: ({ direction, select, unit }) => {
+        terminalEditingRef.current?.breakSequence();
         const selection = window.getSelection();
         if (!selection) return;
         const granularity = {
@@ -288,6 +296,7 @@ export function SessionChatPlainInput({
         callbacksRef.current.onCaretChange(readSelection().focus);
       },
       selectAll: () => {
+        terminalEditingRef.current?.breakSequence();
         const editor = editorRef.current;
         if (!editor) {
           return;
@@ -298,8 +307,24 @@ export function SessionChatPlainInput({
         callbacksRef.current.onCaretChange(canonicalEditorText(editor).length);
       },
     };
+    terminalEditingRef.current = createSessionChatTerminalEditing({
+      getValue: api.getValue,
+      getSelection: readSelection,
+      setSelection: (start, end = start) => {
+        focus();
+        const editor = editorRef.current;
+        if (!editor) return;
+        setEditorSelection(editor, start, end);
+        selectionRef.current = { start, end, focus: end };
+        callbacksRef.current.onCaretChange(end);
+      },
+      insertText,
+    });
     registerApiRef.current(api);
-    return () => registerApiRef.current(null);
+    return () => {
+      terminalEditingRef.current = null;
+      registerApiRef.current(null);
+    };
   }, []);
 
   useEffect(() => {
@@ -413,7 +438,16 @@ export function SessionChatPlainInput({
       onCut={(event) => copySelection(event, true)}
       onDoubleClick={revealReferenceSource}
       onInput={synchronizeInput}
-      onKeyDown={onKeyDown}
+      onPointerDown={() => terminalEditingRef.current?.breakSequence()}
+      onKeyDown={(event) => {
+        const terminal = sessionChatTerminalShortcut(event.nativeEvent);
+        if (sessionChatBreaksKillSequence(event.nativeEvent)) terminalEditingRef.current?.breakSequence();
+        onKeyDown(event);
+        if (!event.defaultPrevented && terminal && terminalEditingRef.current?.run(terminal)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
       onPaste={(event) => {
         if (callbacksRef.current.onPasteData(event.clipboardData)) {
           event.preventDefault();
